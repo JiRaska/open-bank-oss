@@ -4,6 +4,7 @@ package com.openbank.kyb.infrastructure.persistence.repository
 import com.openbank.kyb.application.port.out.KybOutboxRepository
 import com.openbank.kyb.application.port.out.UboCorrectionRepository
 import com.openbank.kyb.domain.model.UboCorrection
+import com.openbank.kyb.domain.model.UboCorrectionStatus
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboObservation
 import com.openbank.kyb.domain.model.UboSource
@@ -12,6 +13,7 @@ import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCase
 import com.openbank.kyb.infrastructure.persistence.entity.UboCorrectionEntity
 import com.openbank.kyb.infrastructure.persistence.entity.UboCorrectionReadEntity
 import com.openbank.kyb.infrastructure.persistence.entity.UboObservationEntity
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -116,7 +118,7 @@ class UboCorrectionRepositoryImpl(private val outbox: KybOutboxRepository) : Ubo
                         } else {
                             session.persist(
                                 UboCorrectionReadEntity().apply {
-                                    readId = UUID.randomUUID()
+                                    readId = Ids.newId()
                                     this.caseId = caseId
                                     this.correctionId = correctionId
                                     this.principalId = principalId
@@ -184,7 +186,7 @@ class UboCorrectionRepositoryImpl(private val outbox: KybOutboxRepository) : Ubo
         actorId: String,
         proposedAt: Instant,
     ) = UboCorrectionEntity().apply {
-        correctionId = UUID.randomUUID()
+        correctionId = Ids.newId()
         this.caseId = caseId
         this.priorObservationId = priorObservationId
         candidateFindingJson = json
@@ -246,7 +248,7 @@ class UboCorrectionRepositoryImpl(private val outbox: KybOutboxRepository) : Ubo
         recordedAt: Instant,
     ): Uni<Boolean?> {
         val observation = UboObservation(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             caseId = row.caseId,
             revision = revision,
             finding = KybUboJson.read(row.candidateFindingJson),
@@ -282,7 +284,7 @@ class UboCorrectionRepositoryImpl(private val outbox: KybOutboxRepository) : Ubo
         reasonCode = reasonCode,
         proposedBy = proposedBy,
         proposedAt = proposedAt,
-        status = status,
+        status = UboCorrectionStatus.valueOf(status),
         decidedBy = decidedBy,
         decidedAt = decidedAt,
     )

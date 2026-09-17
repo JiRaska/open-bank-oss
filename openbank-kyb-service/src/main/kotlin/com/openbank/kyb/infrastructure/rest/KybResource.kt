@@ -297,7 +297,7 @@ class KybResource {
             clock.instant(),
         ) ?: return Response.status(Response.Status.CONFLICT).header("Cache-Control", "no-store").build()
         return Response.status(Response.Status.CREATED)
-            .entity(mapOf("id" to proposal.id, "caseId" to caseId, "status" to proposal.status))
+            .entity(mapOf("id" to proposal.id, "caseId" to caseId, "status" to proposal.status.name))
             .header("Cache-Control", "no-store").build()
     }
 
@@ -325,7 +325,7 @@ class KybResource {
                 "reasonCode" to proposal.reasonCode,
                 "proposedBy" to proposal.proposedBy,
                 "proposedAt" to proposal.proposedAt,
-                "status" to proposal.status,
+                "status" to proposal.status.name,
                 "decidedBy" to proposal.decidedBy,
                 "decidedAt" to proposal.decidedAt,
                 "candidate" to UboResponse.from(proposal.candidate),
