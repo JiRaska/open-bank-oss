@@ -78,6 +78,11 @@ including when the restriction event arrives before the recorded event. Replays 
 idempotent and conflicting references fail. This slice does not yet implement
 erasure, corrected-observation lineage, indirect ownership or the complete authority
 lens; those remain acceptance gates before full delivery.
+Flyway V9 reserves an append-only, case-scoped correction proposal and replacement
+link. It enforces a changed mapped finding, matching case, different proposal and
+decision actors, and an approved proposal plus its replacement in one transaction.
+V9 alone has no application writer, reviewer API, Context supersession marker or
+original register artifact; corrections cannot yet be used by an investigator.
 
 The historical observation read names both the onboarding case and the observation.
 It requires KYC/admin authorization and the exact `KYB_OWNERSHIP_REVIEW` purpose. KYB
