@@ -130,4 +130,20 @@ class MerchantDescriptorTest {
         assertThat(parsed?.key).isEqualTo("PRAHACOFFEE")
         assertThat(parsed?.cityToken).isEqualTo("BRNO")
     }
+
+    @Test
+    fun `operator town input folds to the same location key as an acquirer descriptor`() {
+        assertThat(MerchantDescriptor.foldTown("  Plzeň. ")).isEqualTo("PLZEN")
+        assertThat(MerchantDescriptor.parse("BILLA PLZEŇ")?.cityToken).isEqualTo("PLZEN")
+        assertThat(MerchantDescriptor.foldTown("České Budějovice")).isEqualTo("CESKEBUDEJOVICE")
+        assertThat(MerchantDescriptor.foldTown("Hradec-Králové")).isEqualTo("HRADECKRALOVE")
+        assertThat(MerchantDescriptor.foldTown("Brno")).isEqualTo("BRNO")
+    }
+
+    @Test
+    fun `empty operator town input cannot become a location key`() {
+        assertThat(MerchantDescriptor.foldTown(null)).isNull()
+        assertThat(MerchantDescriptor.foldTown("   ")).isNull()
+        assertThat(MerchantDescriptor.foldTown("---")).isNull()
+    }
 }
