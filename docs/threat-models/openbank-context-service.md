@@ -107,6 +107,28 @@ unrestricted cross-case search API. Its event UUIDs and party/account references
 data: legal retention, restriction and deletion handling must be completed before a
 real-data rollout. The synthetic sandbox exercises do not establish those controls.
 
+## Proposed corporate KYC boundary (not deployed)
+
+ADR-0305's corporate lens is gated on a durable KYB source observation and a reviewed
+data path. The present `/ubo` answer is not historical evidence. The company-scoped PSC
+record reference and a corporate registration number with jurisdiction may support
+reviewed entity resolution; matching names or a PSC notification date must never create
+a person identity or an ownership-effective date. Incomplete pages, restricted identities
+and source errors remain unknown. A later corrected observation must not silently erase
+what an earlier analyst actually saw at decision time.
+
+The current `openbank.kyb.events` topic has onboarding and analytics consumers and is
+not an approved path for owner-level evidence. A future reference-only event requires a
+separate topic, KYB-only producer ACL, context-only consumer ACL, isolated DLQ and bounded
+retention. Its contract must exclude names, birth dates, addresses and free text. Context
+must fetch the versioned observation through a service-authorized API, enforce case and
+field policy before disclosure, and rebuild from the durable KYB source after Kafka
+retention expires. Topic/ACL/consumer inventory, payload tests, deletion/restriction
+propagation and an egress review are required together before enabling the producer.
+
+This design does not authorize owner evidence ingestion or change the P0/P1 invariant
+that their projection stores only opaque references.
+
 ## Invariants
 
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.

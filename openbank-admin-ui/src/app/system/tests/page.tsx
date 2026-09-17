@@ -579,7 +579,11 @@ export default function TestIntelligencePage() {
     try {
       const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
       if (!response.ok) throw new Error(`Test intelligence request failed with HTTP ${response.status}`)
-      setReport(await response.json() as TestIntelligenceReport)
+      const result = await response.json() as TestIntelligenceReport
+      if (!Array.isArray(result.components) || !Array.isArray(result.warnings) || !result.totals) {
+        throw new Error('Invalid test intelligence report')
+      }
+      setReport(result)
     } catch { setReport(null) } finally { setLoading(false) }
   }, [])
   useEffect(() => {
