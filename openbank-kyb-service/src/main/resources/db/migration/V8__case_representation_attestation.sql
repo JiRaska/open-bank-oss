@@ -1,4 +1,6 @@
 -- #10247: retain the exact rule confirmation that set a business case's signing quorum.
+-- V8 follows the V6/V7 ownership-observation migrations in PR #10243. Deploy that dependency
+-- first: Flyway does not apply a later-added V6/V7 behind an already-applied V8 by default.
 -- Existing cases stay NULL and cannot acquire statutory JOINT authority by inference.
 -- Rollback: disable new statutory-policy writes first; retain this nullable evidence column
 -- while old and new images may overlap. Drop only after those readers are retired and

@@ -24,6 +24,7 @@ import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
 import com.openbank.kyb.domain.model.SignerStatus
+import com.openbank.kyb.domain.model.StatutoryPolicyMode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -175,6 +176,15 @@ class BusinessOnboardingCaseTest {
         case = case.signs(cosigner)
         assertThat(case.status).isEqualTo(CaseStatus.SIGNED)
         assertThat(case.signedCount).isEqualTo(2)
+        val evidence = case.statutoryPolicyEvidence(now)
+        assertThat(evidence).isNotNull()
+        assertThat(evidence!!.mode).isEqualTo(StatutoryPolicyMode.JOINT_N)
+        assertThat(evidence.registryRepresentativeCount).isEqualTo(3)
+        assertThat(evidence.eligibleRepresentatives.map { it.partyId }).containsExactlyInAnyOrder(initiator, cosigner)
+        assertThat(evidence.eligibleRepresentatives.flatMap { it.registryRepresentativeIndices })
+            .containsExactlyInAnyOrder(0, 1)
+        assertThat(case.copy(representationAttestationId = null).statutoryPolicyEvidence(now)).isNull()
+        assertThat(case.copy(signers = case.signers.filter { it.isInitiator }).statutoryPolicyEvidence(now)).isNull()
     }
 
     @Test

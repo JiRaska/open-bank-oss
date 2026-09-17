@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.it.PostgresTestResource
@@ -329,6 +330,19 @@ class KybCaseApiIT {
                     "BUSINESS_SIGNER_IDENTIFIED",
                     "BUSINESS_AGREEMENT_SIGNED",
                 )
+            }
+            c.prepareStatement(
+                "SELECT payload FROM kyb_outbox WHERE aggregate_id = ? AND event_type = 'BUSINESS_AGREEMENT_SIGNED'",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(caseId))
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    val policy = ObjectMapper().readTree(rows.getString(1)).path("statutoryPolicy")
+                    assertThat(policy.path("sourceCaseId").asText()).isEqualTo(caseId)
+                    assertThat(policy.path("requiredSignatures").asInt()).isEqualTo(2)
+                    assertThat(policy.path("eligibleRepresentatives").size()).isEqualTo(2)
+                    assertThat(policy.path("attestationId").asText()).isNotBlank()
+                }
             }
         }
 

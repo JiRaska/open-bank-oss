@@ -270,6 +270,13 @@ data class BusinessOnboardingCase(
         updatedAt = at,
     )
 
+    /** Last-signature recheck found a different active confirmation; keep signatures for review. */
+    fun representationRuleChanged(at: Instant): BusinessOnboardingCase = review(
+        requireNotNull(extract) { "a representation recheck requires its register extract" },
+        "representation attestation changed before the case could grant authority; re-confirm the current rule",
+        at,
+    )
+
     /** party-service has created the entity party. */
     fun entityPartyCreated(partyId: UUID, at: Instant): BusinessOnboardingCase =
         copy(entityPartyId = partyId, updatedAt = at)
@@ -637,6 +644,7 @@ data class BusinessOnboardingCase(
         requiredSignatures: Int,
         at: Instant,
         requiredSignerRoles: List<String> = emptyList(),
+        currentAttestationId: UUID? = null,
     ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
         require(requiredSignatures >= 1) { "at least one signature is required" }
@@ -650,7 +658,7 @@ data class BusinessOnboardingCase(
             requiredSignerRoles = requiredSignerRoles
                 .map { CzechRepresentationRuleParser.fold(it) }
                 .filter { it.isNotBlank() },
-            representationAttestationId = null,
+            representationAttestationId = currentAttestationId,
             reviewReason = null,
             updatedAt = at,
         )
@@ -707,6 +715,66 @@ data class BusinessOnboardingCase(
         return offices.filterIndexed { i, office ->
             !assign(i, office, offices, roles, assignedTo, BooleanArray(roles.size))
         }
+    }
+
+    /**
+     * Build only the verified statutory subset that has itself signed and received a mandate.
+     * An unidentified register entry is never invented from a name; for N-of-M it simply remains
+     * ineligible. JOINT_ALL is derived only when every register row is mapped to an identified human.
+     * The caller must still check that [representationAttestationId] is currently active before
+     * publishing this historical evidence.
+     */
+    fun statutoryPolicyEvidence(at: Instant): StatutoryPolicyEvidence? {
+        if (status != CaseStatus.SIGNED && status != CaseStatus.ACTIVE) return null
+        val ex = extract ?: return null
+        val attestationId = representationAttestationId ?: return null
+        val principal = entityPartyId ?: return null
+        val quorum = requiredSignatures ?: return null
+        val ceremony = agreement?.ceremonyId ?: return null
+        if (ex.verification != ExtractVerification.VERIFIED) return null
+        if (ex.status != EntityStatus.ACTIVE) return null
+        if (ex.source == RegistryExtract.SANDBOX_DEMO_SOURCE) return null
+
+        val statutory = signers.filter { it.status == SignerStatus.SIGNED && it.representativeIndex != null }
+        val indices = statutory.mapNotNull { it.representativeIndex }
+        val people = statutory.mapNotNull { it.partyId }
+        if (statutory.size < quorum) return null
+        if (people.size != statutory.size || people.distinct().size != people.size) return null
+        if (indices.distinct().size != indices.size) return null
+        if (indices.any { it !in ex.representatives.indices }) return null
+        if (officeShortfall(statutory).isNotEmpty()) return null
+
+        val eligible = statutory.map { signer ->
+            val index = requireNotNull(signer.representativeIndex)
+            val role = CzechRepresentationRuleParser.fold(ex.representatives[index].role.orEmpty())
+            val offices = requiredSignerRoles.filter { holdsOffice(role, it) }.toSet()
+            StatutoryRepresentativeEvidence(
+                partyId = requireNotNull(signer.partyId),
+                registryRepresentativeIndices = setOf(index),
+                officeTags = offices.ifEmpty { setOf("statutory-representative") },
+            )
+        }
+        val mode = when {
+            quorum == 1 -> StatutoryPolicyMode.SOLE
+            eligible.size == quorum && indices.toSet() == ex.representatives.indices.toSet() ->
+                StatutoryPolicyMode.JOINT_ALL
+            else -> StatutoryPolicyMode.JOINT_N
+        }
+        return StatutoryPolicyEvidence(
+            sourceCaseId = id,
+            principalPartyId = principal,
+            attestationId = attestationId,
+            ruleTextHash = RepresentationAttestation.hashOf(ex.representationRule.sourceText),
+            registrySource = ex.source,
+            registrySourceRef = ex.sourceRef,
+            registryRepresentativeCount = ex.representatives.size,
+            mode = mode,
+            requiredSignatures = quorum,
+            requiredOffices = requiredSignerRoles,
+            eligibleRepresentatives = eligible,
+            evidenceRef = "kyb-case:$id:ceremony:$ceremony",
+            effectiveFrom = at,
+        )
     }
 
     companion object {

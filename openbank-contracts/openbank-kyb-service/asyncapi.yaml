@@ -9,7 +9,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank KYB Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Lifecycle events of a business onboarding case (ADR-0284): a sole trader or company being
     verified against its public register and signed for by its listed representatives.
@@ -98,9 +98,9 @@ components:
         $ref: '#/components/schemas/SignerEnvelope'
     BusinessAgreementSigned:
       name: BUSINESS_AGREEMENT_SIGNED
-      summary: "The required number of distinct verified signers has signed; mandates were granted in party-service."
+      summary: "The required distinct signers signed; optional statutoryPolicy carries confirmed registry evidence for party-service."
       payload:
-        $ref: '#/components/schemas/CaseEnvelope'
+        $ref: '#/components/schemas/SignedEnvelope'
     BusinessOnboardingCompleted:
       name: BUSINESS_ONBOARDING_COMPLETED
       summary: "Signed AND the entity party passed the KYC+AML gate (ADR-0267) — the relationship is live."
@@ -117,6 +117,41 @@ components:
         $ref: '#/components/schemas/CaseEnvelope'
 
   schemas:
+    SignedEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/CaseEnvelope'
+        - type: object
+          properties:
+            statutoryPolicy:
+              description: "Null for legacy, manually overridden or incompletely identified rules; it conveys no authority by itself."
+              oneOf:
+                - $ref: '#/components/schemas/StatutoryPolicyEvidence'
+                - type: 'null'
+    StatutoryPolicyEvidence:
+      type: object
+      required: [sourceCaseId, principalPartyId, attestationId, ruleTextHash, registrySource, registryRepresentativeCount, mode, requiredSignatures, requiredOffices, eligibleRepresentatives, evidenceRef, effectiveFrom]
+      properties:
+        sourceCaseId: { type: string, format: uuid }
+        principalPartyId: { type: string, format: uuid }
+        attestationId: { type: string, format: uuid }
+        ruleTextHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        registrySource: { type: string }
+        registrySourceRef: { type: [string, 'null'] }
+        registryRepresentativeCount: { type: integer, minimum: 1 }
+        mode: { type: string, enum: [SOLE, JOINT_N, JOINT_ALL] }
+        requiredSignatures: { type: integer, minimum: 1 }
+        requiredOffices: { type: array, items: { type: string } }
+        eligibleRepresentatives:
+          type: array
+          items:
+            type: object
+            required: [partyId, registryRepresentativeIndices, officeTags]
+            properties:
+              partyId: { type: string, format: uuid }
+              registryRepresentativeIndices: { type: array, items: { type: integer, minimum: 0 }, uniqueItems: true }
+              officeTags: { type: array, items: { type: string }, uniqueItems: true }
+        evidenceRef: { type: string }
+        effectiveFrom: { type: string, format: date-time }
     CaseEnvelope:
       type: object
       description: "Flat payload of `CaseEvent` (domain/model/KybEvent.kt) — the constructor properties ARE the wire fields."

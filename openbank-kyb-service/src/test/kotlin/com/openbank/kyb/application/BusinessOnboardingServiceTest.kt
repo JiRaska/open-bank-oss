@@ -42,6 +42,7 @@ import com.openbank.kyb.application.usecase.RepresentationAttestationService
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.BeneficialOwner
+import com.openbank.kyb.domain.model.BusinessAgreementSigned
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.CrsStatus
@@ -140,6 +141,7 @@ class BusinessOnboardingServiceTest {
     }
 
     private lateinit var service: BusinessOnboardingService
+    private lateinit var confirmation: AlwaysConfirmed
 
     @BeforeEach
     fun setUp() {
@@ -156,7 +158,7 @@ class BusinessOnboardingServiceTest {
         // for whatever rule text is asked about — the confirmation itself is exercised in
         // RepresentationAttestationServiceTest and the flow's dependence on it in
         // BusinessOnboardingCaseTest.
-        val representation = AlwaysConfirmed().apply {
+        confirmation = AlwaysConfirmed().apply {
             this.attestations = NoStore()
             this.lookup = lookup
             this.clock = clock
@@ -172,7 +174,7 @@ class BusinessOnboardingServiceTest {
             this.metrics = this@BusinessOnboardingServiceTest.metrics
             this.timers = this@BusinessOnboardingServiceTest.timers
             this.clock = clock
-            this.representation = representation
+            this.representation = confirmation
             this.documents = docs
             this.settings = object : BusinessOnboardingSettings {
                 override val highRiskCountries = setOf("IR", "KP")
@@ -492,9 +494,18 @@ class BusinessOnboardingServiceTest {
      * unconfirmed rule cannot proceed — by BusinessOnboardingCaseTest.
      */
     private class AlwaysConfirmed : RepresentationAttestationService() {
+        private val ids = mutableMapOf<String, UUID>()
+
+        fun supersedeAll() = ids.clear()
+
+        private fun stableId(extract: RegistryExtract): UUID {
+            val key = "${extract.identifier}:${extract.representationRule.sourceText}"
+            return ids.getOrPut(key) { UUID.randomUUID() }
+        }
+
         override suspend fun decide(extract: RegistryExtract) = RepresentationDecision.Attested(
             RepresentationAttestation(
-                id = UUID.randomUUID(),
+                id = stableId(extract),
                 identifier = extract.identifier,
                 ruleTextHash = RepresentationAttestation.hashOf(extract.representationRule.sourceText),
                 ruleText = extract.representationRule.sourceText,
@@ -655,11 +666,47 @@ class BusinessOnboardingServiceTest {
                     it.requiredSignatures == 2 &&
                     it.source == "REGISTRY"
             }
+            val signedEvent = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }
+            val policy = (signedEvent.payload as BusinessAgreementSigned).statutoryPolicy
+            assertThat(policy).isNotNull()
+            assertThat(policy!!.attestationId).isEqualTo(signed.representationAttestationId)
+            assertThat(policy.eligibleRepresentatives.map { it.partyId })
+                .containsExactlyInAnyOrder(initiator, cosigner)
 
             service.entityPartyActivated(entityParty)
             assertThat(store[started.id]!!.status).isEqualTo(CaseStatus.ACTIVE)
             assertThat(events.map { it.eventType }).contains(KybEvents.AGREEMENT_SIGNED, KybEvents.COMPLETED)
         }
+
+    @Test
+    fun `superseded attestation before final signature goes to review without granting mandates`(): Unit = runBlocking {
+        coEvery { registry.lookup(ico, null) } returns
+            extract(
+                RepresentationRule(RepresentationMode.JOINT_N, 2, "dva společně"),
+                listOf("Jana Nováková", "Eva Dvořáková"),
+            )
+        coEvery { parties.createEntityParty(any()) } returns entityParty
+        val mandates = mutableListOf<MandateRequest>()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+
+        val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
+        coEvery { parties.initiatorIdentity(any()) } returns InitiatorIdentity("Jana Nováková", null, verified = true)
+        service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Nováková", null))
+        val invited = service.inviteCosigners(InviteCosignersCommand(started.id, initiator, listOf(1)))
+        val token = invited.signers.first { !it.isInitiator }.invitationToken!!
+        val cosigner = UUID.randomUUID()
+        service.claimInvitation(ClaimInvitationCommand(token, cosigner))
+        val ceremony = readyToSign(started.id, initiator)
+        signs(started.id, initiator, ceremony)
+
+        confirmation.supersedeAll()
+        val reviewed = signs(started.id, cosigner, ceremony)
+        assertThat(reviewed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(reviewed.representationAttestationId).isNull()
+        assertThat(reviewed.reviewReason).contains("attestation changed")
+        assertThat(mandates).isEmpty()
+        assertThat(events.last().eventType).isEqualTo(KybEvents.REVIEW_REQUIRED)
+    }
 
     @Test
     fun `a sole trader gets an OWNER mandate and only the initiator may drive their case`(): Unit = runBlocking {
@@ -732,6 +779,10 @@ class BusinessOnboardingServiceTest {
         assertThat(mandates)
             .describedAs("an entity that reaches SIGNED must carry a mandate per signature")
             .hasSize(2)
+        val signedEvent = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }
+        assertThat((signedEvent.payload as BusinessAgreementSigned).statutoryPolicy)
+            .describedAs("a manual override is not a verified statutory rule")
+            .isNull()
     }
 
     // --- fully digital onboarding of the sandbox demo company (single jednatel, SOLE rule) ------

@@ -220,7 +220,12 @@ object KybEvents {
     }
 
     /** Every required signature is in; mandates were granted in party-service. */
-    fun agreementSigned(case: BusinessOnboardingCase, at: Instant, actorId: String): KybEvent {
+    fun agreementSigned(
+        case: BusinessOnboardingCase,
+        at: Instant,
+        actorId: String,
+        statutoryPolicy: StatutoryPolicyEvidence? = null,
+    ): KybEvent {
         val actor = actorId
         val f = fields(case)
         return KybEvent(
@@ -244,6 +249,7 @@ object KybEvents {
                 actorId = actor,
                 actorType = actorType(actor),
                 sourceService = SOURCE_SERVICE,
+                statutoryPolicy = statutoryPolicy,
             ),
         )
     }

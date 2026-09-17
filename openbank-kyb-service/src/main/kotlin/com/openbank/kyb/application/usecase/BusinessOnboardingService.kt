@@ -33,17 +33,21 @@ import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
+import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.AgreementRecord
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.EntityStatus
+import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import com.openbank.kyb.domain.model.KnownPerson
 import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RepresentationDecision
 import com.openbank.kyb.domain.model.SignerStatus
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
@@ -284,8 +288,20 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         }
         val now = Instant.now(clock)
         val signed = case.signed(cmd.signerPartyId, cmd.signatureRef, now, settings.highRiskCountries)
+        if ((signed.status == CaseStatus.SIGNED || signed.status == CaseStatus.ACTIVE) &&
+            boundAttestationChanged(signed)
+        ) {
+            val reviewed = signed.representationRuleChanged(now)
+            return cases.update(reviewed, KybEvents.reviewRequired(reviewed, now)).also(::armTimers)
+        }
+        val policy = if (signed.status == CaseStatus.SIGNED || signed.status == CaseStatus.ACTIVE) {
+            signed.statutoryPolicyEvidence(now)
+        } else {
+            null
+        }
         val event = when (signed.status) {
-            CaseStatus.SIGNED, CaseStatus.ACTIVE -> KybEvents.agreementSigned(signed, now, cmd.signerPartyId.toString())
+            CaseStatus.SIGNED, CaseStatus.ACTIVE ->
+                KybEvents.agreementSigned(signed, now, cmd.signerPartyId.toString(), policy)
             CaseStatus.MANUAL_REVIEW -> KybEvents.reviewRequired(signed, now)
             else -> null
         }
@@ -305,7 +321,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val now = Instant.now(clock)
-        var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles)
+        val attestationId = matchingAttestationId(case, cmd.requiredSignatures, cmd.requiredSignerRoles)
+        var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, attestationId)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
                 resolved.entityPartyCreated(
@@ -327,11 +344,33 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         // its own representatives is refused.
         if (resolved.status == CaseStatus.SIGNED || resolved.status == CaseStatus.ACTIVE) {
             grantMandates(resolved)
-            val saved = cases.update(resolved, KybEvents.agreementSigned(resolved, now, cmd.operator))
+            val saved = cases.update(
+                resolved,
+                KybEvents.agreementSigned(resolved, now, cmd.operator, resolved.statutoryPolicyEvidence(now)),
+            )
             if (saved.status == CaseStatus.ACTIVE) cases.update(saved, KybEvents.completed(saved, now))
             return saved.also(::armTimers)
         }
         return cases.update(resolved, KybEvents.registryVerified(resolved, now)).also(::armTimers)
+    }
+
+    private suspend fun boundAttestationChanged(case: BusinessOnboardingCase): Boolean {
+        val bound = case.representationAttestationId ?: return false
+        val extract = case.extract ?: return true
+        val current = representation.decide(extract) as? RepresentationDecision.Attested ?: return true
+        if (current.attestation.id != bound) return true
+        if (current.attestation.confirmedSigners != case.requiredSignatures) return true
+        return current.attestation.confirmedRoles != case.requiredSignerRoles
+    }
+
+    private suspend fun matchingAttestationId(case: BusinessOnboardingCase, signers: Int, roles: List<String>): UUID? {
+        val extract = case.extract ?: return null
+        if (extract.verification != ExtractVerification.VERIFIED || extract.status != EntityStatus.ACTIVE) return null
+        val current = representation.decide(extract) as? RepresentationDecision.Attested ?: return null
+        val normalizedRoles = roles.map(CzechRepresentationRuleParser::fold).filter(String::isNotBlank)
+        return current.attestation.takeIf {
+            it.confirmedSigners == signers && it.confirmedRoles == normalizedRoles
+        }?.id
     }
 
     override suspend fun reject(cmd: RejectCaseCommand): BusinessOnboardingCase {

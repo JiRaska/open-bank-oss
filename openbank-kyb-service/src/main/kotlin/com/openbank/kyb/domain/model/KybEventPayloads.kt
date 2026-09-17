@@ -199,6 +199,7 @@ data class BusinessAgreementSigned(
     override val actorId: String,
     override val actorType: String,
     override val sourceService: String,
+    val statutoryPolicy: StatutoryPolicyEvidence?,
 ) : KybEventPayload {
     companion object {
         const val EVENT_TYPE = "BUSINESS_AGREEMENT_SIGNED"
