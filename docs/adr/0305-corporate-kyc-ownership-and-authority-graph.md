@@ -81,8 +81,16 @@ lens; those remain acceptance gates before full delivery.
 Flyway V9 reserves an append-only, case-scoped correction proposal and replacement
 link. It enforces a changed mapped finding, matching case, different proposal and
 decision actors, and an approved proposal plus its replacement in one transaction.
-V9 alone has no application writer, reviewer API, Context supersession marker or
-original register artifact; corrections cannot yet be used by an investigator.
+V10 adds append-only case-, principal- and purpose-scoped read audit for correction
+candidates. The KYB API can now propose a candidate only from a fresh register read,
+release it after a live assignment check and committed read audit, and let a different
+KYC/admin reviewer approve or reject it only after their own audited candidate read.
+Approval writes the successor observation
+and the existing minimized reference event in one transaction. The observation detail
+exposes an explicit predecessor ID; chronological adjacency alone is not a correction.
+Context does not yet render supersession lineage, and KYB still lacks the original
+register artifact, so neither document-level provenance nor the complete graph lens
+is claimed by this stage.
 
 The historical observation read names both the onboarding case and the observation.
 It requires KYC/admin authorization and the exact `KYB_OWNERSHIP_REVIEW` purpose. KYB

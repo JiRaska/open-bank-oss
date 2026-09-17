@@ -112,4 +112,21 @@ data class UboObservation(
     /** SHA-256 of KYB's serialized mapped finding, not of the upstream register response. */
     val sourceSha256: String,
     val recordedAt: Instant,
+    /** Set only for a reviewed correction, never inferred from a later register observation. */
+    val supersedesObservationId: UUID? = null,
+)
+
+/** An explicit proposal to correct the mapped finding of one case observation. */
+data class UboCorrection(
+    val id: UUID,
+    val caseId: UUID,
+    val priorObservationId: UUID,
+    val candidate: UboFinding,
+    val candidateSha256: String,
+    val reasonCode: String,
+    val proposedBy: String,
+    val proposedAt: Instant,
+    val status: String,
+    val decidedBy: String?,
+    val decidedAt: Instant?,
 )

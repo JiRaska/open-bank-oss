@@ -177,6 +177,80 @@ class UboObservationEntity {
 
     @Column(name = "recorded_at", nullable = false)
     lateinit var recordedAt: Instant
+
+    @Column(name = "supersedes_observation_id")
+    var supersedesObservationId: UUID? = null
+
+    @Column(name = "correction_id")
+    var correctionId: UUID? = null
+}
+
+/** Candidate data never leaves the source service through Kafka. */
+@Entity
+@Table(name = "kyb_ubo_observation_corrections")
+class UboCorrectionEntity {
+    @Id
+    @Column(name = "correction_id", nullable = false)
+    lateinit var correctionId: UUID
+
+    @Column(name = "case_id", nullable = false)
+    lateinit var caseId: UUID
+
+    @Column(name = "prior_observation_id", nullable = false)
+    lateinit var priorObservationId: UUID
+
+    @Column(name = "candidate_finding_json", nullable = false, columnDefinition = "TEXT")
+    lateinit var candidateFindingJson: String
+
+    @Column(name = "candidate_sha256", nullable = false)
+    lateinit var candidateSha256: String
+
+    @Column(name = "candidate_source", nullable = false)
+    lateinit var candidateSource: String
+
+    @Column(name = "candidate_fetched_at", nullable = false)
+    lateinit var candidateFetchedAt: Instant
+
+    @Column(name = "reason_code", nullable = false)
+    lateinit var reasonCode: String
+
+    @Column(name = "proposed_by", nullable = false)
+    lateinit var proposedBy: String
+
+    @Column(name = "proposed_at", nullable = false)
+    lateinit var proposedAt: Instant
+
+    @Column(name = "status", nullable = false)
+    lateinit var status: String
+
+    @Column(name = "decided_by")
+    var decidedBy: String? = null
+
+    @Column(name = "decided_at")
+    var decidedAt: Instant? = null
+}
+
+@Entity
+@Table(name = "kyb_ubo_correction_reads")
+class UboCorrectionReadEntity {
+    @Id
+    @Column(name = "read_id", nullable = false)
+    lateinit var readId: UUID
+
+    @Column(name = "case_id", nullable = false)
+    lateinit var caseId: UUID
+
+    @Column(name = "correction_id", nullable = false)
+    lateinit var correctionId: UUID
+
+    @Column(name = "principal_id", nullable = false)
+    lateinit var principalId: String
+
+    @Column(name = "purpose", nullable = false)
+    lateinit var purpose: String
+
+    @Column(name = "read_at", nullable = false)
+    lateinit var readAt: Instant
 }
 
 /** Permanent read restriction; the original observation and its source hash remain evidentiary. */
