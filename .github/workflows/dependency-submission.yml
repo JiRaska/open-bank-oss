@@ -13,8 +13,8 @@
 # independent of GitHub's graph) reports dozens of GHSA IDs with no per-package, per-fix-version
 # context — the worst of both worlds (silent Dependabot, noisy unopinionated Scorecard).
 #
-# This wires `gradle/actions/setup-gradle`'s built-in dependency-graph extractor so the graph
-# gets submitted from a real build on every main push. Once populated, Dependabot
+# This wires `gradle/actions/dependency-submission`'s resolution-only extractor so the graph
+# gets submitted without compiling the fleet on every main push. Once populated, Dependabot
 # alerts become the authoritative, actionable, per-service view (exact vulnerable version +
 # suggested fix), and Scorecard's Vulnerabilities check should stop flying blind.
 name: Dependency submission
@@ -33,8 +33,8 @@ on:
   # allow-ghsas were accreted: pre-existing findings surfaced as if new, each silenced by
   # a permanent fleet-wide suppression.
   #
-  # The cost of dropping the filter is a ~11 min run on every main push, which is $0 —
-  # public repo, hosted runners, free and unlimited. Do not "optimize" it back: a
+  # The cost of dropping the filter is a fleet resolution on every main push. Do not
+  # "optimize" it back: a
   # docs-only main commit produces a graph identical to its parent's, but exact-SHA
   # lookup means an identical graph and a MISSING graph are not the same thing.
   push:
@@ -79,7 +79,7 @@ permissions:
 # superseded push has nothing to contribute. On main every commit is a potential
 # `pull_request.base.sha` for some future PR, so every one has to finish.
 #
-# Cost: a merge burst (a release-please batch drain) starts one ~11 min job per commit
+# Cost: a merge burst (a release-please batch drain) starts one resolution job per commit
 # in parallel. $0 on hosted runners for a public repo; the exposure is queue depth, and
 # a queued snapshot arriving late still beats a cancelled one never arriving.
 concurrency:
@@ -104,15 +104,10 @@ jobs:
     permissions:
       contents: write # required by the dependency-submission API
     env:
-      # Same OOM guard as fleet-lint.yml / security.yml CodeQL job: a full-fleet dependency
-      # resolution (~30 modules + the quarkus-bom) needs more than Gradle's 3 GiB default heap.
-      # 4g stopped being enough as the fleet grew: every run since 2026-07-14 failed with
-      # "Java heap space" (`assemble testClasses` OOMs before the graph is written), so the
-      # dependency graph GitHub uses for Dependabot alerts/SBOM has been silently stale since
-      # then — no graph file to submit, but the job still exits without visibly failing that
-      # step (issue #909's residual-alert investigation traced back here). security.yml's
-      # CodeQL java-kotlin leg resolves the same whole-fleet graph on the same ubuntu-latest
-      # runner at -Xmx6g without OOMing — match that proven headroom here.
+      # Keep the existing ceiling for dependency resolution, but do not increase it to mask
+      # the OOM seen on #10216: its Gradle daemon reached 6133/6144 MiB while compiling
+      # fleet-wide `assemble testClasses`. The action below resolves configurations without
+      # Quarkus code generation or compilation, avoiding that unnecessary heap pressure.
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
@@ -126,7 +121,8 @@ jobs:
             21
             25
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Generate and submit fleet dependency graph
+        uses: gradle/actions/dependency-submission@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           # NEVER write the Actions cache from this job — restore only, on every ref
           # including main (#3299).
@@ -142,7 +138,7 @@ jobs:
           # entire `modules-2` tree, so two jobs resolving almost-the-same set still store
           # it twice.
           #
-          # This is the fix `setup-gradle`'s own docs prescribe for exactly this shape
+          # This is the Gradle action's documented fix for exactly this shape
           # ("Select which jobs should write to the cache"): elect ONE writer per
           # OS+architecture and make every other job a consumer. `fleet-lint` is that writer
           # on Linux-X64 — it runs `testClasses detekt ktlintCheck` fleet-wide on every main
@@ -152,11 +148,10 @@ jobs:
           #
           # Why THIS job is the right one to demote rather than fleet-lint or CodeQL:
           # it is the only fleet-wide Gradle job nobody waits on. It is not a required
-          # check, it is push/schedule-triggered, and it currently runs 4.8-8.5 min against
-          # a 30 min timeout. The cost of a colder cache here is re-downloading the
-          # runtime-only artifacts `assemble` pulls beyond fleet-lint's `testClasses` set —
-          # minutes, inside that headroom. fleet-lint is a required check, and CodeQL's
-          # java-kotlin leg documents a 25-30 min cold penalty and is the most
+          # check, and remains push/schedule-triggered. The prior compile-based run took
+          # 24 minutes before failing; this resolution-only path must be measured in CI.
+          # A colder cache means re-downloading runtime and test artifacts.
+          # fleet-lint is a required check, and CodeQL's java-kotlin leg is the most
           # preemption-exposed job in the fleet; demoting either would trade a real, felt
           # regression for the same headroom.
           #
@@ -165,10 +160,14 @@ jobs:
           # unaffected.
           cache-read-only: true
           dependency-graph: generate-and-submit
-          # COUPLING: setup-gradle injects its own
+          dependency-graph-continue-on-failure: false
+          # Resolves all resolvable configurations without compiling source or running tests.
+          # Preserve the full runtime and test graph while bounding Gradle worker concurrency.
+          additional-arguments: --no-daemon --max-workers=4
+          # COUPLING: the Gradle action injects its own
           # org.gradle:github-dependency-graph-gradle-plugin:<version> onto the buildscript
           # classpath, and Gradle dependency verification checks it against
-          # gradle/verification-metadata.xml. A setup-gradle bump that raises the plugin
+          # gradle/verification-metadata.xml. An action bump that raises the plugin
           # version (v6 line moved 1.4.1 -> 1.4.2) fails this job with "Dependency
           # verification failed for configuration 'classpath'" until the matching
           # <component> entry is added to verification-metadata.xml — the version is not
@@ -209,13 +208,6 @@ jobs:
           # `detachedConfiguration<N>` freely between builds and versions, so pinning to
           # `detachedConfiguration11` would silently stop matching.
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
-
-      # assemble resolves runtimeClasspath (what actually ships); testClasses additionally
-      # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
-      # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
-      # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
-      - name: Resolve fleet dependency graph
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
@@ -279,16 +271,14 @@ jobs:
 
           Run: ${RUN_URL}
 
-          **Check the heap first.** The 2026-07-14..07-17 outage was \`Java heap space\` in
-          \`Resolve fleet dependency graph\`: \`-Xmx4g\` stopped fitting as the fleet grew, every
-          run died for three days, and nobody noticed because a red push-triggered workflow on
-          main is addressed to nobody. It is now \`-Xmx6g\`; that is a ratchet, not a fix. If the
-          log says \`Java heap space\`, raise \`GRADLE_OPTS\` in this workflow and match the
-          headroom \`security.yml\`'s CodeQL java-kotlin leg already proves on the same runner.
+          **Check the resolve and submission steps.** The old \`assemble testClasses\` run reached
+          the 6 GiB Gradle heap ceiling on #10216 while 1.7 GiB of physical RAM remained free.
+          The workflow now uses Gradle's resolution-only action, so a new heap failure needs
+          investigation before raising \`-Xmx\`. Verify that the current SHA has a complete
+          submitted graph; a successful setup without submission is not a recovery.
 
-          Note \`dependency-graph-continue-on-failure: true\` (setup-gradle's default): graph
-          submission is NOT gated on the resolve succeeding, so a partial graph may have been
-          submitted rather than none. Do not assume the previous good graph is still intact.
+          \`dependency-graph-continue-on-failure: false\` makes a resolution or submission
+          failure red. Do not assume a previous graph covers this exact SHA.
 
           This issue is refreshed on each further failure; close it once a run is green.
           EOF
