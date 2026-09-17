@@ -37,6 +37,27 @@
       }
     },
     {
+      "description": "read incident impact with an unassigned investigation case",
+      "providerStates": [
+        {
+          "name": "an incident investigator is unauthorized for another case"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "unassigned-case",
+          "X-Investigation-Purpose": "INCIDENT_IMPACT"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/incidents/incident-1/impact"
+      },
+      "response": {
+        "status": 403
+      }
+    },
+    {
       "description": "read missing incident impact from Customer 360 admin",
       "providerStates": [
         {

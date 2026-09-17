@@ -10,6 +10,14 @@ import { auth } from '@/auth'
 import { contextServiceUrl } from '@/lib/context/server'
 import { GET } from '@/app/api/context/incidents/[reference]/impact/route'
 
+function createPact() {
+  return new PactV3({
+      consumer: 'openbank-admin-ui', provider: 'openbank-context-service',
+      dir: path.resolve(process.cwd(), '../pacts'), host: '127.0.0.1',
+      spec: SpecificationVersion.SPECIFICATION_VERSION_V3, logLevel: 'error',
+  })
+}
+
 describe('Admin UI incident impact consumer contract', () => {
   afterEach(() => vi.restoreAllMocks())
 
@@ -19,11 +27,7 @@ describe('Admin UI incident impact consumer contract', () => {
     { status: 'AVAILABLE', counts: { SERVICE: 2 }, total: 2 },
   ])('preserves $status projection semantics through the real BFF', async ({ status, counts, total }) => {
     vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'pact-operator', roles: ['ROLE_OPERATOR'] } } as never)
-    const pact = new PactV3({
-      consumer: 'openbank-admin-ui', provider: 'openbank-context-service',
-      dir: path.resolve(process.cwd(), '../pacts'), host: '127.0.0.1',
-      spec: SpecificationVersion.SPECIFICATION_VERSION_V3, logLevel: 'error',
-    })
+    const pact = createPact()
     const impact = { affectedByType: counts, total, drilldownAvailable: false, projectionStatus: status }
     await pact.given(`an authorized incident projection is ${status.toLowerCase()}`)
       .uponReceiving(`read ${status.toLowerCase()} incident impact from Customer 360 admin`)
@@ -46,6 +50,28 @@ describe('Admin UI incident impact consumer contract', () => {
         expect(response.status).toBe(200)
         expect(response.headers.get('Cache-Control')).toBe('no-store')
         expect(await response.json()).toEqual(impact)
+      })
+  })
+
+  it('rejects an operator accessing an unassigned case', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'pact-operator', roles: ['ROLE_OPERATOR'] } } as never)
+    await createPact().given('an incident investigator is unauthorized for another case')
+      .uponReceiving('read incident impact with an unassigned investigation case')
+      .withRequest({
+        method: 'GET', path: '/api/v1/context/incidents/incident-1/impact',
+        headers: {
+          Authorization: 'Bearer pact-operator', Accept: 'application/json',
+          'X-Investigation-Case-Id': 'unassigned-case', 'X-Investigation-Purpose': 'INCIDENT_IMPACT',
+        },
+      })
+      .willRespondWith({ status: 403 })
+      .executeTest(async server => {
+        vi.mocked(contextServiceUrl).mockImplementation(route => `${server.url}${route}`)
+        const response = await GET(new NextRequest('http://localhost/api/context/incidents/incident-1/impact?caseId=unassigned-case&purpose=INCIDENT_IMPACT'), {
+          params: Promise.resolve({ reference: 'incident-1' }),
+        })
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({ error: 'context_unavailable' })
       })
   })
 })

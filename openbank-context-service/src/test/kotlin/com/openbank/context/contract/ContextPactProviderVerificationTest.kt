@@ -47,6 +47,9 @@ class ContextPactProviderVerificationTest {
     @State("an authorized incident projection is partial")
     fun partial() = IncidentImpactPactFixtures().seed(3)
 
+    @State("an incident investigator is unauthorized for another case")
+    fun unauthorizedCase() = IncidentImpactPactFixtures().seed(2)
+
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verify(context: PactVerificationContext) {
