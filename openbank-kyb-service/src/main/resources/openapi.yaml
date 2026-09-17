@@ -891,7 +891,10 @@ components:
         id: { type: string, format: uuid }
         caseId: { type: string, format: uuid }
         revision: { type: integer, format: int64, minimum: 1 }
-        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        sourceSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of KYB's serialized mapped finding; not a digest of the original register response or legal source document.
         recordedAt: { type: string, format: date-time }
         finding: { $ref: '#/components/schemas/UboFinding' }
     UboFinding:

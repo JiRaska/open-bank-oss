@@ -85,7 +85,8 @@ export function KybOwnershipInvestigation({ initialCaseId = '' }: { initialCaseI
       {detailState === 'error' && <p role="alert">{t('Detail nyní nelze bezpečně ověřit.', 'Detail cannot be verified safely right now.')}</p>}
       {detail && detail.owners.length > owners.length && <p role="status">{t('Graf zobrazuje prvních osm vlastníků této revize; detail zůstává úplný.', 'The graph shows the first eight owners in this revision; the evidence detail remains complete.')}</p>}
       {detail && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-        <p>{t('Zdroj', 'Source')}: {detail.source} · {t('Zjištěno', 'Fetched')}: {detail.fetchedAt} · SHA-256: {detail.sourceSha256}</p>
+        <p>{t('Zdroj', 'Source')}: {detail.source} · {t('Zjištěno', 'Fetched')}: {detail.fetchedAt} · {t('SHA-256 mapovaného nálezu', 'Mapped finding SHA-256')}: {detail.sourceSha256}</p>
+        <p>{t('Hash nepotvrzuje původní odpověď registru.', 'The hash does not verify the original register response.')}</p>
         <ol aria-label={t('Vlastníci ve vybrané revizi', 'Owners in the selected revision')} style={{ maxHeight: 280, overflowY: 'auto', paddingLeft: 22 }}>
           {detail.owners.map((owner, index) => <li key={`${owner.fullName}-${index}`} style={{ marginBottom: 5 }}><strong>{owner.fullName}</strong> · {owner.band} · {owner.natureOfControl.join(', ')}</li>)}
         </ol>
