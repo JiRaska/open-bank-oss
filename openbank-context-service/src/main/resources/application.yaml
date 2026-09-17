@@ -49,6 +49,8 @@ quarkus:
   mp:
     messaging:
       incoming:
+        kyb-ubo-observation-references-in:
+          connector: smallrye-in-memory
         aml-case-evidence-in:
           connector: smallrye-in-memory
         delegation-history-in:
@@ -81,6 +83,19 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      kyb-ubo-observation-references-in:
+        connector: smallrye-kafka
+        topic: openbank.kyb.ubo-observation-references
+        group:
+          id: openbank-context-service
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.kyb-ubo-observations
       aml-case-evidence-in:
         connector: smallrye-kafka
         topic: openbank.aml.events
