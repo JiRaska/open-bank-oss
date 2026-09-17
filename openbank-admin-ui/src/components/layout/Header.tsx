@@ -130,6 +130,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         {build && (
           <Link
             href="/docs/release-notes/admin-ui"
+            className={styles.buildLink}
             title={
               `admin-ui ${build.version}` +
               `\ngit: ${build.gitSha}` +
@@ -226,7 +227,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '11px', fontWeight: 700, color: 'var(--surface-1)', flexShrink: 0,
             }}>{initials}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <div className={styles.userSummary}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
                 {user?.name ?? user?.email ?? 'User'}
               </span>
@@ -273,6 +274,16 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
                   })}
                 </div>
               </div>
+
+              <Link
+                href="/docs/release-notes/admin-ui"
+                role="menuitem"
+                className={styles.menuLink}
+                onClick={() => setMenuOpen(false)}
+              >
+                <HelpCircle size={14} aria-hidden="true" />
+                {t('Poznámky k vydání', 'Release notes')}
+              </Link>
 
               {/* Sign out — federated (ADR-0080 P1 / F-AUTH-04): clear the local session AND
                   the Keycloak SSO session, otherwise navigating Back silently re-authenticates. */}
