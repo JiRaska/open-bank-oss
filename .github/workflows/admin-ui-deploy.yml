@@ -131,6 +131,13 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Coalesce evidence completions across successive main SHAs before the
+    # privileged build. Cancellation applies to this cheap source job only;
+    # build-push below must always finish signing an image it has pushed.
+    # Direct source pushes and manual refreshes get unique groups without this delay.
+    concurrency:
+      group: ${{ github.event_name == 'workflow_run' && 'admin-ui-evidence-source' || format('admin-ui-source-{0}', github.run_id) }}
+      cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
     permissions:
       contents: read
       pull-requests: read
@@ -138,7 +145,8 @@ jobs:
       proceed: ${{ steps.source.outputs.proceed }}
     steps:
       # Evidence-only workflow_run bursts can otherwise start a full API-heavy image
-      # build for every successive main SHA. Wait once, then let the existing ancestry
+      # build for every successive main SHA. Restart the wait on each new evidence
+      # completion, then let the existing ancestry
       # guard reject a source superseded by a later build-relevant commit. Source
       # pushes and explicit operator refreshes remain immediate. Never cancel an
       # in-flight build: it must finish signing and attesting the image it pushed.
