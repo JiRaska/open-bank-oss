@@ -82,6 +82,22 @@ class UpstreamClientTest {
     }
 
     @Test
+    fun `get forwards actor identity without allowing identity header override`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.get(
+                "$baseUrl/statutory-operations/1",
+                "company-9",
+                mapOf("X-Customer-Actor-Party-Id" to "signer-3"),
+            )
+
+            assertThat(response.status).isEqualTo(200)
+            val req = requests.single { it.path == "/statutory-operations/1" }
+            assertThat(req.headers["x-customer-party-id"]).isEqualTo("company-9")
+            assertThat(req.headers["x-customer-actor-party-id"]).isEqualTo("signer-3")
+        }
+    }
+
+    @Test
     fun `postAnonymous sends a generated Idempotency-Key and no party header`() {
         withServer { client, baseUrl, requests ->
             val response = client.postAnonymous("$baseUrl/parties", """{"name":"Jana"}""")

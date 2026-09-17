@@ -200,14 +200,22 @@ class UpstreamClient {
         return builder.build()
     }
 
-    fun get(url: String, partyId: String): Response = try {
-        val request = HttpRequest.newBuilder()
+    fun get(url: String, partyId: String, extraHeaders: Map<String, String> = emptyMap()): Response = try {
+        val builder = HttpRequest.newBuilder()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Accept", "application/json")
             .timeout(Duration.ofMillis(requestTimeoutMs))
-            .GET().build()
+            .GET()
+        extraHeaders.forEach { (name, value) ->
+            require(
+                name.equals("Authorization", ignoreCase = true).not() &&
+                    name.equals(PARTY_HEADER, ignoreCase = true).not(),
+            ) { "caller headers cannot replace upstream identity" }
+            builder.header(name, value)
+        }
+        val request = builder.build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
         Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
     } catch (e: Exception) {

@@ -229,6 +229,51 @@ class CustomerDelegationResourceTest {
         verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `joint proposal carries company principal and authenticated human actor without grant SCA`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        val party = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(any(), capture(party), capture(body), eq("proposal-1"), capture(headers)) } returns
+            Response.status(201).build()
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        val response = resource.proposeStatutory(
+            """{"granteePartyId":"$stranger","grantScaSessionId":"$GRANT_ID"}""",
+            "proposal-1",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(party.captured).isEqualTo(entity.toString())
+        assertThat(body.captured).contains("\"grantorPartyId\":\"$entity\"")
+        assertThat(body.captured).doesNotContain("grantScaSessionId")
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `joint proposal refuses a forged company or a personal profile before upstream`() {
+        val upstream = mockk<UpstreamClient>()
+        assertThat(resource(upstream).proposeStatutory("{}", "proposal-1").status).isEqualTo(403)
+        val entity = UUID.randomUUID()
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+        assertThat(
+            resource.proposeStatutory("""{"grantorPartyId":"$stranger"}""", "proposal-1").status,
+        ).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
+    }
+
     /**
      * A preview exists to tell the customer whether the grant they are about to sign for can
      * succeed. Answering 400 to a cumulative ceiling would now be a lie — delegation-service both

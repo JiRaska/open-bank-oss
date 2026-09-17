@@ -258,6 +258,51 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** A company signer may propose an exact grant for co-signature; this cannot create access. */
+    @POST
+    @Path("/statutory-operations")
+    @Blocking
+    fun proposeStatutory(body: String?, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: return refuse(Response.Status.BAD_REQUEST, "Idempotency-Key header is required")
+        val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val principal = context.principal.toString()
+        val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
+        if (declared != null && declared != principal) {
+            return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated company")
+        }
+        node.put(FIELD_GRANTOR, principal)
+        node.remove(FIELD_GRANT_SCA_SESSION)
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations",
+            principal,
+            json.writeValueAsString(node),
+            key,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    /** Current roster membership is rechecked upstream before proposal details are released. */
+    @GET
+    @Path("/statutory-operations/{id}")
+    @Blocking
+    fun statutoryProposal(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/$id",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *
