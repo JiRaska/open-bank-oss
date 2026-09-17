@@ -43,6 +43,12 @@
   overflow-y: auto;
 }
 
+/* Role-filtered links arrive after the client session. Keep their initial
+   geometry out of the painted frame so section labels do not jump on load. */
+@media (min-width: 861px) {
+  .sessionPending { visibility: hidden; }
+}
+
 .sectionLabel {
   padding: 18px 9px 7px;
   color: #64748b;
