@@ -9,7 +9,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   await page.route('**/api/services/health', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ services: [] }),
+    body: JSON.stringify({ byContainer: {}, source: 'test' }),
   }))
   await page.route('**/api/catalog/services', route => route.fulfill({
     status: 503,
@@ -35,6 +35,63 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     }),
   }))
   await page.route('**/api/svc/**', route => route.fulfill({ status: 503, body: '{}' }))
+})
+
+test('unavailable fleet health is not reported as not deployed', async ({ page }) => {
+  await page.route('**/api/services/health', route => route.fulfill({ status: 503, body: '{}' }))
+  await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+  const account = page.locator('[role="button"][aria-controls="api-service-account"]')
+  await expect(account.locator('.animate-spin')).toHaveCount(0)
+  await expect(account).toContainText('Status unknown')
+  await expect(account).not.toContainText('Not deployed')
+  await expect(account).toContainText('1 endpoint')
+})
+
+test('unreported service health is not reported as down', async ({ page }) => {
+  await page.route('**/api/services/health', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ byContainer: { 'account-service': { status: 'UNKNOWN' } }, source: 'test' }),
+  }))
+  await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+  const account = page.locator('[role="button"][aria-controls="api-service-account"]')
+  await expect(account.locator('.animate-spin')).toHaveCount(0)
+  await expect(account).toContainText('Status unknown')
+  await expect(account).not.toContainText('Offline')
+})
+
+test('a service absent from a valid health snapshot remains not deployed', async ({ page }) => {
+  await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+  const account = page.locator('[role="button"][aria-controls="api-service-account"]')
+  await expect(account.locator('.animate-spin')).toHaveCount(0)
+  await expect(account).toContainText('Not deployed')
+  await expect(account).not.toContainText('Status unknown')
+})
+
+test('an explicit DOWN health verdict remains offline', async ({ page }) => {
+  await page.route('**/api/services/health', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ byContainer: { 'account-service': { status: 'DOWN' } }, source: 'test' }),
+  }))
+  await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+  const account = page.locator('[role="button"][aria-controls="api-service-account"]')
+  await expect(account.locator('.animate-spin')).toHaveCount(0)
+  await expect(account.getByLabel('Offline')).toBeVisible()
+  await expect(account).not.toContainText('Status unknown')
+})
+
+test('malformed health snapshot cannot silently erase every status', async ({ page }) => {
+  await page.route('**/api/services/health', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ services: [] }),
+  }))
+  await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+  const account = page.locator('[role="button"][aria-controls="api-service-account"]')
+  await expect(account.locator('.animate-spin')).toHaveCount(0)
+  await expect(account).toContainText('Status unknown')
+  await expect(account).toContainText('1 endpoint')
 })
 
 test('service disclosures work from the keyboard', async ({ page }) => {

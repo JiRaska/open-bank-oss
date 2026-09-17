@@ -218,7 +218,7 @@ interface OpenAPIDoc {
 // deployed in this environment (most of the 33-service fleet in the sandbox)
 // from one that IS deployed but failed its readiness probe. Showing the former
 // as a red "Offline" reads as "the app is broken" — see ADR-0056 / graceful-state.
-type Health = 'up' | 'not_deployed' | 'down'
+type Health = 'up' | 'not_deployed' | 'down' | 'unknown'
 
 interface ServiceStatus {
   health: Health
@@ -245,11 +245,12 @@ async function loadHealthSnapshot(): Promise<HealthSnapshot | null> {
   try {
     const res = await fetch('/api/services/health', { cache: 'no-store', signal: AbortSignal.timeout(8000) })
     if (!res.ok) return null
-    return (await res.json()) as HealthSnapshot
+    const data = await res.json()
+    if (!data || typeof data.byContainer !== 'object' || data.byContainer === null || Array.isArray(data.byContainer)) return null
+    return data as HealthSnapshot
   } catch {
     // Same-origin server route; a failure here means we cannot determine the
-    // fleet state. Degrade to the neutral "not deployed" rather than a scary
-    // "down" (see ADR-0056 / graceful-state).
+    // fleet state. Do not infer deployment or outage from an unavailable read.
     return null
   }
 }
@@ -260,10 +261,12 @@ async function loadHealthSnapshot(): Promise<HealthSnapshot | null> {
 // (discovery → `account-service`, static probe → `openbank-account-service`),
 // so try both forms.
 function healthFor(snap: HealthSnapshot | null, k8s: string): Health {
-  if (!snap) return 'not_deployed'
+  if (!snap) return 'unknown'
   const entry = snap.byContainer[k8s] ?? snap.byContainer[`openbank-${k8s}`]
   if (!entry) return 'not_deployed'
-  return entry.status === 'UP' ? 'up' : 'down'
+  if (entry.status === 'UP') return 'up'
+  if (entry.status === 'DOWN') return 'down'
+  return 'unknown'
 }
 
 const resolveRef = (ref: string, openapi: OpenAPIDoc | null): OpenAPISchema | undefined => {
@@ -635,6 +638,7 @@ export default function ApiCatalogPage() {
             { label: t('Online', 'Online'), value: Object.values(statuses).filter(s => s.health === 'up').length, color: 'var(--success)' },
             { label: t('Nenasazeno', 'Not deployed'), value: Object.values(statuses).filter(s => s.health === 'not_deployed').length, color: 'var(--text-tertiary)' },
             { label: t('Offline', 'Offline'), value: Object.values(statuses).filter(s => s.health === 'down').length, color: 'var(--danger)' },
+            { label: t('Stav neznámý', 'Status unknown'), value: Object.values(statuses).filter(s => s.health === 'unknown').length, color: 'var(--text-secondary)' },
             { label: t('Endpointů celkem', 'Total endpoints'), value: Object.values(statuses).reduce((a, s) => a + s.paths.length, 0), color: 'var(--accent)' },
           ].map(stat => (
             <div key={stat.label} style={{
@@ -699,6 +703,8 @@ export default function ApiCatalogPage() {
                   <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} aria-label={t('Online', 'Online')} />
                 ) : status?.health === 'not_deployed' ? (
                   <MinusCircle size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} aria-label={t('Není nasazeno v tomto prostředí', 'Not deployed in this environment')} />
+                ) : status?.health === 'unknown' ? (
+                  <MinusCircle size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} aria-label={t('Stav služby nelze ověřit', 'Service health cannot be verified')} />
                 ) : (
                   <XCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} aria-label={t('Offline', 'Offline')} />
                 )}
@@ -741,6 +747,13 @@ export default function ApiCatalogPage() {
                         background: 'var(--surface-2)', color: 'var(--text-tertiary)',
                         borderRadius: '4px', border: '1px solid var(--border)',
                       }}>{t('Nenasazeno', 'Not deployed')}</span>
+                    )}
+                    {!loading && status?.health === 'unknown' && (
+                      <span style={{
+                        fontSize: '10px', fontWeight: 600, padding: '2px 6px',
+                        background: 'var(--surface-3)', color: 'var(--text-secondary)',
+                        borderRadius: '4px', border: '1px solid var(--border)',
+                      }} title={t('Z health snapshotu nelze určit, zda služba běží.', 'The health snapshot cannot establish whether this service is running.')}>{t('Stav neznámý', 'Status unknown')}</span>
                     )}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t(SERVICE_DESC_CS[svc.id] ?? svc.desc, svc.desc)}</div>
@@ -802,9 +815,9 @@ export default function ApiCatalogPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         {status.paths.length === 0 ? (
                           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                            {status.health === 'not_deployed'
-                              ? t('Služba není v tomto prostředí nasazená — OpenAPI spec se načte, jakmile poběží.', 'Service is not deployed in this environment — the OpenAPI spec loads once it is running.')
-                              : t('Žádné endpointy (služba offline nebo OpenAPI nedostupné).', 'No endpoints (service offline or OpenAPI unavailable).')}
+                            {status.openapi
+                              ? t('Dostupný OpenAPI kontrakt neuvádí žádné endpointy.', 'The available OpenAPI contract declares no endpoints.')
+                              : t('OpenAPI kontrakt není dostupný; stav služby se vyhodnocuje zvlášť.', 'The OpenAPI contract is unavailable; service health is evaluated separately.')}
                           </div>
                         ) : status.paths.map((path, i) => {
                           const docPaths = status.openapi?.paths || {}
