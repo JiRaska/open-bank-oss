@@ -89,7 +89,15 @@ class CompaniesHousePscAdapter : UboAdapter {
     }
 
     internal fun map(identifier: LegalEntityIdentifier, body: JsonNode, pack: CountryPack): UboFinding {
-        val items = body.path("items").toList()
+        val page = body.path("items")
+        if (!page.isArray) throw RegistryUnavailableException(SOURCE)
+        val items = page.toList()
+        val total = body.path("total_results")
+        // This adapter requests only the first page. Never call a partial list the full UBO
+        // finding: omitted owners would silently satisfy the review's evidence requirement.
+        if (!total.isIntegralNumber || !total.canConvertToInt() || total.asInt() != items.size) {
+            throw RegistryUnavailableException(SOURCE)
+        }
         val owners = items
             .filter { it.text("ceased_on") == null && it.text("kind")?.contains("statement") != true }
             .mapNotNull { toOwner(it, identifier.value) }

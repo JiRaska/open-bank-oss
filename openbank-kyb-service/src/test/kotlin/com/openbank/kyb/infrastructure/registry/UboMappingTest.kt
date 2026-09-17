@@ -6,6 +6,7 @@ package com.openbank.kyb.infrastructure.registry
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.OwnershipBand
@@ -13,6 +14,7 @@ import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -75,7 +77,7 @@ class UboMappingTest {
     fun `a PSC reference cannot point to another company or arbitrary URL`() {
         val body = json.readTree(
             """
-            {"items":[
+            {"total_results":3,"items":[
               {"name":"Synthetic owner", "links":{"self":"/company/OTHER/persons-with-significant-control/individual/1"}},
               {"name":"Synthetic owner 2", "links":{"self":"https://example.invalid/psc/2"}},
               {"name":"Synthetic owner 3", "links":{"self":"/company/OC123456/persons-with-significant-control/individual/../3"}}
@@ -92,7 +94,7 @@ class UboMappingTest {
     fun `corporate identifiers stay source evidence and malformed or personal fields are omitted`() {
         val body = json.readTree(
             """
-            {"items":[
+            {"total_results":2,"items":[
               {"name":"Person", "kind":"individual-person-with-significant-control",
                "identification":{"registration_number":"12345678","country_registered":"United Kingdom"}},
               {"name":"Company", "kind":"corporate-entity-person-with-significant-control",
@@ -104,6 +106,20 @@ class UboMappingTest {
         assertThat(finding.owners.map { it.registrationNumber }).containsOnlyNulls()
         assertThat(finding.owners[0].countryRegistered).isNull()
         assertThat(finding.owners[1].countryRegistered).isEqualTo("United Kingdom")
+    }
+
+    @Test
+    fun `a partial PSC page cannot be presented as a complete owner finding`() {
+        val body = json.readTree(
+            """{"total_results":2,"items":[{"name":"First owner","kind":"individual-person-with-significant-control"}]}""",
+        )
+        assertThatThrownBy {
+            adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), body, gb)
+        }.isInstanceOf(RegistryUnavailableException::class.java)
+        val missingTotal = json.readTree("""{"items":[{"name":"First owner"}]}""")
+        assertThatThrownBy {
+            adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), missingTotal, gb)
+        }.isInstanceOf(RegistryUnavailableException::class.java)
     }
 
     @Test
@@ -131,7 +147,7 @@ class UboMappingTest {
     fun `a filed statement is an answer, not an absence`() {
         val body = json.readTree(
             """
-            {"items":[{"kind":"persons-with-significant-control-statement",
+            {"total_results":1,"items":[{"kind":"persons-with-significant-control-statement",
                        "statement":"no-individual-or-entity-with-signficant-control"}]}
             """.trimIndent(),
         )
