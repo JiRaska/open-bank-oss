@@ -298,17 +298,31 @@ class DelegationService(
         granteePartyId: UUID,
         scaSessionId: UUID,
         callerPartyId: CallerPartyId,
+        actorPartyId: UUID?,
     ): DelegationGrant {
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
         rejectLegacyExposure(grant)
+        val actor = actorPartyId ?: granteePartyId
+        val authority = grantorAuthorityClient.authorityFor(granteePartyId, actor)
+        when (authority.verdict) {
+            GrantorAuthorityVerdict.AUTHORIZED -> Unit
+            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
+                "actor $actor has no sole authority to accept for grantee $granteePartyId",
+            )
+            GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
+                "authority for grantee $granteePartyId could not be established",
+            )
+        }
+        // Pure aggregate transition first: an already-closed offer must not burn a valid human
+        // challenge only to discover afterward that activation is impossible.
+        val accepted = grant.accept(scaSessionId, OffsetDateTime.now(clock))
         verifyAndConsumeSca(
             sessionId = scaSessionId,
-            expectedPartyId = granteePartyId,
+            expectedPartyId = actor,
             expectedPurpose = SCA_PURPOSE_ACCEPT,
             errorPrefix = "accept SCA",
         )
-        val accepted = grant.accept(scaSessionId, OffsetDateTime.now(clock))
         return delegationRepository.save(
             accepted,
             DelegationActivated(
