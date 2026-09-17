@@ -47,7 +47,7 @@ class RegistryRouterDemoTest {
         return RegistryRouter().also {
             it.adapters = instance
             it.metrics = mockk<KybMetricsPort>(relaxed = true)
-            it.demo = DemoEntity(demoOn, "Oldřich Vaněk", clock)
+            it.demo = DemoEntity(demoOn, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", clock)
         }
     }
 
