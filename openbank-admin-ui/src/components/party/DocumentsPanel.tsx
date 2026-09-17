@@ -6,15 +6,11 @@ import { useEffect, useState } from 'react'
 import { Download, FileText, HelpCircle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { StatusBadge } from '@/components/ui'
-import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
+import { svcUrl, type BffFailure } from '@/lib/services/bff'
+import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
+import type { DocumentFact } from '@/lib/context/customerGraph'
 
-interface PartyDocument {
-  id: string; templateCode: string; templateVersion: string; contentType: string
-  sizeBytes: number; status: string; caseRef: string | null; productRef: string | null
-  retainUntil: string | null; createdAt: string
-}
-
-type State = { kind: 'loading' } | { kind: 'ok'; documents: PartyDocument[] } | { kind: 'unknown'; why: BffFailure }
+type State = { kind: 'loading' } | { kind: 'ok'; documents: DocumentFact[] } | { kind: 'unknown'; why: BffFailure }
 
 export function DocumentsPanel({ partyId }: { partyId: string }) {
   const { t, language } = useLanguage()
@@ -24,14 +20,10 @@ export function DocumentsPanel({ partyId }: { partyId: string }) {
     let live = true
     ;(async () => {
       try {
-        const res = await fetch(svcUrl('document-service', '/api/v1/documents', { partyRef: partyId }), { cache: 'no-store' })
-        if (!res.ok) {
-          const why = await classifyBffFailure(res)
-          if (live) setState({ kind: 'unknown', why })
-          return
-        }
-        const body = await res.json() as PartyDocument[]
-        if (live) setState({ kind: 'ok', documents: Array.isArray(body) ? body : [] })
+        const facts = await loadCustomerGraphFacts(partyId)
+        if (live) setState(facts.unavailable.includes('documents')
+          ? { kind: 'unknown', why: 'unreachable' }
+          : { kind: 'ok', documents: facts.documents })
       } catch {
         if (live) setState({ kind: 'unknown', why: 'unreachable' })
       }

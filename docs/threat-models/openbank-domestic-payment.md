@@ -460,3 +460,16 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+
+- **2026-09-13** — **Additive lifecycle evidence contract for ADR-0306.**
+  `domestic_payments.aggregate_revision` starts at 1 and every valid transition increments it while
+  holding a pessimistic row lock. The aggregate update and status event remain in the same existing
+  transaction, so the emitted revision names the committed state. Created and status-changed payloads
+  expose the additive optional `aggregateRevision`; optionality preserves retained pre-1.2 records,
+  while new writers always populate it. Context-service consumes the topic asynchronously with its own
+  group, mTLS ACL and DLQ and stores only payment id, status, event time and revision as restricted
+  evidence. It receives no account number, party name, amount or narrative in its projection model and
+  adds no synchronous payment-path dependency. Risk class is integrity and availability: the row lock
+  serializes concurrent transitions, the revision makes replay ordering explicit, and context-service
+  failure can only stale the investigative view. Rollback stops that consumer first; the additive
+  column can be dropped only before any V17 writer runs, as recorded in the migration.

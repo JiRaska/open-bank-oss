@@ -5,6 +5,15 @@
 name: agent-review
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/agent-review.yml'
+      - '.github/workflows/agent-issue-worker.yml'
+      - '.github/workflows/agent-pr-steward.yml'
+      - '.github/scripts/agent-review-budget.py'
+      - '.github/scripts/test-agent-review-budget.py'
+      - '.github/scripts/solo-review-*.py'
+      - '.github/scripts/test-solo-review-*.py'
   workflow_dispatch:
     inputs:
       pr:
@@ -21,7 +30,7 @@ permissions: {}
 
 # Serialize provider dispatches; never cancel a running paid invocation for a newer PR.
 concurrency:
-  group: agent-provider-budget
+  group: ${{ github.event_name == 'pull_request' && format('agent-review-validation-{0}', github.event.pull_request.number) || 'agent-provider-budget' }}
   cancel-in-progress: false
 
 jobs:

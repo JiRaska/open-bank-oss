@@ -14,7 +14,12 @@ info:
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
   # Additive recertification review and evidence routes.
-  version: 1.66.0
+  # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
+  # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
+  # decisions are always the human signer's.
+  # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
+  # FATCA/CRS self-certification).
+  version: 1.69.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1237,6 +1242,59 @@ paths:
           description: Consent does not belong to caller
         '404':
           description: Consent not found
+
+  /me/aml-profile:
+    get:
+      tags: [Profile]
+      summary: The caller's own personal AML profile
+      description: >-
+        AML Act 253/2008 §9 declaration plus the FATCA/CRS self-certification of the HUMAN behind
+        the token. The party id is taken from the token only; X-Acting-For is ignored on this route,
+        so a customer acting for a company still sees their own profile. party-service's status and
+        body are passed through.
+      operationId: getMyAmlProfile
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current profile; declaredAt says when it was last confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '404':
+          description: The customer has not declared an AML profile yet
+    put:
+      tags: [Profile]
+      summary: Declare (or re-confirm) the caller's personal AML profile
+      description: >-
+        Stores a new version (version increments on every change; history is kept). The party id
+        is taken from the token only — a partyId in the body and the X-Acting-For header are
+        ignored. A declaration carrying a risk factor (PEP, US person, cash-intensive, high-risk
+        tax residency, turnover over 500k CZK) is still stored and answers reviewStatus
+        ENHANCED_DUE_DILIGENCE, meaning the account needs a check.
+      operationId: putMyAmlProfile
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmlProfileRequest'
+      responses:
+        '200':
+          description: The stored version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '400':
+          description: >-
+            Body is not a JSON object, or party-service rejected the declaration (the error message
+            names the rule), passed through unchanged
+        '422':
+          description: The caller's party is not a natural person, or is closed
 
   /payees:
     get:
@@ -2604,13 +2662,20 @@ paths:
   /documents:
     get:
       tags: [Documents]
-      summary: List the authenticated customer's documents
+      summary: List the authenticated customer's (or the acted-for entity's) documents
       description: >-
-        partyRef is taken from the JWT, never the query (IDOR). Object-store coordinates
-        (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
+        partyRef is taken from the JWT, never the query (IDOR); with X-Acting-For it is the
+        entity, after party-service confirms an active mandate (403 otherwise). Object-store
+        coordinates (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
       operationId: listDocuments
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: The caller's documents, newest first
@@ -2657,11 +2722,16 @@ paths:
   /documents/{id}/content:
     get:
       tags: [Documents]
-      summary: Stream a document's PDF bytes (owner only)
+      summary: Stream a document's PDF bytes (owner, acted-for entity, or share grantee)
       operationId: getDocumentContent
       security:
         - customerOidc: [accounts:read]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
         - name: id
           in: path
           required: true
@@ -2698,8 +2768,10 @@ paths:
       tags: [Documents]
       summary: Record the caller's signing decision (SCA-bound, ADR-0169)
       description: >-
-        partyRef is forced to the JWT; evidenceRef (the SCA challenge id) is verified upstream by
-        document-service against sca-service (ADR-0021).
+        partyRef is forced to the JWT's human party, also under X-Acting-For (a business agreement's
+        signers are natural persons; the header is still validated and a missing mandate is a 403);
+        evidenceRef (the SCA challenge id) is verified upstream by document-service against
+        sca-service (ADR-0021).
       operationId: recordDecision
       security:
         - customerOidc: [accounts:read]
@@ -3725,6 +3797,7 @@ paths:
                 dateOfBirth: { type: string, format: date, nullable: true }
       responses:
         '200': {description: Case}
+        '422': {description: 'Refused — the verified identity does not match a listed representative (INITIATOR_IDENTITY_MISMATCH)'}
 
   /business/onboarding/{id}/cosigners:
     post:
@@ -3790,6 +3863,152 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200': {description: Case}
+
+  /business/onboarding/{id}/questionnaire:
+    put:
+      tags: [Business]
+      summary: Answer the AML (Act 253/2008 §9) and FATCA/CRS questionnaire for the case
+      description: >-
+        Proxied to kyb-service as the authenticated human (never X-Acting-For). kyb-service
+        requires the caller to be the initiator or an invited signer.
+      operationId: putBusinessQuestionnaire
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessQuestionnaire' }
+      responses:
+        '200': {description: Case}
+        '400': {description: Invalid answers}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts the questionnaire}
+
+  /business/onboarding/{id}/questionnaire/prefill:
+    get:
+      tags: [Business]
+      summary: Persons already known for the case and any earlier questionnaire answers
+      operationId: getBusinessQuestionnairePrefill
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Prefill
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessQuestionnairePrefill' }
+        '404': {description: Not involved}
+
+  /business/onboarding/{id}/documents/{documentId}/content:
+    get:
+      tags: [Business]
+      summary: Stream a document of this onboarding case (agreement or disclosure) to a case participant
+      description: >-
+        Works before any mandate exists; X-Acting-For is ignored. The case is read from kyb-service
+        as the authenticated human (initiator or invited signer only). The document must carry
+        caseRef equal to the case id, otherwise 404, so the existence of other documents is never revealed.
+      operationId: getBusinessCaseDocumentContent
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': {description: kyb-service refused the caller for this case}
+        '404': {description: Case not visible to the caller, or the document does not belong to this case}
+
+  /business/onboarding/{id}/declarations:
+    put:
+      tags: [Business]
+      summary: Confirm beneficial owners, PEP status and truthfulness for the case
+      operationId: putBusinessDeclarations
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessDeclarations' }
+      responses:
+        '200': {description: Case}
+        '400': {description: truthful is false, a discrepancy note is missing, or a listed person has no PEP entry}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts declarations}
+
+  /business/onboarding/{id}/agreement:
+    post:
+      tags: [Business]
+      summary: Render (or return) the business framework agreement, its disclosures and signing ceremony
+      operationId: ensureBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: lang
+          in: query
+          required: false
+          schema: { type: string, enum: [cs, en] }
+      responses:
+        '200':
+          description: The agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessAgreement' }
+        '400': {description: lang is not cs or en}
+        '404': {description: Not involved}
+        '409': {description: Questionnaire or declarations missing, or the agreement is already signed}
+
+  /business/onboarding/{id}/agreement/accept:
+    post:
+      tags: [Business]
+      summary: Accept the disclosures, each bound to code, version and sha256
+      operationId: acceptBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisclosureAcceptance' }
+      responses:
+        '200': {description: Case}
+        '404': {description: Not involved}
+        '409': {description: The accepted set does not match the current disclosures exactly (stale)}
 
   /business/invitations/{token}/claim:
     post:
@@ -4295,6 +4514,201 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    AmlPep:
+      type: object
+      required: [isPep]
+      properties:
+        isPep: {type: boolean}
+        category:
+          type: string
+          nullable: true
+          description: Required when isPep is true; must be empty otherwise.
+          enum: [HEAD_OF_STATE_OR_GOV, MINISTER, MP, JUDGE, CENTRAL_BANK, AMBASSADOR, MILITARY,
+                 STATE_COMPANY_BOARD, INTL_ORG, PARTY_LEADERSHIP, FAMILY_MEMBER, CLOSE_ASSOCIATE]
+        detail: {type: string, nullable: true, maxLength: 500}
+
+    AmlProfileRequest:
+      type: object
+      required: [purpose, incomeSources, occupation, expectedMonthlyTurnover, cashIntensive, pep,
+                 taxResidencies, usPerson, truthful]
+      properties:
+        purpose:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EVERYDAY_BANKING, SALARY, SAVINGS, INVESTMENTS, BUSINESS_SIDE_INCOME, OTHER]
+        purposeNote: {type: string, nullable: true, maxLength: 500, description: Required when purpose includes OTHER}
+        incomeSources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EMPLOYMENT, SELF_EMPLOYMENT, PENSION, STUDENT_SUPPORT, RENTAL, INVESTMENTS, INHERITANCE_GIFT, OTHER]
+        incomeNote: {type: string, nullable: true, maxLength: 500, description: Required when incomeSources includes OTHER}
+        occupation:
+          type: string
+          enum: [EMPLOYED, SELF_EMPLOYED, STUDENT, RETIRED, UNEMPLOYED, OTHER]
+        occupationNote: {type: string, nullable: true, maxLength: 500, description: Required when occupation is OTHER}
+        expectedMonthlyTurnover:
+          type: string
+          description: Monthly turnover band in CZK
+          enum: [UP_TO_30K, UP_TO_100K, UP_TO_500K, OVER_500K]
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies:
+          type: array
+          minItems: 1
+          description: ISO 3166-1 alpha-2 codes, no repeats. A US residency requires usPerson=true.
+          items: {type: string, pattern: '^[A-Za-z]{2}$'}
+        tin:
+          type: object
+          description: >-
+            Taxpayer identification number per NON-CZ residency, keyed by ISO 3166-1 alpha-2 code,
+            e.g. {"SK": "1234567890"}. Keys must be declared taxResidencies and must not include CZ.
+          additionalProperties: {type: string, maxLength: 64}
+        usPerson: {type: boolean, description: FATCA self-certification}
+        truthful: {type: boolean, description: Must be true}
+
+    AmlProfile:
+      type: object
+      required: [partyId, version, declaredAt, purpose, incomeSources, occupation, expectedMonthlyTurnover,
+                 cashIntensive, pep, taxResidencies, tin, usPerson, truthful, riskFactors, eddRequired,
+                 reviewStatus, pepFlag, fatcaStatus, crsStatus]
+      properties:
+        partyId: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        declaredAt: {type: string, format: date-time, description: When this version was confirmed}
+        purpose: {type: array, items: {type: string}}
+        purposeNote: {type: string, nullable: true}
+        incomeSources: {type: array, items: {type: string}}
+        incomeNote: {type: string, nullable: true}
+        occupation: {type: string}
+        occupationNote: {type: string, nullable: true}
+        expectedMonthlyTurnover: {type: string}
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies: {type: array, items: {type: string}}
+        tin:
+          type: object
+          additionalProperties: {type: string}
+        usPerson: {type: boolean}
+        truthful: {type: boolean}
+        riskFactors:
+          type: array
+          items:
+            type: string
+            enum: [PEP, US_PERSON, CASH_INTENSIVE, HIGH_RISK_COUNTRY, HIGH_TURNOVER]
+        eddRequired: {type: boolean}
+        reviewStatus:
+          type: string
+          enum: [STANDARD, ENHANCED_DUE_DILIGENCE]
+          description: ENHANCED_DUE_DILIGENCE — tell the customer the account needs a check.
+        pepFlag: {type: boolean}
+        pepCategory: {type: string, nullable: true}
+        fatcaStatus: {type: string, enum: [US_PERSON, NON_US]}
+        crsStatus: {type: string, enum: [REPORTABLE, NON_REPORTABLE]}
+
+    BusinessQuestionnaire:
+      type: object
+      required: [purpose, expectedMonthlyTurnover, sourceOfFunds, cashIntensive, countries, taxResidencies, fatcaStatus, crsStatus]
+      properties:
+        purpose: { type: string, enum: [OPERATING_ACCOUNT, SAVINGS, PAYMENTS_ESHOP, HOLDING, OTHER] }
+        purposeNote: { type: string, nullable: true }
+        expectedMonthlyTurnover: { type: string, enum: [UP_TO_100K, UP_TO_1M, UP_TO_10M, OVER_10M], description: CZK }
+        sourceOfFunds:
+          type: array
+          items: { type: string, enum: [BUSINESS_REVENUE, SHARE_CAPITAL, LOANS, INVESTMENTS, OTHER] }
+        sourceOfFundsNote: { type: string, nullable: true }
+        cashIntensive: { type: boolean }
+        countries:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        taxResidencies:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        fatcaStatus: { type: string, enum: [ACTIVE_NFFE, PASSIVE_NFFE, FINANCIAL_INSTITUTION, US_PERSON] }
+        crsStatus: { type: string, enum: [ACTIVE_NFE, PASSIVE_NFE, FINANCIAL_INSTITUTION] }
+        answeredAt: { type: string, format: date-time, readOnly: true }
+        answeredBy: { type: string, format: uuid, readOnly: true }
+    BusinessQuestionnairePrefill:
+      type: object
+      properties:
+        knownPersons:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              partyId: { type: string, format: uuid }
+              pep: { type: boolean, nullable: true }
+        previousQuestionnaire:
+          allOf:
+            - $ref: '#/components/schemas/BusinessQuestionnaire'
+          nullable: true
+    BusinessDeclarations:
+      type: object
+      required: [uboConfirmed, peps, truthful]
+      properties:
+        uboConfirmed: { type: boolean, description: true = the register's beneficial-owner list is correct }
+        uboDiscrepancyNote: { type: string, nullable: true, description: Required when uboConfirmed is false }
+        peps:
+          type: array
+          description: One entry for every listed beneficial owner and representative
+          items:
+            type: object
+            required: [name, isPep]
+            properties:
+              name: { type: string }
+              isPep: { type: boolean }
+              detail: { type: string, nullable: true }
+        truthful: { type: boolean, description: Must be true }
+        declaredAt: { type: string, format: date-time, readOnly: true }
+        declaredBy: { type: string, format: uuid, readOnly: true }
+    BusinessAgreement:
+      type: object
+      properties:
+        caseId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        templateCode: { type: string, example: RAMCOVA_SMLOUVA_PO_CS }
+        templateVersion: { type: string }
+        sha256: { type: string, description: Hash of the PDF the signers sign over }
+        sealedSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, format: uuid }
+        ceremonyStatus: { type: string, enum: [PENDING, PARTIALLY_SIGNED, COMPLETED, DECLINED, EXPIRED] }
+        signers:
+          type: array
+          items:
+            type: object
+            properties:
+              partyRef: { type: string, format: uuid }
+              status: { type: string, enum: [PENDING, SIGNED, DECLINED] }
+              signedAt: { type: string, format: date-time, nullable: true }
+        disclosures:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string, example: VOP_CS }
+              version: { type: string }
+              title: { type: string }
+              sha256: { type: string }
+              documentId: { type: string, format: uuid }
+    DisclosureAcceptance:
+      type: object
+      required: [disclosures]
+      properties:
+        disclosures:
+          type: array
+          items:
+            type: object
+            required: [code, version, sha256]
+            properties:
+              code: { type: string }
+              version: { type: string }
+              sha256: { type: string }
     LoyaltySummary:
       type: object
       required: [balance, earnedThisYear, history]

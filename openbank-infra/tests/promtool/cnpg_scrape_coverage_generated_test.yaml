@@ -50,6 +50,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -175,6 +177,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -316,6 +320,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -441,6 +447,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -558,6 +566,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -683,6 +693,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -812,6 +824,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -935,6 +949,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -1059,6 +1075,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -1182,6 +1200,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"

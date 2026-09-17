@@ -465,7 +465,10 @@ class SourceAndAcceptanceTest(unittest.TestCase):
         workflow = Path(__file__).resolve().parents[1] / "workflows" / "agent-review.yml"
         config = yaml.safe_load(workflow.read_text())
         self.assertEqual(config["permissions"], {})
-        self.assertEqual(config["concurrency"], dict(group="agent-provider-budget", **{"cancel-in-progress": False}))
+        self.assertFalse(config["concurrency"]["cancel-in-progress"])
+        self.assertEqual(config["concurrency"]["group"],
+                         "${{ github.event_name == 'pull_request' && format('agent-review-validation-{0}', github.event.pull_request.number) || 'agent-provider-budget' }}")
+        self.assertIn("pull_request", config.get("on", config.get(True)))
         self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", workflow.read_text())
         self.assertIn("secrets.AGENT_REVIEW_ANTHROPIC_API_KEY", workflow.read_text())
         jobs = config["jobs"]

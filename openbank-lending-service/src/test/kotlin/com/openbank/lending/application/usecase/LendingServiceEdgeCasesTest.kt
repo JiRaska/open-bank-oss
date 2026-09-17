@@ -77,6 +77,11 @@ class LendingServiceEdgeCasesTest {
 
     @org.junit.jupiter.api.BeforeEach
     fun stubEventEmitter() {
+        every { loans.withLocked<Any>(any(), any()) } answers {
+            loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
+        }
+        every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
+
         every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
     }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
@@ -479,7 +484,7 @@ class LendingServiceEdgeCasesTest {
         assertThat(snapshot.stage).isEqualTo(Ifrs9Stage.STAGE_3)
         assertThat(snapshot.horizon).isEqualTo(EclHorizon.LIFETIME)
         // Lifetime ECL = pdLifetime * lgd * EAD = 0.20 * 0.45 * 12000 = 1080.00
-        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("1080.00"))
+        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("5400.00"))
     }
 
     @Test

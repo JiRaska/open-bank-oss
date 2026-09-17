@@ -92,7 +92,7 @@ export function Tabs<Id extends string>({
               borderLeft: rail ? `2px solid ${selected ? 'var(--accent)' : 'transparent'}` : undefined,
               borderBottom: rail ? undefined : `2px solid ${selected ? 'var(--accent)' : 'transparent'}`,
               background: rail && selected ? 'var(--accent-light)' : 'transparent',
-              color: selected ? 'var(--accent)' : 'var(--text-secondary)',
+              color: selected ? 'var(--accent-text)' : 'var(--text-secondary)',
               cursor: 'pointer',
               fontFamily: 'inherit',
               fontSize: 13,

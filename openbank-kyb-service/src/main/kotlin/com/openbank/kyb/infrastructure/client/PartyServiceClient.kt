@@ -8,16 +8,21 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
+import com.openbank.kyb.application.port.out.PepProfile
+import com.openbank.kyb.domain.model.InitiatorIdentity
+import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
@@ -51,6 +56,24 @@ data class AddressBody(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PartyCreated(val id: UUID)
 
+/** The part of party-service's `GET /parties/{id}` that decides who an initiator verifiably is. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PartyRecord(
+    val legalName: String,
+    val kycStatus: String?,
+    val address: PartyAddress?,
+    // Compliance metadata party-service stores (`parties.pep_flag`, `pep_category`, `fatca_status`,
+    // `crs_status`). Nullable and defaulted: a response that does not carry them reads as "not on
+    // file", which makes the person declare rather than silently count as non-PEP.
+    val pepFlag: Boolean? = null,
+    val pepCategory: String? = null,
+    val fatcaStatus: String? = null,
+    val crsStatus: String? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PartyAddress(val line1: String?, val city: String?, val postalCode: String?, val countryCode: String?)
+
 data class MandateBody(
     val agentPartyId: UUID,
     val role: String,
@@ -81,6 +104,10 @@ interface PartyServiceRestClient {
     @POST
     @Path("/{id}/mandates")
     suspend fun grantMandate(@PathParam("id") principalPartyId: UUID, body: MandateBody): Any?
+
+    @GET
+    @Path("/{id}")
+    suspend fun getParty(@PathParam("id") id: UUID): PartyRecord
 }
 
 @ApplicationScoped
@@ -146,7 +173,41 @@ class PartyServiceGateway : PartyGateway {
         )
     }
 
+    /**
+     * The initiator's verified identity. 404 is "no such party" (null); anything else propagates, so a
+     * party-service outage is an outage and never reads as "identity does not match".
+     */
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun initiatorIdentity(partyId: UUID): InitiatorIdentity? {
+        val party = try {
+            client.getParty(partyId)
+        } catch (e: WebApplicationException) {
+            if (e.response?.status == HTTP_NOT_FOUND) return null
+            throw e
+        }
+        return InitiatorIdentity(
+            legalName = party.legalName,
+            address = party.address?.let {
+                RegisteredAddress(it.line1, it.city, it.postalCode, it.countryCode.orEmpty())
+            },
+            verified = party.kycStatus == KYC_APPROVED,
+        )
+    }
+
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun pepProfile(partyId: UUID): PepProfile? {
+        val party = try {
+            client.getParty(partyId)
+        } catch (e: WebApplicationException) {
+            if (e.response?.status == HTTP_NOT_FOUND) return null
+            throw e
+        }
+        return PepProfile(pep = party.pepFlag, category = party.pepCategory)
+    }
+
     private companion object {
         const val PARTY_TIMEOUT_MS = 5000L
+        const val HTTP_NOT_FOUND = 404
+        const val KYC_APPROVED = "APPROVED"
     }
 }

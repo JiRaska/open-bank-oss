@@ -496,3 +496,11 @@ every URL and the upload path is unaffected.
   narrowing of that gate's coverage — a service dropping OIDC would no longer be caught there and
   would fail at its own ArC init. The evidence and the cost are written at the entry itself, and
   two self-test cases pin the allowance so it cannot silently widen (issue #8993).
+
+- **2026-09-13** — The existing `TransactionInitiated` outbox payload adds optional
+  `originatingPaymentId`, copied from the already persisted transaction field. This lets the isolated
+  context projector correlate a rail payment to its booking transaction by an explicit source id.
+  The field is absent for non-rail postings, carries no account, amount, party or counterparty data,
+  and does not alter posting, workflow or authorization. Risk class = confidentiality of a stable
+  financial reference; Kafka mTLS/ACLs and the context lens's assignment + OPA + audit boundary limit
+  disclosure. Rollback: consumers ignore the additive field and the producer may stop emitting it.

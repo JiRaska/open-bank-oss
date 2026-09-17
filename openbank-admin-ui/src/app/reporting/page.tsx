@@ -14,13 +14,21 @@
 // operator explores comes from Grafana.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
-import { ReportTrend } from '@/components/reporting/ReportTrend'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { BarChart3, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
 import { parseReportCatalogue, parseReportResult, type CatalogueColumn, type CatalogueReport, type ReportResult } from '@/lib/reporting/clientContract'
+
+// Recharts is larger than the rest of this route and a trend exists only after an operator runs
+// one of the additive daily-count reports. Keep the catalogue, parameters and tabular result fast;
+// fetch the visualisation engine only when there is real chartable evidence to render.
+const ReportTrend = dynamic(
+  () => import('@/components/reporting/ReportTrend').then(module => module.ReportTrend),
+  { ssr: false },
+)
 
 // Shapes mirrored from /api/reporting/route.ts and /api/reporting/[queryId]/route.ts. The page
 // deliberately does NOT import the registry module: its SQL builders stay server-side.

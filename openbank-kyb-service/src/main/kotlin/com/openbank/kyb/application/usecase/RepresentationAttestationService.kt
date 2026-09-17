@@ -10,17 +10,22 @@ import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
 import com.openbank.kyb.application.port.`in`.RepresentationAttestationUseCase
 import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
 import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
+import com.openbank.kyb.domain.model.EntityStatus
+import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
+import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
+import java.util.Optional
 
 /** Raised when the rule text moved between rendering the confirmation form and submitting it. */
 class StaleAttestationException(message: String) : RuntimeException(message)
@@ -28,9 +33,22 @@ class StaleAttestationException(message: String) : RuntimeException(message)
 /**
  * Human confirmation of a representation rule, per entity (#9711).
  *
- * The parser proposes; this decides. Nothing here consults the parser's verdict to gate anything —
- * it is recorded alongside the human's answer purely so the two can be compared later, which is the
- * only honest way to learn whether the heuristic is improving.
+ * The parser proposes; a human decides — with ONE narrow exception, [autoConfirmsSingleMember].
+ * Outside it the parser's verdict gates nothing: it is recorded alongside the human's answer purely
+ * so the two can be compared later, which is the only honest way to learn whether the heuristic is
+ * improving.
+ *
+ * ## The single-member exception
+ *
+ * The risk a human confirmation guards against is a rule that reads SOLE while really demanding a
+ * second signature. When the register lists exactly ONE member of the statutory body, there is no
+ * second person who could be that signature: whatever the text says, the one member is the only
+ * possible signatory, and one signature is the only count that can bind. So a VERIFIED, ACTIVE
+ * extract whose rule parses SOLE/1 without named offices, and which lists exactly one
+ * representative, is confirmed by the system and persisted like any other attestation (actor
+ * [SYSTEM_ACTOR]) — so the audit trail, the parser measurement and the next lookup all see it.
+ * Never over a previous attestation: a changed text still goes to a human ([RepresentationDecision.Superseded]).
+ * Kill switch: `openbank.kyb.representation.auto-confirm-single-member`.
  */
 @ApplicationScoped
 open class RepresentationAttestationService : RepresentationAttestationUseCase {
@@ -40,6 +58,10 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
     @Inject lateinit var lookup: RegistryLookupUseCase
 
     @Inject lateinit var clock: Clock
+
+    /** Kill switch for the single-member exception; see the class KDoc. Defaults on. */
+    @ConfigProperty(name = "openbank.kyb.representation.auto-confirm-single-member", defaultValue = "true")
+    lateinit var autoConfirmSingleMember: Optional<Boolean>
 
     private val log = Logger.getLogger(RepresentationAttestationService::class.java)
 
@@ -62,7 +84,46 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
         attestations.findLatestFor(extract.identifier)?.let {
             return RepresentationDecision.Superseded(it, rule)
         }
+        if (autoConfirmsSingleMember(extract)) {
+            return RepresentationDecision.Attested(attestations.attest(systemAttestation(extract, hash)))
+        }
         return RepresentationDecision.Unattested(rule)
+    }
+
+    /** The unambiguous case, and only it: see the class KDoc. */
+    private fun autoConfirmsSingleMember(extract: RegistryExtract): Boolean {
+        val rule = extract.representationRule
+        return autoConfirmSingleMember.orElse(true) &&
+            extract.verification == ExtractVerification.VERIFIED &&
+            extract.status == EntityStatus.ACTIVE &&
+            rule.mode == RepresentationMode.SOLE &&
+            rule.requiredSigners == 1 &&
+            !rule.isRoleConstrained &&
+            extract.representatives.size == 1
+    }
+
+    private fun systemAttestation(extract: RegistryExtract, hash: String): RepresentationAttestation {
+        val rule = extract.representationRule
+        val saved = RepresentationAttestation(
+            id = Ids.newId(),
+            identifier = extract.identifier,
+            ruleTextHash = hash,
+            ruleText = rule.sourceText,
+            parsedMode = rule.mode,
+            parsedSigners = rule.requiredSigners,
+            confirmedSigners = 1,
+            confirmedRoles = emptyList(),
+            attestedBy = SYSTEM_ACTOR,
+            attestedAt = Instant.now(clock),
+            note = "Confirmed automatically: the register lists exactly one member of the statutory body " +
+                "and the rule reads sole representation, so no second signatory can exist.",
+        )
+        log.infof(
+            "representation auto-confirmed for %s %s: single statutory member, 1 signature",
+            extract.identifier.scheme.name,
+            extract.identifier.value,
+        )
+        return saved
     }
 
     override suspend fun attest(cmd: AttestRepresentationCommand): RepresentationAttestation {
@@ -109,6 +170,10 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
             saved.parsedSigners ?: "-",
         )
         return saved
+    }
+
+    companion object {
+        const val SYSTEM_ACTOR = "system:single-statutory-member"
     }
 
     override suspend fun history(scheme: IdentifierScheme, identifier: String): List<RepresentationAttestation> =

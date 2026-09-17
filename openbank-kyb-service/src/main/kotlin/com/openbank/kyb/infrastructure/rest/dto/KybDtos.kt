@@ -7,6 +7,7 @@ package com.openbank.kyb.infrastructure.rest.dto
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.RegistrySearchHit
 import com.openbank.kyb.domain.model.RepresentationAttestation
@@ -315,6 +316,10 @@ data class CaseResponse(
     val extract: ExtractResponse?,
     val signers: List<SignerResponse>,
     val reviewReason: String?,
+    /** The AML questionnaire as answered, or null (business-contract spec, W2). */
+    val questionnaire: Questionnaire?,
+    val declarations: DeclarationsResponse?,
+    val agreement: AgreementSummary?,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -333,6 +338,9 @@ data class CaseResponse(
             extract = c.extract?.let { ExtractResponse.from(it) },
             signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
             reviewReason = c.reviewReason,
+            questionnaire = c.questionnaire,
+            declarations = c.declarations?.let { DeclarationsResponse.from(it) },
+            agreement = c.agreement?.let { AgreementSummary.from(it) },
             createdAt = c.createdAt,
             updatedAt = c.updatedAt,
         )

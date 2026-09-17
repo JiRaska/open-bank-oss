@@ -20,7 +20,24 @@ import java.util.UUID
  */
 
 /** A single ledger posting the loan book emits — it never mutates balances itself (ADR-0028 D3). */
-data class LedgerPosting(val reference: String, val partyId: UUID, val amount: Money, val kind: PostingKind)
+data class LedgerPosting(
+    val reference: String,
+    val partyId: UUID,
+    val amount: Money,
+    val kind: PostingKind,
+    val accountingDate: java.time.LocalDate? = null,
+)
+
+/** Immutable internal command; the outbox retries this exact amount, key and accounting date. */
+data class AllowancePostingCommand(
+    val reference: String,
+    val partyId: UUID,
+    val loanId: UUID,
+    val amount: BigDecimal,
+    val currency: String,
+    val accountingDate: java.time.LocalDate,
+    val eventPayload: String? = null,
+)
 
 /**
  * The economic events the loan book posts to the ledger.
@@ -83,6 +100,8 @@ data class CreditAssessment(
     val score: Int?, // null when no bureau data is available
     val hasAdverseData: Boolean,
     val source: String,
+    /** True only when the bureau adapter actually completed the required check. */
+    val available: Boolean = false,
 )
 
 interface CreditBureauPort {

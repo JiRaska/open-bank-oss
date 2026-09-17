@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.23.0...transaction-service-v1.24.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
 ## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.22.0...transaction-service-v1.23.0) (2026-09-13)
 
 

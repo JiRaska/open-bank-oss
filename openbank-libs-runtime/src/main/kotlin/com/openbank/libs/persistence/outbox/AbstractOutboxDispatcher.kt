@@ -59,6 +59,12 @@ abstract class AbstractOutboxDispatcher {
     protected abstract val outboxEventPublisher: OutboxEventPublisher
 
     /**
+     * Maximum rows claimed by one scheduled tick. Services with a measured burst envelope may
+     * override this while the fleet keeps the conservative default.
+     */
+    protected open val dispatchBatchSize: Int = DEFAULT_BATCH_SIZE
+
+    /**
      * `service` tag for [DomainMetrics.outboxDispatched] / `.outboxDead` (#5049). Defaults to a
      * kebab-case derivation of the concrete class's simple name — `PartyOutboxDispatcher`
      * becomes `party` — chosen (2026-08-16) to reproduce the `service` string most sibling
@@ -135,7 +141,10 @@ abstract class AbstractOutboxDispatcher {
      * `@Scheduled` method on the concrete bean calls through the proxy.
      */
     protected open suspend fun dispatchScheduledBatch() {
-        val result = OutboxDispatch.dispatchOnce(outboxRepository) { entry ->
+        require(dispatchBatchSize in 1..MAX_BATCH_SIZE) {
+            "outbox dispatch batch size must be between 1 and $MAX_BATCH_SIZE"
+        }
+        val result = OutboxDispatch.dispatchOnce(outboxRepository, dispatchBatchSize) { entry ->
             publishWithResilience(entry)
         }
         for (outcome in result.outcomes) {
@@ -159,6 +168,7 @@ abstract class AbstractOutboxDispatcher {
     companion object {
         val log: Logger = Logger.getLogger(AbstractOutboxDispatcher::class.java)
         const val DEFAULT_BATCH_SIZE: Int = OutboxDispatch.DEFAULT_BATCH_SIZE
+        const val MAX_BATCH_SIZE: Int = 1_000
 
         /**
          * `FooBarOutboxDispatcher` -> `foo-bar`. See [service] for why this exists.

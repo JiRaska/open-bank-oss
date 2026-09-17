@@ -26,6 +26,12 @@ import java.util.UUID
  * aml.case.status_changed.v1 (CLEARED) on openbank.aml.events, which party-service consumes
  * for its KYC+AML two-key gate.
  *
+ * Screened party types ([SCREENED_PARTY_TYPES]): INDIVIDUAL and the business types SOLE_TRADER
+ * and COMPANY created by KYB onboarding — without a case an entity never clears the AML key and
+ * waits in PENDING_KYC forever. All three take the identical path: the onboarding case carries
+ * only the party id (no name, date of birth or nationality, and no sanctions call is made here),
+ * so nothing in it assumes a natural person. Any other type (e.g. TRUST) is ignored explicitly.
+ *
  * Idempotent: the case idempotency key is "<partyId>:CUSTOMER_ONBOARDING", so a redelivered
  * PARTY_CREATED reuses the existing case; the auto-clear is skipped once the case is terminal.
  *
@@ -73,7 +79,11 @@ class PartyEventConsumer(
     }
 
     private suspend fun handleCreated(partyId: UUID?, node: com.fasterxml.jackson.databind.JsonNode, payload: String) {
-        if (node.path("partyType").asText("") != "INDIVIDUAL") return
+        val partyType = node.path("partyType").asText("")
+        if (partyType !in SCREENED_PARTY_TYPES) {
+            log.debugf("[party-events-in] PARTY_CREATED for party type '%s' is not screened here, skipping", partyType)
+            return
+        }
         if (partyId == null) {
             log.warnf("[party-events-in] PARTY_CREATED without a valid partyId, skipping: %.200s", payload)
             return
@@ -125,5 +135,10 @@ class PartyEventConsumer(
                 partyId,
             )
         }
+    }
+
+    companion object {
+        /** party-service `PartyType` values that get an onboarding AML case. */
+        val SCREENED_PARTY_TYPES = setOf("INDIVIDUAL", "SOLE_TRADER", "COMPANY")
     }
 }

@@ -33,6 +33,10 @@ interface CreditPolicyPort {
 @Default
 class StarterCreditPolicy : CreditPolicyPort {
 
+    private companion object {
+        val TOTAL_DEBT_POLICY_FROM: LocalDate = LocalDate.of(2026, 9, 9)
+    }
+
     override fun activeBundle(asOf: LocalDate): Uni<PolicyBundle> = Uni.createFrom().item(
         PolicyBundle(
             tables = listOf(
@@ -40,15 +44,21 @@ class StarterCreditPolicy : CreditPolicyPort {
                 eligibilityTable(),
                 affordabilityTable(),
                 pricingTable(),
-            ),
+            ).map { table ->
+                if (asOf.isBefore(TOTAL_DEBT_POLICY_FROM)) {
+                    table.copy(version = 1, effectiveFrom = LocalDate.EPOCH, effectiveTo = TOTAL_DEBT_POLICY_FROM)
+                } else {
+                    table
+                }
+            },
         ),
     )
 
     private fun exclusionTable() = PolicyTable(
         kind = PolicyTableKind.EXCLUSION,
         name = "starter-exclusion",
-        version = 1,
-        effectiveFrom = LocalDate.EPOCH,
+        version = 2,
+        effectiveFrom = TOTAL_DEBT_POLICY_FROM,
         rules = listOf(
             PolicyRule(
                 id = "starter-ex-adverse",
@@ -63,8 +73,8 @@ class StarterCreditPolicy : CreditPolicyPort {
     private fun eligibilityTable() = PolicyTable(
         kind = PolicyTableKind.ELIGIBILITY,
         name = "starter-eligibility",
-        version = 1,
-        effectiveFrom = LocalDate.EPOCH,
+        version = 2,
+        effectiveFrom = TOTAL_DEBT_POLICY_FROM,
         rules = listOf(
             PolicyRule(
                 id = "starter-el-age",
@@ -86,8 +96,8 @@ class StarterCreditPolicy : CreditPolicyPort {
     private fun affordabilityTable() = PolicyTable(
         kind = PolicyTableKind.AFFORDABILITY,
         name = "starter-affordability",
-        version = 1,
-        effectiveFrom = LocalDate.EPOCH,
+        version = 2,
+        effectiveFrom = TOTAL_DEBT_POLICY_FROM,
         rules = listOf(
             PolicyRule(
                 id = "starter-af-dsti",
@@ -109,8 +119,8 @@ class StarterCreditPolicy : CreditPolicyPort {
     private fun pricingTable() = PolicyTable(
         kind = PolicyTableKind.PRICING_BAND,
         name = "starter-pricing",
-        version = 1,
-        effectiveFrom = LocalDate.EPOCH,
+        version = 2,
+        effectiveFrom = TOTAL_DEBT_POLICY_FROM,
         rules = listOf(
             PolicyRule(
                 id = "starter-pr-prime",

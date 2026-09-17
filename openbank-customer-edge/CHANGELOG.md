@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.79.0...customer-edge-v0.80.0) (2026-09-17)
+
+
+### Features
+
+* **customer-edge:** let customers read and update their AML profile ([#10204](https://github.com/JiRaska/open-bank-oss/issues/10204)) ([7839ebd](https://github.com/JiRaska/open-bank-oss/commit/7839ebdace00e52c6fa382245a3035e9b34bfa7a)), closes [#10200](https://github.com/JiRaska/open-bank-oss/issues/10200)
+
+## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.78.0...customer-edge-v0.79.0) (2026-09-17)
+
+
+### Features
+
+* **customer-edge:** route business questionnaire, agreement and entity documents ([#10197](https://github.com/JiRaska/open-bank-oss/issues/10197)) ([7457608](https://github.com/JiRaska/open-bank-oss/commit/7457608555574ab543c6f7fd75b80b72c87e2614))
+
+## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.77.0...customer-edge-v0.78.0) (2026-09-14)
+
+
+### Features
+
+* **kyb:** bind the initiator to their verified identity, and add a sandbox demo company ([#10059](https://github.com/JiRaska/open-bank-oss/issues/10059)) ([545c744](https://github.com/JiRaska/open-bank-oss/commit/545c744be77662f22be40a6e7c392e2f9a2529d9))
+
 ## [0.77.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.76.0...customer-edge-v0.77.0) (2026-09-13)
 
 

@@ -84,4 +84,7 @@ class ComplaintEntity : PanacheEntityBase() {
 
     @Column(name = "updated_at")
     var updatedAt: OffsetDateTime = OffsetDateTime.MIN
+
+    @Column(name = "aggregate_revision", nullable = false)
+    var aggregateRevision: Long = 1
 }

@@ -13,16 +13,16 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Customer 360 documents panel', () => {
   it('queries the document owner by the selected party and exposes the audited content route', async () => {
-    const f = vi.fn(async () => json([{
+    const f = vi.fn(async () => json({ documents: [{
       id: 'doc-1', templateCode: 'SECCI', templateVersion: '2', contentType: 'application/pdf',
       sizeBytes: 2048, status: 'GENERATED', caseRef: 'case-7', productRef: null,
       retainUntil: '2036-08-20', createdAt: '2026-08-20T10:00:00Z',
-    }]))
+    }], unavailable: [] }))
     vi.stubGlobal('fetch', f)
     render(<LanguageProvider><DocumentsPanel partyId={PARTY} /></LanguageProvider>)
 
     await waitFor(() => expect(screen.getByText('SECCI')).toBeInTheDocument())
-    expect(String(f.mock.calls[0][0])).toBe(`/api/svc/document-service/api/v1/documents?partyRef=${PARTY}`)
+    expect(String(f.mock.calls[0][0])).toBe(`/api/customer-360/${PARTY}/graph`)
     expect(screen.getByRole('link', { name: /Download/i })).toHaveAttribute(
       'href', '/api/svc/document-service/api/v1/documents/doc-1/content',
     )
@@ -30,14 +30,14 @@ describe('Customer 360 documents panel', () => {
   })
 
   it('distinguishes a measured empty list from an unavailable service', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json([])))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ documents: [], unavailable: [] })))
     const view = render(<LanguageProvider><DocumentsPanel partyId={PARTY} /></LanguageProvider>)
     await waitFor(() => expect(screen.getByText(/No documents for this customer/i)).toBeInTheDocument())
 
     view.unmount()
-    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'scaled_to_zero' }, 503)))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ documents: [], unavailable: ['documents'] })))
     render(<LanguageProvider><DocumentsPanel partyId={PARTY} /></LanguageProvider>)
-    await waitFor(() => expect(screen.getByText(/Documents unavailable.*scaled_to_zero/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Documents unavailable.*unreachable/i)).toBeInTheDocument())
     expect(screen.queryByText(/No documents for this customer/i)).toBeNull()
   })
 })

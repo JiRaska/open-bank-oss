@@ -17,11 +17,9 @@
 # ScaVerificationAdapter -> sca-service on every SIGNED decision (ADR-0021/ADR-0162 D4).
 #
 # Not a money-path service (rules.yaml: money_path_services does not list it); OPA
-# sidecar bundle is the minimal, no-service-extension shape (document-service-opa-bundle.yaml
-# / gen-document-service-opa-bundle.sh — mirrors notification-service's bundle, which
-# has no <svc>_rest_ext.rego of its own), relying on rest.rego's base allow reasons
-# (operator-read-any, compliance-read-any, customer-self-action, etc.) until a
-# document-domain-specific carve-out is actually needed.
+# sidecar bundle (document-service-opa-bundle.yaml / gen-document-service-opa-bundle.sh)
+# is rest.rego's base allow reasons plus document_rest_ext.rego (kyb-service's business
+# onboarding agreement grant).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,7 +50,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d915010f9dd809d4"
+        openbank.tech/policy-checksum: "81f10db7a5b5f597"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -66,7 +64,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-2dbf9f7d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-4f382d98
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -270,8 +268,7 @@ spec:
         # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
         # all @Authorize-annotated endpoints in document-service. Bundle mounted from
         # document-service-opa-bundle ConfigMap (gen-document-service-opa-bundle.sh) —
-        # the minimal shape (no service-specific rest-ext.rego), mirroring
-        # notification-service.
+        # rest.rego plus document_rest_ext.rego.
         - name: opa
           image: docker.io/openpolicyagent/opa:1.17.0
           imagePullPolicy: IfNotPresent
@@ -305,6 +302,10 @@ spec:
             - name: opa-bundle
               mountPath: /bundle/rest.rego
               subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/document_rest_ext.rego
+              subPath: document_rest_ext.rego
               readOnly: true
             - name: opa-bundle
               mountPath: /bundle/agents.rego

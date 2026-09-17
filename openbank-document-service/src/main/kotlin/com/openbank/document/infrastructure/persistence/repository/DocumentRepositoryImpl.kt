@@ -113,5 +113,7 @@ class DocumentRepositoryImpl :
         // and its fallback resolved back to the ARCHIVED document — whose ceremony then failed to
         // sign with "Only PENDING_SIGNATURE documents can be signed" (every onboarding language switch).
         idempotencyKey = document.idempotencyKey
+        // Set by the seal step on ceremony completion — the update path, never an insert.
+        sealedSha256 = document.sealedSha256
     }
 }
