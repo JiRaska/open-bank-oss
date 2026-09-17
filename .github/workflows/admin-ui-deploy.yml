@@ -598,9 +598,12 @@ jobs:
         run: |
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
+          # A one-item response has selected an older completed run while a newer
+          # main run and its artifacts existed. Compare attempt timestamps explicitly
+          # rather than trusting the API's first item (reruns can change recency).
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=100" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
             echo "No completed pitest run found — skipping pitest staging."

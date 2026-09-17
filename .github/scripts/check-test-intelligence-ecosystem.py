@@ -812,8 +812,10 @@ def check(root: Path) -> list[str]:
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
-    if "pitest.yml/runs?branch=main&status=completed&per_page=1" not in deploy:
-        errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
+    if "pitest.yml/runs?branch=main&status=completed&per_page=100" not in deploy:
+        errors.append("mutation projection does not inspect completed attempts regardless of verdict")
+    if "r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True)" not in deploy:
+        errors.append("mutation projection does not select the latest completed attempt by start time")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
     pitest_workflow = text(root / ".github/workflows/pitest.yml")
