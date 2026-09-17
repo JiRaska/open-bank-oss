@@ -11,7 +11,11 @@ import com.openbank.party.domain.model.RepresentationPolicySnapshot
 import com.openbank.party.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.restassured.module.kotlin.extensions.Given
+import io.restassured.module.kotlin.extensions.Then
+import io.restassured.module.kotlin.extensions.When
 import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +41,7 @@ class RepresentationPolicySchemaIT {
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `repository round-trips the entire verified roster and office rule`() {
         val chair = UUID.randomUUID()
         val member = UUID.randomUUID()
@@ -67,6 +72,33 @@ class RepresentationPolicySchemaIT {
         assertThat(onVertxContext { policies.findBySourceCaseId(snapshot.sourceCaseId) }).isEqualTo(snapshot)
         assertThat(onVertxContext { policies.findLatestEffective(snapshot.principalPartyId) }).isEqualTo(snapshot)
         assertThat(onVertxContext { policies.allocateRevision() }).isPositive()
+        Given { this } When {
+            get("/api/v1/parties/${snapshot.principalPartyId}/representation-policy")
+        } Then {
+            statusCode(200)
+            body("sourceCaseId", org.hamcrest.Matchers.equalTo(snapshot.sourceCaseId.toString()))
+            body("mode", org.hamcrest.Matchers.equalTo("JOINT_N"))
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
+    fun `representation evidence returns 404 when no verified signed case exists`() {
+        Given { this } When {
+            get("/api/v1/parties/${UUID.randomUUID()}/representation-policy")
+        } Then {
+            statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `ordinary viewer cannot enumerate statutory representative ids`() {
+        Given { this } When {
+            get("/api/v1/parties/${UUID.randomUUID()}/representation-policy")
+        } Then {
+            statusCode(403)
+        }
     }
 
     @Test

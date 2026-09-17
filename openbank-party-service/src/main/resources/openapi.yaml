@@ -14,7 +14,8 @@ info:
   # 1.24.0 -> 1.25.0: additive only — GET/PUT /api/v1/parties/{id}/aml-profile (the personal AML
   # profile, AML Act §9 + FATCA/CRS self-certification) and the party detail documents the derived
   # pepFlag/pepCategory/fatcaStatus/crsStatus facts. Read off live origin/main (1.24.0).
-  version: 1.25.0
+  # 1.25.0 -> 1.26.0: additive internal read of signed statutory-rule evidence.
+  version: 1.26.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -298,6 +299,27 @@ paths:
           description: Updated
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/parties/{id}/representation-policy:
+    get:
+      tags: [Parties]
+      summary: Latest immutable statutory-rule evidence for an entity
+      description: >-
+        Internal evidence only. This response is not an authorization token: the caller must
+        verify that the KYB attestation is still current and that each actor has a live mandate
+        before opening an operation, then snapshot the exact rule onto that operation.
+      operationId: getRepresentationPolicyEvidence
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Signed statutory-rule evidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepresentationPolicySnapshot'
+        '404':
+          description: No signed statutory-rule evidence for this entity
 
   /api/v1/parties/{id}/mandates:
     post:
@@ -1070,6 +1092,53 @@ components:
           type: string
           format: date-time
           nullable: true
+    RepresentationPolicySnapshot:
+      type: object
+      required:
+        - id
+        - principalPartyId
+        - revision
+        - sourceCaseId
+        - attestationId
+        - ruleTextHash
+        - registrySource
+        - registryRepresentativeCount
+        - mode
+        - requiredSignatures
+        - requiredOffices
+        - eligibleRepresentatives
+        - evidenceRef
+        - effectiveFrom
+      properties:
+        id: { type: string, format: uuid }
+        principalPartyId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        sourceCaseId: { type: string, format: uuid }
+        attestationId: { type: string, format: uuid }
+        ruleTextHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        registrySource: { type: string }
+        registrySourceRef: { type: string, nullable: true }
+        registryRepresentativeCount: { type: integer, minimum: 1 }
+        mode: { type: string, enum: [SOLE, JOINT_N, JOINT_ALL] }
+        requiredSignatures: { type: integer, minimum: 1 }
+        requiredOffices:
+          type: array
+          items: { type: string }
+        eligibleRepresentatives:
+          type: array
+          items:
+            type: object
+            required: [partyId, registryRepresentativeIndices, officeTags]
+            properties:
+              partyId: { type: string, format: uuid }
+              registryRepresentativeIndices:
+                type: array
+                items: { type: integer, minimum: 0 }
+              officeTags:
+                type: array
+                items: { type: string }
+        evidenceRef: { type: string }
+        effectiveFrom: { type: string, format: date-time }
     PartyMandate:
       type: object
       properties:
