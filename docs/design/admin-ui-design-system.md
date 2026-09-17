@@ -28,7 +28,8 @@ surfaces in light and dark themes. The visual companion is `e2e/ui-primitives.sp
 
 ## Components and contracts
 
-Use `PageHeader`, `StatCard`, `StatusBadge` and `EmptyState` from `@/components/ui` today. `StatusBadge`
+Use `PageHeader`, `StatCard`, `StatusBadge`, `EmptyState`, `LoadingState`, `LoadMoreControl`,
+`Tabs`, `Drawer` and `TableScrollRegion` from `@/components/ui` today. `StatusBadge`
 maps `status -> Tone -> CSS class`; unknown values are neutral, never green. A domain may pass an
 explicit `tone` only when the same word has a documented different meaning (for example PID
 `REVOKED`). `EmptyState` owns hierarchy and announcement semantics while the caller owns truthful
@@ -36,8 +37,13 @@ domain copy and any recovery action. Components must accept caller-supplied Czec
 expose native focus and disabled/loading state, and keep icons decorative unless they are the sole
 accessible label.
 
+`TableScrollRegion` owns the named, keyboard-focusable horizontal scroll around a financial table.
+The table itself must not become a second scroll container at mobile widths: focus and scroll must
+remain on the same element. The browser regression for the EoD tie-out tests actual arrow-key
+movement at 375px, not just the presence of `tabIndex`.
+
 The next primitive tranches, derived from repeated live page shapes, are: Button/FormField,
-Tabs, Pagination/FilterBar, dense Table, Card, modal/drawer and tooltip. Each needs
+FilterBar, dense Table, Card and tooltip. Each needs
 default, hover, focus-visible, disabled, loading, error and empty-state evidence before adoption.
 
 ## Mechanical migration map
@@ -67,7 +73,9 @@ geometry changes, and is merged only after green CI plus independent review.
 
 ## Dark theme decision
 
-Dark mode is supported at the token layer now because the app already declared class-based dark
-mode. It is intentionally not enabled by a user preference control until the raw-colour ratchet
-has reduced legacy surfaces enough for a coherent whole-console experience. This avoids offering
-operators a half-themed environment while preserving a testable, accessible implementation path.
+Dark mode is user-reachable through the header theme control. Light remains the default for an
+operator who has not chosen a theme; a choice is persisted in a server-readable cookie and in
+local storage, so the server-rendered root class and the control agree on first paint. Core
+workflows have light/dark browser accessibility coverage, but this is not proof that every
+legacy route and loaded state is contrast-clean. Continue the raw-colour ratchet and test real
+loaded states in both themes as each route migrates.
