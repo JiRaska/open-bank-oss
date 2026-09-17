@@ -76,6 +76,45 @@ jobs:
             echo "No dependency submission input touched — no Gradle submission runs for this PR, so nothing to wait for."
           fi
 
+      # A completed failed producer on the immutable merge-base cannot be repaired by
+      # waiting for the PR head. Reject that proven state before the action's 30-minute
+      # snapshot retry. A pending producer or transient Checks API failure still takes
+      # the normal bounded review path, which retains the final fail-closed basis check.
+      - name: Reject known failed base dependency graph
+        if: ${{ steps.deps.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha' 2>/dev/null)" || {
+            echo "::warning::Could not query merge-base; final basis check remains authoritative."
+            exit 0
+          }
+          [ -n "$mb" ] || { echo "::error::Empty merge-base"; exit 1; }
+          response="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${mb}/check-runs?per_page=100" 2>/dev/null)" || {
+            echo "::warning::Checks API unavailable; final basis check remains authoritative."
+            exit 0
+          }
+          verdict="$(jq -r -s --arg name 'Submit fleet dependency graph' '
+            if length > 0 and all(.[]; (.check_runs | type) == "array") then
+              [.[] | .check_runs[] | select(.name == $name)] |
+              if any(.[]; .conclusion == "success") then "success"
+              elif any(.[]; .status != "completed") then "pending"
+              elif any(.[]; .conclusion == "failure") then "failure"
+              else "unknown" end
+            else error("invalid check-run response") end
+          ' <<< "$response" 2>/dev/null)" || {
+            echo "::warning::Checks API response malformed; final basis check remains authoritative."
+            exit 0
+          }
+          if [ "$verdict" = failure ]; then
+            echo "::error title=Base dependency graph failed::Merge-base $mb has only failed dependency-submission checks. Waiting for a PR-head snapshot cannot repair its missing base graph. See #10145."
+            exit 1
+          fi
+          echo "merge-base $mb producer verdict: $verdict; continuing full dependency review."
+
       - name: Dependency Review
         id: review
         continue-on-error: true
@@ -201,10 +240,9 @@ jobs:
       # and neither is distinguishable from a real verdict: a green means "not evaluated",
       # a red means "every pre-existing dependency, re-flagged".
       #
-      # #2837 made every main commit submit, so the systemic cause is gone — but a branch
-      # whose merge-base predates that fix, or a submission that failed outright, still lands
-      # here. This step makes that state RED and says why, instead of letting the gate claim
-      # a verdict it did not earn.
+      # #2837 made every main commit trigger submission, but a trigger is not a graph:
+      # the producer can still fail (issue #10145). A missing or failed merge-base
+      # submission makes this step RED instead of claiming a verdict it did not earn.
       #
       # Only armed on dependency-touching PRs: with no Gradle submission in flight there is no
       # Gradle graph on either side and nothing to assert.
@@ -309,7 +347,7 @@ jobs:
 
           fail=0
           if [ "${base_runs}" -eq 0 ]; then
-            echo "::error title=Dependency review had no base graph::No successful dependency-submission run exists for the merge-base ${mb}, so the Gradle half of this review compared against nothing and reported the whole head graph as additions. Rebase onto current main — every main commit has carried a snapshot since #2837, so a current merge-base resolves. See issue #2833."
+            echo "::error title=Dependency review had no base graph::No successful dependency-submission run exists for merge-base ${mb}; the Gradle comparison has no verified base. Check that SHA's Dependency submission run and #10145. Rebase only after a newer main commit has successfully published a complete graph; a rebase alone does not create one."
             fail=1
           fi
           if [ "${head_runs}" -eq 0 ]; then

@@ -28,7 +28,8 @@ name='Submit fleet dependency graph'
 rows=[dict(name=name,conclusion='success')]
 if case=='missing' or (case=='missing-head' and any('/head/' in a for a in args)):
  rows=[]
-if case=='failed-submission': rows=[dict(name=name,conclusion='failure')]
+if case=='failed-submission': rows=[dict(name=name,conclusion='failure',status='completed')]
+if case=='pending-base': rows=[dict(name=name,conclusion=None,status='in_progress')]
 if case=='wrong-job': rows=[dict(name='Other job',conclusion='success')]
 if case=='paginated':
  print(json.dumps(dict(check_runs=[dict(name='Other job',conclusion='success')]*100)))
@@ -38,6 +39,53 @@ print(json.dumps(dict(check_runs=rows)))
 
 
 class BasisTests(unittest.TestCase):
+    def test_known_failed_base_is_rejected_before_snapshot_wait(self):
+        failed, _ = self.run_base_case("failed-submission")
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("Base dependency graph failed", failed.stdout)
+
+    def test_base_preflight_defers_uncertain_state_to_final_guard(self):
+        for case in ["valid", "pending-base", "missing", "api-failure", "malformed"]:
+            with self.subTest(case=case):
+                result, _ = self.run_base_case(case)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def run_base_case(self, case):
+        source = WORKFLOW.read_text()
+        block = source.split(
+            "      - name: Reject known failed base dependency graph\n", 1
+        )[1]
+        body = block.split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line)
+        script = textwrap.dedent("\n".join(lines))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gh = root / "gh"
+            gh.write_text(GH)
+            gh.chmod(0o755)
+            calls = root / "calls"
+            env = dict(
+                os.environ,
+                PATH=directory + os.pathsep + os.environ["PATH"],
+                CASE=case,
+                CALLS=str(calls),
+                GITHUB_REPOSITORY="example/repo",
+                BASE_SHA="base",
+                HEAD_SHA="head",
+            )
+            result = subprocess.run(
+                ["bash", "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return result, calls.read_text()
+
     def test_snapshot_wait_matches_submission_trigger(self):
         source = WORKFLOW.read_text()
         pattern = re.search(r"if grep -qE '([^']+)' <<<", source)
