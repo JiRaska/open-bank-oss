@@ -252,14 +252,16 @@ class SepaPaymentService(
 
         val txId = payment.transactionId
         var reversalPerformed = false
+        var reversalTransactionId: UUID? = null
         if (txId != null) {
             try {
-                reversalPort.reverseTransaction(
+                val reversal = reversalPort.reverseTransaction(
                     transactionId = txId,
                     idempotencyKey = "sepa-reversal-${payment.id}",
                     reason = returnMsg.returnReasonCode ?: "return",
                 )
-                reversalPerformed = true
+                reversalPerformed = reversal.reversed
+                reversalTransactionId = reversal.reversalTransactionId.takeIf { reversal.reversed }
             } catch (ex: ReversalUnavailableException) {
                 log.warnf(
                     ex,
@@ -290,6 +292,7 @@ class SepaPaymentService(
                 actorType = command.actorType,
                 correlationId = command.correlationId,
                 reversalPerformed = reversalPerformed,
+                reversalTransactionId = reversalTransactionId,
             ),
         )
     }
