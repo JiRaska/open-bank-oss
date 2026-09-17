@@ -29,7 +29,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { EntityChip } from '@/components/entities/EntityChip'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableScrollRegion } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 import {
   type Decision, type LoanRisk, type OutcomeSummary, type Policy,
@@ -376,7 +376,7 @@ function CreditRiskConsole() {
           </div>
           <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Poslední rozhodnutí', 'Latest decisions')}>
             <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t(`Poslední rozhodnutí (${visible.length} z max. ${DECISION_LIMIT})`, `Latest decisions (${visible.length} of at most ${DECISION_LIMIT})`)}</h3>
-            <div style={{ overflowX: 'auto' }}>
+            <TableScrollRegion label={t('Posuvná tabulka úvěrových rozhodnutí', 'Scrollable lending decisions table')}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: 'var(--surface-2)' }}>
                   <th style={th}>{t('Klient', 'Party')}</th><th style={th}>{t('Částka', 'Amount')}</th><th style={th}>DSTI</th><th style={th}>DTI</th><th style={th}>{t('Engine', 'Engine')}</th><th style={th}>{t('Pásmo', 'Band')}</th><th style={th}>{t('Důvody', 'Reasons')}</th><th style={th}>{t('Stav', 'Status')}</th><th style={th}>{t('Vyhodnoceno', 'Evaluated')}</th><th style={th} />
@@ -399,7 +399,7 @@ function CreditRiskConsole() {
                   {!loading && visible.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>{t('Engine zatím nic nevyhodnotil', 'The engine has evaluated nothing yet')}</td></tr>}
                 </tbody>
               </table>
-            </div>
+            </TableScrollRegion>
           </section>
         </div>
       )}
