@@ -19,23 +19,27 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / '.github/workflows/dr-restore-verify.yml'
 KUBECTL = r'''
 import json, os, pathlib, signal, sys, time
-import yaml
 root = pathlib.Path(os.environ['DR_TEST_STATE'])
 args = sys.argv[1:]
 with (root / 'calls').open('a') as log:
     log.write(json.dumps(args) + '\n')
 if args[:2] == ['create', 'namespace']:
-    sys.exit(1 if os.environ['DR_TEST_CASE'] == 'collision' else 0)
+    if os.environ['DR_TEST_CASE'] == 'collision':
+        sys.exit(1)
+    if os.environ['DR_TEST_CASE'] != 'policy-failure':
+        (root / 'resources').write_text(json.dumps([['networkpolicy', 'ledger-dr-check-isolation']]))
+    sys.exit(0)
+if len(args) > 3 and args[2:4] == ['get', 'networkpolicy']:
+    sys.exit(1 if os.environ['DR_TEST_CASE'] == 'policy-failure' else 0)
 if args[:2] == ['delete', 'namespace'] and os.environ['DR_TEST_CASE'] == 'delete-failure':
     sys.exit(1)
 if args[:2] == ['get', 'rollout']:
     print('registry.invalid/ledger:fixture')
-elif args[:2] in (['apply', '-f'], ['create', '-f']):
+elif args[:2] == ['apply', '-f']:
+    import yaml
     path = root / 'resources'
     docs = json.loads(path.read_text()) if path.exists() else []
     incoming = [d for d in yaml.safe_load_all(sys.stdin) if d]
-    if any(d['kind'] == 'NetworkPolicy' for d in incoming) and os.environ['DR_TEST_CASE'] == 'policy-failure':
-        sys.exit(1)
     if any(d['kind'] == 'Deployment' for d in incoming):
         if ['networkpolicy', 'ledger-dr-check-isolation'] not in docs:
             sys.exit(1)
@@ -91,7 +95,7 @@ class DrRestoreWorkflowTest(unittest.TestCase):
                        GITHUB_RUN_ATTEMPT='2', GITHUB_STEP_SUMMARY=str(root / 'summary'),
                        FISCAL_YEAR='2026')
             result = subprocess.run(['bash', '-c', step['run']], cwd=ROOT, env=env,
-                                    capture_output=True, text=True, timeout=15)
+                                    capture_output=True, text=True, timeout=30)
             calls = [json.loads(s) for s in (root / 'calls').read_text().splitlines()]
             return result, calls, (root / 'forward-stopped').exists()
 
@@ -111,7 +115,9 @@ class DrRestoreWorkflowTest(unittest.TestCase):
 
     def test_isolation_selects_check_pod_and_only_restored_database_and_dns(self):
         templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
-        policy = yaml.safe_load((templates / 'ledger-check-network-policy.yaml.tmpl').read_text())['spec']
+        roles = list(yaml.safe_load_all((ROOT / 'openbank-infra/gitops/components/platform/dr-runner-rbac.yaml').read_text()))
+        generator = next(d for d in roles if d['metadata']['name'] == 'ledger-dr-check-network-isolation')
+        policy = generator['spec']['rules'][0]['generate']['data']['spec']
         pod = yaml.safe_load((templates / 'ledger-service-dr-check.yaml.tmpl').read_text())['spec']['template']
         self.assertEqual(policy['podSelector']['matchLabels'], pod['metadata']['labels'])
         self.assertEqual(set(policy['policyTypes']), {'Ingress', 'Egress'})
@@ -123,9 +129,8 @@ class DrRestoreWorkflowTest(unittest.TestCase):
                      'podSelector': {'matchLabels': {'k8s-app': 'kube-dns'}}}],
              'ports': [{'protocol': 'UDP', 'port': 53}, {'protocol': 'TCP', 'port': 53}]}])
         self.assertIs(pod['spec']['automountServiceAccountToken'], False)
-        roles = list(yaml.safe_load_all((ROOT / 'openbank-infra/gitops/components/platform/dr-runner-rbac.yaml').read_text()))
         grants = [r for r in roles[0]['rules'] if 'networkpolicies' in r['resources']]
-        self.assertEqual(grants, [{'apiGroups': ['networking.k8s.io'], 'resources': ['networkpolicies'], 'verbs': ['create']}])
+        self.assertEqual(grants, [{'apiGroups': ['networking.k8s.io'], 'resources': ['networkpolicies'], 'resourceNames': ['ledger-dr-check-isolation'], 'verbs': ['get']}])
 
     def test_cleanup_failure_is_not_a_successful_drill(self):
         result, _, stopped = self.run_step('delete-failure')

@@ -36,38 +36,33 @@ production, which defeats the point of a restore drill.
 
 ## Check workload network boundary
 
-The workflow creates `ledger-check-network-policy.yaml.tmpl` before either restore
-manifest. A creation failure aborts before the workload starts and cleans up the
-attempt's namespace. The policy selects only the ledger check pod, denies incoming
-pod traffic and permits outgoing TCP 5432 only to `ledger-db-restored` pods in the
-same namespace, plus TCP/UDP 53 to kube-system DNS pods. It grants no egress to live
-services or external endpoints. CNPG pods are not selected: backup access and
-replication require their own boundary. The check pod mounts no Kubernetes API token.
-The DR runner receives only `create` for NetworkPolicies; namespace deletion handles
-cleanup. Port-forward and kubelet readiness are not pod-to-pod ingress tests.
+The trusted Kyverno namespace bootstrap creates `ledger-dr-check-isolation` for
+new `dr-verify-*` namespaces. The DR runner has only `get` permission for that
+policy name, no network-policy write permission. It polls up to 60 times, two
+seconds apart, with a five-second API request timeout, before creating any restore workload. Missing bootstrap fails the drill
+and cleans up the attempt's namespace; the runner cannot grant itself access.
+The deployed chart's background controller already owns network-policy generation;
+this change adds no controller permission or scanner exception.
 
-Policy creation is not proof that the CNI has programmed it. In particular, the
-cluster's documented standard enforcement mode can initially allow traffic while
-pod rules are being installed. A live drill must prove enforcement from startup
-and actual DNS/database access before using restored data; do not label this
-manifest or the fake-boundary tests as runtime isolation evidence. The remaining
-startup, authorization, write-isolation and full money-path recovery requirements
-above still apply.
+The generated policy selects only the ledger check pod, denies pod ingress and
+allows egress only to the same namespace's restored CNPG pods on TCP 5432 and
+kube-system DNS pods on TCP/UDP 53. CNPG pods are not selected, so backup access
+requires its own boundary. The check pod mounts no Kubernetes API token.
 
-The additional create grant is constrained by the native
-`openbank-dr-network-policy-scope` ValidatingAdmissionPolicy and Deny binding.
-GitOps sync waves install the policy and binding before the RBAC grant. This
-requires Kubernetes with the `admissionregistration.k8s.io/v1` policy API; validate
-its live admission behavior before deploying the grant outside GitOps. Unlike a
-webhook rule, this boundary does not depend on Kyverno namespace filters.
+Creation is not proof that the CNI has programmed the policy. The cluster's
+standard enforcement mode can initially allow traffic while rules are installed.
+A live drill must prove enforcement from startup and actual DNS/database access;
+neither these manifests nor fake-boundary tests establish runtime isolation.
+Startup, authorization, write isolation and full money-path recovery remain open.
+Port-forward and kubelet readiness are not pod-to-pod ingress tests.
 
-Offline policy regression (requires a separately installed Kyverno CLI):
+Offline bootstrap regression (requires a separately installed Kyverno CLI):
 
 ```sh
-python3 .github/scripts/test-dr-network-policy-admission.py --kyverno /path/to/kyverno
+python3 .github/scripts/test-dr-network-policy-generation.py --kyverno /path/to/kyverno
 ```
 
-The seven cases exercise native policy evaluation for denied live/system
-namespaces, denied empty DR suffix, an allowed DR namespace and an unaffected
-other identity. This test is separate from the CI orchestration tests and must be
-run explicitly; neither verifies live admission registration or CNI behavior.
+The seven cases verify generated resources for DR namespaces and no generation in
+live/system namespaces or with an empty suffix. This is separate from the ordinary
+CI orchestration tests and must be run explicitly. It does not contact a cluster
+or prove that its controller is installed and healthy.

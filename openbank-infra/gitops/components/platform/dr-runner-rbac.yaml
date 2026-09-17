@@ -8,10 +8,9 @@
 #
 # Least-privilege notes, honestly stated: Kubernetes RBAC cannot scope a
 # ClusterRole to a namespace NAME PREFIX, so namespace create/delete is
-# cluster-wide on paper. The compensating control is the Kyverno policy below:
-# the openbank-dr SA may be used ONLY by pods in arc-runners carrying the ARC
-# runner labels, and dr-restore-verify's own teardown plus the
-# dr-verify-namespace-reaper alert bound the lifetime of what it creates.
+# cluster-wide. The existing Kyverno rule prohibits using the openbank-dr service
+# account name outside arc-runners; it does not constrain API requests made by
+# that identity to DR namespaces. The workflow owns naming and teardown.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -19,9 +18,8 @@ metadata:
   labels:
     app.kubernetes.io/part-of: openbank-ci
 rules:
-  # Throwaway verify namespaces: create, read, delete. The name pattern is
-  # enforced by convention in dr-restore-verify.yml (dr-verify-$RUN_ID) and by
-  # the Kyverno policy's namespace-name check below.
+  # Throwaway verify namespaces: create, read, delete. The workflow chooses
+  # dr-verify-$RUN_ID; this ClusterRole is not scoped to that prefix.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create", "get", "list", "delete"]
@@ -46,11 +44,12 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "delete"]
-  # Create the check workload's isolation policy in its fresh namespace. The
-  # workflow uses create, so this grant needs no policy update/delete capability.
+  # The bootstrap controller creates the policy. The runner can only observe
+  # its exact name; it cannot create an additive allow rule or remove isolation.
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["create"]
+    resourceNames: ["ledger-dr-check-isolation"]
+    verbs: ["get"]
   # CNPG: read the source clusters/backups (to pick the restore point) and
   # manage the recovery cluster in the verify namespace.
   - apiGroups: ["postgresql.cnpg.io"]
@@ -72,10 +71,8 @@ subjects:
     name: openbank-dr
     namespace: arc-runners
 ---
-# Kyverno: the openbank-dr SA may ONLY be used by GitHub ARC runner pods in the
-# arc-runners namespace — never by an application workload, and a dr-verify
-# other resource grants are not namespace-prefix constrained by this rule.
-# The native admission policy below restricts the new NetworkPolicy grant.
+# Keep the openbank-dr service-account name out of non-runner namespaces.
+# This rule does not namespace-scope the other resource grants above.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -103,34 +100,54 @@ spec:
                 value: openbank-dr
 
 ---
-# Native admission is used so webhook namespace exclusions cannot bypass this
-# boundary. Install policy and binding before granting NetworkPolicy creation.
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
+# Trusted namespace bootstrap owns network policy writes, never the DR runner.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
 metadata:
-  name: openbank-dr-network-policy-scope
-  annotations:
-    argocd.argoproj.io/sync-wave: "-2"
+  name: ledger-dr-check-network-isolation
 spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-      - apiGroups: ["networking.k8s.io"]
-        apiVersions: ["v1"]
-        operations: ["CREATE"]
-        resources: ["networkpolicies"]
-  validations:
-    - expression: >-
-        request.userInfo.username != 'system:serviceaccount:arc-runners:openbank-dr' ||
-        (request.namespace.startsWith('dr-verify-') && size(request.namespace) > 10)
-      message: "The DR runner may create NetworkPolicies only in nonempty dr-verify-* namespaces."
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: openbank-dr-network-policy-scope
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
-spec:
-  policyName: openbank-dr-network-policy-scope
-  validationActions: [Deny]
+  background: false
+  rules:
+  - name: bootstrap-dr-check-isolation
+    match:
+      any:
+      - resources:
+          kinds:
+          - Namespace
+          names:
+          - dr-verify-?*
+    generate:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      name: ledger-dr-check-isolation
+      namespace: '{{ request.object.metadata.name }}'
+      synchronize: true
+      data:
+        spec:
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ledger-service-dr-check
+          policyTypes:
+          - Ingress
+          - Egress
+          ingress: []
+          egress:
+          - to:
+            - podSelector:
+                matchLabels:
+                  cnpg.io/cluster: ledger-db-restored
+            ports:
+            - protocol: TCP
+              port: 5432
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+              podSelector:
+                matchLabels:
+                  k8s-app: kube-dns
+            ports:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53

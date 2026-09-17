@@ -94,9 +94,17 @@ jobs:
             -o jsonpath='{.spec.template.spec.containers[0].image}')"
           [ -n "$IMAGE" ] || { echo "::error::could not read the live ledger-service image — refusing to restore an unspecified build."; exit 1; }
 
-          # Create the isolation rule before starting the check workload. Failure aborts
-          # the drill; API acceptance alone does not prove CNI enforcement.
-          sed "s#\${NS}#${NS}#g" "$TEMPLATES/ledger-check-network-policy.yaml.tmpl" | kubectl create -f -
+          # Namespace bootstrap owns the policy. The runner has read-only access;
+          # never grant it network writes just to make this prerequisite pass.
+          POLICY_READY=false
+          for (( attempt=1; attempt<=60; attempt++ )); do
+            if kubectl -n "$NS" get networkpolicy ledger-dr-check-isolation -o name --request-timeout=5s >/dev/null 2>&1; then
+              POLICY_READY=true
+              break
+            fi
+            sleep 2
+          done
+          [ "$POLICY_READY" = true ] || { echo "::error::DR isolation policy was not provisioned; no workload started."; exit 1; }
           sed "s#\${NS}#${NS}#g" "$TEMPLATES/cnpg-recovery-cluster.yaml.tmpl" | kubectl apply -f -
           sed "s#\${NS}#${NS}#g; s#\${IMAGE}#${IMAGE}#g" "$TEMPLATES/ledger-service-dr-check.yaml.tmpl" | kubectl apply -f -
 
