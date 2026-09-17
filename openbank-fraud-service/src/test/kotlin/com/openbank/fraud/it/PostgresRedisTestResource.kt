@@ -4,6 +4,7 @@
 
 package com.openbank.fraud.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -27,16 +28,18 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_fraud_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
-        val rd = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(REDIS_PORT)
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(REDIS_PORT)
         rd.start()
         redis = rd
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
 
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
@@ -51,11 +54,19 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        redis?.stop()
-        postgres?.stop()
+        redis?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        }
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 
     private companion object {
         const val REDIS_PORT = 6379
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
     }
 }

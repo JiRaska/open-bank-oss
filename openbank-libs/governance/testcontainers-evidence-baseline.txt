@@ -13,8 +13,6 @@
 openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
-openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
-openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
 openbank-lending-service/src/test/kotlin/com/openbank/lending/it/PostgresRedisTestResource.kt
 openbank-psd2-service/src/test/kotlin/com/openbank/psd2/it/PostgresRedisTestResource.kt
 openbank-sca-service/src/test/kotlin/com/openbank/sca/it/PostgresRedisTestResource.kt
