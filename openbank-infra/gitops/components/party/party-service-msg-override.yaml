@@ -34,3 +34,5 @@ data:
     mp.messaging.incoming.kyc-events-in.group.id=openbank-party-service
     mp.messaging.incoming.aml-events-in.group.id=openbank-party-service
     mp.messaging.incoming.consent-events-in.group.id=openbank-party-service
+    mp.messaging.incoming.kyb-representation-in.group.id=openbank-party-service-kyb-representation
+    mp.messaging.incoming.kyb-representation-in.auto.offset.reset=earliest

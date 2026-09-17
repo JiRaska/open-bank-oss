@@ -9,9 +9,14 @@ import java.util.UUID
 
 /** Additive evidence store; no update or delete operation exists for a signed rule revision. */
 interface RepresentationPolicyRepository {
+    suspend fun allocateRevision(): Long
+
     suspend fun insert(snapshot: RepresentationPolicySnapshot): RepresentationPolicySnapshot
 
     suspend fun findById(id: UUID): RepresentationPolicySnapshot?
 
     suspend fun findBySourceCaseId(sourceCaseId: UUID): RepresentationPolicySnapshot?
+
+    /** Effective time, not Kafka receipt order, decides which verified rule is current. */
+    suspend fun findLatestEffective(principalPartyId: UUID): RepresentationPolicySnapshot?
 }

@@ -7,6 +7,9 @@
 -- The direct-SQL default and Hibernate's pooled allocator must draw from the SAME sequence.
 -- Two independent sequences can both issue id=1 and fail a legitimate second insert.
 CREATE SEQUENCE party_representation_policies_seq INCREMENT BY 50;
+-- Receipt-order revision allocation is global, so independent consumers cannot race on a
+-- principal's next number. Effective rule ordering is determined by effective_from, not this id.
+CREATE SEQUENCE party_representation_policy_revisions_seq;
 
 CREATE TABLE party_representation_policies (
     id                            BIGINT DEFAULT nextval('party_representation_policies_seq') PRIMARY KEY,

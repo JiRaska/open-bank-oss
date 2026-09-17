@@ -146,6 +146,16 @@ mp:
         topic: openbank.party.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # New group starts at the beginning of retained KYB history; legacy events without a
+      # verified rule are ignored. Malformed targeted evidence is parked, never silently acked.
+      kyb-representation-in:
+        connector: smallrye-kafka
+        topic: openbank.kyb.events
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.party.kyb-representation-in
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # KYC + AML activation gate: consume the KYC and AML case-lifecycle
       # topics and flip the party to ACTIVE only when both clear (two-key gate).
       kyc-events-in:

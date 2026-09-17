@@ -22,6 +22,18 @@ class RepresentationPolicyRepositoryImpl(private val mapper: ObjectMapper) :
     RepresentationPolicyRepository,
     PanacheRepository<RepresentationPolicyEntity> {
 
+    override suspend fun allocateRevision(): Long {
+        val value = Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery(
+                    "SELECT nextval('party_representation_policy_revisions_seq')",
+                    java.lang.Long::class.java,
+                ).singleResult
+            }
+        }.awaitSuspending()
+        return (value as Number).toLong()
+    }
+
     override suspend fun insert(snapshot: RepresentationPolicySnapshot): RepresentationPolicySnapshot {
         val entity = RepresentationPolicyEntity().apply {
             policyId = snapshot.id
@@ -49,6 +61,11 @@ class RepresentationPolicyRepositoryImpl(private val mapper: ObjectMapper) :
 
     override suspend fun findBySourceCaseId(sourceCaseId: UUID): RepresentationPolicySnapshot? =
         Panache.withSession { find("sourceCaseId", sourceCaseId).firstResult() }.awaitSuspending()?.toDomain()
+
+    override suspend fun findLatestEffective(principalPartyId: UUID): RepresentationPolicySnapshot? =
+        Panache.withSession {
+            find("principalPartyId = ?1 order by effectiveFrom desc, revision desc", principalPartyId).firstResult()
+        }.awaitSuspending()?.toDomain()
 
     private fun RepresentationPolicyEntity.toDomain() = RepresentationPolicySnapshot(
         id = policyId,

@@ -58,6 +58,18 @@ spec:
         operations: [Read, Describe]
         host: "*"
       - resource:
+          type: topic
+          name: openbank.kyb.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-party-service-kyb-representation
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
           type: group
           name: openbank-party-service
           patternType: literal
@@ -90,6 +102,12 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.party.kyc-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.party.kyb-representation-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

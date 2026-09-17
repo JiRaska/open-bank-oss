@@ -65,6 +65,8 @@ class RepresentationPolicySchemaIT {
         assertThat(restored).isEqualTo(snapshot)
         assertThat(restored!!.satisfiedBy(setOf(chair, member))).isTrue()
         assertThat(onVertxContext { policies.findBySourceCaseId(snapshot.sourceCaseId) }).isEqualTo(snapshot)
+        assertThat(onVertxContext { policies.findLatestEffective(snapshot.principalPartyId) }).isEqualTo(snapshot)
+        assertThat(onVertxContext { policies.allocateRevision() }).isPositive()
     }
 
     @Test
