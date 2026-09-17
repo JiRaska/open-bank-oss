@@ -334,7 +334,8 @@ class CustomerDelegationResourceTest {
     fun `accept sends the token party as grantee and the client's SCA session`() {
         val upstream = mockk<UpstreamClient>()
         val url = slot<String>()
-        every { upstream.post(capture(url), any(), any(), any()) } returns Response.ok().build()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(capture(url), any(), any(), any(), capture(headers)) } returns Response.ok().build()
         val sca = UUID.randomUUID()
 
         resource(upstream).accept(GRANT_ID, sca)
@@ -342,6 +343,26 @@ class CustomerDelegationResourceTest {
         assertThat(url.captured)
             .isEqualTo("$svc/api/v1/delegations/$GRANT_ID/accept?granteePartyId=$caller&scaSessionId=$sca")
         assertThat(url.captured).doesNotContain(stranger.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `company acceptance forwards entity principal and token human separately`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val principal = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(any(), capture(principal), any(), any(), capture(headers)) } returns Response.ok().build()
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(resource.accept(GRANT_ID, UUID.randomUUID()).status).isEqualTo(200)
+        assertThat(principal.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
     }
 
     @Test

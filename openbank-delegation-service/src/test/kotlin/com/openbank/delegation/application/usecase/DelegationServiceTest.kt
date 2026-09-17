@@ -67,6 +67,8 @@ class DelegationServiceTest {
         service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
         coEvery { authorityClient.authorityFor(grantor, grantor) } returns
             GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
+        coEvery { authorityClient.authorityFor(grantee, grantee) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
         coEvery { scaClient.consumeChallenge(any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")

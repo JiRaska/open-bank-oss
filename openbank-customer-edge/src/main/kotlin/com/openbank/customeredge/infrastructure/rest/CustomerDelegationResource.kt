@@ -307,20 +307,23 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
-     * Accept an offered grant. `granteePartyId` is the token's party, so the caller can only ever
-     * accept an offer addressed to themselves; `scaSessionId` is the grantee's OWN challenge
-     * (purpose `DELEGATION_ACCEPT`) and is the one thing the client supplies.
+     * Accept an offered grant. The principal is the selected profile; the human actor comes only
+     * from the token. Their personal SCA challenge is verified against a live SOLE mandate when
+     * the offer is addressed to a business. The client supplies only the SCA session id.
      */
     @POST
     @Path("/{id}/accept")
     @Blocking
     fun accept(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         if (scaSessionId == null) return refuse(Response.Status.BAD_REQUEST, "scaSessionId is required")
         return upstream.post(
             "$delegationServiceUrl$UPSTREAM/$id/accept?granteePartyId=$partyId&scaSessionId=$scaSessionId",
             partyId,
             "",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
         )
     }
 
