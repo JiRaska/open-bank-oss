@@ -95,8 +95,6 @@ object TopicProducers {
         "openbank.interest.accrual.event" to "interest-service",
         // openbank-fraud-service/src/main/resources/application.yaml -> fraud-outbox-out.
         "openbank.fraud.hold.changed" to "fraud-service",
-        // openbank-fraud-service/src/main/resources/application.yaml -> fraud-case-outbox-out.
-        "openbank.fraud.investigation.case.references" to "fraud-service",
         // Issue #6035, second and final backfill: the last KNOWN_GAPS entries of
         // check-audit-money-path-subscription.py. Same rule as the four above -- each value is
         // read off the module that DECLARES the outgoing channel, never derived from the topic's
