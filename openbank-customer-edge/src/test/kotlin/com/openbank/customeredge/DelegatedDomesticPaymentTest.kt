@@ -118,7 +118,7 @@ class DelegatedDomesticPaymentTest {
         every { upstream.get(match { it.contains("payment-authorization") }, any()) } returns decision
         every { upstream.get(match { it.contains("/parties/") }, any()) } answers {
             val name = if (secondArg<String>() == grantor.toString()) "Grantor Name" else "Delegate Name"
-            Response.ok("""{"legalName":"$name"}""").build()
+            Response.ok("""{"legalName":"$name","partyType":"INDIVIDUAL"}""").build()
         }
         every { upstream.post(match { it.contains("/sca/challenges/") }, any(), any()) } returns
             if (scaOk) Response.ok("""{"status":"CONSUMED"}""").build() else Response.status(403).build()
@@ -142,6 +142,45 @@ class DelegatedDomesticPaymentTest {
 
         assertThat(resp.status).isEqualTo(201)
         verify { upstream.post(match { it.contains("/api/v1/domestic-payments") }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `a previously issued grant cannot bypass a company joint signing mandate`() {
+        val upstream = upstreamWith(authorizedDecision())
+        every { upstream.get("http://party/api/v1/parties/$grantor", grantor.toString()) } returns
+            Response.ok("""{"legalName":"Company","partyType":"COMPANY"}""").build()
+
+        val response = resource(upstream, mockk(relaxed = true))
+            .createDomesticPayment(body(), "company-delegation", SCA_ID)
+
+        assertThat(response.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(match { it.contains("/sca/challenges/") }, any(), any()) }
+        verify(exactly = 0) { upstream.post(match { it.contains("/domestic-payments") }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `a sole trader retains delegated payment access`() {
+        val upstream = upstreamWith(authorizedDecision())
+        every { upstream.get("http://party/api/v1/parties/$grantor", grantor.toString()) } returns
+            Response.ok("""{"legalName":"Trader","partyType":"SOLE_TRADER"}""").build()
+
+        val response = resource(upstream, mockk(relaxed = true))
+            .createDomesticPayment(body(), "sole-trader-delegation", SCA_ID)
+
+        assertThat(response.status).isEqualTo(201)
+    }
+
+    @Test
+    fun `an unknown owner type is not treated as personal delegated authority`() {
+        val upstream = upstreamWith(authorizedDecision())
+        every { upstream.get("http://party/api/v1/parties/$grantor", grantor.toString()) } returns
+            Response.ok("""{"legalName":"Unknown"}""").build()
+
+        val response = resource(upstream, mockk(relaxed = true))
+            .createDomesticPayment(body(), "unknown-owner-type", SCA_ID)
+
+        assertThat(response.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(match { it.contains("/domestic-payments") }, any(), any(), any()) }
     }
 
     /**

@@ -260,3 +260,15 @@ Trust boundaries:
   reconciliation. During overlap an older provider fails closed for company payments; personal
   payments remain unchanged. Roll back by setting that switch false, not by restoring the prior
   bypass.
+
+- **2026-09-18** — **Old delegated grant after a company mandate changes.** A delegation
+  decision and reservation establish a grantee and a spend limit, but neither proves the
+  account owner's current company signing quorum. A SOLO grant issued before a mandate became
+  JOINT must not remain a route around the direct-payment guard. Before SCA or a reservation,
+  the edge now resolves the grantor's party type from party-service and permits this direct
+  delegated rail only for `INDIVIDUAL` or `SOLE_TRADER` owners. `COMPANY`, `TRUST`, unknown and
+  unavailable types fail with the same opaque 403 and a classified audit event. Company
+  delegation needs a separate operation-specific approval snapshot and decision workflow;
+  this change deliberately does not represent a company grant as permission to debit.
+  Rollback of this guard would re-expose a unilateral debit path and requires disabling
+  delegated payment initiation first.

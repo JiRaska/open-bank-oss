@@ -2558,6 +2558,9 @@ class CustomerEdgeResource(
         if (extractOwnerPartyId(ownerJson) != grantor.toString()) {
             return DebitAuthorityResult.Refused(forbidden("Debtor account does not belong to caller"))
         }
+        delegatedBusinessOwnerRefusal(customer, debtorAccountId, grantor)?.let {
+            return DebitAuthorityResult.Refused(it)
+        }
         return DebitAuthorityResult.Allowed(
             DebitAuthority(
                 accountJson = ownerJson,
@@ -2566,6 +2569,35 @@ class CustomerEdgeResource(
                 delegationId = decision.delegationId,
             ),
         )
+    }
+
+    /** A pre-existing SOLO grant must not outlive a company's later JOINT signing rule. */
+    private fun delegatedBusinessOwnerRefusal(
+        customer: CustomerIdentity,
+        accountId: UUID,
+        ownerPartyId: UUID,
+    ): Response? {
+        // The delegation decision and spend reservation carry no operation quorum proof.
+        // Sole traders use the personal rail; unknown/unavailable owner types fail closed.
+        val ownerParty = runCatching {
+            upstream.get("$partyServiceUrl/api/v1/parties/$ownerPartyId", ownerPartyId.toString())
+        }.getOrNull()
+        val ownerType = ownerParty?.takeIf { it.status == 200 }?.entity?.toString()
+            ?.let { extractTextField(objectMapper, it, "partyType") }
+        if (ownerType == "INDIVIDUAL" || ownerType == "SOLE_TRADER") return null
+        audit.emit(
+            eventType = "CUSTOMER_PAYMENT_REFUSED",
+            partyId = customer.partyId.toString(),
+            operation = "payments.domestic",
+            result = "DENIED",
+            resourceId = accountId.toString(),
+            details = mapOf(
+                "reason" to "DELEGATED_BUSINESS_PAYMENT_REQUIRES_APPROVAL",
+                "ownerPartyId" to ownerPartyId.toString(),
+                "actorPartyId" to customer.actorPartyId.toString(),
+            ),
+        )
+        return forbidden("Debtor account does not belong to caller")
     }
 
     /** A profile switch grants visibility, not unilateral payment authority. Fail closed on any
