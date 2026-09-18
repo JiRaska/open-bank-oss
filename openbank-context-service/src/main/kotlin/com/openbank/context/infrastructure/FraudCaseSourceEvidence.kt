@@ -8,7 +8,6 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
-import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -55,7 +54,7 @@ interface FraudCaseSourceClient {
         @HeaderParam("X-Investigation-Purpose") purpose: String,
     ): Uni<FraudCaseSourceSnapshot>
 
-    @POST
+    @GET
     @Path("/{caseId}/match-assigned")
     fun matchAssigned(
         @PathParam("caseId") caseId: UUID,

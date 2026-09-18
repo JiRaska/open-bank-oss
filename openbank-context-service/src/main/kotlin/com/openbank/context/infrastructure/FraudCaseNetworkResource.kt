@@ -33,6 +33,7 @@ data class FraudCaseNetwork(
     val related: List<FraudRelatedCase>,
     val inspectedCandidates: Int,
     val candidateTruncated: Boolean,
+    val comparedCandidates: Int? = null,
 )
 
 @Path("/api/v1/context/fraud-cases")
@@ -74,8 +75,9 @@ class FraudCaseNetworkResource(
                     FraudCaseNetwork(
                         root,
                         related,
-                        matches.inspectedCandidates,
+                        matches.candidateIds.size,
                         matches.truncated,
+                        matches.inspectedCandidates,
                     ),
                 )
                     .header("Cache-Control", "no-store").build()

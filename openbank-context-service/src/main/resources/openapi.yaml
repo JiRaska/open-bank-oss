@@ -298,8 +298,13 @@ components:
         inspectedCandidates:
           type: integer
           minimum: 0
+          maximum: 4
+          description: Source-matched candidates independently checked by Context.
+        comparedCandidates:
+          type: integer
+          minimum: 0
           maximum: 256
-          description: Assigned candidates compared by Fraud before each returned match is independently checked by Context.
+          description: Assigned candidates compared by Fraud; absent in older responses.
         candidateTruncated:
           type: boolean
           description: Assignment scan or source match limit was reached; no exhaustive negative conclusion is possible.
