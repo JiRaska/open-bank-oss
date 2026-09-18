@@ -60,7 +60,6 @@ spec:
           for: 15m
           labels: { severity: critical, service: context-service }
           annotations:
-            subject_period: continuous
             summary: Context read-audit commitments are not reaching the fleet audit chain promptly
             description: Check the dedicated Audit consumer, broker ACLs and the Context outbox before enabling sensitive reads.
         - alert: ContextAuditCommitmentOutboxStalled
@@ -68,6 +67,5 @@ spec:
           for: 15m
           labels: { severity: critical, service: context-service }
           annotations:
-            subject_period: continuous
             summary: Committed Context read-audit evidence remains in the local outbox
             description: Check the relay and dedicated topic, then reconcile local audit IDs with the fleet chain.
