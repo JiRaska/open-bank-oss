@@ -43,8 +43,10 @@ class AuthorityHistoryResource(
     ): Response {
         val now = clock.instant()
         val effective = timestamp(effectiveAt, now)
-        val known = timestamp(knownAt, now)
-        require(effective <= now && known <= now) { "historical evidence cannot establish future authorization" }
+        val known = knownAt?.let { timestamp(it, now) }
+        require(effective <= now && (known == null || known <= now)) {
+            "historical evidence cannot establish future authorization"
+        }
         val case =
             requireNotNull(caseId?.takeIf { it.isNotBlank() && it.length <= MAX_CASE_LENGTH }) { "caseId is required" }
         require(purpose == "AUTHORIZATION_REVIEW") { "AUTHORIZATION_REVIEW is required" }
@@ -54,7 +56,7 @@ class AuthorityHistoryResource(
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(case, purpose, effective, known),
             ) {
-                val selected = history.history(id, effective, known)
+                val selected = history.history(id, effective, known ?: history.databaseNow())
                 ContextReadResult(
                     Response.ok(selected).header("Cache-Control", "no-store").build(),
                     ContextDisclosure(

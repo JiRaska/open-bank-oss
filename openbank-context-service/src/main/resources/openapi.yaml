@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.5.1
+  version: 1.5.2
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/aml-cases/{id}/network:
@@ -18,6 +18,7 @@ paths:
           schema: { type: string, format: date-time }
         - name: knownAt
           in: query
+          description: Omit for a current database-recorded snapshot; provide a timestamp for an exact historical knowledge cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -41,6 +42,7 @@ paths:
           schema: { type: string, format: date-time }
         - name: knownAt
           in: query
+          description: Omit for a current database-recorded snapshot; provide a timestamp for an exact historical knowledge cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -64,6 +66,7 @@ paths:
           schema: { type: string, format: date-time }
         - name: knownAt
           in: query
+          description: Omit for a current database-recorded snapshot; provide a timestamp for an exact historical knowledge cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':

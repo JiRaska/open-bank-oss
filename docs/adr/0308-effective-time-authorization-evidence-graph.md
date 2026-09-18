@@ -148,7 +148,10 @@ audit trail or treat an unexported commitment as exported.
 The authority-history lens consumes the existing versioned delegation lifecycle stream and
 stores immutable, deduplicated source observations. It retains event time and database record
 time independently, supports `effectiveAt` and `knownAt`, and rejects conflicting content for
-an already recorded source revision. The audit view exposes grantor, grantee, resource,
+an already recorded source revision. An omitted `knownAt` uses PostgreSQL time as the cutoff
+for the current snapshot, since comparing a database-recorded timestamp with an application
+clock can hide a committed observation during clock skew. An explicit historical `knownAt`
+remains an exact caller-supplied cutoff. The audit view exposes grantor, grantee, resource,
 capabilities and lifecycle evidence with provenance, bounded to 100 observations.
 
 `AUTHORIZATION_REVIEW` requires a maker/checker-approved assignment to the exact delegation
