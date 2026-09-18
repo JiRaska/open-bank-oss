@@ -103,6 +103,12 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A customer must explicitly review an active delegation; no access is changed by this reminder. */
     DELEGATION_RECERTIFICATION_DUE(setOf("audience")),
+
+    /** A current company representative must personally sign a pending joint issuance proposal. */
+    JOINT_ISSUANCE_SIGNATURE_REQUESTED(emptySet()),
+
+    /** A current company representative must personally sign a pending joint acceptance proposal. */
+    JOINT_ACCEPTANCE_SIGNATURE_REQUESTED(emptySet()),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -127,6 +133,8 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // someone just exercised delegated authority over the grantor's money, and a missing
             // device must not silence that (the fallback carries no body, only the prompt).
             DELEGATION_FIRST_USE,
+            JOINT_ISSUANCE_SIGNATURE_REQUESTED,
+            JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
@@ -164,6 +172,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
             DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             DELEGATION_RECERTIFICATION_DUE,
+            JOINT_ISSUANCE_SIGNATURE_REQUESTED, JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT

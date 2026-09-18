@@ -1155,8 +1155,22 @@ class NotificationConsumer @Inject constructor(
                     "<h2>Review Delegated Access</h2><p>A delegated access grant is due for review " +
                     "under your <b>${vars.v("audience")}</b> review cadence. Access remains active until " +
                     "you explicitly keep, narrow or revoke it in the OpenBank app.</p>"
+            NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED ->
+                jointIssuanceCopy()
+            NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED ->
+                jointAcceptanceCopy()
         }
 }
+
+private fun jointIssuanceCopy(): Pair<String, String> = "Your signature is requested for a company access grant" to
+    "<h2>Company access grant</h2><p>A company you represent has a pending proposal " +
+    "to grant delegated access. Review the exact terms and sign personally in the " +
+    "OpenBank app. No access is granted by this notification.</p>"
+
+private fun jointAcceptanceCopy(): Pair<String, String> = "Your signature is requested for company access acceptance" to
+    "<h2>Company access acceptance</h2><p>A company you represent has a pending " +
+    "proposal to accept delegated access. Review the exact terms and sign personally " +
+    "in the OpenBank app. No access is activated by this notification.</p>"
 
 /**
  * Reads a declared template variable, HTML-escaped, or "" when the caller omitted it.

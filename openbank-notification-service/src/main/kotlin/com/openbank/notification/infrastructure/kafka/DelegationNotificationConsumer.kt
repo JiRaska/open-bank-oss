@@ -15,16 +15,16 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
+import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 /**
  * Wires ADR-0232 delegated-access lifecycle events into customer notifications.
  *
  * `openbank-delegation-service` already publishes the full lifecycle onto
- * `openbank.delegation.events` (DelegationEvents.kt) via its transactional outbox; today
- * `openbank-account-service` (its enforcement projection, ADR-0232 D3) and `openbank-audit-service`
- * (its `onBehalfOf` audit trail) are the only consumers. Neither party is told anything — this is
- * a SECOND consumer of the same, already-live topic, not a new event contract.
+ * `openbank.delegation.events` via its transactional outbox. This consumer turns selected events
+ * into notifications; enforcement and audit consumers independently read the same topic.
  *
  * **Which party, per event** — the party who has something to act on, or who is affected:
  *  - `DelegationOffered` -> the **grantee**: they have an offer to accept or decline.
@@ -34,6 +34,8 @@ import java.util.UUID
  *  - `DelegationSuspended` / `DelegationReinstated` -> **both**: authority changed at the bank.
  *  - `DelegationRenounced` -> the **grantor**: the grantee ended their access.
  *  - `DelegationExpired` -> **both**: the grant is gone either way.
+ *  - `StatutoryDelegationProposalOpened` -> each human on the frozen JOINT roster, once per
+ *    operation/person. It is only an inbox hint; the signing API rechecks live authority.
  *  - Any future/unknown type is deliberately not notified until its recipient semantics are reviewed.
  *
  * **Delivery reuses the real pipeline, in-process.** Rather than re-implement rendering, the
@@ -51,10 +53,11 @@ import java.util.UUID
  * name would mean a synchronous cross-service call from an event consumer for a non-critical field,
  * which this fan-out deliberately does not add; the templates read `resourceType` only.
  *
- * **Idempotency**: none, deliberately, matching [NotificationConsumer.consume]'s own documented
- * position — delivery is at-least-once and a redelivery re-persists a fresh notification row, which
- * is "acceptable for notifications (no money path)". A DLQ'd/retried delegation event can therefore
- * produce a duplicate notification on redelivery, same as every other channel into this service.
+ * **Idempotency**: joint proposal fan-out uses a stable per-operation/person notification key, so
+ * a Kafka replay cannot create another notification row for the same representative. This does NOT
+ * guarantee eventual dispatch: if sending fails after that row commits, [NotificationConsumer]
+ * skips the duplicate request. Recovery of such PENDING/FAILED rows is separate work. Legacy
+ * lifecycle types retain their delivery semantics; first-use and recertification also have keys.
  *
  * **Failure handling**, two kinds, and only the first is handled here. A malformed/unparseable
  * record is a poison pill — logged and swallowed so it can never wedge the partition (mirrors
@@ -77,11 +80,16 @@ import java.util.UUID
  * nacked, and `application.yaml` is what answers what the connector then does with it.
  */
 @ApplicationScoped
-class DelegationNotificationConsumer @Inject constructor(
+class DelegationNotificationConsumer(
     private val notificationConsumer: NotificationConsumer,
     private val objectMapper: ObjectMapper,
+    private val clock: Clock,
 ) {
     private val log = Logger.getLogger(DelegationNotificationConsumer::class.java)
+
+    @Inject
+    constructor(notificationConsumer: NotificationConsumer, objectMapper: ObjectMapper) :
+        this(notificationConsumer, objectMapper, Clock.systemUTC())
 
     /**
      * Reactive `Uni`, not `suspend` — same reasoning as [NotificationConsumer.consume]'s own KDoc:
@@ -96,28 +104,26 @@ class DelegationNotificationConsumer @Inject constructor(
         val node = try {
             objectMapper.readTree(payload)
         } catch (e: Exception) {
-            log.warnf(
-                e,
-                "Dropping unprocessable delegation event (poison pill): %s",
-                payload.take(MAX_LOGGED_PAYLOAD_CHARS),
-            )
+            // Proposal events can carry a human roster: never echo raw Kafka payloads to logs.
+            log.warnf("Dropping unprocessable delegation event (poison pill): %s", e.javaClass.simpleName)
             return Uni.createFrom().voidItem()
         }
-        val requests = requestsFor(node, payload)
+        val requests = requestsFor(node)
         if (requests.isEmpty()) return Uni.createFrom().voidItem()
         return requests
             .map { req -> notificationConsumer.consume(objectMapper.writeValueAsString(req)) }
             .reduce { a, b -> a.chain { _: Void? -> b } }
     }
 
-    /** The [NotificationRequest]s this event should raise — zero, one, or two (EXPIRED). */
+    /** The [NotificationRequest]s this event should raise — a JOINT proposal may reach its whole roster. */
     @Suppress(
         "CyclomaticComplexMethod",
         "ComplexCondition",
         // Event-specific recipient and validation rules must remain visibly adjacent to the event map.
     )
-    private fun requestsFor(node: JsonNode, payload: String): List<NotificationRequest> {
+    private fun requestsFor(node: JsonNode): List<NotificationRequest> {
         val eventType = node.path("eventType").asText("")
+        if (eventType == STATUTORY_PROPOSAL_OPENED) return statutoryProposalRequests(node)
         val template = TEMPLATE_BY_EVENT_TYPE[eventType]
         if (template == null) {
             // Not an error: future event types stay out until their customer recipient semantics
@@ -143,11 +149,7 @@ class DelegationNotificationConsumer @Inject constructor(
             (!reviewDue && grantee == null) ||
             (reviewDue && !dueEventIsValid)
         ) {
-            log.warnf(
-                "Dropping delegation event %s with missing/unparseable identifiers: %s",
-                eventType,
-                payload.take(MAX_LOGGED_PAYLOAD_CHARS),
-            )
+            log.warnf("Dropping delegation event %s with missing/unparseable identifiers", eventType)
             return emptyList()
         }
         val targets = TARGETS_BY_EVENT_TYPE.getValue(eventType)(grantor, grantee)
@@ -179,11 +181,61 @@ class DelegationNotificationConsumer @Inject constructor(
         }
     }
 
+    /** One immutable proposal event fans out to the frozen human roster, never to the company id. */
+    @Suppress("CyclomaticComplexMethod") // Every malformed authority/expiry field must fail closed before fan-out.
+    private fun statutoryProposalRequests(node: JsonNode): List<NotificationRequest> {
+        if (node.path("sourceService").asText() != DELEGATION_SOURCE_SERVICE ||
+            node.path("aggregateType").asText() != "StatutoryDelegationOperation" ||
+            node.path("version").asLong(-1) != 1L
+        ) {
+            return emptyList()
+        }
+        val operationId = canonicalUuid(node.path("aggregateId")) ?: return emptyList()
+        val principal = canonicalUuid(node.path("principalPartyId")) ?: return emptyList()
+        val initiator = canonicalUuid(node.path("actorId")) ?: return emptyList()
+        if (runCatching { Instant.parse(node.path("expiresAt").asText()) }.getOrNull()
+                ?.isAfter(clock.instant()) != true
+        ) {
+            return emptyList()
+        }
+        val roster = node.path("representativePartyIds")
+        if (!roster.isArray || roster.size() < 2) return emptyList()
+        val recipients = roster.map { canonicalUuid(it) ?: return emptyList() }
+        if (recipients.size != recipients.distinct().size || initiator !in recipients || principal in recipients) {
+            return emptyList()
+        }
+        val (template, link) = when (node.path("operationKind").asText()) {
+            "ISSUE" ->
+                NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED to "openbank://delegations/joint-issuance"
+            "ACCEPT" ->
+                NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED to "openbank://delegations/joint-acceptance"
+            else -> return emptyList()
+        }
+        return recipients.map { recipient ->
+            NotificationRequest(
+                partyId = recipient,
+                channel = NotificationChannel.PUSH,
+                template = template,
+                recipient = recipient.toString(),
+                variables = emptyMap(),
+                deepLink = link,
+                correlationId = operationId,
+                // Global notification dedup is on one UUID, so use one stable key per human.
+                deduplicationKey = UUID.nameUUIDFromBytes(
+                    "statutory-proposal:$operationId:$recipient".toByteArray(Charsets.UTF_8),
+                ),
+            )
+        }
+    }
+
+    private fun canonicalUuid(node: JsonNode): UUID? = node.takeIf { it.isTextual }?.asText()?.let { raw ->
+        runCatching { UUID.fromString(raw).takeIf { it.toString() == raw } }.getOrNull()
+    }
+
     private companion object {
-        /** Cap on the producer-supplied payload echoed into a poison-pill warning (untrusted input). */
-        const val MAX_LOGGED_PAYLOAD_CHARS = 300
         const val SPEND_CONFIRMED = "SpendConfirmed"
         const val RECERTIFICATION_DUE = "DelegationRecertificationDue"
+        const val STATUTORY_PROPOSAL_OPENED = "StatutoryDelegationProposalOpened"
         const val DELEGATION_SOURCE_SERVICE = "delegation-service"
         val REVIEW_AUDIENCES = setOf("PERSONAL", "FOP", "SME", "CORPORATE")
 

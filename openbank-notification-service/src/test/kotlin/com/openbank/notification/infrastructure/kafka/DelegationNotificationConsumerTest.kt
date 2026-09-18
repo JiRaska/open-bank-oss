@@ -18,7 +18,9 @@ import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class DelegationNotificationConsumerTest {
@@ -61,6 +63,102 @@ class DelegationNotificationConsumerTest {
         grantor?.let { fields += "\"grantorPartyId\":\"$it\"" }
         grantee?.let { fields += "\"granteePartyId\":\"$it\"" }
         return "{${fields.joinToString(",")}}"
+    }
+
+    private fun statutoryOpened(
+        kind: String = "ISSUE",
+        recipients: List<String> = listOf(grantorPartyId.toString(), granteePartyId.toString()),
+        expiresAt: String = "2026-09-19T12:00:00Z",
+        sourceService: String = "delegation-service",
+        version: Int = 1,
+    ): String = objectMapper.writeValueAsString(
+        mapOf(
+            "eventType" to "StatutoryDelegationProposalOpened",
+            "aggregateType" to "StatutoryDelegationOperation",
+            "version" to version,
+            "sourceService" to sourceService,
+            "aggregateId" to grantId.toString(),
+            "principalPartyId" to UUID.randomUUID().toString(),
+            "actorId" to grantorPartyId.toString(),
+            "operationKind" to kind,
+            "representativePartyIds" to recipients,
+            "expiresAt" to expiresAt,
+        ),
+    )
+
+    @Test
+    fun `joint proposal notifies each frozen human with a distinct replay safe key`() {
+        consumer = DelegationNotificationConsumer(
+            notificationConsumer,
+            objectMapper,
+            Clock.fixed(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC),
+        )
+        consumer.consume(statutoryOpened()).subscribe().with({}, {})
+
+        val requests = capturedRequests()
+        assertThat(requests).hasSize(2)
+        assertThat(requests.map { it.partyId }).containsExactly(grantorPartyId, granteePartyId)
+        assertThat(requests).allSatisfy {
+            assertThat(it.template).isEqualTo(NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED)
+            assertThat(it.channel).isEqualTo(NotificationChannel.PUSH)
+            assertThat(it.variables).isEmpty()
+            assertThat(it.correlationId).isEqualTo(grantId)
+            assertThat(it.deepLink).isEqualTo("openbank://delegations/joint-issuance")
+            assertThat(it.deduplicationKey).isNotNull()
+        }
+        assertThat(requests.map { it.deduplicationKey }.distinct()).hasSize(2)
+    }
+
+    @Test
+    fun `joint acceptance uses its own screen and template`() {
+        consumer = DelegationNotificationConsumer(
+            notificationConsumer,
+            objectMapper,
+            Clock.fixed(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC),
+        )
+        consumer.consume(statutoryOpened(kind = "ACCEPT")).subscribe().with({}, {})
+
+        assertThat(capturedRequests()).allSatisfy {
+            assertThat(it.template).isEqualTo(NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED)
+            assertThat(it.deepLink).isEqualTo("openbank://delegations/joint-acceptance")
+        }
+    }
+
+    @Test
+    fun `joint proposal replay keeps one stable dedup key per representative`() {
+        consumer = DelegationNotificationConsumer(
+            notificationConsumer,
+            objectMapper,
+            Clock.fixed(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC),
+        )
+        val payload = statutoryOpened()
+        consumer.consume(payload).subscribe().with({}, {})
+        consumer.consume(payload).subscribe().with({}, {})
+
+        val requests = capturedRequests()
+        assertThat(requests).hasSize(4)
+        assertThat(requests[0].deduplicationKey).isEqualTo(requests[2].deduplicationKey)
+        assertThat(requests[1].deduplicationKey).isEqualTo(requests[3].deduplicationKey)
+        assertThat(requests[0].deduplicationKey).isNotEqualTo(requests[1].deduplicationKey)
+    }
+
+    @Test
+    fun `stale or malformed statutory proposals do not notify`() {
+        consumer = DelegationNotificationConsumer(
+            notificationConsumer,
+            objectMapper,
+            Clock.fixed(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC),
+        )
+        listOf(
+            statutoryOpened(expiresAt = "2026-09-18T12:00:00Z"),
+            statutoryOpened(sourceService = "other-service"),
+            statutoryOpened(version = 2),
+            statutoryOpened(recipients = listOf(grantorPartyId.toString(), grantorPartyId.toString())),
+            statutoryOpened(recipients = listOf("bad-id", granteePartyId.toString())),
+            statutoryOpened(kind = "OTHER"),
+        ).forEach { consumer.consume(it).subscribe().with({}, {}) }
+
+        verify(exactly = 0) { notificationConsumer.consume(any()) }
     }
 
     @Test
