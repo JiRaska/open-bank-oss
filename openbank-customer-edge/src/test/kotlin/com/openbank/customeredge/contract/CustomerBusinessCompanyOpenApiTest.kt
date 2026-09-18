@@ -47,6 +47,7 @@ class CustomerBusinessCompanyOpenApiTest {
             "status",
             "representatives",
             "signingRule",
+            "signingRuleAsOf",
             "accounts",
             "accountsPagination",
         )

@@ -60,7 +60,7 @@ class CustomerBusinessCompanyResourceTest {
             kyb ?: Response.ok(
                 """{"representatives":[{"fullName":"Jana  NOVÁKOVÁ","role":"jednatel"},""" +
                     """{"fullName":"Karel Dvořák","role":"jednatel"}],""" +
-                    """"representationRule":{"mode":"JOINT","sourceText":"Jednají dva jednatelé společně."}}""",
+                    """"representationRule":{"mode":"JOINT","sourceText":"Jednají dva jednatelé společně."},"fetchedAt":"2026-09-14T08:00:00Z"}""",
             ).build()
             )
         return upstream
@@ -99,6 +99,7 @@ class CustomerBusinessCompanyResourceTest {
             mapOf("street" to "Václavské náměstí 1", "city" to "Praha", "postalCode" to "11000", "country" to "CZ"),
         )
         assertThat(b["signingRule"]).isEqualTo("Jednají dva jednatelé společně.")
+        assertThat(b["signingRuleAsOf"]).isEqualTo("2026-09-14T08:00:00Z")
         assertThat(b["representatives"]).isEqualTo(
             listOf(
                 mapOf("name" to "Jana Nováková", "role" to "LEGAL_REPRESENTATIVE", "partyId" to human, "isYou" to true),
@@ -149,6 +150,7 @@ class CustomerBusinessCompanyResourceTest {
 
         assertThat(r.status).isEqualTo(200)
         assertThat(body(r)["signingRule"]).isNull()
+        assertThat(body(r)["signingRuleAsOf"]).isNull()
         @Suppress("UNCHECKED_CAST")
         val reps = body(r)["representatives"] as List<Map<String, Any?>>
         assertThat(reps.map { it["partyId"] }).containsExactly(human, colleague)

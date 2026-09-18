@@ -3675,10 +3675,11 @@ paths:
       description: >-
         Requires `X-Acting-For: <business partyId>` naming an entity the signed-in human holds an ACTIVE
         mandate for; without the header, naming the human themselves, or without a mandate it is a 403.
-        Only system-of-record data: party-service (entity, mandates), kyb-service's fresh cached
-        extract (signing rule, register-only representatives) and account-service. A cache miss does
-        not trigger an external lookup. Accounts are the first page; `accountsPagination` tells the
-        client when to fetch more from `/business/company/accounts`. A value no source holds is null.
+        Only system-of-record data: party-service (entity, mandates), kyb-service's last recorded
+        extract (signing rule, register-only representatives) and account-service. The extract can
+        be older than the normal refresh TTL; `signingRuleAsOf` must accompany any display of the
+        rule. A cache miss never triggers an external lookup. Accounts are the first page;
+        `accountsPagination` tells the client when to fetch more from `/business/company/accounts`.
       operationId: getBusinessCompany
       security:
         - customerOidc: [profile:read]
@@ -4605,7 +4606,8 @@ components:
               role: { type: string, nullable: true }
               partyId: { type: string, format: uuid, nullable: true, description: 'null for a register-listed member with no party here' }
               isYou: { type: boolean }
-        signingRule: { type: string, nullable: true, description: 'The register text of how the company is represented' }
+        signingRule: { type: string, nullable: true, description: 'Last observed register text; show with signingRuleAsOf, not as current certification' }
+        signingRuleAsOf: { type: string, format: date-time, nullable: true, description: 'Original registry fetch time for the last observed signing rule' }
         accounts:
           type: array
           items:

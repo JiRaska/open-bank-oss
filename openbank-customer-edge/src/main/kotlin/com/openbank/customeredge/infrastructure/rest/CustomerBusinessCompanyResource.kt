@@ -45,9 +45,11 @@ import java.util.UUID
  *  - representatives — party-service's ACTIVE mandates over the entity (names read from each
  *    agent's party), plus register-listed statutory body members that have no party here yet
  *    (`partyId: null`);
- *  - `signingRule` — the register's own representation text, via kyb-service's cached register
- *    extract; only asked for schemes the edge can name unambiguously from the entity's country
- *    (`CZ_ICO`, `SK_ICO`), and `null` whenever kyb cannot answer;
+ *  - `signingRule` and `signingRuleAsOf` — the register's last recorded representation text and
+ *    original fetch time, via kyb-service's read-only stored extract. This may be older than the
+ *    registry refresh TTL; the caller must show the time rather than imply a current legal rule.
+ *    Only asked for schemes unambiguously known from the entity's country (`CZ_ICO`, `SK_ICO`);
+ *    both are `null` when no extract was ever recorded;
  *  - accounts — account-service, scoped to the entity.
  */
 @Path("/customer/v1/business/company")
@@ -102,6 +104,7 @@ class CustomerBusinessCompanyResource(
             "status" to text(node, "status"),
             "representatives" to representatives,
             "signingRule" to extract?.path("representationRule")?.let { text(it, "sourceText") },
+            "signingRuleAsOf" to extract?.let { text(it, "fetchedAt") },
             "accounts" to accountPage.accounts,
             "accountsPagination" to accountPage.pagination,
         )
