@@ -81,8 +81,11 @@ accepts old timestamp tokens during migration, measures that compatibility path 
 after the topic boundary has been proven clean.
 The protected admin UI returns aggregate counts by affected type and never returns service or
 customer identifiers. Production relay activation, replay-boundary evidence, workflow and
-business-case correlation remain activation prerequisites, so this ADR stays `partial` and the
-deployment stays at zero replicas.
+business-case correlation remain activation prerequisites, so this ADR stays `partial`.
+On 2026-09-18 the sandbox's base Context deployment was observed at one ready replica
+(`sandbox-cb7d1d26`); its readiness reported the incident Kafka channel as connected.
+This proves a running consumer, not successful incident replay or case-level impact.
+The observed instance had no incident projection-event sample in its metrics since start.
 
 The aggregate API now distinguishes a missing root (`MISSING`), a bounded slice
 (`PARTIAL`) and an available projection (`AVAILABLE`). Availability describes the

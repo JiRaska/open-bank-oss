@@ -239,29 +239,33 @@ class ContextApiIT {
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
-    fun `incident lens exposes aggregate counts without affected identifiers`() {
-        val reference = UUID.randomUUID().toString()
-        val root = "incident:$reference"
+    fun `incident source event exposes only aggregate service counts without identifiers`() {
+        val incidentId = UUID.randomUUID()
+        val reference = incidentId.toString()
+        val source = connector.source<String>("ict-incident-events-in")
+        source.runOnVertxContext(true)
+        source.send(
+            incidentEvent(
+                incidentId,
+                NOW.epochSecond * 1_000_000_000 + NOW.nano,
+                listOf("ledger-service", "payment-service"),
+            ),
+        )
+        awaitCount("context_projection_events", "aggregate_ref", "incident:$incidentId", 1)
         seedAssignment(CASE, "INCIDENT_IMPACT")
-        seedNode(root, "INCIDENT", "Incident $reference", namespace = "INCIDENT")
-        repeat(2) {
-            val payment = "payment:${UUID.randomUUID()}"
-            seedNode(payment, "PAYMENT", "Payment", namespace = "INCIDENT")
-            seedEdge(root, payment, "AFFECTED", namespace = "INCIDENT")
-        }
 
         val response = given()
             .header("X-Investigation-Case-Id", CASE)
             .header("X-Investigation-Purpose", "INCIDENT_IMPACT")
             .`when`().get("/api/v1/context/incidents/$reference/impact")
             .then().statusCode(200)
-            .body("affectedByType", hasEntry("PAYMENT", 2))
+            .body("affectedByType", hasEntry("SERVICE", 2))
             .body("total", equalTo(2))
             .body("drilldownAvailable", equalTo(false))
             .body("projectionStatus", equalTo("AVAILABLE"))
             .extract().asString()
 
-        assertThat(response).doesNotContain("payment:")
+        assertThat(response).doesNotContain("ledger-service", "payment-service", "payment:")
     }
 
     @Test
