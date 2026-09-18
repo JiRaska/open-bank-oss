@@ -4,14 +4,20 @@
 
 package com.openbank.fraud.integration
 
+import com.openbank.fraud.application.port.out.FraudCaseAccessDecision
+import com.openbank.fraud.infrastructure.client.FraudCaseContextAccessAdapter
 import com.openbank.fraud.it.PostgresRedisTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.util.UUID
@@ -22,6 +28,13 @@ import java.util.concurrent.TimeUnit
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class FraudInvestigationCaseIT {
+    @BeforeEach
+    fun contextCaseAccess() {
+        val access = mockk<FraudCaseContextAccessAdapter>()
+        coEvery { access.check(any(), BEARER) } returns FraudCaseAccessDecision.ALLOWED
+        QuarkusMock.installMockForType(access, FraudCaseContextAccessAdapter::class.java)
+    }
+
     @Test
     @TestSecurity(user = "fraud-admin", roles = ["ROLE_ADMIN"])
     fun `review score opens one case and close never creates a fraud finding`() {
@@ -53,18 +66,27 @@ class FraudInvestigationCaseIT {
 
         given().header("X-Investigation-Purpose", PURPOSE)
             .header("Idempotency-Key", UUID.randomUUID().toString())
+            .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(403)
+            .header("Cache-Control", "no-store")
+        assertThat(outboxCount(caseId)).isEqualTo(1)
+
+        given().header("X-Investigation-Purpose", PURPOSE)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .header("Authorization", BEARER)
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
             .body("status", equalTo("CLOSED_NO_FINDING"))
             .body("revision", equalTo(2))
         given().header("X-Investigation-Purpose", PURPOSE)
             .header("Idempotency-Key", UUID.randomUUID().toString())
+            .header("Authorization", BEARER)
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
             .body("revision", equalTo(2))
         assertThat(outboxCount(caseId)).isEqualTo(2)
         assertReference(caseId, 2, "fraud.case_closed", accountId, counterpartyId)
-        given().header("X-Investigation-Purpose", PURPOSE)
-            .get("/api/v1/fraud/cases/$caseId").then().statusCode(403)
+        given().header("X-Investigation-Purpose", PURPOSE).header("Authorization", BEARER)
+            .get("/api/v1/fraud/cases/$caseId").then().statusCode(200)
             .header("Cache-Control", "no-store")
+            .body("status", equalTo("CLOSED_NO_FINDING"))
     }
 
     @Test
@@ -157,6 +179,7 @@ class FraudInvestigationCaseIT {
                 val close = CompletableFuture.supplyAsync({
                     given().header("X-Investigation-Purpose", PURPOSE)
                         .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .header("Authorization", BEARER)
                         .post("/api/v1/fraud/cases/$caseId/close-without-finding")
                 }, pool)
                 waitForBlockedClose(lock, close)
@@ -270,5 +293,6 @@ class FraudInvestigationCaseIT {
 
     private companion object {
         const val PURPOSE = "FRAUD_INVESTIGATION"
+        const val BEARER = "Bearer fraud-case-it-token"
     }
 }

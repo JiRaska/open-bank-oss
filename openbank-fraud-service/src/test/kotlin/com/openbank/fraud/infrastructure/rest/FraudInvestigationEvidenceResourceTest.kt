@@ -56,6 +56,21 @@ class FraudInvestigationEvidenceResourceTest {
     }
 
     @Test
+    fun `closing a case requires live assignment before mutation`(): Unit = runBlocking {
+        coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.DENIED
+        val denied = resource.closeWithoutFinding(id, "FRAUD_INVESTIGATION", "idem-1", bearer)
+        assertThat(denied.status).isEqualTo(403)
+        assertThat(denied.entity).isNull()
+        coVerify(exactly = 0) { cases.closeWithoutFinding(any(), any()) }
+
+        coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.UNAVAILABLE
+        val unavailable = resource.closeWithoutFinding(id, "FRAUD_INVESTIGATION", "idem-1", bearer)
+        assertThat(unavailable.status).isEqualTo(503)
+        assertThat(unavailable.entity).isNull()
+        coVerify(exactly = 0) { cases.closeWithoutFinding(any(), any()) }
+    }
+
+    @Test
     fun `denial and outage reveal no source associations`(): Unit = runBlocking {
         coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.DENIED
         val denied = resource.evidence(id, "FRAUD_INVESTIGATION", bearer)

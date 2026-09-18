@@ -20,6 +20,20 @@ class FraudEvidenceApiContractTest {
     }
 
     @Test
+    fun `case closure declares live assignment and unavailable authorization response`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+        val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/close-without-finding:")
+            .substringBefore("/api/v1/fraud/review-queue:")
+        assertThat(operation).contains(
+            "closeFraudInvestigationCaseWithoutFinding",
+            "Close an assigned case",
+            "InvestigationPurpose",
+            "'403'",
+            "'503'",
+        )
+    }
+
+    @Test
     fun `restricted evidence route declares source associations and fail closed responses`() {
         val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
         val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/evidence:")
