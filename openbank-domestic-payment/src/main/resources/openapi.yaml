@@ -411,13 +411,15 @@ components:
 
     OwnerProposalDraftResponse:
       type: object
-      required: [id, status, makerPartyId, debtorAccountId, amount, currency,
+      required: [id, status, makerPartyId, debtorAccountId, debtorAccountLast4, debtorBankCode, amount, currency,
                  creditorAccountNumber, creditorBankCode, creditorName, createdAt, expiresAt]
       properties:
         id: {type: string, format: uuid}
         status: {type: string, enum: [DRAFT]}
         makerPartyId: {type: string, format: uuid}
         debtorAccountId: {type: string, format: uuid}
+        debtorAccountLast4: {type: string, description: Last four characters of the source account number}
+        debtorBankCode: {type: string}
         amount: {type: string, description: Exact decimal CZK amount}
         currency: {type: string, enum: [CZK]}
         creditorAccountNumber: {type: string}

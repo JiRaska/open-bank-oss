@@ -144,6 +144,8 @@ class DomesticPaymentProposalResourceTest {
         assertThat(response.status).isEqualTo(200)
         assertThat(body.makerPartyId).isEqualTo(maker)
         assertThat(body.debtorAccountId).isEqualTo(draft.instruction.debtorAccountId)
+        assertThat(body.debtorAccountLast4).isEqualTo("7890")
+        assertThat(body.debtorBankCode).isEqualTo("0800")
         assertThat(body.amount).isEqualTo("1500.00")
         assertThat(body.variableSymbol).isEqualTo("123")
         assertThat(body.messageForPayee).isEqualTo("Invoice")

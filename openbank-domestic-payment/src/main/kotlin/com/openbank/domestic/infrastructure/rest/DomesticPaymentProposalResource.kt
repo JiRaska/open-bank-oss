@@ -204,6 +204,8 @@ data class OwnerProposalDraftResponse(
     val status: String,
     val makerPartyId: UUID,
     val debtorAccountId: UUID,
+    val debtorAccountLast4: String,
+    val debtorBankCode: String,
     val amount: String,
     val currency: String,
     val creditorAccountNumber: String,
@@ -219,11 +221,15 @@ data class OwnerProposalDraftResponse(
 
 data class OwnerProposalDraftPageResponse(val items: List<OwnerProposalDraftResponse>, val nextCursor: UUID?)
 
+private const val ACCOUNT_SUFFIX_LENGTH = 4
+
 private fun DomesticPaymentProposalDraft.toOwnerResponse() = OwnerProposalDraftResponse(
     id = id,
     status = "DRAFT",
     makerPartyId = makerPartyId,
     debtorAccountId = instruction.debtorAccountId,
+    debtorAccountLast4 = instruction.debtorAccountNumber.takeLast(ACCOUNT_SUFFIX_LENGTH),
+    debtorBankCode = instruction.debtorBankCode,
     amount = instruction.amount.toPlainString(),
     currency = instruction.currency,
     creditorAccountNumber = instruction.creditorAccountNumber,
