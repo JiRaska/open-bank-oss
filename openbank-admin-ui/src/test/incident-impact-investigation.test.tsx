@@ -48,8 +48,23 @@ describe('incident impact investigation', () => {
 
     expect(await screen.findByText('Observed 4')).toBeInTheDocument()
     expect(screen.getByText('PAYMENT: 3')).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Incident timeline' })).toHaveTextContent('Detected')
+    expect(screen.getByText('A time window alone does not prove impact on a customer or business case.')).toBeInTheDocument()
     expect(screen.getByText(/customer identifiers are never returned/)).toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(1)
+  })
+
+  it('marks an inconsistent legacy source window unknown after authorization', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      affectedByType: { SERVICE: 1 }, total: 1, drilldownAvailable: false, projectionStatus: 'AVAILABLE',
+    }))))
+    const inconsistent = { ...incidents[0], containedAt: '2026-09-13T06:00:00Z' }
+    render(<LanguageProvider initialLanguage="en"><IncidentImpactInvestigation incidents={[inconsistent]} /></LanguageProvider>)
+
+    await submit()
+
+    expect(await screen.findByText('Source timestamps conflict; the incident window is unknown.')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Incident timeline' })).not.toBeInTheDocument()
   })
 
   it('discards a late aggregate after the selected incident changes', async () => {
