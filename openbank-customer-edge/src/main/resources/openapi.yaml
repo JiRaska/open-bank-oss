@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.69.0
+  version: 1.70.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1885,6 +1885,45 @@ paths:
                         type: {type: string, enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA]}
                         status: {type: string, enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]}
                         performedAt: {type: string, format: date-time}
+
+  /domestic-payment-proposals/drafts:
+    post:
+      tags: [Payments]
+      summary: Prepare a delegated domestic payment for later approval
+      description: >-
+        The authenticated human is always the maker, including while acting for a company.
+        An active owner-issued ACCOUNT_PROPOSE_PAYMENT grant must cover the account and amount;
+        this permission never permits direct debit. The edge enriches the lightweight instruction
+        with the owner's account coordinates and legal name. The payment service repeats the
+        current maker check and stores only a DRAFT. No SCA challenge is consumed here; approval
+        and execution are separate, unavailable transitions until their quorum proof is built.
+      operationId: createDomesticPaymentProposalDraft
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, amount, creditorAccountNumber, creditorName]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                amount: {type: string, example: '250.00'}
+                currency: {type: string, enum: [CZK]}
+                creditorAccountNumber: {type: string, description: 'Czech BBAN or IBAN'}
+                creditorName: {type: string}
+                variableSymbol: {type: string, nullable: true}
+                specificSymbol: {type: string, nullable: true}
+                constantSymbol: {type: string, nullable: true}
+                reference: {type: string, nullable: true}
+      responses:
+        '201': {description: An immutable DRAFT was stored or exactly replayed}
+        '400': {description: Invalid instruction or missing Idempotency-Key}
+        '403': {description: Account unavailable or maker grant absent, expired, or insufficient}
+        '409': {description: Idempotency-Key belongs to another proposal}
 
   /domestic-payments:
     post:

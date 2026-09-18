@@ -272,3 +272,16 @@ Trust boundaries:
   this change deliberately does not represent a company grant as permission to debit.
   Rollback of this guard would re-expose a unilateral debit path and requires disabling
   delegated payment initiation first.
+
+- **2026-09-18** — **Human maker on a company/FOP draft.** The additive
+  `POST /customer/v1/domestic-payment-proposals/drafts` route uses the validated customer
+  JWT's human actor, never the effective `X-Acting-For` company identity, as maker. It asks
+  account-service for live `ACCOUNT_PROPOSE_PAYMENT` permission for the account, amount and
+  CZK currency before reading owner account coordinates or legal name. Unknown or old-provider
+  decisions get the same 403 as no grant; the payment service repeats the authority check.
+  The edge forwards the human maker only under its M2M token; the receiving service pins that
+  token to `openbank-edge` so a different caller cannot spoof the party header. No SCA challenge,
+  debit reservation or direct payment is created. The draft is not presented as payable until
+  a separate immutable corporate-approval snapshot and SCA decision workflow is implemented.
+  Rollout: account decision endpoint, then payment writer, then edge route. Rollback removes
+  the edge route first; stored drafts remain retained, never executed.

@@ -2858,6 +2858,89 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- Domestic payment proposals (maker-only; never a direct debit) ---
+
+    /**
+     * A person prepares a company/FOP owner's payment for a later, separate approval. The
+     * account-service decision is only a maker permission, never debit authority. The payment
+     * service repeats that decision before persisting the immutable DRAFT.
+     */
+    @POST
+    @Path("/domestic-payment-proposals/drafts")
+    @Authorize(action = "customer.payments.initiate")
+    @Blocking
+    @Suppress("LongMethod", "ReturnCount", "CyclomaticComplexMethod")
+    fun createDomesticPaymentProposalDraft(
+        body: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val customer = customer()
+        if (idempotencyKey.isNullOrBlank() || idempotencyKey.length > MAX_PROPOSAL_KEY_LENGTH) {
+            return badRequest("Idempotency-Key must be 1-128 characters")
+        }
+        val debtor = parseDebtorAccountId(objectMapper, body)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("Missing or malformed debtorAccountId")
+        val amountText = extractAmountField(objectMapper, body) ?: return badRequest("A positive amount is required")
+        val amount = runCatching { java.math.BigDecimal(amountText) }.getOrNull()
+            ?.takeIf { it.signum() > 0 } ?: return badRequest("A positive amount is required")
+        val integerDigits = amount.precision().toLong() - amount.scale().toLong()
+        if (amount.scale() > MAX_PROPOSAL_AMOUNT_SCALE || integerDigits > MAX_PROPOSAL_INTEGER_DIGITS) {
+            return badRequest("Proposal amount exceeds supported precision")
+        }
+        val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        if (!currency.equals("CZK", ignoreCase = true)) return badRequest("Domestic proposals require CZK")
+
+        val decisionUrl = "$accountServiceUrl/api/v1/accounts/$debtor/delegation/" +
+            "payment-proposal-authorization?partyId=${customer.actorPartyId}" +
+            "&amount=${amount.toPlainString()}&currency=CZK"
+        val decision = upstream.get(decisionUrl, customer.actorPartyId.toString())
+        val evidence = parseJson(decision)
+        if (decision.status != 200 || evidence?.path("authorized")?.asBoolean() != true) {
+            return forbidden("Payment proposal is not available")
+        }
+        if (evidence.path("outcome").asText() != "ALLOWED") {
+            return forbidden("Payment proposal is not available")
+        }
+        val owner = evidence.path("grantorPartyId").asText().let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return forbidden("Payment proposal is not available")
+        val grant = evidence.path("delegationId").asText().let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return forbidden("Payment proposal is not available")
+        if (owner == customer.actorPartyId || grant == UUID(0, 0)) {
+            return forbidden("Payment proposal is not available")
+        }
+        val accountJson = fetchAccount(debtor, owner) ?: return forbidden("Payment proposal is not available")
+        if (extractOwnerPartyId(accountJson) != owner.toString()) {
+            return forbidden("Payment proposal is not available")
+        }
+        val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
+            ?: return badRequest("Cannot resolve debtor account number")
+        val (debtorNumber, debtorBank) = czechIbanToBban(debtorIban)
+            ?: return badRequest("Debtor account is not a Czech IBAN")
+        val debtorName = fetchPartyLegalName(owner) ?: return badRequest("Cannot resolve debtor name")
+        val creditorRaw = extractTextField(objectMapper, body, "creditorAccountNumber")
+            ?: return badRequest("Missing creditorAccountNumber")
+        val (creditorNumber, creditorBank) = resolveCreditorBban(creditorRaw)
+            ?: return badRequest("Malformed creditor account")
+        val enriched = buildDomesticRequest(
+            objectMapper,
+            body,
+            debtor.toString(),
+            debtorNumber,
+            debtorBank,
+            debtorName,
+            creditorNumber,
+            creditorBank,
+        ) ?: return badRequest("Malformed or incomplete proposal body")
+        // Human actor, NOT effective company profile: the workload binds this to the edge's
+        // authenticated service token and repeats the maker grant/ownership checks.
+        return upstream.post(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/drafts",
+            customer.actorPartyId.toString(),
+            enriched,
+            idempotencyKey,
+        )
+    }
+
     // --- Domestic payments (initiate; settlement is a separate, SCA-gated step) ---
 
     /**
@@ -5541,6 +5624,10 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+
+        private const val MAX_PROPOSAL_KEY_LENGTH = 128
+        private const val MAX_PROPOSAL_AMOUNT_SCALE = 6
+        private const val MAX_PROPOSAL_INTEGER_DIGITS = 14
 
         /**
          * The path transaction-service puts in `merchant.logoUrl`, and the path this edge serves it
