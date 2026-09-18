@@ -12,7 +12,9 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
 
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class.
@@ -50,5 +52,31 @@ class DomesticPaymentBootSmokeIT {
     fun `the service-info endpoint answers on the configured HTTP port`() {
         val body = (Given { this } When { get("/api/v1/info") } Then { statusCode(200) }).extract().body().asString()
         assertThat(body).contains("openbank-domestic-payment")
+    }
+
+    @Test
+    fun `proposal drafts migration includes a durable table and pooled id sequence`() {
+        val config = ConfigProvider.getConfig()
+        val url = config.getValue("quarkus.datasource.jdbc.url", String::class.java)
+        val user = config.getValue("quarkus.datasource.username", String::class.java)
+        val password = config.getValue("quarkus.datasource.password", String::class.java)
+        DriverManager.getConnection(url, user, password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(
+                    "SELECT COUNT(*) FROM information_schema.tables " +
+                        "WHERE table_name = 'domestic_payment_proposal_drafts'",
+                ).use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(1)
+                }
+                statement.executeQuery(
+                    "SELECT increment_by FROM pg_sequences " +
+                        "WHERE sequencename = 'domestic_payment_proposal_drafts_seq'",
+                ).use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getLong(1)).isEqualTo(50)
+                }
+            }
+        }
     }
 }

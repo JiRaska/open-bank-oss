@@ -473,3 +473,18 @@ not change any existing request's outcome until explicitly flipped.
   serializes concurrent transitions, the revision makes replay ordering explicit, and context-service
   failure can only stale the investigative view. Rollback stops that consumer first; the additive
   column can be dropped only before any V17 writer runs, as recorded in the migration.
+
+- **2026-09-18** — **Expand-only maker draft storage for domestic payment proposals**
+  (V18). This is deliberately not a payment, an approval or an executable instruction:
+  the table admits only `DRAFT`, has no payment status/outbox transition, and no HTTP writer
+  is enabled in this stage. A draft preserves the immutable instruction, owner, human maker,
+  grant, idempotency key and expiry for the next stage; its unique maker/key constraint
+  prevents a concurrent retry from silently stacking two drafts. The typed reader refuses
+  an unknown status or a money/account mismatch rather than interpreting it as a grant.
+  **Risk:** sensitive payee instructions are stored in a new table, so access and retention
+  must follow payment data policy before an API is exposed. The customer-visible proposal
+  path requires a current maker-grant check, an immutable approval-requirement snapshot,
+  distinct SCA-bound approver decisions, and atomic execution proof; none is claimed here.
+  Rollout is migration and repository first with no callers. Rollback may drop this table
+  and its Panache sequence only while empty; once populated, retain and export records
+  before any destructive contraction.
