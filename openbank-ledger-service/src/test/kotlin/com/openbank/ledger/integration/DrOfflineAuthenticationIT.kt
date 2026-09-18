@@ -2,15 +2,17 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.ledger.integration
 
-import com.openbank.ledger.it.PostgresRedpandaTestResource
-import io.quarkus.test.common.QuarkusTestResource
+import com.openbank.ledger.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.restassured.RestAssured.given
+import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Path
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.time.Instant
@@ -19,11 +21,17 @@ import java.util.Base64
 /** Real bearer-token verification without Keycloak or TestSecurity identities. */
 @QuarkusTest
 @TestProfile(DrOfflineAuthenticationIT.OfflineProfile::class)
-@QuarkusTestResource(DrOfflineAuthenticationResource::class, restrictToAnnotatedClass = true)
 class DrOfflineAuthenticationIT {
     class OfflineProfile : QuarkusTestProfile {
+        override fun disableGlobalTestResources() = true
+        override fun testResources() =
+            listOf(QuarkusTestProfile.TestResourceEntry(DrOfflineAuthenticationResource::class.java))
+
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.oidc.enabled" to "true",
+            "quarkus.config.locations" to generateSequence(Path.of("").toAbsolutePath()) { it.parent }
+                .map { it.resolve("openbank-infra/gitops/dr-restore-templates/ledger-dr-check.properties") }
+                .first { Files.isRegularFile(it) }.toUri().toString(),
         )
     }
 
@@ -32,6 +40,15 @@ class DrOfflineAuthenticationIT {
 
     @ConfigProperty(name = "dr.test.expired-token")
     lateinit var expiredToken: String
+
+    @Test
+    fun `DR readiness requires the database but no live broker or cache`() {
+        val response = given().get("/q/health/ready")
+        assertThat(response.statusCode).describedAs(response.body.asString()).isEqualTo(200)
+        assertThat(response.jsonPath().getString("status")).isEqualTo("UP")
+        assertThat(response.jsonPath().getList<String>("checks.name"))
+            .anyMatch { it.contains("PostgreSQL") || it.contains("Database") }
+    }
 
     @Test
     fun `temporary viewer can read trial balance`() {
@@ -66,7 +83,7 @@ class DrOfflineAuthenticationIT {
 }
 
 class DrOfflineAuthenticationResource : QuarkusTestResourceLifecycleManager {
-    private val infrastructure = PostgresRedpandaTestResource()
+    private val infrastructure = PostgresTestResource()
 
     override fun start(): Map<String, String> {
         val keys = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
@@ -96,6 +113,8 @@ class DrOfflineAuthenticationResource : QuarkusTestResourceLifecycleManager {
             "quarkus.oidc.roles.role-claim-path" to "groups",
             "quarkus.oidc-client.client-enabled" to "false",
             "quarkus.scheduler.enabled" to "false",
+            "kafka.bootstrap.servers" to "127.0.0.1:1",
+            "quarkus.redis.hosts" to "redis://127.0.0.1:1",
             "openbank.outbox.dispatch-enabled" to "false",
             "dr.test.viewer-token" to token(Instant.now().epochSecond + 300),
             "dr.test.expired-token" to token(Instant.now().epochSecond - 300),

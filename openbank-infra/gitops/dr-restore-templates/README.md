@@ -20,8 +20,11 @@ both the restored database and check workload before requesting the trial balanc
 
 The Deployment disables all Quarkus scheduled jobs, outbox dispatch and Flyway
 startup migration. It verifies a drill-specific viewer JWT locally, without OIDC
-discovery or outbound token acquisition. These settings do not remove Kafka
-connectors, Redis health checks or other outbound clients from the image.
+discovery or outbound token acquisition. Its mounted `ledger-dr-check.properties`
+excludes only Redis and the outgoing ledger channel from readiness checks because
+this viewer-only read uses neither. Both PostgreSQL health checks remain active.
+These settings do not remove Kafka connectors or outbound clients from the image;
+network isolation remains a separate prerequisite.
 Scheduler shutdown prevents scheduled mutations but is not a database read-only
 permission boundary. Before a live drill, verify the actual image's startup
 requirements and enforce network and write isolation. Do not add live credentials
@@ -92,6 +95,10 @@ and failure. No live issuer, client secret or operator role is used.
 
 `DrOfflineAuthenticationIT` exercises the real bearer verifier against temporary
 infrastructure: viewer read, anonymous/expired rejection and mutation rejection.
-It does not establish image startup without Kafka/Redis, CNI isolation or database
+It also runs with PostgreSQL only and the actual mounted properties file, with
+Kafka and Redis pointed at an unavailable local port; readiness must stay UP and
+retain its database check. Without the DR properties, readiness returns 503 while
+the authenticated trial-balance read succeeds. This is source-level regression
+proof, not a deployment test of the selected live image, CNI isolation or database
 write permissions. The Python workflow suite verifies signing, tamper rejection,
 credential permissions and teardown through the workflow shell.

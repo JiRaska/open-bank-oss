@@ -113,7 +113,8 @@ jobs:
           python3 .github/scripts/dr-check-credentials.py "$AUTH_DIR"
           # Kubernetes receives the public verification key only, never a token or private key.
           kubectl -n "$NS" create configmap ledger-dr-check-auth \
-            --from-file=public-key="$AUTH_DIR/public-key"
+            --from-file=public-key="$AUTH_DIR/public-key" \
+            --from-file=dr-check.properties="$TEMPLATES/ledger-dr-check.properties"
           sed "s#\${NS}#${NS}#g" "$TEMPLATES/cnpg-recovery-cluster.yaml.tmpl" | kubectl apply -f -
           sed "s#\${NS}#${NS}#g; s#\${IMAGE}#${IMAGE}#g" "$TEMPLATES/ledger-service-dr-check.yaml.tmpl" | kubectl apply -f -
 

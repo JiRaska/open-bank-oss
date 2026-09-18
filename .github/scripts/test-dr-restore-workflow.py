@@ -28,6 +28,8 @@ with (root / 'calls').open('a') as log:
     log.write(json.dumps(args) + '\n')
 if len(args) > 4 and args[2:5] == ['create', 'configmap', 'ledger-dr-check-auth']:
     public_file = pathlib.Path(next(a.split('=', 2)[2] for a in args if a.startswith('--from-file=public-key=')))
+    properties = pathlib.Path(next(a.split('=', 2)[2] for a in args if a.startswith('--from-file=dr-check.properties=')))
+    assert properties.is_file()
     assert public_file.name == 'public-key'
     assert 'PRIVATE' not in public_file.read_text() and 'Bearer' not in public_file.read_text()
     (root / 'auth-directory').write_text(str(public_file.parent))
@@ -175,6 +177,27 @@ class DrRestoreWorkflowTest(unittest.TestCase):
             command = ['openssl', 'dgst', '-sha256', '-verify', str(key), '-keyform', 'DER', '-signature', str(sig)]
             self.assertEqual(subprocess.run(command, input=f'{header}.{body}'.encode(), capture_output=True).returncode, 0)
             self.assertNotEqual(subprocess.run(command, input=f'{header}.{body}x'.encode(), capture_output=True).returncode, 0)
+
+    def test_check_workload_mounts_its_scoped_runtime_health_configuration(self):
+        templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
+        pod = yaml.safe_load((templates / 'ledger-service-dr-check.yaml.tmpl').read_text())['spec']['template']['spec']
+        container = pod['containers'][0]
+        env = {item['name']: item.get('value') for item in container['env']}
+        self.assertEqual(env['QUARKUS_CONFIG_LOCATIONS'], 'file:/etc/openbank-dr/application.properties')
+        mount = next(m for m in container['volumeMounts'] if m['mountPath'] == '/etc/openbank-dr')
+        self.assertIs(mount['readOnly'], True)
+        volume = next(v for v in pod['volumes'] if v['name'] == mount['name'])
+        self.assertEqual(volume['configMap'], {
+            'name': 'ledger-dr-check-auth',
+            'items': [{'key': 'dr-check.properties', 'path': 'application.properties'}]})
+        properties = dict(line.split('=', 1) for line in
+                          (templates / 'ledger-dr-check.properties').read_text().splitlines()
+                          if line and not line.startswith('#'))
+        self.assertEqual(properties, {
+            'config_ordinal': '500',
+            'quarkus.smallrye-health.check."io.quarkus.redis.runtime.client.health.RedisHealthCheck".enabled': 'false',
+            'mp.messaging.outgoing.ledger-events-out.health-enabled': 'false',
+        })
 
     def test_check_workload_uses_only_local_viewer_verification(self):
         template = ROOT / 'openbank-infra/gitops/dr-restore-templates/ledger-service-dr-check.yaml.tmpl'

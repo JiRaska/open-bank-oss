@@ -29,6 +29,13 @@ spec:
         fsGroup: 101
         seccompProfile:
           type: RuntimeDefault
+      volumes:
+        - name: dr-check-config
+          configMap:
+            name: ledger-dr-check-auth
+            items:
+              - key: dr-check.properties
+                path: application.properties
       containers:
         - name: ledger-service
           image: ${IMAGE}
@@ -38,7 +45,13 @@ spec:
               containerPort: 8101
             - name: management
               containerPort: 8085
+          volumeMounts:
+            - name: dr-check-config
+              mountPath: /etc/openbank-dr
+              readOnly: true
           env:
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: file:/etc/openbank-dr/application.properties
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://ledger-db-restored-rw.${NS}.svc:5432/openbank_ledger
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
