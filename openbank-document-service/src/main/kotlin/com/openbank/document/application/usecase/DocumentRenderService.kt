@@ -89,6 +89,7 @@ class DocumentRenderService(
             retainUntil = cmd.retainUntil,
             createdAt = now,
             idempotencyKey = cmd.idempotencyKey,
+            bankScope = bankScope,
         )
 
         val outboxMessage = OutboxMessage(

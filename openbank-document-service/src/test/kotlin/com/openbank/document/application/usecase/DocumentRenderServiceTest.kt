@@ -76,6 +76,7 @@ class DocumentRenderServiceTest {
         assertThat(result.sha256).isEqualTo(Document.sha256(pdf))
         assertThat(result.sizeBytes).isEqualTo(pdf.size.toLong())
         assertThat(result.metadata["bankScope"]).isEqualTo("test-bank-a")
+        assertThat(result.bankScope).isEqualTo("test-bank-a")
         assertThat(savedMsg.captured.eventType).isEqualTo(DocumentRenderService.EVENT_DOCUMENT_GENERATED)
         // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
         // (EVENT-sourced) attribution.

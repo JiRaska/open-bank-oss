@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -19,6 +19,7 @@ tags:
   - name: Documents
   - name: Signature Ceremonies
   - name: Business Agreements
+  - name: Lending Evidence
 
 paths:
   /api/v1/documents/templates:
@@ -201,6 +202,34 @@ paths:
         '403':
           description: The document.list policy decision denied the caller
 
+  /api/v1/documents/lending-guarantee-evidence/verify:
+    post:
+      tags: [Lending Evidence]
+      summary: Verify a signed guarantee document against a specific loan, guarantor and bank
+      description: >-
+        Internal boolean-only proof check for the dedicated openbank-lending-graph service
+        account (OPA action document.guaranteeEvidence.verify). Compares the sealed bytes'
+        SHA-256, not the pre-seal digest. Missing, archived, unsigned, unsealed or mismatched
+        evidence returns matches=false without disclosing document metadata.
+      operationId: verifyLendingGuaranteeEvidence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LendingGuaranteeEvidenceRequest'
+      responses:
+        '200':
+          description: Boolean proof result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LendingGuaranteeEvidenceResponse'
+        '400':
+          description: Invalid proof request
+        '403':
+          description: Caller is not the dedicated Lending graph service identity
+
   /api/v1/documents/{id}:
     get:
       tags: [Documents]
@@ -377,6 +406,34 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    LendingGuaranteeEvidenceRequest:
+      type: object
+      required: [documentId, loanId, guarantorPartyId, bankScope, sealedSha256]
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        loanId:
+          type: string
+          format: uuid
+        guarantorPartyId:
+          type: string
+          format: uuid
+        bankScope:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
+        sealedSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+    LendingGuaranteeEvidenceResponse:
+      type: object
+      required: [matches]
+      properties:
+        matches:
+          type: boolean
+
     CreateTemplateRequest:
       type: object
       required: [code, version, name, bodyHtml]
