@@ -94,7 +94,7 @@ into a bank-scoped outbox in the same transaction. A bounded relay publishes onl
 and random audit ID, and a dedicated strict Audit consumer validates the exact payload and
 persists it idempotently into the fleet hash chain. Both channels are disabled by default until
 the images, topic ACLs and operational checks are in place; code and local integration tests do
-not prove sandbox delivery or fleet anchoring. Central disclosure-outcome export, reconciliation and
+not prove sandbox delivery or fleet anchoring. Live disclosure-outcome export, reconciliation and
 historical business-action decision ingestion also remain, so this ADR stays `partial`.
 
 ### Remaining P0 audit-delivery contract
@@ -106,8 +106,11 @@ service. The outcome links to the allowed decision and records the projection ge
 applicable, normalized query hash,
 returned evidence references/count and whether the response was truncated. Failed queries and
 candidate checks omitted from the final response do not produce disclosure outcomes. Failure to
-persist the outcome suppresses the response. Central export and reconciliation of disclosure
-outcomes remain release gates; local persistence alone is not fleet anchoring. Historical decision
+persist the outcome suppresses the response. Context now commits a versioned SHA-256 disclosure
+commitment in the same transaction and has a separate relay, disabled by default until compatible
+Audit images are deployed. The strict Audit consumer validates both commitment types and rejects
+conflicting redelivery before ACK. Live export and reconciliation of disclosure outcomes remain
+release gates; local and in-memory tests are not fleet anchoring. Historical decision
 evidence from the source enforcement point remains a distinct record, not an inference from either
 read-audit row.
 

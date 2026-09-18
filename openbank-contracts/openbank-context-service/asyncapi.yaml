@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-# ADR-0006 / ADR-0308: minimized, versioned Context read-audit commitment.
+# ADR-0006 / ADR-0308: minimized, versioned Context audit commitments.
 asyncapi: 3.0.0
 info:
   title: OpenBank Context Service — audit commitment events
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    Context writes each restricted read-audit row and commitment outbox entry atomically.
-    This topic carries only a random audit ID, SHA-256 commitment and event time; the
+    Context writes each restricted read-audit or disclosure row and its commitment outbox
+    entry atomically. This topic carries only a random local row ID, SHA-256
+    commitment and event time; the
     investigator, case, root and returned evidence stay in the local bank-scoped store.
     The stream is disabled until the compatible Context and Audit images are deployed.
   license:
@@ -30,6 +31,8 @@ channels:
     messages:
       contextReadAuditCommitted:
         $ref: '#/components/messages/contextReadAuditCommitted'
+      contextDisclosureCommitted:
+        $ref: '#/components/messages/contextDisclosureCommitted'
 operations:
   publishContextAuditCommitment:
     action: send
@@ -40,6 +43,7 @@ operations:
       a claim is retried with the same eventId after a crash or failed send.
     messages:
       - $ref: '#/channels/contextAuditCommitments/messages/contextReadAuditCommitted'
+      - $ref: '#/channels/contextAuditCommitments/messages/contextDisclosureCommitted'
   ingestContextAuditCommitment:
     action: receive
     channel:
@@ -51,6 +55,7 @@ operations:
       of successful central storage.
     messages:
       - $ref: '#/channels/contextAuditCommitments/messages/contextReadAuditCommitted'
+      - $ref: '#/channels/contextAuditCommitments/messages/contextDisclosureCommitted'
 components:
   messages:
     contextReadAuditCommitted:
@@ -58,6 +63,11 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/contextReadAuditCommitmentV1'
+    contextDisclosureCommitted:
+      name: CONTEXT_DISCLOSURE_COMMITTED
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/contextDisclosureCommitmentV1'
   schemas:
     contextReadAuditCommitmentV1:
       type: object
@@ -100,3 +110,44 @@ components:
           type: string
           pattern: '^[0-9a-f]{64}$'
           description: SHA-256 of the canonical length-delimited, schema-versioned local row.
+    contextDisclosureCommitmentV1:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - eventId
+        - eventType
+        - aggregateType
+        - aggregateId
+        - sourceService
+        - occurredAt
+        - commitment
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        eventId:
+          type: string
+          format: uuid
+          description: Random ID of the local context_disclosure_audit row and outbox entry.
+        eventType:
+          type: string
+          const: CONTEXT_DISCLOSURE_COMMITTED
+        aggregateType:
+          type: string
+          const: CONTEXT_DISCLOSURE
+        aggregateId:
+          type: string
+          format: uuid
+          description: Must equal eventId.
+        sourceService:
+          type: string
+          const: context-service
+        occurredAt:
+          type: string
+          format: date-time
+          description: Local row time normalized to PostgreSQL microsecond precision.
+        commitment:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the canonical length-delimited local disclosure row.

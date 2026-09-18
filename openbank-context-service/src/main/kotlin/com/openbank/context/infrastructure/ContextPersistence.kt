@@ -227,6 +227,38 @@ class ContextDisclosureAuditEntity : PanacheEntityBase() {
 }
 
 @Entity
+@Table(name = "context_disclosure_commitment_outbox")
+class ContextDisclosureCommitmentOutboxEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "disclosure_id")
+    lateinit var disclosureId: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "commitment")
+    lateinit var commitment: String
+
+    @Column(name = "occurred_at")
+    lateinit var occurredAt: Instant
+
+    @Column(name = "status")
+    lateinit var status: String
+
+    @Column(name = "attempt_count")
+    var attemptCount: Int = 0
+
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+
+    @Column(name = "sent_at")
+    var sentAt: Instant? = null
+
+    @Column(name = "updated_at")
+    lateinit var updatedAt: Instant
+}
+
+@Entity
 @Table(name = "context_audit_commitment_outbox")
 class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
     @Id
@@ -589,9 +621,19 @@ class ContextReadAuditRepository(
             truncated = entry.disclosure.truncated
             occurredAt = entry.occurredAt.truncatedTo(ChronoUnit.MICROS)
         }
+        val commitment = ContextDisclosureCommitmentOutboxEntity().apply {
+            disclosureId = entity.id
+            bankScope = entity.bankScope
+            this.commitment = ContextDisclosureCommitment.of(entity)
+            occurredAt = entity.occurredAt
+            status = "PENDING"
+            updatedAt = entity.occurredAt
+        }
         sessions.withTransaction { session, _ ->
             session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult.flatMap { session.persist(entity) }
+                .setParameter("bank", bankScope).singleResult
+                .flatMap { session.persist(entity) }
+                .flatMap { session.persist(commitment) }
         }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
     }
 }

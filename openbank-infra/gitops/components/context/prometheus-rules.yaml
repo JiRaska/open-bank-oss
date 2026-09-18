@@ -53,14 +53,14 @@ spec:
           labels: { severity: critical, service: context-service }
           annotations:
             subject_period: continuous
-            summary: A Context read-audit commitment was dead-lettered
+            summary: A Context audit commitment was dead-lettered
             description: Quarantine and reconcile the audit ID; do not treat the local row as centrally anchored.
         - alert: ContextAuditCommitmentConsumerLag
           expr: max(kafka_consumergroup_lag{consumergroup="audit-service-context-commitments",topic="openbank.context.audit.commitments"}) > 0
           for: 15m
           labels: { severity: critical, service: context-service }
           annotations:
-            summary: Context read-audit commitments are not reaching the fleet audit chain promptly
+            summary: Context audit commitments are not reaching the fleet audit chain promptly
             description: Check the dedicated Audit consumer, broker ACLs and the Context outbox before enabling sensitive reads.
         - alert: ContextAuditCommitmentOutboxStalled
           expr: openbank_context_audit_outbox_pending > 0
@@ -69,3 +69,10 @@ spec:
           annotations:
             summary: Committed Context read-audit evidence remains in the local outbox
             description: Check the relay and dedicated topic, then reconcile local audit IDs with the fleet chain.
+        - alert: ContextDisclosureCommitmentOutboxStalled
+          expr: openbank_context_disclosure_outbox_pending > 0
+          for: 15m
+          labels: { severity: critical, service: context-service }
+          annotations:
+            summary: Committed Context disclosure evidence remains in the local outbox
+            description: Check the disclosure relay and reconcile local IDs with the fleet audit chain.
