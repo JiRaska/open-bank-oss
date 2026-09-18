@@ -113,7 +113,9 @@ not a deployment rollback. A 1×/10× synthetic portfolio with one asset shared
 across facilities, partial guarantees and mixed currencies is required before
 the P3 pilot. Flyway V18 is the **schema-only expand stage** for the four fact
 types; it enforces separate proposal/decision actors, immutable decided facts,
-and approved matching legacy collateral on an allocation insert. There is no
+approved matching legacy collateral on an allocation insert, and a locked
+recheck at allocation approval. A proposal whose collateral was released can
+be rejected but cannot be approved. There is no
 application writer, source read contract, Context projector, UI or measured
 workload yet, so V18 alone does not deliver the P3 lens.
 The database checks proposal/decision separation and local referential lineage;
