@@ -10,6 +10,8 @@
 
 CREATE TABLE lending_graph_asset (
     asset_id UUID PRIMARY KEY,
+    canonical_asset_id UUID NOT NULL REFERENCES lending_graph_asset(asset_id),
+    revision BIGINT NOT NULL CHECK (revision > 0),
     asset_type VARCHAR(32) NOT NULL CHECK (asset_type IN
         ('REAL_ESTATE', 'VEHICLE', 'SECURITIES', 'CASH_DEPOSIT', 'OTHER')),
     identity_jurisdiction CHAR(2) NOT NULL
@@ -23,6 +25,11 @@ CREATE TABLE lending_graph_asset (
         CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     decided_by VARCHAR(128),
     decided_at TIMESTAMPTZ,
+    CONSTRAINT lending_graph_asset_revision UNIQUE (canonical_asset_id, revision),
+    CONSTRAINT lending_graph_asset_root_or_correction CHECK (
+        (revision = 1 AND supersedes_asset_id IS NULL AND canonical_asset_id = asset_id) OR
+        (revision > 1 AND supersedes_asset_id IS NOT NULL AND canonical_asset_id <> asset_id)
+    ),
     CONSTRAINT lending_graph_asset_no_self_correction CHECK
         (supersedes_asset_id IS NULL OR supersedes_asset_id <> asset_id),
     CONSTRAINT lending_graph_asset_decision CHECK (
@@ -80,7 +87,7 @@ DECLARE
     legacy_released_at TIMESTAMPTZ;
 BEGIN
     SELECT asset_type INTO asset_kind FROM lending_graph_asset
-        WHERE asset_id = NEW.asset_id AND status = 'APPROVED';
+        WHERE asset_id = NEW.asset_id AND canonical_asset_id = asset_id AND status = 'APPROVED';
     IF asset_kind IS NULL THEN
         RAISE EXCEPTION 'approved asset identity is required';
     END IF;
@@ -120,7 +127,7 @@ DECLARE
     legacy_released_at TIMESTAMPTZ;
 BEGIN
     SELECT asset_type INTO asset_kind FROM lending_graph_asset
-        WHERE asset_id = NEW.asset_id AND status = 'APPROVED';
+        WHERE asset_id = NEW.asset_id AND canonical_asset_id = asset_id AND status = 'APPROVED';
     SELECT type::text, status::text, currency, released_at
       INTO legacy_type, legacy_status, legacy_currency, legacy_released_at
       FROM collateral WHERE id = NEW.collateral_id FOR UPDATE;
@@ -169,13 +176,23 @@ CREATE INDEX idx_lending_graph_valuation_asset ON lending_graph_valuation(asset_
 CREATE FUNCTION guard_lending_graph_asset_lineage() RETURNS trigger AS $$
 DECLARE
     prior_asset_id UUID;
+    prior_canonical_asset_id UUID;
+    prior_revision BIGINT;
     prior_status VARCHAR(16);
+    prior_asset_type VARCHAR(32);
+    prior_jurisdiction CHAR(2);
 BEGIN
     IF NEW.supersedes_asset_id IS NOT NULL THEN
-        SELECT asset_id, status INTO prior_asset_id, prior_status
+        SELECT asset_id, canonical_asset_id, revision, status, asset_type, identity_jurisdiction
+          INTO prior_asset_id, prior_canonical_asset_id, prior_revision, prior_status,
+               prior_asset_type, prior_jurisdiction
           FROM lending_graph_asset WHERE asset_id = NEW.supersedes_asset_id;
-        IF prior_asset_id IS NULL OR prior_status IS DISTINCT FROM 'APPROVED' THEN
-            RAISE EXCEPTION 'asset correction must supersede an approved identity';
+        IF prior_asset_id IS NULL OR prior_status IS DISTINCT FROM 'APPROVED' OR
+           prior_canonical_asset_id IS DISTINCT FROM NEW.canonical_asset_id OR
+           prior_revision IS DISTINCT FROM NEW.revision - 1 OR
+           prior_asset_type IS DISTINCT FROM NEW.asset_type OR
+           prior_jurisdiction IS DISTINCT FROM NEW.identity_jurisdiction THEN
+            RAISE EXCEPTION 'asset correction must supersede the approved prior revision of the same identity';
         END IF;
     END IF;
     RETURN NEW;
