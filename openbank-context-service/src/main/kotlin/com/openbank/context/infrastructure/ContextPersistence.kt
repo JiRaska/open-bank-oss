@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.context.infrastructure
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.context.application.CaseAssignmentPort
+import com.openbank.context.application.ContextDisclosureAudit
 import com.openbank.context.application.ContextGraphPort
 import com.openbank.context.application.ContextReadAudit
 import com.openbank.context.application.ContextReadAuditPort
@@ -190,6 +192,38 @@ class ContextReadAuditEntity : PanacheEntityBase() {
 
     @Column(name = "known_at")
     var knownAt: Instant? = null
+}
+
+@Entity
+@Table(name = "context_disclosure_audit")
+class ContextDisclosureAuditEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "disclosure_id")
+    lateinit var id: UUID
+
+    @Column(name = "decision_audit_id")
+    lateinit var decisionAuditId: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "query_hash")
+    lateinit var queryHash: String
+
+    @Column(name = "projection_generation")
+    var projectionGeneration: Long? = null
+
+    @Column(name = "evidence_refs_json")
+    lateinit var evidenceRefsJson: String
+
+    @Column(name = "evidence_count")
+    var evidenceCount: Int = 0
+
+    @Column(name = "truncated")
+    var truncated: Boolean = false
+
+    @Column(name = "occurred_at")
+    lateinit var occurredAt: Instant
 }
 
 @Entity
@@ -504,12 +538,13 @@ class CaseAssignmentRepository(
 @ApplicationScoped
 class ContextReadAuditRepository(
     private val sessions: Mutiny.SessionFactory,
+    private val mapper: ObjectMapper,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextReadAuditPort {
     override suspend fun record(entry: ContextReadAudit) {
         val entity = ContextReadAuditEntity().apply {
-            id = Ids.newId()
+            id = entry.id
             this.bankScope = this@ContextReadAuditRepository.bankScope
             principalId = entry.principalId
             caseId = entry.caseId
@@ -540,5 +575,23 @@ class ContextReadAuditRepository(
                 .flatMap { session.persist(commitment) }
         }
             .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+    }
+
+    override suspend fun recordDisclosure(entry: ContextDisclosureAudit) {
+        val entity = ContextDisclosureAuditEntity().apply {
+            id = Ids.newId()
+            decisionAuditId = entry.decisionAuditId
+            bankScope = this@ContextReadAuditRepository.bankScope
+            queryHash = entry.queryHash
+            projectionGeneration = entry.disclosure.projectionGeneration
+            evidenceRefsJson = mapper.writeValueAsString(entry.disclosure.evidenceRefs)
+            evidenceCount = entry.disclosure.evidenceCount
+            truncated = entry.disclosure.truncated
+            occurredAt = entry.occurredAt.truncatedTo(ChronoUnit.MICROS)
+        }
+        sessions.withTransaction { session, _ ->
+            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                .setParameter("bank", bankScope).singleResult.flatMap { session.persist(entity) }
+        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
     }
 }

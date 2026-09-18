@@ -94,19 +94,22 @@ into a bank-scoped outbox in the same transaction. A bounded relay publishes onl
 and random audit ID, and a dedicated strict Audit consumer validates the exact payload and
 persists it idempotently into the fleet hash chain. Both channels are disabled by default until
 the images, topic ACLs and operational checks are in place; code and local integration tests do
-not prove sandbox delivery or fleet anchoring. Disclosure-outcome evidence, reconciliation and
+not prove sandbox delivery or fleet anchoring. Central disclosure-outcome export, reconciliation and
 historical business-action decision ingestion also remain, so this ADR stays `partial`.
 
 ### Remaining P0 audit-delivery contract
 
 The current `ALLOWED` row records a successful *access decision before the read*. It does not
-establish that any evidence was returned. Before an investigative lens is declared complete,
-Context must append a separate disclosure outcome after materializing the bounded response and
-before sending it to the caller. That outcome records the projection generation, normalized
-query hash, returned evidence references/count and whether the response was truncated. Failure
-to persist the disclosure outcome suppresses the response; a source timeout or failed query must
-never be reported as a successful disclosure. Historical decision evidence from the source
-enforcement point remains a distinct record, not an inference from either read-audit row.
+establish that any evidence was returned. Context now appends a separate, bank-scoped disclosure
+outcome after materializing a bounded successful response and before returning it from the query
+service. The outcome links to the allowed decision and records the projection generation where
+applicable, normalized query hash,
+returned evidence references/count and whether the response was truncated. Failed queries and
+candidate checks omitted from the final response do not produce disclosure outcomes. Failure to
+persist the outcome suppresses the response. Central export and reconciliation of disclosure
+outcomes remain release gates; local persistence alone is not fleet anchoring. Historical decision
+evidence from the source enforcement point remains a distinct record, not an inference from either
+read-audit row.
 
 Context will write each read-audit row and its export outbox entry in one database transaction.
 The outbox carries only a schema version, random audit event ID, occurrence time and SHA-256

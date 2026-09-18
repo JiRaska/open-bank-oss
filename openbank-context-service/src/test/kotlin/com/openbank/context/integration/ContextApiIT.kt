@@ -184,6 +184,15 @@ class ContextApiIT {
         assertThat(storedAuditCommitment(root)).isEqualTo(auditCommitments(root).single())
         assertThat(auditCommitments(root, null)).isEmpty()
         assertThat(auditCommitments(root, "another-bank")).isEmpty()
+        assertThat(disclosureRows(root)).hasSize(1)
+        assertThat(disclosureRows(root).single().first).isEqualTo(1)
+        assertThat(disclosureRows(root).single().second).startsWith("[\"evidence:")
+        assertThat(disclosureRows(root, null)).isEmpty()
+        assertThat(disclosureRows(root, "another-bank")).isEmpty()
+        assertAuditEvidenceImmutable(root)
+    }
+
+    private fun assertAuditEvidenceImmutable(root: String) {
         assertThatThrownBy {
             withAuditScope("openbank-cz") { connection ->
                 connection.prepareStatement("DELETE FROM context_read_audit WHERE root_ref = ?").use {
@@ -196,6 +205,17 @@ class ContextApiIT {
             withAuditScope("openbank-cz") { connection ->
                 connection.prepareStatement(
                     "DELETE FROM context_audit_commitment_outbox WHERE audit_id IN " +
+                        "(SELECT audit_id FROM context_read_audit WHERE root_ref = ?)",
+                ).use {
+                    it.setString(1, root)
+                    it.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("context audit records are append-only")
+        assertThatThrownBy {
+            withAuditScope("openbank-cz") { connection ->
+                connection.prepareStatement(
+                    "DELETE FROM context_disclosure_audit WHERE decision_audit_id IN " +
                         "(SELECT audit_id FROM context_read_audit WHERE root_ref = ?)",
                 ).use {
                     it.setString(1, root)
@@ -400,6 +420,22 @@ class ContextApiIT {
             }
         }
 
+    private fun disclosureRows(root: String, bankScope: String? = "openbank-cz"): List<Pair<Int, String>> =
+        withAuditScope(bankScope) { connection ->
+            connection.prepareStatement(
+                """SELECT d.evidence_count, d.evidence_refs_json FROM context_disclosure_audit d
+                   JOIN context_read_audit a ON a.audit_id = d.decision_audit_id
+                   WHERE a.principal_id = ? AND a.root_ref = ? AND a.decision = 'ALLOWED'
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, ACTOR)
+                statement.setString(2, root)
+                statement.executeQuery().use { rows ->
+                    buildList { while (rows.next()) add(rows.getInt(1) to rows.getString(2)) }
+                }
+            }
+        }
+
     private fun storedAuditCommitment(root: String): String = withAuditScope("openbank-cz") { connection ->
         connection.prepareStatement(
             "SELECT * FROM context_read_audit WHERE principal_id = ? AND root_ref = ?",
@@ -441,6 +477,7 @@ class ContextApiIT {
             )
             statement.execute("GRANT SELECT, DELETE ON context_read_audit TO context_read_audit_test")
             statement.execute("GRANT SELECT, DELETE ON context_audit_commitment_outbox TO context_read_audit_test")
+            statement.execute("GRANT SELECT, DELETE ON context_disclosure_audit TO context_read_audit_test")
         }
         connection.autoCommit = false
         connection.createStatement().use { it.execute("SET LOCAL ROLE context_read_audit_test") }

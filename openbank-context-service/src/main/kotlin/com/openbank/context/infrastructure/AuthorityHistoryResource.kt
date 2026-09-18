@@ -3,7 +3,9 @@ package com.openbank.context.infrastructure
 
 import com.openbank.context.application.ContextAccessDenied
 import com.openbank.context.application.ContextAuthorizationUnavailable
+import com.openbank.context.application.ContextDisclosure
 import com.openbank.context.application.ContextQueryService
+import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
@@ -52,7 +54,15 @@ class AuthorityHistoryResource(
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(case, purpose, effective, known),
             ) {
-                Response.ok(history.history(id, effective, known)).header("Cache-Control", "no-store").build()
+                val selected = history.history(id, effective, known)
+                ContextReadResult(
+                    Response.ok(selected).header("Cache-Control", "no-store").build(),
+                    ContextDisclosure(
+                        selected.observations.map { it.evidenceRef },
+                        selected.observations.size,
+                        selected.truncated,
+                    ),
+                )
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).build()
