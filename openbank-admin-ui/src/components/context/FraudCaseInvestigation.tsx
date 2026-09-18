@@ -63,7 +63,7 @@ export function FraudCaseInvestigation({ initialCaseId = '' }: { initialCaseId?:
         <div className={styles.chips}>
           <span className={styles.chip}>{t('Živý zdroj', 'Live source')}</span>
           <span className={styles.chip}>{t('Přístup dle případu', 'Case-scoped access')}</span>
-          <span className={styles.chip}>{network.inspectedCandidates} {t('prověřené případy', 'cases inspected')}</span>
+          <span className={styles.chip}>{network.inspectedCandidates} {t('prověřené přidělené případy', 'assigned cases inspected')}</span>
         </div>
         {network.candidateTruncated && <p role="status" className={styles.alert}>{t('Částečný pohled: další přidělené případy nebyly v tomto limitu prohledány.', 'Partial view: additional assigned cases were not searched within this limit.')}</p>}
         <div className={styles.stage}>
@@ -90,7 +90,7 @@ export function FraudCaseInvestigation({ initialCaseId = '' }: { initialCaseId?:
           {network.related.map((item, index) => <button type="button" key={item.evidence.caseId} className={styles.evidenceCard} aria-pressed={selected === index} onClick={() => setSelected(index)}><strong>{t('Doložená shoda', 'Evidence match')}</strong>{short(item.evidence.caseId)} · {item.shared.map(ref => referenceLabel(ref.type)).join(', ')}</button>)}
         </div>
         {selectedEvidence && <div className={styles.detail} aria-live="polite"><strong>{t('Zdrojová evidence', 'Source evidence')}</strong><dl><dt>{t('Případ', 'Case')}</dt><dd>{selectedEvidence.caseId}</dd><dt>{t('Skórovací záznam', 'Score record')}</dt><dd>{selectedEvidence.scoreId}</dd><dt>{t('Účet', 'Account')}</dt><dd>{selectedEvidence.accountId}</dd><dt>{t('Protistrana', 'Counterparty')}</dt><dd>{selectedEvidence.counterpartyId ?? '—'}</dd><dt>{t('Otevřeno', 'Opened')}</dt><dd>{selectedEvidence.openedAt}</dd></dl></div>}
-        <p className={styles.muted}>{t('Přístup je ověřen pro každý případ zvlášť. Graf zobrazuje nejvýše čtyři kandidáty a může být neúplný; shoda identifikátoru je vodítko, ne zjištění podvodu.', 'Every case is authorized separately. The graph inspects at most four candidates and may be incomplete; an identifier match is a lead, not a fraud finding.')}</p>
+        <p className={styles.muted}>{t('Přístup je ověřen pro každý případ zvlášť. Zdroj porovnává omezenou sadu přidělených případů a graf zobrazuje nejvýše čtyři shody; výsledek může být neúplný. Shoda identifikátoru je vodítko, ne zjištění podvodu.', 'Every case is authorized separately. The source compares a bounded set of assigned cases and the graph shows at most four matches; the result may be incomplete. An identifier match is a lead, not a fraud finding.')}</p>
       </>}
     </div>
   </section>

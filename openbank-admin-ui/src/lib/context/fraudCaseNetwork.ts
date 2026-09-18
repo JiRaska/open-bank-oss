@@ -46,7 +46,7 @@ function explicitShared(root: FraudCaseEvidence, related: FraudCaseEvidence): Fr
 export function parseFraudCaseNetwork(value: unknown): FraudCaseNetwork {
   const body = object(value), root = evidence(body.root)
   if (!Array.isArray(body.related) || body.related.length > 4 || !Number.isInteger(body.inspectedCandidates) ||
-      Number(body.inspectedCandidates) < body.related.length || Number(body.inspectedCandidates) > 4 ||
+      Number(body.inspectedCandidates) < body.related.length || Number(body.inspectedCandidates) > 256 ||
       typeof body.candidateTruncated !== 'boolean') throw new Error('Invalid bounded Fraud network')
   const seen = new Set([root.caseId])
   const related = body.related.map(raw => {
