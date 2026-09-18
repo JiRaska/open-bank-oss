@@ -143,6 +143,7 @@ class KybObservationReferenceIT {
             repository.append(decoder.decode(payload(caseId, observationId), UUID.randomUUID().toString(), EVENT_TYPE))
         }
         request(caseId).then().statusCode(403)
+        requestAccess(caseId).then().statusCode(403)
         val proposal = onVertx {
             assignments.propose(
                 ProposeAssignmentRequest(
@@ -163,23 +164,32 @@ class KybObservationReferenceIT {
             .body("root", org.hamcrest.Matchers.equalTo("kyb-case:$caseId"))
             .body("observations.size()", org.hamcrest.Matchers.equalTo(1))
             .body("observations[0].observationId", org.hamcrest.Matchers.equalTo(observationId.toString()))
+        requestAccess(caseId).then().statusCode(204).header("Cache-Control", "no-store")
+            .header("Content-Type", org.hamcrest.Matchers.nullValue())
         given().header("X-Investigation-Case-Id", UUID.randomUUID().toString())
             .header("X-Investigation-Purpose", PURPOSE)
             .get("/api/v1/context/kyb-cases/$caseId/ownership-observations").then().statusCode(400)
         onVertx { assignments.revoke(assignmentId, "kyb-revoker") }
         request(caseId).then().statusCode(403)
+        requestAccess(caseId).then().statusCode(403)
     }
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
     fun `operator cannot list KYB ownership references`() {
         request(UUID.randomUUID()).then().statusCode(403)
+        requestAccess(UUID.randomUUID()).then().statusCode(403)
     }
 
     private fun request(caseId: UUID) = given()
         .header("X-Investigation-Case-Id", caseId.toString())
         .header("X-Investigation-Purpose", PURPOSE)
         .get("/api/v1/context/kyb-cases/$caseId/ownership-observations")
+
+    private fun requestAccess(caseId: UUID) = given()
+        .header("X-Investigation-Case-Id", caseId.toString())
+        .header("X-Investigation-Purpose", PURPOSE)
+        .get("/api/v1/context/kyb-cases/$caseId/access")
 
     private fun payload(caseId: UUID, observationId: UUID, type: String = EVENT_TYPE) =
         """{"schemaVersion":1,"eventType":"$type","caseId":"$caseId", """ +

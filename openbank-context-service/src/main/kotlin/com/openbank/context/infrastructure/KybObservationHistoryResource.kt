@@ -35,6 +35,31 @@ class KybObservationHistoryResource(
     private val clock: Clock,
 ) {
     @GET
+    @Path("/{id}/access")
+    suspend fun access(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Investigation-Case-Id") caseId: String?,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+    ): Response {
+        require(caseId == id.toString()) { "caseId must identify the KYB case" }
+        require(purpose == PURPOSE) { "KYB_OWNERSHIP_REVIEW is required" }
+        return try {
+            queries.kybCaseEvidence(
+                id.toString(),
+                Investigator(identity.principal.name, identity.roles.sorted()),
+                InvestigationContext(caseId, purpose, clock.instant()),
+                summarize = ContextDisclosureSummaries::response,
+            ) {
+                Response.noContent().header("Cache-Control", "no-store").build()
+            }
+        } catch (_: ContextAccessDenied) {
+            Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        } catch (_: ContextAuthorizationUnavailable) {
+            Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        }
+    }
+
+    @GET
     @Path("/{id}/ownership-observations")
     suspend fun history(
         @PathParam("id") id: UUID,
