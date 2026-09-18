@@ -130,6 +130,9 @@ interface RegistryLookupUseCase {
      * `RegistryUnavailableException` instead, so the two can never be confused by a caller.
      */
     suspend fun lookup(cmd: LookupCommand): RegistryExtract?
+
+    /** Fresh cached extract only; never calls an external register or refreshes the cache. */
+    suspend fun cached(cmd: LookupCommand): RegistryExtract?
 }
 
 // One method per state transition: the count belongs to the state machine, not to this interface.

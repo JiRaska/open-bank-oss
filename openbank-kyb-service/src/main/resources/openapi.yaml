@@ -6,7 +6,8 @@ info:
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
-  version: 1.7.0
+  # 1.7.0 -> 1.8.0: additive cached-only lookup for read-only customer company profiles.
+  version: 1.8.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -80,6 +81,28 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/RegistryUnavailable'
+  /api/v1/kyb/lookup/cached:
+    get:
+      tags: [KYB]
+      summary: Read a fresh cached register extract without contacting the register
+      description: >-
+        Returns 404 when no fresh extract exists. It never performs an external lookup or
+        refreshes the cache; a customer profile can therefore use it without a hidden write.
+      operationId: cachedLookup
+      parameters:
+        - {name: scheme, in: query, required: true, schema: {type: string}}
+        - {name: identifier, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Fresh cached register extract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryExtract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kyb/registry/search:
     get:
       tags: [KYB]

@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.application
 
+import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.out.BusinessRegistryPort
 import com.openbank.kyb.application.port.out.RegistryExtractCache
 import com.openbank.kyb.application.usecase.RegistryLookupService
@@ -73,5 +74,29 @@ class RegistryLookupDemoCacheTest {
         val real = extract("ares", "45274649")
         service(real, cache).lookup(real.identifier, null)
         coVerify(exactly = 1) { cache.put(real) }
+    }
+
+    @Test
+    fun `cached read never fetches or writes a missing extract`(): Unit = runBlocking {
+        val cache = mockk<RegistryExtractCache>(relaxed = true)
+        coEvery { cache.find(any(), any()) } returns null
+        val real = extract("ares", "45274649")
+        val service = service(real, cache)
+
+        assertThat(service.cached(LookupCommand(IdentifierScheme.CZ_ICO, "45274649"))).isNull()
+        coVerify(exactly = 0) { service.registry.lookup(any(), any()) }
+        coVerify(exactly = 0) { cache.put(any()) }
+    }
+
+    @Test
+    fun `cached read returns only a fresh cache entry without contacting the register`(): Unit = runBlocking {
+        val cache = mockk<RegistryExtractCache>(relaxed = true)
+        val real = extract("ares", "45274649")
+        coEvery { cache.find(real.identifier, now.minus(Duration.ofHours(24))) } returns real
+        val service = service(real, cache)
+
+        assertThat(service.cached(LookupCommand(IdentifierScheme.CZ_ICO, "45274649"))).isEqualTo(real)
+        coVerify(exactly = 0) { service.registry.lookup(any(), any()) }
+        coVerify(exactly = 0) { cache.put(any()) }
     }
 }

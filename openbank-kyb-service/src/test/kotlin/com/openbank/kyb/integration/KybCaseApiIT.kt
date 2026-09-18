@@ -100,6 +100,23 @@ class KybCaseApiIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `cached lookup contract serves an existing extract over GET`() {
+        Given {
+            contentType("application/json")
+            body("""{"scheme":"CZ_ICO","identifier":"45274649"}""")
+        } When { post("/api/v1/kyb/lookup") } Then { statusCode(200) }
+
+        Given {
+            queryParam("scheme", "CZ_ICO")
+            queryParam("identifier", "45274649")
+        } When { get("/api/v1/kyb/lookup/cached") } Then {
+            statusCode(200)
+            body("legalName", equalTo("Příklad s.r.o."))
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     @Suppress("LongMethod") // one continuous journey; splitting it would need shared state between tests
     fun `two-signer s r o onboarding end to end with outbox evidence`() {
         // 1. lookup shows the register preview without creating anything

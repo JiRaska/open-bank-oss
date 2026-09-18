@@ -65,6 +65,7 @@ class RepresentationAttestationServiceTest {
 
     private class FixedLookup(var extract: RegistryExtract?) : RegistryLookupUseCase {
         override suspend fun lookup(cmd: LookupCommand): RegistryExtract? = extract
+        override suspend fun cached(cmd: LookupCommand): RegistryExtract? = extract
     }
 
     private fun extract(

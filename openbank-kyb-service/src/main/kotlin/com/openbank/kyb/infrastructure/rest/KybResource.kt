@@ -192,6 +192,20 @@ class KybResource {
     }
 
     @GET
+    @Path("/lookup/cached")
+    @Authorize(action = "kyb.lookup")
+    @Operation(summary = "Read a fresh cached register extract without contacting the register")
+    suspend fun cachedLookup(
+        @QueryParam("scheme") scheme: String?,
+        @QueryParam("identifier") identifier: String?,
+    ): Response {
+        val request = LookupRequest(scheme, identifier)
+        val extract = lookup.cached(LookupCommand(request.scheme(), request.identifier()))
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(ExtractResponse.from(extract)).build()
+    }
+
+    @GET
     @Path("/ubo")
     @Authorize(action = "kyb.ubo.read")
     @Operation(
