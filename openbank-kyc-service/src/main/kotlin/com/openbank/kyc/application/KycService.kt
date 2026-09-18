@@ -4,6 +4,7 @@
 
 package com.openbank.kyc.application
 
+import com.openbank.kyc.application.port.out.AdverseMediaScreeningPort
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.domain.model.CheckStatus
@@ -78,6 +79,8 @@ class KycService {
     @Inject lateinit var metrics: DomainMetrics
 
     @Inject lateinit var clock: Clock
+
+    @Inject lateinit var adverseMediaSource: AdverseMediaScreeningPort
 
     /** Bounded `type` tag for the fleet KYC metrics (`individual` | `business`). */
     private fun caseType(subjectType: SubjectType) = subjectType.name.lowercase()
@@ -410,14 +413,19 @@ class KycService {
         if (reason.length < MIN_REASON_LENGTH) throw InvalidApprovalReasonException(reason)
     }
 
-    private fun newCheck(type: CheckType) = KycCheck(
-        id = UUID.randomUUID(),
-        caseId = UUID.randomUUID(),
-        checkType = type,
-        status = CheckStatus.PENDING,
-        result = null,
-        provider = null,
-        performedAt = null,
-        createdAt = Instant.now(clock),
-    )
+    private fun newCheck(type: CheckType): KycCheck {
+        val missingSource = type == CheckType.ADVERSE_MEDIA && adverseMediaSource.sourceId == null
+        return KycCheck(
+            id = UUID.randomUUID(),
+            caseId = UUID.randomUUID(),
+            checkType = type,
+            status = if (missingSource) CheckStatus.MANUAL_REVIEW else CheckStatus.PENDING,
+            result = if (missingSource) "SOURCE_NOT_CONFIGURED" else null,
+            provider = null,
+            // Source availability is not a performed screen. A configured source still
+            // leaves this check pending until a result is actually applied.
+            performedAt = null,
+            createdAt = Instant.now(clock),
+        )
+    }
 }

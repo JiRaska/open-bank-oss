@@ -406,7 +406,7 @@ components:
           type: string
           description: >-
             The check performed. Individual subjects carry IDENTITY, ADDRESS, PEP_SCREENING,
-            SANCTIONS_SCREENING and ADVERSE_MEDIA; business subjects carry REGISTRY_MATCH,
+            and SANCTIONS_SCREENING; business subjects carry REGISTRY_MATCH,
             REPRESENTATIVE_AUTHORITY, UBO_IDENTIFICATION, SANCTIONS_SCREENING and ADVERSE_MEDIA
             (ADR-0284 D5). Deliberately NOT a closed enum on the response: the set grows with new
             subject types, and a client must tolerate a value it has not seen rather than break.
@@ -414,6 +414,12 @@ components:
         status:
           type: string
           enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]
+          description: >-
+            A new adverse-media check starts in MANUAL_REVIEW with result
+            SOURCE_NOT_CONFIGURED when no source is configured. Its provider and
+            performedAt remain null because no screening occurred. A configured source
+            alone leaves the check PENDING. Explicit sandbox auto-approval can replace
+            checks with PASSED results labelled sandbox-auto; these are not real screening.
         result:
           type: [string, 'null']
         provider:
