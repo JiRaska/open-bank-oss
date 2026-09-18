@@ -22,6 +22,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Entity
@@ -189,6 +190,38 @@ class ContextReadAuditEntity : PanacheEntityBase() {
 
     @Column(name = "known_at")
     var knownAt: Instant? = null
+}
+
+@Entity
+@Table(name = "context_audit_commitment_outbox")
+class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "audit_id")
+    lateinit var auditId: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "commitment")
+    lateinit var commitment: String
+
+    @Column(name = "occurred_at")
+    lateinit var occurredAt: Instant
+
+    @Column(name = "status")
+    lateinit var status: String
+
+    @Column(name = "attempt_count")
+    var attemptCount: Int = 0
+
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+
+    @Column(name = "sent_at")
+    var sentAt: Instant? = null
+
+    @Column(name = "updated_at")
+    lateinit var updatedAt: Instant
 }
 
 @ApplicationScoped
@@ -487,13 +520,24 @@ class ContextReadAuditRepository(
             policyVersion =
                 entry.policyVersion
             reasonCode = entry.reasonCode
-            occurredAt = entry.occurredAt
-            effectiveAt = entry.effectiveAt
-            knownAt = entry.knownAt
+            // PostgreSQL timestamptz stores microseconds. Commit only the value it can retain.
+            occurredAt = entry.occurredAt.truncatedTo(ChronoUnit.MICROS)
+            effectiveAt = entry.effectiveAt?.truncatedTo(ChronoUnit.MICROS)
+            knownAt = entry.knownAt?.truncatedTo(ChronoUnit.MICROS)
+        }
+        val commitment = ContextAuditCommitmentOutboxEntity().apply {
+            auditId = entity.id
+            this.bankScope = entity.bankScope
+            this.commitment = ContextAuditCommitment.of(entity)
+            occurredAt = entity.occurredAt
+            status = "PENDING"
+            updatedAt = entity.occurredAt
         }
         sessions.withTransaction { session, _ ->
             session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult.flatMap { session.persist(entity) }
+                .setParameter("bank", bankScope).singleResult
+                .flatMap { session.persist(entity) }
+                .flatMap { session.persist(commitment) }
         }
             .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
     }

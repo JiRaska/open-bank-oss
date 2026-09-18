@@ -2,6 +2,8 @@
 package com.openbank.context.integration
 
 import com.openbank.context.infrastructure.AssignmentAdministrationService
+import com.openbank.context.infrastructure.ContextAuditCommitment
+import com.openbank.context.infrastructure.ContextReadAuditEntity
 import com.openbank.context.infrastructure.MakerCheckerViolation
 import com.openbank.context.infrastructure.ProposeAssignmentRequest
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 import jakarta.enterprise.inject.Any as AnyQualifier
@@ -176,9 +179,25 @@ class ContextApiIT {
         assertThat(auditDecisions(root)).containsExactly("ALLOWED")
         assertThat(auditDecisions(root, null)).isEmpty()
         assertThat(auditDecisions(root, "another-bank")).isEmpty()
+        assertThat(auditCommitments(root)).hasSize(1)
+        assertThat(auditCommitments(root).single()).matches("[0-9a-f]{64}")
+        assertThat(storedAuditCommitment(root)).isEqualTo(auditCommitments(root).single())
+        assertThat(auditCommitments(root, null)).isEmpty()
+        assertThat(auditCommitments(root, "another-bank")).isEmpty()
         assertThatThrownBy {
             withAuditScope("openbank-cz") { connection ->
                 connection.prepareStatement("DELETE FROM context_read_audit WHERE root_ref = ?").use {
+                    it.setString(1, root)
+                    it.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("context audit records are append-only")
+        assertThatThrownBy {
+            withAuditScope("openbank-cz") { connection ->
+                connection.prepareStatement(
+                    "DELETE FROM context_audit_commitment_outbox WHERE audit_id IN " +
+                        "(SELECT audit_id FROM context_read_audit WHERE root_ref = ?)",
+                ).use {
                     it.setString(1, root)
                     it.executeUpdate()
                 }
@@ -367,6 +386,49 @@ class ContextApiIT {
             }
         }
 
+    private fun auditCommitments(root: String, bankScope: String? = "openbank-cz"): List<String> =
+        withAuditScope(bankScope) { connection ->
+            connection.prepareStatement(
+                """SELECT o.commitment FROM context_audit_commitment_outbox o
+                   JOIN context_read_audit a ON a.audit_id = o.audit_id
+                   WHERE a.principal_id = ? AND a.root_ref = ? AND o.status = 'PENDING'
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, ACTOR)
+                statement.setString(2, root)
+                statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.getString(1)) } }
+            }
+        }
+
+    private fun storedAuditCommitment(root: String): String = withAuditScope("openbank-cz") { connection ->
+        connection.prepareStatement(
+            "SELECT * FROM context_read_audit WHERE principal_id = ? AND root_ref = ?",
+        ).use { statement ->
+            statement.setString(1, ACTOR)
+            statement.setString(2, root)
+            statement.executeQuery().use { rows ->
+                check(rows.next())
+                ContextAuditCommitment.of(
+                    ContextReadAuditEntity().apply {
+                        id = rows.getObject("audit_id", UUID::class.java)
+                        bankScope = rows.getString("bank_scope")
+                        principalId = rows.getString("principal_id")
+                        caseId = rows.getString("case_id")
+                        purpose = rows.getString("purpose")
+                        action = rows.getString("action")
+                        rootRef = rows.getString("root_ref")
+                        decision = rows.getString("decision")
+                        policyVersion = rows.getString("policy_version")
+                        reasonCode = rows.getString("reason_code")
+                        occurredAt = rows.getObject("occurred_at", OffsetDateTime::class.java).toInstant()
+                        effectiveAt = rows.getObject("effective_at", OffsetDateTime::class.java)?.toInstant()
+                        knownAt = rows.getObject("known_at", OffsetDateTime::class.java)?.toInstant()
+                    },
+                )
+            }
+        }
+    }
+
     private fun <T> withAuditScope(scope: String?, action: (Connection) -> T): T = connection().use { connection ->
         connection.createStatement().use { statement ->
             statement.execute(
@@ -378,6 +440,7 @@ class ContextApiIT {
                 """.trimIndent(),
             )
             statement.execute("GRANT SELECT, DELETE ON context_read_audit TO context_read_audit_test")
+            statement.execute("GRANT SELECT, DELETE ON context_audit_commitment_outbox TO context_read_audit_test")
         }
         connection.autoCommit = false
         connection.createStatement().use { it.execute("SET LOCAL ROLE context_read_audit_test") }

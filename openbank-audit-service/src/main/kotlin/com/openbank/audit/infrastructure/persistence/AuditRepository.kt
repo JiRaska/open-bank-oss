@@ -164,7 +164,14 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             val alreadyRecorded = Panache.withSession {
                 find("entryId", entry.id).firstResult()
             }.awaitSuspending()
-            if (alreadyRecorded != null) return
+            if (alreadyRecorded != null) {
+                if (entry.eventType == "CONTEXT_READ_AUDIT_COMMITTED") {
+                    require(alreadyRecorded.eventType == entry.eventType && alreadyRecorded.payload == entry.payload) {
+                        "Context audit commitment event ID reused with different evidence"
+                    }
+                }
+                return
+            }
             val prev = Panache.withSession {
                 find("ORDER BY id DESC").page(0, 1).firstResult()
             }.awaitSuspending()

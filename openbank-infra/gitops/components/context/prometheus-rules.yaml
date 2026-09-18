@@ -47,3 +47,27 @@ spec:
             subject_period: continuous
             summary: Authorized context read p95 exceeds 300 ms
             description: Keep the graph bounds fixed and inspect OPA, audit and adjacency-query latency.
+        - alert: ContextAuditCommitmentDeadLettered
+          expr: sum(increase(kafka_topic_partition_current_offset{topic="openbank.dlq.audit.context-audit-commitments-in"}[5m])) > 0
+          for: 0m
+          labels: { severity: critical, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: A Context read-audit commitment was dead-lettered
+            description: Quarantine and reconcile the audit ID; do not treat the local row as centrally anchored.
+        - alert: ContextAuditCommitmentConsumerLag
+          expr: max(kafka_consumergroup_lag{consumergroup="audit-service-context-commitments",topic="openbank.context.audit.commitments"}) > 0
+          for: 15m
+          labels: { severity: critical, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: Context read-audit commitments are not reaching the fleet audit chain promptly
+            description: Check the dedicated Audit consumer, broker ACLs and the Context outbox before enabling sensitive reads.
+        - alert: ContextAuditCommitmentOutboxStalled
+          expr: openbank_context_audit_outbox_pending > 0
+          for: 15m
+          labels: { severity: critical, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: Committed Context read-audit evidence remains in the local outbox
+            description: Check the relay and dedicated topic, then reconcile local audit IDs with the fleet chain.

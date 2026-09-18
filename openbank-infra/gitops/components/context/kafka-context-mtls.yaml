@@ -10,6 +10,9 @@ spec:
   authorization:
     type: simple
     acls:
+      - resource: { type: topic, name: openbank.context.audit.commitments, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
       - resource: { type: topic, name: openbank.dispute.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
