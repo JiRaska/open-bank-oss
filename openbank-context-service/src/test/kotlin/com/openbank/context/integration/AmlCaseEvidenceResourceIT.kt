@@ -89,7 +89,7 @@ class AmlCaseEvidenceResourceIT {
     fun `legacy complaint assignment does not authorize AML investigation`() {
         val id = UUID.randomUUID()
         record(id)
-        grant(id, purpose = "PAYMENT_COMPLAINT", root = null)
+        grant(id, purpose = "PAYMENT_COMPLAINT", root = "complaint:synthetic")
         request(id).then().statusCode(403)
     }
 

@@ -46,7 +46,10 @@ class ContextQueryServiceTest {
 
     @Test
     fun `missing assignment denies before policy and graph lookup`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(actor.id, context.caseId, context.purpose, now) } returns false
+        coEvery {
+            assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, "complaint:cmp-1", now)
+        } returns
+            false
 
         assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
             .isInstanceOf(ContextAccessDenied::class.java)
@@ -56,8 +59,21 @@ class ContextQueryServiceTest {
     }
 
     @Test
+    fun `a complaint assignment cannot read a different complaint root`(): Unit = runBlocking {
+        coEvery {
+            assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, "complaint:other", now)
+        } returns
+            false
+
+        assertThatThrownBy { runBlocking { service.complaint("other", actor, context) } }
+            .isInstanceOf(ContextAccessDenied::class.java)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `pdp outage is audited and fails closed`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } throws IllegalStateException("offline")
 
         assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
@@ -69,7 +85,7 @@ class ContextQueryServiceTest {
     @Test
     fun `authorized complaint query passes verified purpose and fixed bounds`(): Unit = runBlocking {
         val view = ContextNeighborhood("complaint:cmp-1", emptyList(), emptyList(), false)
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "bundle-9")
         coEvery { graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:cmp-1", now, 100, 200) } returns view
 
@@ -95,7 +111,7 @@ class ContextQueryServiceTest {
 
     @Test
     fun `failed disclosure write suppresses an otherwise successful graph response`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true)
         coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns
             ContextNeighborhood("complaint:cmp-1", emptyList(), emptyList(), false)
@@ -109,7 +125,7 @@ class ContextQueryServiceTest {
 
     @Test
     fun `failed graph query never records disclosure`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true)
         coEvery {
             graph.neighborhood(any(), any(), any(), any(), any())
@@ -122,7 +138,7 @@ class ContextQueryServiceTest {
 
     @Test
     fun `incident response aggregates reported services and audits their source event`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true)
         coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns ContextNeighborhood(
             "incident:inc-1",
@@ -157,7 +173,7 @@ class ContextQueryServiceTest {
 
     @Test
     fun `missing incident projection reports unknown impact after authorization`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true)
         coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns null
 
@@ -170,7 +186,7 @@ class ContextQueryServiceTest {
 
     @Test
     fun `bounded incident query preserves partial coverage`(): Unit = runBlocking {
-        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true)
         coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns ContextNeighborhood(
             "incident:inc-1",

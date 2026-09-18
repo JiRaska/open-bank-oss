@@ -17,8 +17,8 @@ read audit. It is outside every synchronous payment path.
 
 1. An authenticated investigator supplies a case id, purpose and root reference. These values are
    claims, not authority.
-2. The service verifies an active principal/case/purpose assignment in its database, then sends the
-   server-derived `assignmentVerified=true` fact with principal roles and the root to the OPA
+2. The service verifies an active principal/case/purpose/**exact root** assignment in its database, then sends the
+   server-derived `assignmentVerified=true` and `rootScopeVerified=true` facts with principal roles and the root to the OPA
    sidecar. OPA is mandatory and the service fails closed.
 3. The service commits an allow/deny/unavailable audit record before an allowed graph result is
    released.
@@ -31,10 +31,10 @@ read audit. It is outside every synchronous payment path.
 
 | Threat | Control | Residual risk |
 |---|---|---|
-| Spoofed purpose or case | Request values must match an active server-side assignment; creation needs an admin maker and distinct admin checker, is limited to 31 days, and is audited | Maker and checker can still collude; organizational access review remains required |
+| Spoofed purpose, case or root | Request values must match an active exact-root server-side assignment; creation needs an admin maker and distinct admin checker, is limited to 31 days, and is audited. Historical null-root grants authorize no graph read | Maker and checker can still collude; organizational access review remains required |
 | Tampered graph evidence | Kafka producer/consumer ACLs and mTLS, exact source/schema validation, mandatory source-issued revisions in production, stale/duplicate suppression and evidence references | P0/P1 has no signed event envelope; a compromised authorized producer can still emit false facts |
 | Repudiated read | Durable audit records principal, case, purpose, action, root, outcome and policy version before disclosure; DB triggers reject application updates/deletes | Audit table needs export to the fleet tamper-evident audit service before production |
-| Relationship disclosure | Role gate, assignment, OPA, namespace-specific fixed query, 100-node/200-edge bounds; complaint hops follow only explicit outgoing lifecycle and booking relations; denied requests return no counts | Broad assignment issuance could still expose linked cases |
+| Relationship disclosure | Role gate, exact-root assignment, independent OPA scope check, namespace-specific fixed query, 100-node/200-edge bounds; complaint hops follow only explicit outgoing lifecycle and booking relations; denied requests return no counts | Approved root access still exposes the permitted bounded neighborhood; linked-case filtering needs continued review |
 | Resource exhaustion | Indexed bounded fixed-template queries of at most three directed hops, with hard result limits and 500 ms DB timeout; dedicated CNPG/resources; expansion of the pilot requires the 100 RPS plus payment-control workload gate | Hot roots need production-distribution evidence and per-principal rate limits before increasing bounds |
 | Privilege escalation | `authz.enforce=true`; service and OPA both bind each action to its exact purpose; M2M identities are hard-denied; PDP outage returns 503 | Human maker/checker entitlements need periodic access review |
 

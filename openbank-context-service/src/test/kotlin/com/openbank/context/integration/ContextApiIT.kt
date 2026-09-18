@@ -55,7 +55,15 @@ class ContextApiIT {
         val reference = "CMP-ACCESS-${UUID.randomUUID()}"
         val caseId = "case-access-${UUID.randomUUID()}"
         seedNode("complaint:$reference", "COMPLAINT", "Complaint $reference")
-        val request = ProposeAssignmentRequest(ACTOR, caseId, PURPOSE, null, Instant.now().plusSeconds(3600))
+        val request =
+            ProposeAssignmentRequest(
+                ACTOR,
+                caseId,
+                PURPOSE,
+                null,
+                Instant.now().plusSeconds(3600),
+                "complaint:$reference",
+            )
         val proposal = onVertxContext { assignmentAdministration.propose(request, "maker-1") }
         assertThat(proposal.status).isEqualTo("PENDING")
 
@@ -122,7 +130,7 @@ class ContextApiIT {
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$reversalJournalId", 1)
         val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
 
-        seedAssignment(CASE, PURPOSE)
+        seedAssignment(CASE, PURPOSE, "complaint:$reference")
         val response = given()
             .header("X-Investigation-Case-Id", CASE)
             .header("X-Investigation-Purpose", PURPOSE)
@@ -169,7 +177,7 @@ class ContextApiIT {
         val reference = UUID.randomUUID().toString()
         val root = "complaint:$reference"
         val payment = "payment:${UUID.randomUUID()}"
-        seedAssignment(CASE, PURPOSE)
+        seedAssignment(CASE, PURPOSE, root)
         seedNode(root, "COMPLAINT", "Complaint $reference")
         seedNode(payment, "PAYMENT", "Payment evidence")
         seedEdge(root, payment, "TRACES")
@@ -244,7 +252,7 @@ class ContextApiIT {
 
         awaitCount("context_projection_events", "aggregate_ref", "incident:$incidentId", 2)
         assertThat(count("context_edges", "from_key = ?", "incident:$incidentId")).isEqualTo(1)
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", "incident:$incidentId")
 
         val response = given()
             .header("X-Investigation-Case-Id", CASE)
@@ -265,7 +273,7 @@ class ContextApiIT {
     fun `incident lens exposes aggregate counts without affected identifiers`() {
         val reference = UUID.randomUUID().toString()
         val root = "incident:$reference"
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", root)
         seedNode(root, "INCIDENT", "Incident $reference", namespace = "INCIDENT")
         repeat(2) {
             val payment = "payment:${UUID.randomUUID()}"
@@ -291,7 +299,7 @@ class ContextApiIT {
     @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
     fun `authorized missing incident is explicitly unknown and audited`() {
         val reference = UUID.randomUUID().toString()
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", "incident:$reference")
         given()
             .header("X-Investigation-Case-Id", CASE)
             .header("X-Investigation-Purpose", "INCIDENT_IMPACT")
@@ -323,7 +331,7 @@ class ContextApiIT {
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `an assignment for another purpose cannot be replayed against the complaint lens`() {
         val reference = UUID.randomUUID().toString()
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", "incident:${UUID.randomUUID()}")
         seedNode("complaint:$reference", "COMPLAINT", "Complaint $reference")
 
         given()
@@ -364,16 +372,18 @@ class ContextApiIT {
             .then().statusCode(403)
     }
 
-    private fun seedAssignment(caseId: String, purpose: String) = execute(
+    private fun seedAssignment(caseId: String, purpose: String, root: String) = execute(
         """INSERT INTO context_case_assignments
-            (assignment_id, bank_scope, principal_id, case_id, purpose, valid_from, valid_to, created_at)
-            VALUES (?, 'openbank-cz', ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (bank_scope, principal_id, case_id, purpose, valid_from) DO NOTHING
+            (assignment_id, bank_scope, principal_id, case_id, purpose, root_ref, valid_from, valid_to, created_at)
+            VALUES (?, 'openbank-cz', ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (bank_scope, principal_id, case_id, purpose, valid_from)
+            DO UPDATE SET root_ref = EXCLUDED.root_ref
         """.trimIndent(),
         UUID.randomUUID(),
         ACTOR,
         caseId,
         purpose,
+        root,
         NOW.minusSeconds(3600),
         NOW.plusSeconds(3600),
         NOW,

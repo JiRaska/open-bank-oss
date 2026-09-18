@@ -187,17 +187,7 @@ class ContextQueryService(
             decisionMetric(meters, action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
-        val rootScoped = namespace in setOf(
-            ContextNamespace.AUTHORIZATION,
-            ContextNamespace.AML,
-            ContextNamespace.KYB,
-            ContextNamespace.FRAUD,
-        )
-        val assigned = if (rootScoped) {
-            assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
-        } else {
-            assignments.isAssigned(actor.id, context.caseId, context.purpose, now)
-        }
+        val assigned = assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
         if (!assigned) {
             audit.record(entry(actor, context, action, root, "DENIED", null, "NO_ACTIVE_ASSIGNMENT", now))
             decisionMetric(meters, action, "denied", "no_active_assignment")
@@ -213,7 +203,7 @@ class ContextQueryService(
                         "caseId" to context.caseId,
                         "purpose" to context.purpose,
                         "assignmentVerified" to true,
-                        "rootScopeVerified" to rootScoped,
+                        "rootScopeVerified" to true,
                         "effectiveAt" to context.asOf.toString(),
                         "knownAt" to context.knownAt?.toString(),
                         "bankScope" to bankScope,
