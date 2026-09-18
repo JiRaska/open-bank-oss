@@ -500,3 +500,17 @@ not change any existing request's outcome until explicitly flipped.
   before insert. There is still no HTTP writer or approver/execution transition: the next
   rollout must authenticate the human maker at the edge and independently verify it at the
   workload boundary before enabling creation. Rollback is code-only; V18 stays inert.
+
+- **2026-09-18** — **Maker draft HTTP writer (additive, still non-executable).** A new
+  `/api/v1/domestic-payment-proposals/drafts` route accepts writes only from the validated
+  `openbank-edge` service-account JWT (`azp` and `preferred_username` both checked), not from
+  an operator who happens to hold `ROLE_OPERATOR` and can forge the maker header. The route
+  treats `X-Customer-Party-Id` as the human maker only after that workload check, rejects
+  execution-route fields, and maps an absent current maker grant to the same opaque 403.
+  Domestic-payment independently matches Czech account coordinates, current owner and the
+  account-service maker decision before storing DRAFT; a grant never authorizes debit.
+  Exact retries replay the same row; conflicting maker/key reuse returns 409. There is no
+  approval or execution transition, so this writer cannot move money. New edge + workload
+  versions must be rolled out after account-service's decision endpoint; an old account
+  provider fails closed. Rollback removes the two new routes while preserving any created
+  drafts and V18 for retention/export; dropping a populated table is not rollback.

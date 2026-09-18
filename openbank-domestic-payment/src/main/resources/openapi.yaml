@@ -5,7 +5,7 @@ info:
   title: Domestic Payment Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -22,6 +22,42 @@ tags:
   - name: Domestic Payments
 
 paths:
+  /api/v1/domestic-payment-proposals/drafts:
+    post:
+      tags: [Domestic Payments]
+      summary: Prepare a maker-only domestic payment proposal draft
+      description: >-
+        Workload-only route. A validated openbank-edge service token and its human maker header
+        are required. account-service must confirm an active owner-issued ACCOUNT_PROPOSE_PAYMENT
+        grant for this account, maker, amount and currency. The result is immutable DRAFT data,
+        not an approval, direct debit, payment or spend reservation. Reusing the same maker/key
+        with changed instruction, owner or grant returns 409. The shared payment request shape
+        is used for enrichment, but transferScope and technicalAccountCode are forbidden here.
+      operationId: createDomesticPaymentProposalDraft
+      parameters:
+        - {name: X-Customer-Party-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomesticPaymentRequest'
+      responses:
+        '201':
+          description: An immutable DRAFT was stored, or an exact retry replayed it
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only for an exact durable replay
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentProposalDraftResponse'
+        '400': {description: Malformed or unpersistable proposal input}
+        '403': {description: Untrusted workload identity or absent maker authority}
+        '409': {description: Idempotency-Key already belongs to a different draft}
+
   /api/v1/domestic-payments:
     post:
       tags: [Domestic Payments]
@@ -284,6 +320,24 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    DomesticPaymentProposalDraftResponse:
+      type: object
+      required: [id, status, makerPartyId, ownerPartyId, debtorAccountId, amount, currency,
+                 creditorAccountNumber, creditorBankCode, creditorName, createdAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [DRAFT]}
+        makerPartyId: {type: string, format: uuid}
+        ownerPartyId: {type: string, format: uuid}
+        debtorAccountId: {type: string, format: uuid}
+        amount: {type: number}
+        currency: {type: string, enum: [CZK]}
+        creditorAccountNumber: {type: string}
+        creditorBankCode: {type: string}
+        creditorName: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+
     CreateDomesticPaymentRequest:
       type: object
       # Property names and optionality mirror the DTO the resource deserializes into

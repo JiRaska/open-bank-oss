@@ -90,7 +90,7 @@ class DomesticPaymentProposalDraftService(
         }
         require(
             raw.amount.scale() <= MAX_AMOUNT_SCALE &&
-                raw.amount.precision() - raw.amount.scale() <= MAX_INTEGER_DIGITS,
+                raw.amount.precision().toLong() - raw.amount.scale().toLong() <= MAX_INTEGER_DIGITS,
         ) {
             "A proposed amount exceeds the supported precision"
         }

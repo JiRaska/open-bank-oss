@@ -99,6 +99,12 @@ class DomesticPaymentProposalDraftServiceTest {
             }
         }
             .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            runBlocking {
+                service.create(MAKER, command().copy(amount = BigDecimal("1E+100000000")))
+            }
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
         coVerify(exactly = 0) { drafts.saveOrGetWinner(any()) }
     }
 

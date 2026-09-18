@@ -68,4 +68,24 @@ class DomesticPaymentResourceAuthzTest {
             statusCode(404)
         }
     }
+
+    @Test
+    @TestSecurity(user = "service-account-untrusted", roles = ["ROLE_OPERATOR"])
+    fun `proposal draft route is served but refuses a forged maker header from another operator`() {
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            header("Idempotency-Key", "routing-test")
+            body(
+                """{"debtorAccountId":"${UUID.randomUUID()}","debtorAccountNumber":"1234567890",
+                "debtorBankCode":"0800","debtorName":"Owner","creditorAccountNumber":"9876543210",
+                "creditorBankCode":"0100","creditorName":"Supplier","amount":1500.00,
+                "currency":"CZK","priority":"STANDARD"}""",
+            )
+        } When {
+            post("/api/v1/domestic-payment-proposals/drafts")
+        } Then {
+            statusCode(403)
+        }
+    }
 }
