@@ -13,6 +13,7 @@ import { Trend } from "k6/metrics";
 http.setResponseCallback(http.expectedStatuses(200));
 
 const lens = __ENV.CONTEXT_PERF_LENS;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
 
 export const options = {
@@ -47,8 +48,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml or aml-network");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "fraud-network"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network or fraud-network");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -58,6 +59,13 @@ export function setup() {
   if (__ENV.CONTEXT_PERF_REFERENCE.length > 200) fail("Context Graph root reference is too long");
   if (__ENV.CONTEXT_PERF_CASE_ID.length > 200 || __ENV.CONTEXT_PERF_PURPOSE.length > 80) {
     fail("Context Graph case or purpose exceeds the API limit");
+  }
+  if (lens === "fraud-network") {
+    const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
+    if (!Number.isSafeInteger(assigned) || assigned < 2 || assigned > 10000 ||
+        !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID || "")) {
+      fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
+    }
   }
 }
 
@@ -70,6 +78,7 @@ export default function () {
     authority: `/api/v1/context/authorizations/${reference}`,
     aml: `/api/v1/context/aml-cases/${reference}`,
     "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
+    "fraud-network": `/api/v1/context/fraud-cases/${reference}/network`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -113,10 +122,35 @@ export default function () {
         return Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
           hasEvidence(body.root, 100) && body.related.every((caseHistory) => hasEvidence(caseHistory, 20));
       }
+      if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
+}
+
+function hasFraudNetworkEvidence(body) {
+  const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
+  const expected = __ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID.toLowerCase();
+  if (!body || body.root?.status !== "OPEN" ||
+      body.root.caseId?.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+      !Array.isArray(body.related) || body.related.length < 1 || body.related.length > 4 ||
+      !Number.isInteger(body.inspectedCandidates) || body.inspectedCandidates < body.related.length ||
+      body.inspectedCandidates > 4 || body.comparedCandidates !== Math.min(assigned, 256) ||
+      typeof body.candidateTruncated !== "boolean" ||
+      (assigned > 256 && !body.candidateTruncated)) return false;
+  const seen = new Set([body.root.caseId]);
+  return body.related.every((item) => {
+    const evidence = item?.evidence;
+    if (evidence?.status !== "OPEN" || seen.has(evidence.caseId) ||
+        !Array.isArray(item.shared) || item.shared.length < 1 || item.shared.length > 2) return false;
+    seen.add(evidence.caseId);
+    return item.shared.every((edge) =>
+      typeof edge.sourceId === "string" && UUID.test(edge.sourceId) &&
+      ((edge.type === "ACCOUNT" && edge.sourceId === body.root.accountId && edge.sourceId === evidence.accountId) ||
+        (edge.type === "COUNTERPARTY" && edge.sourceId === body.root.counterpartyId &&
+          edge.sourceId === evidence.counterpartyId)));
+  }) && seen.has(expected);
 }
 
 function hasEvidence(history, limit) {
