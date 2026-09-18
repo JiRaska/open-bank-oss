@@ -376,9 +376,11 @@ class KybResource {
         @PathParam("id") caseId: UUID,
         @PathParam("observationId") observationId: UUID,
         @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Authorization") authorization: String?,
         request: RestrictUboObservationRequest?,
     ): Response {
-        require(purpose == "KYB_OWNERSHIP_REVIEW") { "KYB_OWNERSHIP_REVIEW is required" }
+        val denied = checkCorrectionAccess(caseId, purpose, authorization)
+        if (denied != null) return denied
         val reason = requireNotNull(request?.reasonCode) { "reasonCode is required" }
         require(reason in RESTRICTION_REASONS) { "unsupported restriction reasonCode" }
         return when (

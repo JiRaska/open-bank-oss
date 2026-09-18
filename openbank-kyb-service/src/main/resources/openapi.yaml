@@ -9,7 +9,7 @@ info:
   # 1.7.0 -> 1.8.0: additive — case-scoped historical UBO observation read for authorised staff.
   # 1.8.0 -> 1.9.0: additive — administrative restriction of a historical observation.
   # 1.9.0 -> 1.10.0: additive — reviewed, case-scoped UBO correction workflow.
-  version: 1.10.0
+  version: 1.11.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -248,8 +248,9 @@ paths:
       summary: Permanently restrict a historical ownership observation from further reads
       operationId: restrictUboObservation
       description: >-
-        ADMIN-only protective action. Repeating the same restriction is idempotent; no owner
-        attributes or free text enter its reference-only event. There is no unrestrict route.
+        ADMIN-only protective action requiring live case-scoped Context authorization. Repeating
+        the same restriction is idempotent; no owner attributes or free text enter its
+        reference-only event. There is no unrestrict route.
       parameters:
         - $ref: '#/components/parameters/caseId'
         - name: observationId
@@ -281,6 +282,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/kyb/cases/{id}/ubo-observations/{observationId}/corrections:
     post:
       tags: [KYB]
