@@ -9,6 +9,7 @@ import com.openbank.fraud.application.port.out.FraudCaseAccessDecision
 import com.openbank.fraud.infrastructure.client.FraudCaseContextAccessAdapter
 import com.openbank.fraud.it.PostgresRedisTestResource
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
@@ -137,6 +138,8 @@ class FraudInvestigationCaseIT {
         assertThat(response.jsonPath().getBoolean("truncated")).isFalse()
         assertThat(response.body.asString())
             .doesNotContain(account.toString(), counterparty.toString(), crossed.toString(), notSupplied.toString())
+        coVerify(exactly = 1) { access.assignedCandidates(root, BEARER) }
+        coVerify(exactly = 0) { access.check(root, BEARER) }
 
         given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
             .header("X-Investigator-Authorization", BEARER)

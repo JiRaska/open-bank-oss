@@ -105,15 +105,16 @@ class FraudInvestigationCaseResource(
         if (identity.principal.name != CONTEXT_SERVICE_PRINCIPAL) {
             return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
         }
-        val accessFailure = checkCaseAccess(caseId, investigatorAuthorization)
-        if (accessFailure != null) return accessFailure
+        val humanBearer = investigatorAuthorization?.takeIf {
+            it.startsWith("Bearer ") && it.length > "Bearer ".length
+        } ?: return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        val candidates = contextAccess.assignedCandidates(caseId, humanBearer)
+            ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
         val root = cases.find(caseId) ?: return Response.status(Response.Status.NOT_FOUND)
             .header("Cache-Control", "no-store").build()
         if (root.status != FraudInvestigationStatus.OPEN) {
             return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
         }
-        val candidates = contextAccess.assignedCandidates(caseId, requireNotNull(investigatorAuthorization))
-            ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
         val matches = cases.matchingAssigned(caseId, candidates.ids)
         return Response.ok(
             FraudAssignedMatchResponse(

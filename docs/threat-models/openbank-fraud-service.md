@@ -336,7 +336,7 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - **2026-09-18** — The candidate matcher is a separate source read restricted to a
   dedicated Context service principal and the human investigator's bearer. A human
   administrator or the shared machine principal cannot invoke it. Fraud checks the
-  root's current Context assignment, then obtains the candidate set directly from
+  root's current Context assignment by obtaining the candidate set directly from
   Context's root-scoped endpoint under the human bearer before running equality;
   the caller cannot submit case IDs. That Context endpoint exposes only case IDs
   already assigned to the same investigator and purpose; evidence remains separately
