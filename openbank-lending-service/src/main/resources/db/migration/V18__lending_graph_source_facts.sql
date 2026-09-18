@@ -264,6 +264,30 @@ CREATE TRIGGER lending_graph_guarantee_lineage_guard
 
 -- Facts are immutable. The sole mutation is the different-person decision of a
 -- pending proposal; approved/rejected rows cannot be rewritten or deleted.
+-- A direct INSERT with two supplied actor names must not manufacture a reviewed
+-- fact without ever passing through the proposal and decision transitions.
+CREATE FUNCTION guard_lending_graph_fact_initial_status() RETURNS trigger AS $$
+BEGIN
+    IF NEW.status <> 'PENDING' OR NEW.decided_by IS NOT NULL OR NEW.decided_at IS NOT NULL THEN
+        RAISE EXCEPTION 'lending graph evidence must start pending';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER lending_graph_asset_initial_status
+    BEFORE INSERT ON lending_graph_asset
+    FOR EACH ROW EXECUTE FUNCTION guard_lending_graph_fact_initial_status();
+CREATE TRIGGER lending_graph_allocation_initial_status
+    BEFORE INSERT ON lending_graph_allocation
+    FOR EACH ROW EXECUTE FUNCTION guard_lending_graph_fact_initial_status();
+CREATE TRIGGER lending_graph_valuation_initial_status
+    BEFORE INSERT ON lending_graph_valuation
+    FOR EACH ROW EXECUTE FUNCTION guard_lending_graph_fact_initial_status();
+CREATE TRIGGER lending_graph_guarantee_initial_status
+    BEFORE INSERT ON lending_graph_guarantee
+    FOR EACH ROW EXECUTE FUNCTION guard_lending_graph_fact_initial_status();
+
 CREATE FUNCTION guard_lending_graph_fact_mutation() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'TRUNCATE' THEN

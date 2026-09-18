@@ -21,6 +21,49 @@ class LendingGraphSourceSchemaIT {
     lateinit var dataSource: DataSource
 
     @Test
+    fun `reviewed graph facts cannot be inserted without a pending proposal`() {
+        val id = UUID.randomUUID()
+        val relatedId = UUID.randomUUID()
+        val documentId = UUID.randomUUID()
+        val hash = "a".repeat(64)
+        val attemptedApprovals = listOf(
+            """INSERT INTO lending_graph_asset
+               (asset_id, asset_type, source_document_id, source_sha256,
+                proposed_by, proposed_at, status, decided_by, decided_at)
+               VALUES ('$id', 'REAL_ESTATE', '$documentId', '$hash',
+                       'maker', now(), 'APPROVED', 'checker', now())""",
+            """INSERT INTO lending_graph_allocation
+               (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+                priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at,
+                status, decided_by, decided_at)
+               VALUES ('$id', '$relatedId', '$relatedId', 1, 100, 'EUR',
+                       1, now(), '$documentId', '$hash', 'maker', now(),
+                       'APPROVED', 'checker', now())""",
+            """INSERT INTO lending_graph_valuation
+               (valuation_id, asset_id, amount, currency, basis, effective_at,
+                source_document_id, source_sha256, proposed_by, proposed_at,
+                status, decided_by, decided_at)
+               VALUES ('$id', '$relatedId', 100, 'EUR', 'MARKET', now(),
+                       '$documentId', '$hash', 'maker', now(),
+                       'APPROVED', 'checker', now())""",
+            """INSERT INTO lending_graph_guarantee
+               (guarantee_id, contract_id, revision, loan_id, guarantor_party_id,
+                cap_amount, currency, coverage_fraction, seniority, valid_from,
+                source_document_id, source_sha256, proposed_by, proposed_at,
+                status, decided_by, decided_at)
+               VALUES ('$id', '$relatedId', 1, '$relatedId', '$relatedId',
+                       100, 'EUR', 1, 1, now(), '$documentId', '$hash', 'maker', now(),
+                       'APPROVED', 'checker', now())""",
+        )
+        dataSource.connection.use { connection ->
+            attemptedApprovals.forEach { sql ->
+                assertThatThrownBy { connection.createStatement().use { it.executeUpdate(sql) } }
+                    .hasMessageContaining("lending graph evidence must start pending")
+            }
+        }
+    }
+
+    @Test
     fun `an asset requires a different checker and approved evidence cannot be changed`() {
         val assetId = createPendingAsset()
         dataSource.connection.use { connection ->
