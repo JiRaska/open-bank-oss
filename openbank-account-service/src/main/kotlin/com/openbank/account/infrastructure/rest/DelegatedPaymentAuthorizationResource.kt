@@ -69,7 +69,9 @@ class DelegatedPaymentAuthorizationResource(private val authorizationUseCase: Au
      *   "delegationId": "<uuid>", "grantorPartyId": "<uuid>" }
      * ```
      * `delegationId`/`grantorPartyId` are present only when `outcome` is `DELEGATED`. `outcome`
-     * distinguishes NO_GRANT from LIMIT_EXCEEDED for the audit record; the caller is expected to
+     * distinguishes NO_GRANT from LIMIT_EXCEEDED for the audit record. For a policy requiring an
+     * operation approval, the compatible wire outcome remains NO_GRANT and the additive
+     * `approvalRequired` flag tells upgraded audit consumers the precise reason. The caller must
      * render every non-authorized outcome as the same opaque refusal on the customer wire, so the
      * endpoint does not become an existence oracle for other people's grants.
      */
@@ -99,7 +101,17 @@ class DelegatedPaymentAuthorizationResource(private val authorizationUseCase: Au
         val decision = authorizationUseCase.authorizeDelegatedPayment(accountId, partyId, money)
         val body = buildMap<String, Any?> {
             put("authorized", decision.authorized)
-            put("outcome", decision.outcome.name)
+            // Keep the closed response enum compatible with older consumers; the additive flag
+            // carries the stronger refusal classification to upgraded audit consumers.
+            put(
+                "outcome",
+                if (decision.outcome == DelegatedPaymentOutcome.APPROVAL_REQUIRED) {
+                    DelegatedPaymentOutcome.NO_GRANT.name
+                } else {
+                    decision.outcome.name
+                },
+            )
+            if (decision.outcome == DelegatedPaymentOutcome.APPROVAL_REQUIRED) put("approvalRequired", true)
             if (decision.outcome == DelegatedPaymentOutcome.DELEGATED) {
                 put("delegationId", decision.delegationId?.toString())
                 put("grantorPartyId", decision.grantorPartyId?.toString())

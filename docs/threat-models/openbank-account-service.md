@@ -631,6 +631,17 @@ fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. R
 consumer-first (account-service migration and consumer before delegation-service producer);
 rollback removes the producer fields first and may retain the additive projection columns.
 
+The direct-debit authorization endpoint has no operation id or quorum evidence. It now permits
+only a `SOLO` grant with no `requiredApprovals`; `N_OF_M`, `ANY_ONE`, `ALL`, unknown and malformed
+policies answer a refusal even when `ACCOUNT_INITIATE_PAYMENT` is present. The owner transparency
+view uses the same direct-payment predicate. An additive `approvalRequired` flag lets upgraded edge
+audit distinguish this refusal while the existing closed `outcome` enum remains `NO_GRANT` for
+older callers; no grant id or grantor is returned. The edge still renders the same opaque 403.
+This is a fail-closed consumer-first guard, **not** a multi-signature execution flow: a later
+operation snapshot, distinct SCA decisions and one-time execution proof must exist before a
+non-SOLO grant may ever debit. Rollback is to the previous account-service binary after disabling
+non-SOLO issuance; the additive wire flag can remain and old edge versions ignore it.
+
 ## SCA-derived representative identity
 
 An entity-owned savings proposal is still addressed under the entity subject, but the human

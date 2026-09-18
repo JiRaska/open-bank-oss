@@ -193,8 +193,8 @@ enum class DelegatedPaymentOutcome {
     /** The initiating party owns the account — not a delegated action, nothing to record. */
     OWNER,
 
-    /** A legacy `account_authorizations` row authorises the party. Amount limits on that table are
-     *  NOT evaluated here (see [DelegatedPaymentDecision]); it is not a delegation grant. */
+    /** A legacy `account_authorizations` row authorises the party, subject to its transaction
+     *  limit. It is not a delegation grant and never carries delegation evidence. */
     LEGACY_AUTHORIZATION,
 
     /** An ACTIVE, in-window, owner-issued delegation grant authorises the party for this amount. */
@@ -205,6 +205,9 @@ enum class DelegatedPaymentOutcome {
 
     /** A grant names the party, but every candidate grant refuses this amount/currency. */
     LIMIT_EXCEEDED,
+
+    /** An active grant needs operation-specific approval evidence not supplied by this endpoint. */
+    APPROVAL_REQUIRED,
 
     /** The account does not exist. Reported separately so the caller does not turn a typo into a
      *  permission story; callers MUST still collapse it to the same opaque refusal on the wire. */

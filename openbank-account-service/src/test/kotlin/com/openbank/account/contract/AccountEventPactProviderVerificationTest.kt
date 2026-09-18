@@ -283,6 +283,20 @@ class AccountEventPactProviderVerificationTest {
         Unit
     }
 
+    @State("an account with an ACTIVE N_OF_M payment delegation to a known party exists")
+    fun accountWithJointPaymentDelegation() {
+        accountWithActivePaymentDelegation()
+        runOnVertxContext {
+            val grant = delegationProjectionRepository
+                .findActiveByAccountAndParty(DELEGATED_ACCOUNT_ID, DELEGATE_PARTY_ID)
+                .single { it.id == DELEGATION_GRANT_ID }
+            delegationProjectionRepository.upsertActive(
+                grant.copy(approvalPolicy = "N_OF_M", requiredApprovals = 2),
+            )
+            Unit
+        }
+    }
+
     /**
      * The negative state: deliberately seeds NOTHING.
      *

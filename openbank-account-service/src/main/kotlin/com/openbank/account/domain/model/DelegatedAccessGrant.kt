@@ -56,6 +56,12 @@ data class DelegatedAccessGrant(
         AuthorizationRole.CARD_HOLDER -> false
     }
 
+    /** Without operation-specific approval proof, only a well-formed SOLO grant permits a debit. */
+    fun permitsDirectPayment(): Boolean = approvalPolicy == APPROVAL_POLICY_SOLO && requiredApprovals == null
+
+    fun permitsDirect(role: AuthorizationRole): Boolean = satisfies(role) &&
+        (role != AuthorizationRole.PAYMENT_ONLY && role != AuthorizationRole.FULL_ACCESS || permitsDirectPayment())
+
     fun satisfiesSavings(intent: SavingsDelegationIntent): Boolean = when (intent) {
         SavingsDelegationIntent.DEPOSIT -> CAP_SAVINGS_DEPOSIT in capabilities
         SavingsDelegationIntent.WITHDRAW -> CAP_SAVINGS_WITHDRAW in capabilities

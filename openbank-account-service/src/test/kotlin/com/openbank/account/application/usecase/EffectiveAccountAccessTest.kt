@@ -72,6 +72,8 @@ class EffectiveAccountAccessTest {
         grantee: UUID = delegate,
         capabilities: Set<String> = setOf(DelegatedAccessGrant.CAP_INITIATE_PAYMENT),
         grantorPartyId: UUID = owner,
+        approvalPolicy: String = DelegatedAccessGrant.APPROVAL_POLICY_SOLO,
+        requiredApprovals: Int? = null,
         validFrom: OffsetDateTime = now.minusDays(1),
         validTo: OffsetDateTime? = now.plusDays(30),
         active: Boolean = true,
@@ -81,6 +83,8 @@ class EffectiveAccountAccessTest {
         grantorPartyId = grantorPartyId,
         granteePartyId = grantee,
         capabilities = capabilities,
+        approvalPolicy = approvalPolicy,
+        requiredApprovals = requiredApprovals,
         validFrom = validFrom,
         validTo = validTo,
         active = active,
@@ -178,6 +182,16 @@ class EffectiveAccountAccessTest {
         val entry = service.effectiveAccess(accountId)
             .single { it.source == AccountAccessSource.CUSTOMER_DELEGATION }
         assertThat(entry.canInitiatePayments).isFalse()
+    }
+
+    @Test
+    fun `joint approval grant is visible but not shown as direct payment authority`(): Unit = runBlocking {
+        coEvery { projectionRepository.findActiveByAccount(accountId) } returns
+            listOf(grant(approvalPolicy = "N_OF_M", requiredApprovals = 2))
+        val entry = service.effectiveAccess(accountId)
+            .single { it.source == AccountAccessSource.CUSTOMER_DELEGATION }
+        assertThat(entry.canInitiatePayments).isFalse()
+        assertThat(entry.capabilities).contains(DelegatedAccessGrant.CAP_INITIATE_PAYMENT)
     }
 
     @Test

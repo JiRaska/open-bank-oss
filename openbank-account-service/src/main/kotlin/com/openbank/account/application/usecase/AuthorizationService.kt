@@ -155,7 +155,7 @@ class AuthorizationService(
                 AccountAccessEntry(
                     partyId = grant.granteePartyId,
                     source = AccountAccessSource.CUSTOMER_DELEGATION,
-                    canInitiatePayments = grant.satisfies(AuthorizationRole.PAYMENT_ONLY),
+                    canInitiatePayments = grant.permitsDirect(AuthorizationRole.PAYMENT_ONLY),
                     capabilities = grant.capabilities,
                     perTransactionLimit = grant.perTransactionLimitAmount,
                     perTransactionLimitCurrency = grant.perTransactionLimitCurrency,
@@ -189,7 +189,9 @@ class AuthorizationService(
         if (amount == null) return hasDelegatedAccess(accountId, partyId, role, account.partyId)
         val now = OffsetDateTime.now(clock)
         return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
-            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfies(role) }
+            .filter {
+                it.issuedBy(account.partyId) && it.isActiveOn(now) && it.permitsDirect(role)
+            }
             .any { it.withinPerTransactionLimit(amount.amount, amount.currency.code) }
     }
 
@@ -214,6 +216,8 @@ class AuthorizationService(
      *
      * The role asked is always PAYMENT_ONLY: this method exists for debits. FULL_ACCESS satisfies
      * it through [DelegatedAccessGrant.satisfies] / the legacy role check, exactly as before.
+     * The projection's approval policy is independently enforced: this endpoint has no
+     * operation-level quorum proof, so only SOLO grants are direct-debit candidates.
      */
     override suspend fun authorizeDelegatedPayment(
         accountId: UUID,
@@ -232,7 +236,8 @@ class AuthorizationService(
         val now = OffsetDateTime.now(clock)
         val candidates = delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
             .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfies(role) }
-        val permitting = candidates.firstOrNull { grant ->
+        val directCandidates = candidates.filter { it.permitsDirectPayment() }
+        val permitting = directCandidates.firstOrNull { grant ->
             amount == null || grant.withinPerTransactionLimit(amount.amount, amount.currency.code)
         }
 
@@ -255,6 +260,8 @@ class AuthorizationService(
             )
             // A candidate existed and every one refused the amount — the grantor's ceiling bit,
             // which is a materially different event from "this party has nothing here".
+            directCandidates.isEmpty() && candidates.isNotEmpty() ->
+                DelegatedPaymentDecision(DelegatedPaymentOutcome.APPROVAL_REQUIRED)
             candidates.isNotEmpty() || legacy.isNotEmpty() ->
                 DelegatedPaymentDecision(DelegatedPaymentOutcome.LIMIT_EXCEEDED)
             else -> DelegatedPaymentDecision(DelegatedPaymentOutcome.NO_GRANT)
@@ -336,6 +343,8 @@ class AuthorizationService(
     ): Boolean {
         val now = OffsetDateTime.now(clock)
         return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
-            .any { it.issuedBy(ownerPartyId) && it.isActiveOn(now) && it.satisfies(role) }
+            .any {
+                it.issuedBy(ownerPartyId) && it.isActiveOn(now) && it.permitsDirect(role)
+            }
     }
 }

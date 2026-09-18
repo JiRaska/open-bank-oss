@@ -5,6 +5,8 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
+  # 1.18.0 -> 1.19.0: additive approvalRequired refusal flag; the existing closed
+  # outcome enum remains unchanged for mixed-version callers.
   # 1.17.0 -> 1.18.0 (#5962): additive — declare EXPIRED on the withdrawal-proposal list filter,
   # matching WithdrawalProposalStatus, which has carried it since the enum's introduction.
   # 1.16.0 -> 1.17.0 (#9044): additive — optional termsVersion/termsUrl/termsEffectiveFrom on
@@ -12,7 +14,7 @@ info:
   # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
   # opening other account types are unaffected; term-deposit openings come only from
   # customer-edge, updated in the same change).
-  version: 1.18.0
+  version: 1.19.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -378,7 +380,10 @@ paths:
         reconstruct which one was live when the money moved.
 
 
-        `outcome` distinguishes NO_GRANT from LIMIT_EXCEEDED for the audit record.
+        `outcome` distinguishes NO_GRANT from LIMIT_EXCEEDED for existing callers.
+        `approvalRequired: true` distinguishes an N-of-M/unknown-policy refusal
+        for upgraded audit consumers. Its wire `outcome` stays NO_GRANT until the
+        response enum is expanded compatibly in a later stage.
         Callers MUST render every non-authorized outcome as the same opaque refusal on
         a customer-facing wire, so this never becomes an existence oracle for another
         party's grants. Authorize action `account.read`.
@@ -429,6 +434,11 @@ paths:
                       - NO_GRANT
                       - LIMIT_EXCEEDED
                       - ACCOUNT_NOT_FOUND
+                  approvalRequired:
+                    type: boolean
+                    description: >-
+                      True only when a live delegation needs an operation-specific approval
+                      that this direct-debit endpoint cannot verify. The decision is refused.
                   delegationId:
                     type: string
                     format: uuid

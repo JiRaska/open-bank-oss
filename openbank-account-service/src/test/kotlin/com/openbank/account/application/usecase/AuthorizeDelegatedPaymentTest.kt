@@ -70,6 +70,8 @@ class AuthorizeDelegatedPaymentTest {
         perTxAmount: String? = null,
         perTxCurrency: String = "CZK",
         grantorPartyId: UUID = owner,
+        approvalPolicy: String = DelegatedAccessGrant.APPROVAL_POLICY_SOLO,
+        requiredApprovals: Int? = null,
         validFrom: OffsetDateTime = now.minusDays(1),
         validTo: OffsetDateTime? = now.plusDays(30),
         active: Boolean = true,
@@ -79,6 +81,8 @@ class AuthorizeDelegatedPaymentTest {
         grantorPartyId = grantorPartyId,
         granteePartyId = delegate,
         capabilities = capabilities,
+        approvalPolicy = approvalPolicy,
+        requiredApprovals = requiredApprovals,
         perTransactionLimitAmount = perTxAmount?.toBigDecimal(),
         perTransactionLimitCurrency = perTxAmount?.let { perTxCurrency },
         validFrom = validFrom,
@@ -147,6 +151,41 @@ class AuthorizeDelegatedPaymentTest {
             listOf(grant(capabilities = DelegatedAccessGrant.FULL_ACCESS_CAPABILITIES))
         assertThat(service.authorizeDelegatedPayment(accountId, delegate, czk("10.00")).outcome)
             .isEqualTo(DelegatedPaymentOutcome.DELEGATED)
+    }
+
+    @Test
+    fun `N of M grant never authorizes a direct debit without an operation approval`(): Unit = runBlocking {
+        val joint = grant(approvalPolicy = "N_OF_M", requiredApprovals = 2)
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns listOf(joint)
+        val decision = service.authorizeDelegatedPayment(accountId, delegate, czk("10.00"))
+        assertThat(decision.outcome).isEqualTo(DelegatedPaymentOutcome.APPROVAL_REQUIRED)
+        assertThat(decision.authorized).isFalse()
+        assertThat(decision.delegationId).isNull()
+        assertThat(service.isAuthorized(accountId, delegate, AuthorizationRole.PAYMENT_ONLY)).isFalse()
+        assertThat(
+            service.isAuthorizedForAmount(accountId, delegate, AuthorizationRole.PAYMENT_ONLY, czk("10.00")),
+        ).isFalse()
+    }
+
+    @Test
+    fun `unknown approval policy fails closed but an independent SOLO grant can still pay`(): Unit = runBlocking {
+        val unknown = grant(approvalPolicy = "FUTURE_POLICY")
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns listOf(unknown)
+        assertThat(service.authorizeDelegatedPayment(accountId, delegate, czk("10.00")).outcome)
+            .isEqualTo(DelegatedPaymentOutcome.APPROVAL_REQUIRED)
+        val solo = grant()
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns listOf(unknown, solo)
+        val decision = service.authorizeDelegatedPayment(accountId, delegate, czk("10.00"))
+        assertThat(decision.outcome).isEqualTo(DelegatedPaymentOutcome.DELEGATED)
+        assertThat(decision.delegationId).isEqualTo(solo.id)
+    }
+
+    @Test
+    fun `malformed SOLO policy with a quorum still refuses direct debit`(): Unit = runBlocking {
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(grant(requiredApprovals = 2))
+        assertThat(service.authorizeDelegatedPayment(accountId, delegate, czk("10.00")).outcome)
+            .isEqualTo(DelegatedPaymentOutcome.APPROVAL_REQUIRED)
     }
 
     // ── the refusals, and why they are distinguished ───────────────────────────────────────
