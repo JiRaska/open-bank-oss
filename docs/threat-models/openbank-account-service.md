@@ -728,3 +728,5 @@ decision use first; the additive projection table may remain until its consumer 
   remain required before clients can use the capability. Rollout: provider first, then the
   proposal service and edge; older providers return 404 so new clients must fail closed.
   Rollback: remove its future caller first; this additive read endpoint needs no schema rollback.
+  The customer-edge maker Pact supplies a fixed human, account, amount and CZK currency; its
+  provider state grants only `ACCOUNT_PROPOSE_PAYMENT` and is replayed against this HTTP route.

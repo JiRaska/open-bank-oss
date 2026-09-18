@@ -309,6 +309,20 @@ class AccountPactFolderProviderVerificationTest {
         Unit
     }
 
+    @State("an account with an ACTIVE maker-only payment delegation to a known party exists")
+    fun accountWithMakerPaymentDelegation() {
+        accountWithActivePaymentDelegation()
+        runOnVertxContext {
+            val grant = delegationProjectionRepository
+                .findActiveByAccountAndParty(DELEGATED_ACCOUNT_ID, DELEGATE_PARTY_ID)
+                .single { it.id == DELEGATION_GRANT_ID }
+            delegationProjectionRepository.upsertActive(
+                grant.copy(capabilities = setOf(DelegatedAccessGrant.CAP_PROPOSE_PAYMENT)),
+            )
+            Unit
+        }
+    }
+
     @State("an account with an ACTIVE N_OF_M payment delegation to a known party exists")
     fun accountWithJointPaymentDelegation() {
         accountWithActivePaymentDelegation()
