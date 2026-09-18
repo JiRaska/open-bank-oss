@@ -51,6 +51,20 @@ human_restriction_admin if {
     not startswith(input.principal.id, "service-account-")
 }
 
+human_ubo_correction_reviewer if {
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    some role in {"ROLE_KYC", "ROLE_ADMIN"}
+    role in input.principal.roles
+}
+
+# The resource checks the live case assignment and purpose; OPA first excludes
+# operators, edge clients and service accounts from all correction operations.
+prohibited if {
+    startswith(input.action, "kyb.ubo.correction.")
+    not human_ubo_correction_reviewer
+}
+
 allowed_reasons contains "admin-kyb-observation-restriction" if {
     input.action == "kyb.ubo.restrict"
     human_restriction_admin

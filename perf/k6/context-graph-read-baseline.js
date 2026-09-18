@@ -59,6 +59,10 @@ export function setup() {
   if (__ENV.CONTEXT_PERF_CASE_ID.length > 200 || __ENV.CONTEXT_PERF_PURPOSE.length > 80) {
     fail("Context Graph case or purpose exceeds the API limit");
   }
+  if (lens === "kyb" && (!/^[1-9][0-9]*$/.test(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS || "") ||
+      Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) > 50)) {
+    fail("KYB baseline requires CONTEXT_PERF_MIN_KYB_REVISIONS between 1 and 50");
+  }
 }
 
 export default function () {
@@ -117,10 +121,13 @@ export default function () {
       }
       if (lens === "kyb") {
         return body.root === `kyb-case:${__ENV.CONTEXT_PERF_REFERENCE}` &&
-          Array.isArray(body.observations) && body.observations.length > 0 &&
+          Array.isArray(body.observations) &&
+          body.observations.length >= Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) &&
           body.observations.length <= 50 && typeof body.truncated === "boolean" &&
           body.observations.every((item) => Number.isInteger(item.revision) && item.revision > 0 &&
-            /^[0-9a-f]{64}$/.test(item.sourceSha256));
+            /^[0-9a-f]{64}$/.test(item.sourceSha256)) &&
+          body.observations.every((item, index) => index === 0 ||
+            item.revision < body.observations[index - 1].revision);
       }
       if (lens === "fraud-network") {
         return hasFraudEvidence(body.root, __ENV.CONTEXT_PERF_REFERENCE) &&

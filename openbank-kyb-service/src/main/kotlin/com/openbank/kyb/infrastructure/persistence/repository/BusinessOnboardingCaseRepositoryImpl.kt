@@ -129,6 +129,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
             finding = KybUboJson.read(row.findingJson),
             sourceSha256 = row.sourceSha256,
             recordedAt = row.recordedAt,
+            supersedesObservationId = row.supersedesObservationId,
         )
     }
 

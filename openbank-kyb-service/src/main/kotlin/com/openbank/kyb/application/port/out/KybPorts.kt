@@ -105,6 +105,35 @@ interface UboObservationRepository {
     ): Boolean?
 }
 
+/** Correction writes are serialized on the onboarding case and checked again in the database. */
+interface UboCorrectionRepository {
+    suspend fun propose(
+        caseId: UUID,
+        priorObservationId: UUID,
+        candidate: com.openbank.kyb.domain.model.UboFinding,
+        reasonCode: String,
+        actorId: String,
+        proposedAt: Instant,
+    ): com.openbank.kyb.domain.model.UboCorrection?
+
+    /** Commits the read audit before returning personal data. */
+    suspend fun readAndAudit(
+        caseId: UUID,
+        correctionId: UUID,
+        principalId: String,
+        readAt: Instant,
+    ): com.openbank.kyb.domain.model.UboCorrection?
+
+    /** Null means absent/stale; an approval commits its successor observation and reference outbox entry. */
+    suspend fun decide(
+        caseId: UUID,
+        correctionId: UUID,
+        actorId: String,
+        approved: Boolean,
+        decidedAt: Instant,
+    ): Boolean?
+}
+
 /** Live case-root assignment decision from Context; source evidence never trusts a UI-only check. */
 interface UboObservationAccess {
     suspend fun check(caseId: UUID, bearer: String): UboObservationAccessDecision

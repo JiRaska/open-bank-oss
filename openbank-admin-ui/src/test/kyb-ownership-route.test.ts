@@ -8,6 +8,7 @@ import { GET as detail } from '@/app/api/context/kyb-cases/[id]/ownership-observ
 
 const caseId = '11111111-1111-4111-8111-111111111111'
 const observationId = '22222222-2222-4222-8222-222222222222'
+const correctionId = '33333333-3333-4333-8333-333333333333'
 const hash = 'a'.repeat(64)
 const at = '2026-09-17T12:00:00Z'
 const history = { root: `kyb-case:${caseId}`, knownAt: at, truncated: false,
@@ -72,5 +73,40 @@ describe('KYB ownership BFF', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...source, sourceSha256: 'b'.repeat(64) })))
     vi.stubGlobal('fetch', fetch)
     expect((await detailRequest()).status).toBe(502)
+  })
+
+  it('shows only explicit reviewed correction lineage and validates its revision order', async () => {
+    const correctedHistory = { ...history, observations: [
+      ...history.observations,
+      { observationId: correctionId, revision: 2, sourceSha256: hash, recordedAt: at },
+    ] }
+    const correctedSource = { ...source, id: correctionId, revision: 2, supersedesObservationId: observationId }
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(correctedHistory)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(correctedSource)))
+    vi.stubGlobal('fetch', fetch)
+    const response = await detail(new Request('http://localhost/correction'), {
+      params: Promise.resolve({ id: caseId, observationId: correctionId }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      correctsEarlierObservation: true, supersedesObservationId: observationId, supersedesRevision: 1,
+    })
+  })
+
+  it('does not disclose an earlier observation ID absent from the authorized slice', async () => {
+    const correctedHistory = { ...history, observations: [
+      { observationId: correctionId, revision: 2, sourceSha256: hash, recordedAt: at },
+    ] }
+    const correctedSource = { ...source, id: correctionId, revision: 2, supersedesObservationId: observationId }
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(correctedHistory)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(correctedSource)))
+    vi.stubGlobal('fetch', fetch)
+    const response = await detail(new Request('http://localhost/correction'), {
+      params: Promise.resolve({ id: caseId, observationId: correctionId }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      correctsEarlierObservation: true, supersedesObservationId: null, supersedesRevision: null,
+    })
   })
 })
