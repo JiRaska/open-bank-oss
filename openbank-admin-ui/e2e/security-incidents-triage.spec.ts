@@ -40,8 +40,8 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   await page.route('**/api/context/incidents/*/impact?*', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify(impactMalformed
-      ? { affectedByType: { PAYMENT: 3 }, total: 4, drilldownAvailable: false }
-      : { affectedByType: { PAYMENT: 3, ACCOUNT: 1 }, total: 4, drilldownAvailable: false, projectionStatus: 'PARTIAL' }),
+      ? { affectedByType: { SERVICE: 1 }, total: 2, drilldownAvailable: false }
+      : { affectedByType: { SERVICE: 1 }, total: 1, drilldownAvailable: false, projectionStatus: 'PARTIAL' }),
   }))
 
   await page.goto('/security/incidents')
@@ -59,15 +59,15 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   await impactForm.getByLabel('Incident', { exact: true }).selectOption(incidents[0].id)
   await impactForm.getByLabel('Case ID', { exact: true }).fill('case-7')
   await page.getByRole('button', { name: 'View reported scope' }).click()
-  await expect(page.getByText('Projected links: 4')).toBeVisible()
-  await expect(page.getByText('PAYMENT: 3')).toBeVisible()
+  await expect(page.getByText('Projected links: 1')).toBeVisible()
+  await expect(page.getByText('SERVICE: 1')).toBeVisible()
   await expect(page.getByText('Partial result: counts cover only the retrieved slice.')).toBeVisible()
   await expect(page.getByRole('img', { name: 'Aggregate reported incident scope map' })).toBeVisible()
 
   impactMalformed = true
   await page.getByRole('button', { name: 'View reported scope' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Impact could not be verified safely.' })).toBeVisible()
-  await expect(page.getByText('Projected links: 4')).toHaveCount(0)
+  await expect(page.getByText('Projected links: 1')).toHaveCount(0)
 
   await page.getByLabel('Filter by severity').selectOption('P3_MEDIUM')
   await expect(page.getByRole('status')).toContainText('1 of 3 incidents')
