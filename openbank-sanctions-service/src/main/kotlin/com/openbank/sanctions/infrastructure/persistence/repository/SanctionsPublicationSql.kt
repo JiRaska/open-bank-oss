@@ -11,10 +11,11 @@ internal object SanctionsPublicationSql {
     """
     const val RESOLVE_REPAIRED_IDENTITIES = """
         UPDATE sanctions_change_journal j
-        SET resolved_at = clock_timestamp(), resolved_by_external_id = e.external_id
+        SET resolved_at = clock_timestamp(), resolved_by_list_type = e.list_type,
+            resolved_by_external_id = e.external_id
         FROM sanctions_entries e
         WHERE j.list_type = :type AND j.resolved_at IS NULL
-          AND j.entry_id = e.id AND j.list_type = e.list_type
+          AND j.entry_id = e.id
           AND (j.external_id IS NULL OR octet_length(to_json(j.external_id)::text) > :maxBytes)
           AND e.external_id IS NOT NULL
           AND octet_length(to_json(e.external_id)::text) <= :maxBytes

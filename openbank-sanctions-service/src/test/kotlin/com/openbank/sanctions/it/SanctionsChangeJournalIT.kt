@@ -147,11 +147,13 @@ class SanctionsChangeJournalIT {
         assertThat(journalCount()).isEqualTo(2)
     }
 
-    private fun publish(): SanctionsPublicationOutcome = onEventLoop {
-        val id = pool.query("SELECT id FROM sanctions_lists WHERE list_type = 'PEP_GLOBAL'")
-            .execute().awaitSuspending().iterator().next().getUUID("id")
-        publisher.publishPending(id, SanctionsListType.PEP_GLOBAL)
-    }
+    private fun publish(listType: SanctionsListType = SanctionsListType.PEP_GLOBAL): SanctionsPublicationOutcome =
+        onEventLoop {
+            val id = pool.preparedQuery("SELECT id FROM sanctions_lists WHERE list_type = $1")
+                .execute(io.vertx.mutiny.sqlclient.Tuple.of(listType.name))
+                .awaitSuspending().iterator().next().getUUID("id")
+            publisher.publishPending(id, listType)
+        }
 
     private fun eventCount(type: String): Long = onEventLoop {
         pool.preparedQuery("SELECT count(*) AS total FROM sanctions_outbox WHERE event_type = $1")
@@ -419,6 +421,39 @@ class SanctionsChangeJournalIT {
         }
         assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
         assertThat(unresolvedJournalCount()).isZero()
+    }
+
+    @Test
+    fun `repair into another list releases the old invalid journal`() {
+        execute(
+            "INSERT INTO sanctions_entries (list_type, external_id, primary_name) " +
+                "SELECT 'PEP_GLOBAL', 'pep-baseline-' || n, 'PEP Baseline ' || n FROM generate_series(1, 10) n",
+        )
+        execute(
+            "INSERT INTO sanctions_entries (list_type, external_id, primary_name) " +
+                "SELECT 'OFAC_SDN', 'ofac-baseline-' || n, 'OFAC Baseline ' || n FROM generate_series(1, 10) n",
+        )
+        execute("DELETE FROM sanctions_change_journal")
+        execute("INSERT INTO sanctions_entries (list_type, primary_name) VALUES ('PEP_GLOBAL', 'Moved source')")
+        execute(
+            "UPDATE sanctions_entries SET list_type = 'OFAC_SDN', external_id = 'moved-source' " +
+                "WHERE primary_name = 'Moved source'",
+        )
+
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.NO_CHANGES)
+        assertThat(unresolvedJournalCount()).isEqualTo(1)
+        val archivedTargets = onEventLoop {
+            pool.query(
+                "SELECT resolved_by_list_type FROM sanctions_change_journal " +
+                    "WHERE resolved_at IS NOT NULL ORDER BY id",
+            )
+                .execute().awaitSuspending().map { it.getString("resolved_by_list_type") }
+        }
+        assertThat(archivedTargets).containsExactly("OFAC_SDN", "OFAC_SDN")
+        assertThat(publish(SanctionsListType.OFAC_SDN)).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(unresolvedJournalCount()).isZero()
+        assertThat(payloads("SANCTIONS_LIST_CHANGED").single()["changedExternalIds"].map { it.asText() })
+            .containsExactly("moved-source")
     }
 
     @Test
