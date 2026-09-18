@@ -28,6 +28,8 @@ data class TransactionInitiatedEvent(
     val instructionType: InstructionType = InstructionType.UNKNOWN,
     /** Rail payment that caused this booking; absent for operator and internal postings. */
     val originatingPaymentId: UUID? = null,
+    /** Source transaction reversed by this booking; present only for REVERSAL transactions. */
+    val reversalOf: UUID? = null,
     override val occurredAt: Instant,
     /**
      * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
