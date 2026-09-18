@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# AGENT PR GUARD — an autonomous agent's PR may not reach main through a protected path.
+# AGENT PR GUARD — protected changes require verified review and owner acceptance.
 #
 # WHY THIS EXISTS
 #   The repo is moving to scheduled, unattended agents that open PRs 24/7. The control that
@@ -15,8 +15,8 @@
 #   self-approval was refused.
 #
 #   So the rule moves to where it runs regardless of who is driving: a required check.
-#   A red required check cannot be cleared by the agent that tripped it, cannot be cleared
-#   by `--auto`, and takes a deliberate human action to override.
+#   A refusal is cleared only by verified separate AI reports and the owner's acceptance
+#   of that exact revision. Neither `--auto` nor a successful locator supplies that proof.
 #
 # WHAT IT IS AND IS NOT
 #   IS:     a guard against the unattended-accident — an agent quietly landing a change on
@@ -79,6 +79,7 @@
 import argparse
 import fnmatch
 import json
+import importlib.util
 import os
 import re
 import subprocess
@@ -272,11 +273,79 @@ def verdict(author, is_bot, branch, files, cfg, added=frozenset()):
         lines.append(f"    matched: {' '.join(sorted(matched)[:3])}")
     lines.append("")
     lines.append(
-        "An autonomous agent does not land these paths unattended. Hand this PR to a human "
-        "reviewer; do NOT reach for an administrative override flag — a refusal here is the "
-        "correct final state."
+        "An autonomous agent does not land these paths unattended. Supply verified solo "
+        "AI review evidence with owner acceptance; do NOT use an administrative override. "
+        "Without valid evidence the refusal remains in force."
     )
     return 1, "\n".join(lines)
+
+
+def review_run_for_pr(pr):
+    """A status only locates evidence. Its success and author grant no admission."""
+    pull = _gh(["api", f"repos/{REPO}/pulls/{pr}"])
+    head = pull.get("head", {}).get("sha", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise Undetermined("missing current PR head")
+    rows = _gh(["api", "--paginate", "--slurp", f"repos/{REPO}/commits/{head}/statuses?per_page=100"])
+    if not isinstance(rows, list) or any(not isinstance(page, list) for page in rows):
+        raise Undetermined("malformed review status pages")
+    for status in (item for page in rows for item in page):
+        if not isinstance(status, dict):
+            raise Undetermined("malformed review status")
+        if status.get("context") != "solo-review/evidence":
+            continue
+        match = re.fullmatch(rf"https://github\.com/{re.escape(REPO)}/actions/runs/([1-9][0-9]*)",
+                             status.get("target_url") or "")
+        if status.get("state") != "success" or match is None:
+            raise Undetermined("latest review evidence locator is not successful")
+        return int(match[1])
+    return None
+
+
+def validate_controller_policy(pr):
+    """Validate policy freshness even when the classifier would say unprotected."""
+    anchor = os.environ.get("SOLO_REVIEW_POLICY_SHA", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", anchor):
+        raise Undetermined("trusted workflow policy anchor missing")
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "solo_review_policy_proof", os.path.join(os.path.dirname(__file__), "solo-review-proof.py"))
+        proof = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(proof)
+        pull = _gh(["api", f"repos/{REPO}/pulls/{pr}"])
+        return proof.validate_policy_snapshot(REPO, pull["base"]["ref"], anchor, pull["head"]["sha"])
+    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, ImportError) as error:
+        raise Undetermined("trusted controller policy could not be verified") from error
+
+
+def reviewed_verdict(code, message, pr, review_run):
+    """A run id is a locator, never an approval; independently verify all evidence.
+
+    Classification is deliberately unchanged: the review producer still identifies
+    protected changes before any evidence exists. This bridge is explicit while the
+    separate required-check rollout is being validated.
+    """
+    if code != 1 or review_run is None:
+        return code, message
+    if type(review_run) is not int or review_run <= 0:
+        raise Undetermined("invalid solo review run id")
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solo-review-proof.py")
+        spec = importlib.util.spec_from_file_location("solo_review_guard_proof", path)
+        if spec is None or spec.loader is None:
+            raise ValueError("review verifier unavailable")
+        proof = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(proof)
+        options = {}
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            anchor = os.environ.get("SOLO_REVIEW_POLICY_SHA", "")
+            if not re.fullmatch(r"[0-9a-f]{40}", anchor):
+                raise ValueError("trusted workflow policy anchor missing")
+            options["trusted_anchor"] = anchor
+        proof.verify(REPO, pr, review_run, protected=True, **options)
+    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, ImportError) as error:
+        raise Undetermined("solo review evidence could not be verified") from error
+    return 0, f"protected change accepted by verified AI reviews and owner acceptance (run {review_run})"
 
 
 # --------------------------------------------------------------------------- enumeration
@@ -311,7 +380,7 @@ def parse_name_status_z(raw):
         paths = fields[index:index + width]
         index += width
         path = paths[-1]
-        files.append(path)
+        files.extend(paths)
         if status == "A":
             added.add(path)
     return files, frozenset(added)
@@ -352,15 +421,33 @@ def fetch_pr(n):
     local = fetch_event_pr(n)
     if local is not None:
         return local
-    pr = _gh(["pr", "view", str(n), "--json", "author,headRefName"])
-    author = (pr.get("author") or {}).get("login") or ""
-    is_bot = bool((pr.get("author") or {}).get("is_bot"))
-    branch = pr.get("headRefName") or ""
-    if not author or not branch:
-        raise Undetermined(f"PR #{n}: could not read author/headRefName")
+    pr = _gh(["api", f"repos/{REPO}/pulls/{n}"])
+    author = (pr.get("user") or {}).get("login") or ""
+    is_bot = (pr.get("user") or {}).get("type") == "Bot"
+    branch = (pr.get("head") or {}).get("ref") or ""
+    count = pr.get("changed_files")
+    if not author or not branch or type(count) is not int or count <= 0:
+        raise Undetermined(f"PR #{n}: missing identity or file count")
     pages = _gh(["api", f"repos/{REPO}/pulls/{n}/files?per_page=100", "--paginate", "--slurp"])
+    if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+        raise Undetermined("malformed PR file pages")
     flat = [f for page in pages for f in page]
-    files = [f["filename"] for f in flat]
+    if len(flat) != count or any(not isinstance(f, dict) or not f.get("filename") for f in flat):
+        raise Undetermined("incomplete PR file list")
+    names = [f["filename"] for f in flat]
+    if len(set(names)) != count:
+        raise Undetermined("duplicate PR file list entries")
+    files = []
+    for item in flat:
+        if item.get("status") == "renamed":
+            if not item.get("previous_filename"):
+                raise Undetermined("rename source path missing")
+            files.append(item["previous_filename"])
+        files.append(item["filename"])
+    final = _gh(["api", f"repos/{REPO}/pulls/{n}"])
+    for field in ("head", "base", "user", "changed_files"):
+        if final.get(field) != pr.get(field):
+            raise Undetermined("PR changed during classification")
     added = frozenset(f["filename"] for f in flat if f.get("status") == "added")
     return author, is_bot, branch, files, added
 
@@ -586,7 +673,7 @@ def self_test():
         parsed_files, parsed_added = parse_name_status_z(
             "M\0plain.kt\0A\0new file.kt\0R100\0old.kt\0renamed.kt\0C090\0source.kt\0copy.kt\0"
         )
-        if parsed_files != ["plain.kt", "new file.kt", "renamed.kt", "copy.kt"]:
+        if parsed_files != ["plain.kt", "new file.kt", "old.kt", "renamed.kt", "source.kt", "copy.kt"]:
             failures.append(f"name-status parser returned wrong paths: {parsed_files}")
         if parsed_added != frozenset({"new file.kt"}):
             failures.append(f"name-status parser returned wrong added paths: {parsed_added}")
@@ -617,6 +704,8 @@ def main():
     ap = argparse.ArgumentParser(description="agent PR guard")
     ap.add_argument("--pr")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--trusted-controller", action="store_true", help="Validate policy for every classification")
+    ap.add_argument("--review-run", type=int, help="Verify an owner-accepted solo review run; no override")
     ap.add_argument(
         "--paths", nargs="+", metavar="PATH",
         help="classify a file list directly, with no PR: exit 1 if any path is protected. "
@@ -668,8 +757,16 @@ def main():
         if n is None:
             print("agent-pr-guard: no pull request in context — nothing to judge")
             return 0
+        if args.trusted_controller:
+            policy_base = validate_controller_policy(n)
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
+        review_run = args.review_run
+        if code == 1 and review_run is None:
+            review_run = review_run_for_pr(n)
+        code, msg = reviewed_verdict(code, msg, n, review_run)
+        if args.trusted_controller and validate_controller_policy(n) != policy_base:
+            raise Undetermined("live base changed during admission")
     except Undetermined as e:
         # Third state: the verdict could not be computed. The floor must not then convert an
         # unreachable API into a lost-corpus red one layer up.

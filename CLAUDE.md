@@ -45,7 +45,8 @@ ADR-0029):
 5. **Test the new behavior.** Coverage is ratchet-only (never lower); money-path services aim higher.
 6. **Derived data is never hand-edited.** Catalog, coverage, and the governance manifest are
    CI-generated — edit the source, not the artifact.
-7. **Money-path services** (`rules.yaml: money_path_services`) need 2 approvals + a threat model
+7. **Money-path services** (`rules.yaml: money_path_services`) use the solo-owner development
+   review policy: two verified AI reviews plus owner acceptance of the exact revision, and a threat model
    (`docs/threat-models/<service>.md`, ADR-0030).
 
 ## Commit format
