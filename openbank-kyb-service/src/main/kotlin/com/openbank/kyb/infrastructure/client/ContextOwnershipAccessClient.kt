@@ -22,19 +22,23 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
 private const val ASSIGNMENT_TIMEOUT_MS = 3000L
-private const val HTTP_OK = 200
+private const val HTTP_NO_CONTENT = 204
 private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
 private const val HTTP_NOT_FOUND = 404
 
-/** Uses the investigator's bearer, never the KYB service identity, for the live assignment check. */
+/**
+ * Uses the investigator's bearer, never KYB's service identity. Deploy Context's
+ * data-free access route first; an unavailable route fails closed without a
+ * fallback that would retrieve ownership history.
+ */
 @Path("/api/v1/context/kyb-cases")
 @RegisterRestClient(configKey = "context-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface ContextOwnershipAccessRestClient {
     @GET
-    @Path("/{caseId}/ownership-observations")
-    suspend fun history(
+    @Path("/{caseId}/access")
+    suspend fun check(
         @PathParam("caseId") caseId: UUID,
         @HeaderParam("Authorization") bearer: String,
         @HeaderParam("X-Investigation-Case-Id") investigationCaseId: String,
@@ -50,9 +54,9 @@ class ContextOwnershipAccessAdapter : UboObservationAccess {
 
     @Timeout(ASSIGNMENT_TIMEOUT_MS)
     override suspend fun check(caseId: UUID, bearer: String): UboObservationAccessDecision = try {
-        client.history(caseId, bearer, caseId.toString(), "KYB_OWNERSHIP_REVIEW").use { response ->
+        client.check(caseId, bearer, caseId.toString(), "KYB_OWNERSHIP_REVIEW").use { response ->
             when (response.status) {
-                HTTP_OK -> UboObservationAccessDecision.ALLOWED
+                HTTP_NO_CONTENT -> UboObservationAccessDecision.ALLOWED
                 HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, HTTP_NOT_FOUND -> UboObservationAccessDecision.DENIED
                 else -> UboObservationAccessDecision.UNAVAILABLE
             }
