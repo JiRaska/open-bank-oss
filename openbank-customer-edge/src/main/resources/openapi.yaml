@@ -19,7 +19,8 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.69.0
+  # 1.69.0 -> 1.70.0 (#10016): additive GET /capabilities (ADR-0310 D5).
+  version: 1.70.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -4240,6 +4241,31 @@ paths:
         '200': {description: Grant renounced}
         '403': {description: Caller is not the grantee}
 
+  /capabilities:
+    get:
+      tags: [Capabilities]
+      summary: Which app capabilities this environment offers
+      description: >-
+        ADR-0310 D5. Not marketing and not party-specific: identical for every authenticated caller
+        and computed from edge configuration only, never from a live health probe, so the app moves a
+        feature from demo to live without a release. A capability is live only when its backend is
+        wired AND an operator switched it on. Clients MUST ignore capability ids they do not know and
+        treat any state other than `live` as unavailable. Cacheable (Cache-Control: private,
+        max-age=300).
+      operationId: getCapabilities
+      security:
+        - customerOidc: []
+      responses:
+        '200':
+          description: Every capability this edge knows, with its state
+          headers:
+            Cache-Control:
+              schema: {type: string, example: 'private, max-age=300'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CapabilitiesResponse'}
+        '401': {description: Unauthenticated}
+
   /loyalty:
     get:
       tags: [Loyalty]
@@ -4514,6 +4540,36 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    CapabilityId:
+      type: string
+      description: >-
+        Closed set of capability ids (ADR-0310 D5). Adding an id is a MINOR change; a client ignores
+        an id it does not know.
+      enum: [loyalty, referrals, offers, accept.settlement, allmoney.linked, business.tax, approvals.multisig, rewards.points]
+    Capability:
+      type: object
+      required: [id, state]
+      properties:
+        id: {$ref: '#/components/schemas/CapabilityId'}
+        state:
+          type: string
+          enum: [live, unavailable]
+        reason:
+          type: string
+          description: >-
+            Present only when state is unavailable. NOT_BUILT — no backend exists; NOT_DEPLOYED — the
+            backend is not wired to this edge in this environment; DISABLED — an operator switched it off.
+          enum: [NOT_BUILT, NOT_DEPLOYED, DISABLED]
+    CapabilitiesResponse:
+      type: object
+      required: [schemaVersion, capabilities]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        capabilities:
+          type: array
+          items: {$ref: '#/components/schemas/Capability'}
     AmlPep:
       type: object
       required: [isPep]
