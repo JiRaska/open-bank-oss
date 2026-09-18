@@ -9,6 +9,7 @@ import com.openbank.cardissuance.application.port.`in`.CardUseCase
 import com.openbank.cardissuance.application.port.`in`.ReadSecureDetailsQuery
 import com.openbank.cardissuance.application.port.`in`.UpdateControlsCommand
 import com.openbank.cardissuance.application.port.`in`.UpdateLimitsCommand
+import com.openbank.cardissuance.application.port.out.MAX_PARTY_CARD_LIST_LIMIT
 import com.openbank.cardissuance.infrastructure.rest.dto.CardStatusRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.IssueCardRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.UpdateControlsRequest
@@ -32,8 +33,6 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
 import java.util.UUID
-
-private const val MAX_PARTY_CARD_LIST_LIMIT = 100
 
 @Path("/api/v1/cards")
 @Produces(MediaType.APPLICATION_JSON)
