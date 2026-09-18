@@ -53,7 +53,7 @@ class ContextAuditCommitmentIT {
             "eventType" to "CONTEXT_READ_AUDIT_COMMITTED",
             "aggregateType" to "CONTEXT_READ_AUDIT",
             "aggregateId" to id.toString(),
-            "sourceService" to "openbank-context-service",
+            "sourceService" to "context-service",
             "occurredAt" to Instant.parse("2026-09-18T12:00:00Z").toString(),
             "commitment" to digest,
         ),

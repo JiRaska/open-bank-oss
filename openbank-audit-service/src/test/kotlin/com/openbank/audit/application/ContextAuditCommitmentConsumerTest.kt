@@ -73,7 +73,7 @@ class ContextAuditCommitmentConsumerTest {
                 "eventType" to EVENT_TYPE,
                 "aggregateType" to "CONTEXT_READ_AUDIT",
                 "aggregateId" to id.toString(),
-                "sourceService" to "openbank-context-service",
+                "sourceService" to "context-service",
                 "occurredAt" to "2026-09-18T11:59:00Z",
                 "commitment" to "a".repeat(64),
             ),

@@ -38,7 +38,7 @@ class ContextAuditCommitmentConsumer(
         require(node.required("schemaVersion").isIntegralNumber && node.path("schemaVersion").intValue() == 1)
         require(node.required("eventType").textValue() == EVENT_TYPE)
         require(node.required("aggregateType").textValue() == "CONTEXT_READ_AUDIT")
-        require(node.required("sourceService").textValue() == "openbank-context-service")
+        require(node.required("sourceService").textValue() == "context-service")
         val id = UUID.fromString(requiredText(node, "eventId"))
         require(requiredText(node, "aggregateId") == id.toString())
         require(COMMITMENT.matches(requiredText(node, "commitment")))
@@ -52,7 +52,7 @@ class ContextAuditCommitmentConsumer(
                 actorId = null,
                 actorType = null,
                 payload = payload,
-                sourceService = "openbank-context-service",
+                sourceService = node["sourceService"].asText(),
                 correlationId = null,
                 occurredAt = occurredAt,
                 recordedAt = clock.instant(),

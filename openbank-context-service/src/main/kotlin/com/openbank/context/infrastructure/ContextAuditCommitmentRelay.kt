@@ -2,12 +2,16 @@
 package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
@@ -26,11 +30,17 @@ class ContextAuditCommitmentRelay(
     private val mapper: ObjectMapper,
     private val clock: Clock,
     private val meters: MeterRegistry,
+    private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.audit-export.enabled", defaultValue = "false")
     private val enabled: Boolean,
 ) {
     private val pending = AtomicLong(0).also { meters.gauge("openbank_context_audit_outbox_pending", it) }
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     @Scheduled(every = "5s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     suspend fun dispatch() {
@@ -38,14 +48,15 @@ class ContextAuditCommitmentRelay(
         refreshPending()
         for (row in claim()) {
             try {
+                val eventType = "CONTEXT_READ_AUDIT_COMMITTED"
                 val payload = mapper.writeValueAsString(
                     mapOf(
                         "schemaVersion" to ContextAuditCommitment.SCHEMA_VERSION,
                         "eventId" to row.auditId.toString(),
-                        "eventType" to "CONTEXT_READ_AUDIT_COMMITTED",
+                        "eventType" to eventType,
                         "aggregateType" to "CONTEXT_READ_AUDIT",
                         "aggregateId" to row.auditId.toString(),
-                        "sourceService" to "openbank-context-service",
+                        "sourceService" to "context-service",
                         "occurredAt" to row.occurredAt.toString(),
                         "commitment" to row.commitment,
                     ),
@@ -60,6 +71,7 @@ class ContextAuditCommitmentRelay(
             }
         }
         refreshPending()
+        if (pending.get() == 0L) liveness?.recordSuccess()
     }
 
     private suspend fun refreshPending() {
@@ -110,6 +122,9 @@ class ContextAuditCommitmentRelay(
     }
 
     companion object {
+        private const val WORKFLOW_NAME = "context-audit-commitment-relay"
+        private const val POLL_INTERVAL_SECONDS = 5L
+        private val EXPECTED_INTERVAL = Duration.ofSeconds(POLL_INTERVAL_SECONDS)
         private const val RETRY_DELAY_SECONDS = 30L
         private val RETRY_DELAY = Duration.ofSeconds(RETRY_DELAY_SECONDS)
         private const val CLAIM_SQL = """
