@@ -181,6 +181,23 @@ interface AuthorizationUseCase {
         partyId: UUID,
         amount: com.openbank.libs.domain.money.Money?,
     ): DelegatedPaymentDecision
+
+    /** Maker-only authority. This never authorizes a debit or reuses the legacy authorization store. */
+    suspend fun authorizePaymentProposal(
+        accountId: UUID,
+        partyId: UUID,
+        amount: com.openbank.libs.domain.money.Money,
+    ): PaymentProposalDecision
+}
+
+enum class PaymentProposalOutcome { ALLOWED, NO_GRANT, LIMIT_EXCEEDED, ACCOUNT_NOT_FOUND }
+
+data class PaymentProposalDecision(
+    val outcome: PaymentProposalOutcome,
+    val delegationId: UUID? = null,
+    val grantorPartyId: UUID? = null,
+) {
+    val authorized: Boolean get() = outcome == PaymentProposalOutcome.ALLOWED
 }
 
 /**

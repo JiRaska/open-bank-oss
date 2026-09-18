@@ -5,6 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
+  # 1.19.0 -> 1.20.0: additive maker-only payment-proposal authority decision.
   # 1.18.0 -> 1.19.0: additive approvalRequired refusal flag and direct
   # business-debit authority check for a human actor. The existing closed
   # outcome enum remains unchanged for mixed-version callers.
@@ -15,7 +16,7 @@ info:
   # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
   # opening other account types are unaffected; term-deposit openings come only from
   # customer-edge, updated in the same change).
-  version: 1.19.0
+  version: 1.20.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -450,6 +451,56 @@ paths:
                     description: Present only when `outcome` is DELEGATED.
         '400':
           description: amount supplied without a currency, or not a valid monetary value
+
+  /api/v1/accounts/{accountId}/delegation/payment-proposal-authorization:
+    get:
+      tags: [Accounts]
+      summary: Whether a delegate may prepare a payment without execution authority
+      description: >-
+        A maker-only decision based exclusively on an active, owner-issued
+        ACCOUNT_PROPOSE_PAYMENT grant and its per-transaction limit. The legacy
+        authorization store and ACCOUNT_INITIATE_PAYMENT do not grant maker authority.
+        A true decision is evidence for proposal creation, never for payment execution.
+        The caller supplies the authenticated party and full monetary tuple; customer
+        callers must receive the same opaque refusal for all non-authorized outcomes.
+      operationId: checkPaymentProposalAuthorization
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: amount
+          in: query
+          required: true
+          schema: { type: string }
+        - name: currency
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Maker-only authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized, outcome]
+                properties:
+                  authorized: { type: boolean }
+                  outcome:
+                    type: string
+                    enum: [ALLOWED, NO_GRANT, LIMIT_EXCEEDED, ACCOUNT_NOT_FOUND]
+                  delegationId:
+                    type: string
+                    format: uuid
+                    description: Present only when authorized.
+                  grantorPartyId:
+                    type: string
+                    format: uuid
+                    description: Present only when authorized.
+        '400':
+          description: Missing or invalid party or monetary tuple
 
   /api/v1/accounts/{accountId}/business-payment-authorization:
     get:

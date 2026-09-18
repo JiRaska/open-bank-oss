@@ -9,6 +9,8 @@ import com.openbank.account.application.port.`in`.DelegatedPaymentDecision
 import com.openbank.account.application.port.`in`.DelegatedPaymentOutcome
 import com.openbank.account.application.port.`in`.GrantAuthorizationCommand
 import com.openbank.account.application.port.`in`.ListAuthorizationsQuery
+import com.openbank.account.application.port.`in`.PaymentProposalDecision
+import com.openbank.account.application.port.`in`.PaymentProposalOutcome
 import com.openbank.account.application.port.`in`.RevokeAuthorizationCommand
 import com.openbank.account.application.port.out.AccountAuthorizationRepository
 import com.openbank.account.application.port.out.AccountRepository
@@ -265,6 +267,38 @@ class AuthorizationService(
             candidates.isNotEmpty() || legacy.isNotEmpty() ->
                 DelegatedPaymentDecision(DelegatedPaymentOutcome.LIMIT_EXCEEDED)
             else -> DelegatedPaymentDecision(DelegatedPaymentOutcome.NO_GRANT)
+        }
+    }
+
+    override suspend fun authorizePaymentProposal(
+        accountId: UUID,
+        partyId: UUID,
+        amount: Money,
+    ): PaymentProposalDecision {
+        require(amount.isPositive()) { "proposal amount must be positive" }
+        val owner = accountRepository.findById(accountId)?.partyId
+            ?: return PaymentProposalDecision(PaymentProposalOutcome.ACCOUNT_NOT_FOUND)
+        // Maker and owner must be distinct. In particular, neither the legacy payment role nor
+        // ACCOUNT_INITIATE_PAYMENT implies propose-only authority, and this answer cannot debit.
+        if (partyId == owner) return PaymentProposalDecision(PaymentProposalOutcome.NO_GRANT)
+        val now = OffsetDateTime.now(clock)
+        val candidates = delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
+            .filter { grant ->
+                grant.issuedBy(owner) &&
+                    grant.isActiveOn(now) &&
+                    DelegatedAccessGrant.CAP_PROPOSE_PAYMENT in grant.capabilities
+            }
+        val permitted = candidates.firstOrNull { grant ->
+            grant.withinPerTransactionLimit(amount.amount, amount.currency.code)
+        }
+        return when {
+            permitted != null -> PaymentProposalDecision(
+                PaymentProposalOutcome.ALLOWED,
+                delegationId = permitted.id,
+                grantorPartyId = owner,
+            )
+            candidates.isNotEmpty() -> PaymentProposalDecision(PaymentProposalOutcome.LIMIT_EXCEEDED)
+            else -> PaymentProposalDecision(PaymentProposalOutcome.NO_GRANT)
         }
     }
 

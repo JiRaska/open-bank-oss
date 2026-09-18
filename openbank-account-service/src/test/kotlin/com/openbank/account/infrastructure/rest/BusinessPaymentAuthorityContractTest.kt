@@ -28,7 +28,7 @@ class BusinessPaymentAuthorityContractTest {
         val body = BusinessPaymentAuthorityResource(service).check(account, human)
         assertThat(body).isEqualTo(BusinessPaymentAuthorityResponse(true, "SOLE", company))
         val contract = File("src/main/resources/openapi.yaml").readText()
-        assertThat(contract).contains("version: 1.19.0", "/api/v1/accounts/{accountId}/business-payment-authorization:")
+        assertThat(contract).contains("version: 1.20.0", "/api/v1/accounts/{accountId}/business-payment-authorization:")
         assertThat(contract).contains("operationId: checkBusinessPaymentAuthorization", "actorPartyId")
     }
 

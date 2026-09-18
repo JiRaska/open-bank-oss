@@ -5,6 +5,7 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.`in`.DelegatedPaymentOutcome
+import com.openbank.account.application.port.`in`.PaymentProposalOutcome
 import com.openbank.account.application.port.out.AccountAuthorizationRepository
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
@@ -103,6 +104,55 @@ class AuthorizeDelegatedPaymentTest {
     )
 
     private fun czk(v: String) = Money.of(v, "CZK")
+
+    @Test
+    fun `propose-only grant permits preparation but never direct debit`(): Unit = runBlocking {
+        val makerGrant = grant(capabilities = setOf(DelegatedAccessGrant.CAP_PROPOSE_PAYMENT))
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns listOf(makerGrant)
+
+        val proposed = service.authorizePaymentProposal(accountId, delegate, czk("100.00"))
+        assertThat(proposed.outcome).isEqualTo(PaymentProposalOutcome.ALLOWED)
+        assertThat(proposed.delegationId).isEqualTo(makerGrant.id)
+        assertThat(proposed.grantorPartyId).isEqualTo(owner)
+        assertThat(service.authorizeDelegatedPayment(accountId, delegate, czk("100.00")).authorized).isFalse()
+    }
+
+    @Test
+    fun `direct payment grant and legacy row do not confer maker authority`(): Unit = runBlocking {
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns listOf(grant())
+        coEvery { authorizationRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(legacy(AuthorizationRole.PAYMENT_ONLY, null))
+
+        assertThat(service.authorizePaymentProposal(accountId, delegate, czk("100.00")).outcome)
+            .isEqualTo(PaymentProposalOutcome.NO_GRANT)
+    }
+
+    @Test
+    fun `maker ceiling and grant ownership remain enforced`(): Unit = runBlocking {
+        val wrongOwner = grant(
+            capabilities = setOf(DelegatedAccessGrant.CAP_PROPOSE_PAYMENT),
+            grantorPartyId = stranger,
+        )
+        val capped = grant(capabilities = setOf(DelegatedAccessGrant.CAP_PROPOSE_PAYMENT), perTxAmount = "100.00")
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(wrongOwner, capped)
+
+        assertThat(service.authorizePaymentProposal(accountId, delegate, czk("100.00")).outcome)
+            .isEqualTo(PaymentProposalOutcome.ALLOWED)
+        val over = service.authorizePaymentProposal(accountId, delegate, czk("100.01"))
+        assertThat(over.outcome).isEqualTo(PaymentProposalOutcome.LIMIT_EXCEEDED)
+        assertThat(over.delegationId).isNull()
+    }
+
+    @Test
+    fun `expired grant and owner cannot pose as delegated maker`(): Unit = runBlocking {
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(grant(capabilities = setOf(DelegatedAccessGrant.CAP_PROPOSE_PAYMENT), validTo = now))
+        assertThat(service.authorizePaymentProposal(accountId, delegate, czk("100.00")).outcome)
+            .isEqualTo(PaymentProposalOutcome.NO_GRANT)
+        assertThat(service.authorizePaymentProposal(accountId, owner, czk("100.00")).outcome)
+            .isEqualTo(PaymentProposalOutcome.NO_GRANT)
+    }
 
     // ── the authorising outcomes ───────────────────────────────────────────────────────────
 

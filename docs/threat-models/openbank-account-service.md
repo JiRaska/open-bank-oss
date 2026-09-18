@@ -713,3 +713,18 @@ decision use first; the additive projection table may remain until its consumer 
   never by restoring the old company direct-debit bypass. The additive endpoint has no data
   migration and may remain while callers
   drain. Joint payments need an immutable operation-approval snapshot, never an assumed SOLE rule.
+
+- **2026-09-18** — **Maker-only payment-proposal authority**
+  (`GET /api/v1/accounts/{id}/delegation/payment-proposal-authorization`). This additive
+  M2M decision reads only a live, owner-issued `ACCOUNT_PROPOSE_PAYMENT` projection grant,
+  requires a positive amount, checks its per-transaction ceiling and returns the grant id and
+  owner only on success. Owner identity, an old `account_authorizations` row, and
+  `ACCOUNT_INITIATE_PAYMENT` do not imply maker authority. Conversely, a maker grant never
+  satisfies the existing direct-debit guard. **Risk:** privilege confusion: treating
+  `authorized=true` here as execution authority would convert a preparer into a payer. The
+  endpoint is deliberately named and documented as proposal-only and returns no reservation,
+  payment id or execution credential. It does not create or execute a proposal; a durable
+  proposal, immutable approval snapshot, distinct human SCA decisions and execution boundary
+  remain required before clients can use the capability. Rollout: provider first, then the
+  proposal service and edge; older providers return 404 so new clients must fail closed.
+  Rollback: remove its future caller first; this additive read endpoint needs no schema rollback.

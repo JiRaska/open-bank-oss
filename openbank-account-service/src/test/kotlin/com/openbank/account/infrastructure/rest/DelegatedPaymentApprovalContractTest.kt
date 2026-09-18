@@ -34,7 +34,7 @@ class DelegatedPaymentApprovalContractTest {
         assertThat(fields).doesNotContainKeys("delegationId", "grantorPartyId")
 
         val contract = File("src/main/resources/openapi.yaml").readText()
-        assertThat(contract).contains("version: 1.19.0", "approvalRequired:")
+        assertThat(contract).contains("version: 1.20.0", "approvalRequired:")
         assertThat(contract).doesNotContain("- APPROVAL_REQUIRED")
     }
 }
