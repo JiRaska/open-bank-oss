@@ -133,7 +133,7 @@ be prebuilt concurrently before the Flyway migration so startup does not build
 it under write load. The graph requests one extra row to mark truncation.
 This overlay is not the case-scoped Lending exposure read contract in step 4.
 The database checks proposal/decision separation and local referential lineage.
-ADR-0152 makes Lending single-bank per deployment. V18 therefore uses local IDs
+ADR-0311 preserves ADR-0152's single-bank-per-deployment boundary for Lending. V18 therefore uses local IDs
 and foreign keys without a per-row bank dimension; the existing `loan` and
 `collateral` tables follow the same boundary. A writer must derive the bank
 identifier for outgoing Context references from trusted deployment configuration,
@@ -213,6 +213,7 @@ deliberately leaves the schema-and-proof stage dark rather than inventing eviden
 
 - [ADR-0303](0303-banking-context-graph-and-authorized-hybrid-retrieval.md)
 - [ADR-0308](0308-effective-time-authorization-evidence-graph.md)
+- [ADR-0311](0311-deployment-bank-provenance-for-context-evidence.md)
 - [ADR-0028](0028-lending-bounded-context.md)
 - [ADR-0037](0037-anacredit-credit-exposure-reporting.md)
 - [Implementation roadmap #9945](https://github.com/JiRaska/open-bank-oss/issues/9945)
