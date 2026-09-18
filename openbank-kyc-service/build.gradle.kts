@@ -56,6 +56,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
     // KycCasePageApiContractTest PARSES the committed openapi.yaml (#8163) rather than grepping it.
     // Unversioned: the Quarkus BOM is already on the test classpath (testImplementation extends
     // implementation), so the YAML dataformat cannot drift from the runtime's Jackson.
