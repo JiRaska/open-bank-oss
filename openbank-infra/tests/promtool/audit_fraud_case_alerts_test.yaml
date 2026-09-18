@@ -13,6 +13,7 @@ tests:
               severity: critical
               team: security
             exp_annotations:
+              subject_period: continuous
               summary: Fraud case lifecycle event was dead-lettered by Audit
               description: >-
                 Audit could not persist a Fraud case transition. Inspect the dedicated DLQ,
