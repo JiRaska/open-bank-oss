@@ -125,6 +125,11 @@ gap closes only with a consumer pact or a run against a deployed stack.
 - Snapshot bytes are obtained only through document-service's authenticated snapshot-id-plus-digest
   route and re-hashed locally before view consumption. A downstream outage therefore does not spend
   the recipient's view; a conditional database update prevents concurrent over-delivery.
+- A READY snapshot whose digest equals the signed source digest cannot mint a public redemption:
+  the current producer copies the source PDF byte for byte. This is a fail-closed interim gate,
+  **not** evidence that a different-digest artifact has the required redaction, recipient watermark,
+  or new institutional seal. Public rollout remains blocked until those properties are bound to
+  immutable artifact evidence and verified before credential issuance.
 - Every issue, verification and content POST requires an effect-scoped `Idempotency-Key`. Only its
   domain-separated SHA-256 digest is stored: append-only issuance generations, verification-attempt
   entries and view-consumption entries make repeated effects no-ops without caching a recoverable

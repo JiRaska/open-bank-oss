@@ -49,6 +49,15 @@ class DisclosureRedemptionService(
         ) {
             throw DisclosureRedemptionUnavailableException()
         }
+        if (disclosure.sourceSha256 == null ||
+            disclosure.snapshotSha256 == null ||
+            disclosure.sourceSha256 == disclosure.snapshotSha256
+        ) {
+            // The current snapshot producer copies the signed source bytes. Never mint public
+            // credentials for that byte-for-byte copy; a distinct digest is only a minimum
+            // condition, not proof that recipient redaction, watermarking and sealing occurred.
+            throw DisclosureRedemptionUnavailableException()
+        }
         val magicToken = secrets.newOpaqueToken()
         val otp = secrets.newOtp()
         val otpDigest = secrets.hashOtp(otp)

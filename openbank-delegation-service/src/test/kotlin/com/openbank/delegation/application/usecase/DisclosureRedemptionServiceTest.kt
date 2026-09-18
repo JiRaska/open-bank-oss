@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.delegation.application.usecase
 
+import com.openbank.delegation.application.port.`in`.IssueDisclosureRedemptionCommand
 import com.openbank.delegation.application.port.out.DisclosureOtpSender
 import com.openbank.delegation.application.port.out.DisclosureRedemptionRepository
 import com.openbank.delegation.application.port.out.DisclosureRepository
 import com.openbank.delegation.application.port.out.DisclosureSnapshotContentReader
+import com.openbank.delegation.domain.model.Disclosure
+import com.openbank.delegation.domain.model.DisclosureStatus
 import com.openbank.delegation.domain.model.RedeemableSnapshot
 import com.openbank.delegation.infrastructure.security.Pbkdf2DisclosureSecretCodec
 import io.mockk.coEvery
@@ -35,6 +38,44 @@ class DisclosureRedemptionServiceTest {
         contentReader,
         Clock.fixed(now, ZoneOffset.UTC),
     )
+
+    @Test
+    fun `source-identical snapshot cannot mint public redemption credentials`(): Unit = runBlocking {
+        val disclosureId = UUID.randomUUID()
+        val grantor = UUID.randomUUID()
+        val digest = "a".repeat(64)
+        coEvery { disclosures.findById(disclosureId) } returns Disclosure(
+            id = disclosureId,
+            requestId = UUID.randomUUID(),
+            delegationId = UUID.randomUUID(),
+            grantorPartyId = grantor,
+            sourceDocumentId = UUID.randomUUID(),
+            status = DisclosureStatus.READY,
+            snapshotId = UUID.randomUUID(),
+            sourceSha256 = digest,
+            snapshotSha256 = digest,
+            sizeBytes = 100,
+            createdAt = now,
+            updatedAt = now,
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                service.issue(
+                    IssueDisclosureRedemptionCommand(
+                        disclosureId,
+                        grantor,
+                        "recipient@example.test",
+                        now.plusSeconds(600),
+                        1,
+                        "source-copy",
+                    ),
+                )
+            }
+        }.isInstanceOf(DisclosureRedemptionUnavailableException::class.java)
+        coVerify(exactly = 0) { redemptions.issue(any()) }
+        coVerify(exactly = 0) { otpSender.send(any(), any(), any(), any()) }
+    }
 
     @Test
     fun `download verifies bytes before atomically consuming a view`(): Unit = runBlocking {

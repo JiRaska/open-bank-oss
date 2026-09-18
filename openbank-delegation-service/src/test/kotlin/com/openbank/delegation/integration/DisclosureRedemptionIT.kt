@@ -37,6 +37,27 @@ class DisclosureRedemptionIT {
 
     @Test
     @TestSecurity(user = "customer", roles = ["ROLE_API"])
+    fun `public credentials are not issued for unchanged signed source bytes`() {
+        val grantor = UUID.randomUUID()
+        val disclosureId = seedReadyDisclosure(grantor, PDF_SHA)
+        connector.sink<String>("notification-requests-out").clear()
+        val issueBody =
+            """{"recipient":"recipient@example.test","expiresAt":"${Instant.now().plusSeconds(600)}","maxViews":1}"""
+
+        RestAssured.given()
+            .contentType(ContentType.JSON)
+            .header("X-Customer-Party-Id", grantor.toString())
+            .header("Idempotency-Key", "source-copy")
+            .body(issueBody)
+            .post("/api/v1/disclosures/$disclosureId/redemptions")
+            .then().statusCode(404)
+
+        assertThat(connector.sink<String>("notification-requests-out").received()).isEmpty()
+        assertThat(redemptionCount(disclosureId)).isZero()
+    }
+
+    @Test
+    @TestSecurity(user = "customer", roles = ["ROLE_API"])
     fun `idempotent races consume each requested PDF view at most once`() {
         val grantor = UUID.randomUUID()
         val disclosureId = seedReadyDisclosure(grantor)
@@ -128,7 +149,7 @@ class DisclosureRedemptionIT {
         assertThat(activeVerificationSecrets(disclosureId)).isEqualTo("true:true:true")
     }
 
-    private fun seedReadyDisclosure(grantor: UUID): UUID {
+    private fun seedReadyDisclosure(grantor: UUID, sourceDigest: String = SOURCE_SHA): UUID {
         val grantId = UUID.randomUUID()
         val disclosureId = UUID.randomUUID()
         jdbc().use { connection ->
@@ -161,13 +182,25 @@ class DisclosureRedemptionIT {
                 statement.setObject(4, grantor)
                 statement.setObject(5, UUID.randomUUID())
                 statement.setObject(6, UUID.randomUUID())
-                statement.setString(7, SOURCE_SHA)
+                statement.setString(7, sourceDigest)
                 statement.setString(8, PDF_SHA)
                 statement.setLong(9, PDF.size.toLong())
                 statement.executeUpdate()
             }
         }
         return disclosureId
+    }
+
+    private fun redemptionCount(disclosureId: UUID): Int = jdbc().use { connection ->
+        connection.prepareStatement(
+            "SELECT count(*) FROM disclosure_redemptions WHERE disclosure_id=?",
+        ).use { statement ->
+            statement.setObject(1, disclosureId)
+            statement.executeQuery().use { rows ->
+                rows.next()
+                rows.getInt(1)
+            }
+        }
     }
 
     private fun redemptionState(disclosureId: UUID): String = jdbc().use { connection ->
