@@ -116,8 +116,9 @@ while IFS= read -r pin; do
 done < <(
   # Only YAML image fields are deployed pins. Searching arbitrary text also picks up
   # historical tags in policy comments and re-drives that service every tick (#8690).
-  grep -rhE '^[[:space:]]*image:[[:space:]]*[^#[:space:]]*openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' \
+  grep -rhE '^[[:space:]]*image:[[:space:]]*[^#[:space:]]+' \
     "$GITOPS_ROOT" 2>/dev/null \
+    | sed -nE 's/^[[:space:]]*image:[[:space:]]*([^#[:space:]]+).*/\1/p' \
     | grep -oE 'openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' \
     | sort -u
 )
