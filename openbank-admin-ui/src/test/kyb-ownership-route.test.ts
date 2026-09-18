@@ -46,6 +46,14 @@ describe('KYB ownership BFF', () => {
     expect(headers.get('X-Investigation-Purpose')).toBe('KYB_OWNERSHIP_REVIEW')
   })
 
+  it('rejects an oversized Context history before parsing source-controlled JSON', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(history), {
+      headers: { 'Content-Length': String(32 * 1024 + 1) },
+    }))
+    vi.stubGlobal('fetch', fetch)
+    expect((await listRequest()).status).toBe(502)
+  })
+
   it('does not call KYB after Context denies the case assignment', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 403 })); vi.stubGlobal('fetch', fetch)
     expect((await detailRequest()).status).toBe(403)
@@ -66,6 +74,14 @@ describe('KYB ownership BFF', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
     const headers = new Headers((fetch.mock.calls[1] as [string, RequestInit])[1].headers)
     expect(headers.get('X-Investigation-Purpose')).toBe('KYB_OWNERSHIP_REVIEW')
+  })
+
+  it('rejects an oversized streamed KYB detail even without Content-Length', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(history)))
+      .mockResolvedValueOnce(new Response('x'.repeat(128 * 1024 + 1)))
+    vi.stubGlobal('fetch', fetch)
+    expect((await detailRequest()).status).toBe(502)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('refuses source details that disagree with the authorized reference', async () => {
