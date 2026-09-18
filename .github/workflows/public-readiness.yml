@@ -60,6 +60,13 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
 
+      - name: Install manifest parser and test the secret guard
+        run: |
+          python3 -m venv "$RUNNER_TEMP/public-readiness-venv"
+          "$RUNNER_TEMP/public-readiness-venv/bin/python" -m pip install --require-hashes -r .github/workflows/requirements/public-readiness.txt
+          echo "$RUNNER_TEMP/public-readiness-venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/public-readiness-venv/bin/python" .github/scripts/test-manifest-secret-literals.py
+
       - name: Run public-readiness audit
         env:
           # On PRs, skip the 8-minute full-history gitleaks scan — secret-scan.yml
