@@ -144,6 +144,33 @@ The future source adapter must verify these with their owners and recheck the
 current collateral status at publication/read time. No row in V18 alone is
 eligible to become a Context edge.
 
+### Source proof boundary for the first writer
+
+The writer must derive `bank_scope` from the Lending deployment or a verified
+tenant claim, never from the proposal body. On both proposal and approval it
+resolves the loan/collateral in Lending, the guarantor in Party, and the cited
+document in Document. A missing, archived, mismatched or unavailable source
+fails closed; it is not converted into a graph fact. The document check must
+compare `documentId`, expected SHA-256, case/loan reference and bank scope in
+one purpose-limited operation, returning only a match decision. Lending must
+not use the generic document metadata/content endpoints for this check: they
+disclose more than the decision needs, and the current
+shared backend client does not identify Lending uniquely. Provision a dedicated
+Lending service identity and allow only this action in the Document policy;
+Document must resolve the bank of the case through its authoritative owner
+because its current metadata row has no bank-scope field;
+keep the document bytes and free text out of the graph event. The fact's
+`source_sha256` pins the exact document version the checker verified, so a
+later document change does not retroactively alter what the checker saw.
+
+Approval then rechecks current source state in the same logical decision flow
+and emits the versioned, reference-only event through Lending's transactional
+outbox. Context consumes it idempotently, preserves effective and recorded time,
+and reads detail through the source's case-scoped API under a separate OPA
+decision. Until the dedicated identity, source check, writer and outbox exist,
+the V18 rows must not be projected or presented as verified links. This
+deliberately leaves the schema-only stage dark rather than inventing evidence.
+
 ## Alternatives considered
 
 - **Compute totals from visible canvas nodes:** rejected; pagination/authorization would
