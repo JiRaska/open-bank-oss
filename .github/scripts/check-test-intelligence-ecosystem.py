@@ -763,7 +763,11 @@ def check(root: Path) -> list[str]:
         ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
         ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
         ("extract-test-intelligence-envelope.py --self-test", "immutable run envelope selector is not regression-tested"),
-        ('"${archive}" "openbank-admin-ui/test-run-history/${artifact_name}.json"',
+        ("--prune-cache openbank-admin-ui/test-run-history",
+         "restored immutable run history is not validated before deployment"),
+        ('if [ -f "${cached}" ]; then',
+         "a stale staged artifact ID can suppress repair of a missing cached envelope"),
+        ('"${archive}" "${cached}"',
          "immutable run history does not accept browser variant envelopes"),
     ):
         if needle not in history_stage:
