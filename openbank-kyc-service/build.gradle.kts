@@ -72,6 +72,16 @@ dependencies {
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 
+tasks.withType<Test>().configureEach {
+    // Several Quarkus profiles boot in this test JVM (including the Kafka replay IT).
+    // The default 512 MiB exhausted its heap in the full suite, despite focused runs passing.
+    maxHeapSize = "2g"
+    // Each profile needs both listeners isolated: an ephemeral application port alone
+    // still collides on the shared management test port 9001.
+    systemProperty("quarkus.http.test-port", "0")
+    systemProperty("quarkus.management.test-port", "0")
+}
+
 kover {
     reports {
         verify {
