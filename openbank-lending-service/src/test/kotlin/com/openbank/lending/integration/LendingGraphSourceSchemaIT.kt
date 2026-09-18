@@ -28,31 +28,31 @@ class LendingGraphSourceSchemaIT {
         val hash = "a".repeat(64)
         val attemptedApprovals = listOf(
             """INSERT INTO lending_graph_asset
-               (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+               (bank_scope, asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
                 source_register, source_record_ref, source_document_id, source_sha256,
                 proposed_by, proposed_at, status, decided_by, decided_at)
-               VALUES ('$id', '$id', 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', '$id', '$documentId', '$hash',
+               VALUES ('test-bank-a', '$id', '$id', 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', '$id', '$documentId', '$hash',
                        'maker', now(), 'APPROVED', 'checker', now())""",
             """INSERT INTO lending_graph_allocation
-               (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+               (bank_scope, allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
                 priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at,
                 status, decided_by, decided_at)
-               VALUES ('$id', '$relatedId', '$relatedId', 1, 100, 'EUR',
+               VALUES ('test-bank-a', '$id', '$relatedId', '$relatedId', 1, 100, 'EUR',
                        1, now(), '$documentId', '$hash', 'maker', now(),
                        'APPROVED', 'checker', now())""",
             """INSERT INTO lending_graph_valuation
-               (valuation_id, asset_id, amount, currency, basis, effective_at,
+               (bank_scope, valuation_id, asset_id, amount, currency, basis, effective_at,
                 source_document_id, source_sha256, proposed_by, proposed_at,
                 status, decided_by, decided_at)
-               VALUES ('$id', '$relatedId', 100, 'EUR', 'MARKET', now(),
+               VALUES ('test-bank-a', '$id', '$relatedId', 100, 'EUR', 'MARKET', now(),
                        '$documentId', '$hash', 'maker', now(),
                        'APPROVED', 'checker', now())""",
             """INSERT INTO lending_graph_guarantee
-               (guarantee_id, contract_id, revision, loan_id, guarantor_party_id,
+               (bank_scope, guarantee_id, contract_id, revision, loan_id, guarantor_party_id,
                 cap_amount, currency, coverage_fraction, seniority, valid_from,
                 source_document_id, source_sha256, proposed_by, proposed_at,
                 status, decided_by, decided_at)
-               VALUES ('$id', '$relatedId', 1, '$relatedId', '$relatedId',
+               VALUES ('test-bank-a', '$id', '$relatedId', 1, '$relatedId', '$relatedId',
                        100, 'EUR', 1, 1, now(), '$documentId', '$hash', 'maker', now(),
                        'APPROVED', 'checker', now())""",
         )
@@ -112,10 +112,10 @@ class LendingGraphSourceSchemaIT {
             assertThatThrownBy {
                 connection.prepareStatement(
                     """INSERT INTO lending_graph_asset
-                       (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                       (bank_scope, asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
                         source_register, source_record_ref, source_document_id,
                         source_sha256, proposed_by, proposed_at)
-                       VALUES (?, ?, 1, 'REAL_ESTATE', 'g1', 'TEST_REGISTRY', ?, ?, ?, 'maker', now())""",
+                       VALUES ('test-bank-a', ?, ?, 1, 'REAL_ESTATE', 'g1', 'TEST_REGISTRY', ?, ?, ?, 'maker', now())""",
                 ).use { statement ->
                     statement.setObject(1, id)
                     statement.setObject(2, id)
@@ -136,10 +136,10 @@ class LendingGraphSourceSchemaIT {
             assertThatThrownBy {
                 connection.prepareStatement(
                     """INSERT INTO lending_graph_asset
-                       (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                       (bank_scope, asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
                         source_register, source_record_ref, source_document_id, source_sha256,
                         proposed_by, proposed_at)
-                       VALUES (?, ?, 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, 'other-maker', now())""",
+                       VALUES ('test-bank-a', ?, ?, 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, 'other-maker', now())""",
                 ).use { statement ->
                     statement.setObject(1, secondId)
                     statement.setObject(2, secondId)
@@ -166,9 +166,9 @@ class LendingGraphSourceSchemaIT {
             assertThatThrownBy {
                 connection.prepareStatement(
                     """INSERT INTO lending_graph_allocation
-                       (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+                       (bank_scope, allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
                         priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
-                       VALUES (?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'maker', now())""",
+                       VALUES ('test-bank-a', ?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'maker', now())""",
                 ).use { statement ->
                     statement.setObject(1, UUID.randomUUID())
                     statement.setObject(2, assetId)
@@ -198,9 +198,9 @@ class LendingGraphSourceSchemaIT {
                 }
                 connection.prepareStatement(
                     """INSERT INTO lending_graph_allocation
-                   (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+                   (bank_scope, allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
                     priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
-                   VALUES (?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'allocation-maker', now())""",
+                   VALUES ('test-bank-a', ?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'allocation-maker', now())""",
                 ).use { statement ->
                     statement.setObject(1, allocationId)
                     statement.setObject(2, assetId)
@@ -253,10 +253,10 @@ class LendingGraphSourceSchemaIT {
             assertThatThrownBy {
                 connection.prepareStatement(
                     """INSERT INTO lending_graph_asset
-                       (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                       (bank_scope, asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
                         source_register, source_record_ref, source_document_id, source_sha256,
                         supersedes_asset_id, proposed_by, proposed_at)
-                       VALUES (?, ?, 2, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, ?, 'second-maker', now())""",
+                       VALUES ('test-bank-a', ?, ?, 2, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, ?, 'second-maker', now())""",
                 ).use { statement ->
                     statement.setObject(1, UUID.randomUUID())
                     statement.setObject(2, pendingId)
@@ -317,10 +317,10 @@ class LendingGraphSourceSchemaIT {
     private fun insertAssetCorrection(connection: Connection, rootId: UUID, correctionId: UUID) {
         connection.prepareStatement(
             """INSERT INTO lending_graph_asset
-               (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+               (bank_scope, asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
                 source_register, source_record_ref, source_document_id, source_sha256,
                 supersedes_asset_id, proposed_by, proposed_at)
-               VALUES (?, ?, 2, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, ?, 'second-maker', now())""",
+               VALUES ('test-bank-a', ?, ?, 2, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, ?, 'second-maker', now())""",
         ).use { statement ->
             statement.setObject(1, correctionId)
             statement.setObject(2, rootId)
@@ -337,10 +337,10 @@ class LendingGraphSourceSchemaIT {
         assertThatThrownBy {
             connection.prepareStatement(
                 """INSERT INTO lending_graph_allocation
-                   (allocation_id, asset_id, collateral_id, revision, secured_amount,
+                   (bank_scope, allocation_id, asset_id, collateral_id, revision, secured_amount,
                     currency, priority, valid_from, source_document_id, source_sha256,
                     proposed_by, proposed_at)
-                   VALUES (?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'maker', now())""",
+                   VALUES ('test-bank-a', ?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'maker', now())""",
             ).use { statement ->
                 statement.setObject(1, UUID.randomUUID())
                 statement.setObject(2, correctionId)
@@ -359,10 +359,10 @@ class LendingGraphSourceSchemaIT {
         val id = UUID.randomUUID()
         connection.prepareStatement(
             """INSERT INTO lending_graph_asset
-                   (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                   (bank_scope, asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
                     source_register, source_record_ref, source_document_id,
                     source_sha256, proposed_by, proposed_at)
-                   VALUES (?, ?, 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, 'maker', now())""",
+                   VALUES ('test-bank-a', ?, ?, 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, 'maker', now())""",
         ).use { statement ->
             statement.setObject(1, id)
             statement.setObject(2, id)

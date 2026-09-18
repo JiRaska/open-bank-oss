@@ -3,14 +3,17 @@
 -- do not change a loan, a provision, a posting, or an existing collateral row.
 -- No historical collateral is auto-matched: identity and guarantee evidence must
 -- be explicitly proposed and approved before a Context edge can be published.
+-- Graph-owned references are bank scoped. Legacy loan/collateral rows are not;
+-- the future writer must verify their bank ownership before linking them.
 -- Rollback before first writer: DROP TABLE lending_graph_guarantee;
 -- DROP TABLE lending_graph_valuation; DROP TABLE lending_graph_allocation;
 -- DROP TABLE lending_graph_asset. After adoption, stop writers/readers and retain
 -- evidence under the bank's retention policy; dropping populated facts is not rollback.
 
 CREATE TABLE lending_graph_asset (
-    asset_id UUID PRIMARY KEY,
-    canonical_asset_id UUID NOT NULL REFERENCES lending_graph_asset(asset_id),
+    bank_scope VARCHAR(64) NOT NULL CHECK (length(trim(bank_scope)) BETWEEN 1 AND 64),
+    asset_id UUID NOT NULL,
+    canonical_asset_id UUID NOT NULL,
     revision BIGINT NOT NULL CHECK (revision > 0),
     asset_type VARCHAR(32) NOT NULL CHECK (asset_type IN
         ('REAL_ESTATE', 'VEHICLE', 'SECURITIES', 'CASH_DEPOSIT', 'OTHER')),
@@ -22,14 +25,20 @@ CREATE TABLE lending_graph_asset (
         CHECK (length(trim(source_record_ref)) BETWEEN 1 AND 256),
     source_document_id UUID NOT NULL,
     source_sha256 CHAR(64) NOT NULL CHECK (source_sha256 ~ '^[0-9a-f]{64}$'),
-    supersedes_asset_id UUID UNIQUE REFERENCES lending_graph_asset(asset_id),
+    supersedes_asset_id UUID,
     proposed_by VARCHAR(128) NOT NULL CHECK (length(trim(proposed_by)) > 0),
     proposed_at TIMESTAMPTZ NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
         CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     decided_by VARCHAR(128),
     decided_at TIMESTAMPTZ,
-    CONSTRAINT lending_graph_asset_revision UNIQUE (canonical_asset_id, revision),
+    CONSTRAINT lending_graph_asset_pk PRIMARY KEY (bank_scope, asset_id),
+    CONSTRAINT lending_graph_asset_canonical_fk FOREIGN KEY (bank_scope, canonical_asset_id)
+        REFERENCES lending_graph_asset(bank_scope, asset_id),
+    CONSTRAINT lending_graph_asset_supersedes_fk FOREIGN KEY (bank_scope, supersedes_asset_id)
+        REFERENCES lending_graph_asset(bank_scope, asset_id),
+    CONSTRAINT lending_graph_asset_supersedes_unique UNIQUE (bank_scope, supersedes_asset_id),
+    CONSTRAINT lending_graph_asset_revision UNIQUE (bank_scope, canonical_asset_id, revision),
     CONSTRAINT lending_graph_asset_root_or_correction CHECK (
         (revision = 1 AND supersedes_asset_id IS NULL AND canonical_asset_id = asset_id) OR
         (revision > 1 AND supersedes_asset_id IS NOT NULL AND canonical_asset_id <> asset_id)
@@ -45,15 +54,16 @@ CREATE TABLE lending_graph_asset (
 -- One reviewed canonical identity per register record. Corrections keep this
 -- tuple; two independent registers are not silently asserted to be the same asset.
 CREATE UNIQUE INDEX uq_lending_graph_asset_source_root
-    ON lending_graph_asset(identity_jurisdiction, source_register, source_record_ref)
+    ON lending_graph_asset(bank_scope, identity_jurisdiction, source_register, source_record_ref)
     WHERE revision = 1;
 
 CREATE TABLE lending_graph_allocation (
-    allocation_id UUID PRIMARY KEY,
-    asset_id UUID NOT NULL REFERENCES lending_graph_asset(asset_id),
+    bank_scope VARCHAR(64) NOT NULL CHECK (length(trim(bank_scope)) BETWEEN 1 AND 64),
+    allocation_id UUID NOT NULL,
+    asset_id UUID NOT NULL,
     collateral_id UUID NOT NULL REFERENCES collateral(id),
     revision BIGINT NOT NULL CHECK (revision > 0),
-    supersedes_allocation_id UUID UNIQUE REFERENCES lending_graph_allocation(allocation_id),
+    supersedes_allocation_id UUID,
     secured_amount NUMERIC(20,2) NOT NULL CHECK (secured_amount > 0),
     currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
     priority INTEGER NOT NULL CHECK (priority > 0),
@@ -68,7 +78,13 @@ CREATE TABLE lending_graph_allocation (
     decided_by VARCHAR(128),
     decided_at TIMESTAMPTZ,
     CONSTRAINT lending_graph_allocation_interval CHECK (valid_to IS NULL OR valid_to > valid_from),
-    CONSTRAINT lending_graph_allocation_revision UNIQUE (collateral_id, revision),
+    CONSTRAINT lending_graph_allocation_pk PRIMARY KEY (bank_scope, allocation_id),
+    CONSTRAINT lending_graph_allocation_asset_fk FOREIGN KEY (bank_scope, asset_id)
+        REFERENCES lending_graph_asset(bank_scope, asset_id),
+    CONSTRAINT lending_graph_allocation_supersedes_fk FOREIGN KEY (bank_scope, supersedes_allocation_id)
+        REFERENCES lending_graph_allocation(bank_scope, allocation_id),
+    CONSTRAINT lending_graph_allocation_supersedes_unique UNIQUE (bank_scope, supersedes_allocation_id),
+    CONSTRAINT lending_graph_allocation_revision UNIQUE (bank_scope, collateral_id, revision),
     CONSTRAINT lending_graph_allocation_lineage CHECK (
         (revision = 1 AND supersedes_allocation_id IS NULL) OR
         (revision > 1 AND supersedes_allocation_id IS NOT NULL)
@@ -79,7 +95,7 @@ CREATE TABLE lending_graph_allocation (
             AND decided_by <> proposed_by AND decided_at >= proposed_at)
     )
 );
-CREATE INDEX idx_lending_graph_allocation_asset ON lending_graph_allocation(asset_id, valid_from DESC);
+CREATE INDEX idx_lending_graph_allocation_asset ON lending_graph_allocation(bank_scope, asset_id, valid_from DESC);
 
 -- An allocation proposal is permitted only for an approved asset identity and
 -- an approved, unreleased collateral row of the same type and currency. This
@@ -96,7 +112,8 @@ DECLARE
     legacy_released_at TIMESTAMPTZ;
 BEGIN
     SELECT asset_type INTO asset_kind FROM lending_graph_asset
-        WHERE asset_id = NEW.asset_id AND canonical_asset_id = asset_id AND status = 'APPROVED';
+        WHERE bank_scope = NEW.bank_scope AND asset_id = NEW.asset_id
+          AND canonical_asset_id = asset_id AND status = 'APPROVED';
     IF asset_kind IS NULL THEN
         RAISE EXCEPTION 'approved asset identity is required';
     END IF;
@@ -110,7 +127,7 @@ BEGIN
     IF NEW.supersedes_allocation_id IS NOT NULL THEN
         SELECT collateral_id, revision, status
           INTO prior_collateral_id, prior_revision, prior_status
-          FROM lending_graph_allocation WHERE allocation_id = NEW.supersedes_allocation_id;
+          FROM lending_graph_allocation WHERE bank_scope = NEW.bank_scope AND allocation_id = NEW.supersedes_allocation_id;
         IF prior_collateral_id IS DISTINCT FROM NEW.collateral_id OR
            prior_revision IS DISTINCT FROM NEW.revision - 1 OR prior_status IS DISTINCT FROM 'APPROVED' THEN
             RAISE EXCEPTION 'allocation correction must supersede the approved prior revision';
@@ -136,7 +153,8 @@ DECLARE
     legacy_released_at TIMESTAMPTZ;
 BEGIN
     SELECT asset_type INTO asset_kind FROM lending_graph_asset
-        WHERE asset_id = NEW.asset_id AND canonical_asset_id = asset_id AND status = 'APPROVED';
+        WHERE bank_scope = NEW.bank_scope AND asset_id = NEW.asset_id
+          AND canonical_asset_id = asset_id AND status = 'APPROVED';
     SELECT type::text, status::text, currency, released_at
       INTO legacy_type, legacy_status, legacy_currency, legacy_released_at
       FROM collateral WHERE id = NEW.collateral_id FOR UPDATE;
@@ -155,8 +173,9 @@ CREATE TRIGGER lending_graph_allocation_approval_guard
     EXECUTE FUNCTION guard_lending_graph_allocation_approval();
 
 CREATE TABLE lending_graph_valuation (
-    valuation_id UUID PRIMARY KEY,
-    asset_id UUID NOT NULL REFERENCES lending_graph_asset(asset_id),
+    bank_scope VARCHAR(64) NOT NULL CHECK (length(trim(bank_scope)) BETWEEN 1 AND 64),
+    valuation_id UUID NOT NULL,
+    asset_id UUID NOT NULL,
     amount NUMERIC(20,2) NOT NULL CHECK (amount > 0),
     currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
     basis VARCHAR(32) NOT NULL CHECK (basis IN ('MARKET', 'INDEPENDENT_APPRAISAL', 'REGISTERED_VALUE')),
@@ -164,13 +183,19 @@ CREATE TABLE lending_graph_valuation (
     expires_at TIMESTAMPTZ,
     source_document_id UUID NOT NULL,
     source_sha256 CHAR(64) NOT NULL CHECK (source_sha256 ~ '^[0-9a-f]{64}$'),
-    supersedes_valuation_id UUID UNIQUE REFERENCES lending_graph_valuation(valuation_id),
+    supersedes_valuation_id UUID,
     proposed_by VARCHAR(128) NOT NULL CHECK (length(trim(proposed_by)) > 0),
     proposed_at TIMESTAMPTZ NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
         CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     decided_by VARCHAR(128),
     decided_at TIMESTAMPTZ,
+    CONSTRAINT lending_graph_valuation_pk PRIMARY KEY (bank_scope, valuation_id),
+    CONSTRAINT lending_graph_valuation_asset_fk FOREIGN KEY (bank_scope, asset_id)
+        REFERENCES lending_graph_asset(bank_scope, asset_id),
+    CONSTRAINT lending_graph_valuation_supersedes_fk FOREIGN KEY (bank_scope, supersedes_valuation_id)
+        REFERENCES lending_graph_valuation(bank_scope, valuation_id),
+    CONSTRAINT lending_graph_valuation_supersedes_unique UNIQUE (bank_scope, supersedes_valuation_id),
     CONSTRAINT lending_graph_valuation_interval CHECK (expires_at IS NULL OR expires_at > effective_at),
     CONSTRAINT lending_graph_valuation_no_self_correction CHECK
         (supersedes_valuation_id IS NULL OR supersedes_valuation_id <> valuation_id),
@@ -180,7 +205,7 @@ CREATE TABLE lending_graph_valuation (
             AND decided_by <> proposed_by AND decided_at >= proposed_at)
     )
 );
-CREATE INDEX idx_lending_graph_valuation_asset ON lending_graph_valuation(asset_id, effective_at DESC);
+CREATE INDEX idx_lending_graph_valuation_asset ON lending_graph_valuation(bank_scope, asset_id, effective_at DESC);
 
 CREATE FUNCTION guard_lending_graph_asset_lineage() RETURNS trigger AS $$
 DECLARE
@@ -198,7 +223,7 @@ BEGIN
                source_register, source_record_ref
           INTO prior_asset_id, prior_canonical_asset_id, prior_revision, prior_status,
                prior_asset_type, prior_jurisdiction, prior_source_register, prior_source_record_ref
-          FROM lending_graph_asset WHERE asset_id = NEW.supersedes_asset_id;
+          FROM lending_graph_asset WHERE bank_scope = NEW.bank_scope AND asset_id = NEW.supersedes_asset_id;
         IF prior_asset_id IS NULL OR prior_status IS DISTINCT FROM 'APPROVED' OR
            prior_canonical_asset_id IS DISTINCT FROM NEW.canonical_asset_id OR
            prior_revision IS DISTINCT FROM NEW.revision - 1 OR
@@ -220,7 +245,7 @@ DECLARE
 BEGIN
     IF NEW.supersedes_valuation_id IS NOT NULL THEN
         SELECT asset_id, status INTO prior_asset_id, prior_status
-          FROM lending_graph_valuation WHERE valuation_id = NEW.supersedes_valuation_id;
+          FROM lending_graph_valuation WHERE bank_scope = NEW.bank_scope AND valuation_id = NEW.supersedes_valuation_id;
         IF prior_asset_id IS DISTINCT FROM NEW.asset_id OR prior_status IS DISTINCT FROM 'APPROVED' THEN
             RAISE EXCEPTION 'valuation correction must supersede an approved value for the same asset';
         END IF;
@@ -237,10 +262,11 @@ CREATE TRIGGER lending_graph_valuation_lineage_guard
     FOR EACH ROW EXECUTE FUNCTION guard_lending_graph_valuation_lineage();
 
 CREATE TABLE lending_graph_guarantee (
-    guarantee_id UUID PRIMARY KEY,
+    bank_scope VARCHAR(64) NOT NULL CHECK (length(trim(bank_scope)) BETWEEN 1 AND 64),
+    guarantee_id UUID NOT NULL,
     contract_id UUID NOT NULL,
     revision BIGINT NOT NULL CHECK (revision > 0),
-    supersedes_guarantee_id UUID UNIQUE REFERENCES lending_graph_guarantee(guarantee_id),
+    supersedes_guarantee_id UUID,
     loan_id UUID NOT NULL REFERENCES loan(id),
     guarantor_party_id UUID NOT NULL,
     cap_amount NUMERIC(20,2) NOT NULL CHECK (cap_amount > 0),
@@ -257,8 +283,12 @@ CREATE TABLE lending_graph_guarantee (
         CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     decided_by VARCHAR(128),
     decided_at TIMESTAMPTZ,
+    CONSTRAINT lending_graph_guarantee_pk PRIMARY KEY (bank_scope, guarantee_id),
+    CONSTRAINT lending_graph_guarantee_supersedes_fk FOREIGN KEY (bank_scope, supersedes_guarantee_id)
+        REFERENCES lending_graph_guarantee(bank_scope, guarantee_id),
+    CONSTRAINT lending_graph_guarantee_supersedes_unique UNIQUE (bank_scope, supersedes_guarantee_id),
     CONSTRAINT lending_graph_guarantee_interval CHECK (valid_to IS NULL OR valid_to > valid_from),
-    CONSTRAINT lending_graph_guarantee_revision UNIQUE (contract_id, revision),
+    CONSTRAINT lending_graph_guarantee_revision UNIQUE (bank_scope, contract_id, revision),
     CONSTRAINT lending_graph_guarantee_lineage CHECK (
         (revision = 1 AND supersedes_guarantee_id IS NULL) OR
         (revision > 1 AND supersedes_guarantee_id IS NOT NULL)
@@ -269,8 +299,8 @@ CREATE TABLE lending_graph_guarantee (
             AND decided_by <> proposed_by AND decided_at >= proposed_at)
     )
 );
-CREATE INDEX idx_lending_graph_guarantee_loan ON lending_graph_guarantee(loan_id, valid_from DESC);
-CREATE INDEX idx_lending_graph_guarantee_party ON lending_graph_guarantee(guarantor_party_id, valid_from DESC);
+CREATE INDEX idx_lending_graph_guarantee_loan ON lending_graph_guarantee(bank_scope, loan_id, valid_from DESC);
+CREATE INDEX idx_lending_graph_guarantee_party ON lending_graph_guarantee(bank_scope, guarantor_party_id, valid_from DESC);
 
 CREATE FUNCTION guard_lending_graph_guarantee_lineage() RETURNS trigger AS $$
 DECLARE
@@ -281,7 +311,7 @@ BEGIN
     IF NEW.supersedes_guarantee_id IS NOT NULL THEN
         SELECT contract_id, revision, status
           INTO prior_contract_id, prior_revision, prior_status
-          FROM lending_graph_guarantee WHERE guarantee_id = NEW.supersedes_guarantee_id;
+          FROM lending_graph_guarantee WHERE bank_scope = NEW.bank_scope AND guarantee_id = NEW.supersedes_guarantee_id;
         IF prior_contract_id IS DISTINCT FROM NEW.contract_id OR
            prior_revision IS DISTINCT FROM NEW.revision - 1 OR prior_status IS DISTINCT FROM 'APPROVED' THEN
             RAISE EXCEPTION 'guarantee correction must supersede the approved prior revision';
