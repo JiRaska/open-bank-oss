@@ -65,7 +65,7 @@ class StatutoryDelegationProposalServiceTest {
             val draft = draft()
             coEvery { rules.resolve(principal, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
             coJustRun { validator.validateStatutoryProposal(draft) }
-            coEvery { repository.create(any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
+            coEvery { repository.create(any(), any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
 
             val result = service.propose(draft, "offer-1")
             val operation = result.operation
@@ -83,7 +83,17 @@ class StatutoryDelegationProposalServiceTest {
                 operation.ruleHash,
             ).isEqualTo(StatutoryOperationEvidence(mapper).hash(operation.ruleSnapshotJson))
             coVerify(exactly = 1) { validator.validateStatutoryProposal(draft) }
-            coVerify(exactly = 1) { repository.create(any()) }
+            coVerify(exactly = 1) {
+                repository.create(
+                    any(),
+                    match {
+                        it.aggregateId == operation.id &&
+                            it.actorId == actor &&
+                            it.operationKind == StatutoryOperationKind.ISSUE &&
+                            it.representativePartyIds.toSet() == setOf(actor, otherSigner)
+                    },
+                )
+            }
         }
 
     @Test
@@ -93,7 +103,7 @@ class StatutoryDelegationProposalServiceTest {
                 .isInstanceOf(StatutoryProposalDenied::class.java)
         }
         coVerify(exactly = 0) { rules.resolve(any(), any()) }
-        coVerify(exactly = 0) { repository.create(any()) }
+        coVerify(exactly = 0) { repository.create(any(), any()) }
     }
 
     @Test
@@ -106,7 +116,7 @@ class StatutoryDelegationProposalServiceTest {
             .isInstanceOf(StatutoryProposalDenied::class.java)
         assertThatThrownBy { runBlocking { service.propose(draft(), "offer-1") } }
             .isInstanceOf(StatutoryProposalUnavailable::class.java)
-        coVerify(exactly = 0) { repository.create(any()) }
+        coVerify(exactly = 0) { repository.create(any(), any()) }
     }
 
     @Test
@@ -210,7 +220,7 @@ class StatutoryDelegationProposalServiceTest {
         )
         coEvery { rules.resolve(principal, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
         coJustRun { validator.validateStatutoryProposal(draft) }
-        coEvery { repository.create(any()) } returns StatutoryOperationCreateOutcome.Replayed(expired)
+        coEvery { repository.create(any(), any()) } returns StatutoryOperationCreateOutcome.Replayed(expired)
 
         assertThatThrownBy { runBlocking { service.propose(draft, "offer-1") } }
             .isInstanceOf(StatutoryProposalStale::class.java)

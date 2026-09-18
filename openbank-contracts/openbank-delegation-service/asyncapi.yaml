@@ -16,10 +16,10 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.4.0
+  version: 1.5.0
   description: |
     Domain events emitted when a delegation grant changes state or a statutory JOINT
-    operation is cancelled (ADR-0232, ADR-0284).
+    operation is opened or cancelled (ADR-0232, ADR-0284).
 
     A grant is one party letting another act on a resource they own, scoped to explicit
     capabilities and a validity window. Every state transition on the aggregate is published here.
@@ -57,7 +57,7 @@ channels:
       first needs it — not something to assume.
 
       **Partitioning key: `aggregateId`** — the grant id for grant events, or the operation id
-      for a statutory cancellation, as a UUID string (`OutboxKafkaHeaders.partitionKey`). All
+      for a statutory operation, as a UUID string (`OutboxKafkaHeaders.partitionKey`). All
       events for one aggregate land on one partition and are ordered with respect to each other.
       Ordering across different grants is NOT guaranteed, and with `partitions: 1` today the
       distinction is invisible — it will become real the moment the topic is scaled out, so do not
@@ -91,6 +91,8 @@ channels:
         $ref: '#/components/messages/DelegationRecertificationConfirmed'
       StatutoryDelegationProposalCancelled:
         $ref: '#/components/messages/StatutoryDelegationProposalCancelled'
+      StatutoryDelegationProposalOpened:
+        $ref: '#/components/messages/StatutoryDelegationProposalOpened'
   spendReservationState:
     address: openbank.delegation.spend-reservation-state
     title: Delegated domestic-payment reservation state
@@ -120,7 +122,10 @@ operations:
       Their durable per-grant lifecycle cursors compare `lifecycleRevision`; Kafka delivery order,
       `occurredAt` and wall-clock arrival are not used as conflict resolution.
       `StatutoryDelegationProposalCancelled` is audit evidence only and has no grant revision;
-      enforcement projections and the current notification consumer ignore its new event type.
+      enforcement projections and the notification consumer ignore its event type.
+      `StatutoryDelegationProposalOpened` is an inert proposal and notification hint to the
+      frozen human roster. The notification consumer rechecks expiry; the signing API rechecks
+      the current mandate and rule. Enforcement projections ignore this event type.
     messages:
       - $ref: '#/channels/delegationEvents/messages/DelegationOffered'
       - $ref: '#/channels/delegationEvents/messages/DelegationActivated'
@@ -136,6 +141,7 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/DelegationRecertificationDue'
       - $ref: '#/channels/delegationEvents/messages/DelegationRecertificationConfirmed'
       - $ref: '#/channels/delegationEvents/messages/StatutoryDelegationProposalCancelled'
+      - $ref: '#/channels/delegationEvents/messages/StatutoryDelegationProposalOpened'
   publishSpendReservationState:
     action: send
     title: Publish delegated domestic-payment reservation snapshots
@@ -170,6 +176,44 @@ components:
               assume each event arrives once.
 
   schemas:
+    statutoryDelegationProposalOpened:
+      type: object
+      required:
+        - eventId
+        - aggregateId
+        - aggregateType
+        - eventType
+        - version
+        - occurredAt
+        - sourceService
+        - principalPartyId
+        - actorId
+        - operationKind
+        - representativePartyIds
+        - requestHash
+        - ruleHash
+        - expiresAt
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId: { type: string, format: uuid, description: Operation id and Kafka key }
+        aggregateType: { type: string, const: StatutoryDelegationOperation }
+        eventType: { type: string, const: StatutoryDelegationProposalOpened }
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, const: delegation-service }
+        principalPartyId: { type: string, format: uuid }
+        actorId: { type: string, format: uuid, description: Authenticated human initiator }
+        operationKind: { type: string, enum: [ISSUE, ACCEPT] }
+        representativePartyIds:
+          type: array
+          minItems: 2
+          uniqueItems: true
+          items: { type: string, format: uuid }
+          description: Frozen human roster, not a grant of authority or a company notification address.
+        requestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        ruleHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        expiresAt: { type: string, format: date-time }
+
     statutoryDelegationProposalCancelled:
       type: object
       required:
@@ -491,6 +535,18 @@ components:
           description: The active lifecycle revision reviewed; this is evidence, not an authority transition.
 
   messages:
+    StatutoryDelegationProposalOpened:
+      name: StatutoryDelegationProposalOpened
+      title: A joint statutory proposal awaits human signatures
+      summary: >-
+        Inert notification hint emitted once with the immutable proposal. Recipients must
+        recheck the live mandate and exact signing intent before acting.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/statutoryDelegationProposalOpened'
+
     StatutoryDelegationProposalCancelled:
       name: StatutoryDelegationProposalCancelled
       title: An initiator cancelled an inert statutory company proposal

@@ -7,6 +7,7 @@ package com.openbank.delegation.application.port.out
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalOpened
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
@@ -30,7 +31,10 @@ class StatutoryQuorumIncomplete : RuntimeException("statutory approval quorum is
 
 interface StatutoryDelegationOperationRepository {
     /** Exact replay returns the existing operation id; changed evidence under one request key fails. */
-    suspend fun create(operation: StatutoryDelegationOperation): StatutoryOperationCreateOutcome
+    suspend fun create(
+        operation: StatutoryDelegationOperation,
+        event: StatutoryDelegationProposalOpened,
+    ): StatutoryOperationCreateOutcome
 
     /** Principal scope is mandatory so a guessed operation id never reveals another company. */
     suspend fun find(id: UUID, principalPartyId: UUID): StatutoryDelegationOperation?

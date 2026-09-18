@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.StatutoryDelegationOperation
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalOpened
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
@@ -78,7 +79,20 @@ class StatutoryDelegationAcceptanceProposalService(
             targetGrantId = grant.id,
             expectedLifecycleRevision = grant.lifecycleRevision,
         )
-        val outcome = operations.create(operation)
+        val outcome = operations.create(
+            operation,
+            StatutoryDelegationProposalOpened(
+                aggregateId = operation.id,
+                principalPartyId = companyPartyId,
+                actorId = actor,
+                operationKind = operation.operationKind,
+                representativePartyIds = rule.eligibleRepresentatives.map { it.partyId }.sortedBy(UUID::toString),
+                requestHash = operation.requestHash,
+                ruleHash = operation.ruleHash,
+                expiresAt = operation.expiresAt,
+                occurredAt = now,
+            ),
+        )
         ensureFreshReplay(outcome)
         return outcome
     }

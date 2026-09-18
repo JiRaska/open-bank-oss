@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.StatutoryDecisionClosed
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
@@ -11,6 +12,7 @@ import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutc
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalOpened
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
@@ -48,6 +50,7 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(StatutoryDelegationOperationSchemaIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
+@Suppress("LargeClass") // One real-Postgres fixture checks the shared immutable operation ledger for both JOINT kinds.
 class StatutoryDelegationOperationSchemaIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -62,32 +65,67 @@ class StatutoryDelegationOperationSchemaIT {
 
     @Inject lateinit var dataSource: DataSource
 
+    @Inject lateinit var mapper: ObjectMapper
+
     private fun <T> onVertxContext(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
+
+    private suspend fun createOperation(operation: StatutoryDelegationOperation): StatutoryOperationCreateOutcome {
+        val recipients = mapper.readTree(operation.ruleSnapshotJson).path("eligibleRepresentatives")
+            .map { UUID.fromString(it.path("partyId").asText()) }.sortedBy(UUID::toString)
+        return operations.create(
+            operation,
+            StatutoryDelegationProposalOpened(
+                aggregateId = operation.id,
+                principalPartyId = operation.principalPartyId,
+                actorId = operation.initiatorPartyId,
+                operationKind = operation.operationKind,
+                representativePartyIds = recipients,
+                requestHash = operation.requestHash,
+                ruleHash = operation.ruleHash,
+                expiresAt = operation.expiresAt,
+                occurredAt = operation.createdAt,
+            ),
+        )
+    }
 
     @Test
     fun `request key replays the exact proposal but rejects a different operation or rule`() {
         val proposed = operation()
-        assertThat(onVertxContext { operations.create(proposed) })
+        assertThat(onVertxContext { createOperation(proposed) })
             .isInstanceOf(StatutoryOperationCreateOutcome.Created::class.java)
 
         val retry = proposed.copy(id = UUID.randomUUID(), createdAt = proposed.createdAt.plusSeconds(1))
-        val replayed = onVertxContext { operations.create(retry) }
+        val replayed = onVertxContext { createOperation(retry) }
         assertThat(replayed).isInstanceOf(StatutoryOperationCreateOutcome.Replayed::class.java)
         assertThat(replayed.operation.id).isEqualTo(proposed.id)
+        assertThat(rowCount("delegation_outbox", "aggregate_id", proposed.id)).isEqualTo(1)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT event_type, payload FROM delegation_outbox WHERE aggregate_id = ?",
+            ).use { statement ->
+                statement.setObject(1, proposed.id)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString("event_type")).isEqualTo("StatutoryDelegationProposalOpened")
+                    assertThat(rows.getString("payload")).contains(proposed.initiatorPartyId.toString())
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
         assertThat(onVertxContext { operations.find(proposed.id, proposed.principalPartyId) })
             .isEqualTo(proposed)
         assertThat(onVertxContext { operations.find(proposed.id, UUID.randomUUID()) }).isNull()
         val changedPayload = """{"resourceId":"${UUID.randomUUID()}"}"""
         assertThatThrownBy {
             onVertxContext {
-                operations.create(
+                createOperation(
                     retry.copy(payloadJson = changedPayload, requestHash = sha256(changedPayload)),
                 )
             }
         }.isInstanceOf(com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict::class.java)
         assertThatThrownBy {
-            onVertxContext { operations.create(retry.copy(policyRevision = proposed.policyRevision + 1)) }
+            onVertxContext { createOperation(retry.copy(policyRevision = proposed.policyRevision + 1)) }
         }.isInstanceOf(com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict::class.java)
 
         dataSource.connection.use { connection ->
@@ -112,9 +150,10 @@ class StatutoryDelegationOperationSchemaIT {
     }
 
     @Test
+    @Suppress("LongMethod") // One race scenario covers authorization, replay, outbox and evidence.
     fun `only the initiator cancels an inert proposal and exact retry preserves decisions`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         val at = proposed.createdAt.plusSeconds(2)
         val event = StatutoryDelegationProposalCancelled(
             aggregateId = proposed.id,
@@ -173,10 +212,11 @@ class StatutoryDelegationOperationSchemaIT {
                 )
             },
         ).isEqualTo(cancelled)
-        assertThat(rowCount("delegation_outbox", "aggregate_id", proposed.id)).isEqualTo(1)
+        assertThat(rowCount("delegation_outbox", "aggregate_id", proposed.id)).isEqualTo(2)
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "SELECT event_type, payload FROM delegation_outbox WHERE aggregate_id = ?",
+                "SELECT event_type, payload FROM delegation_outbox WHERE aggregate_id = ? " +
+                    "AND event_type = 'StatutoryDelegationProposalCancelled'",
             ).use { statement ->
                 statement.setObject(1, proposed.id)
                 statement.executeQuery().use { rows ->
@@ -212,7 +252,7 @@ class StatutoryDelegationOperationSchemaIT {
     @Test
     fun `pending inbox selects only current rule and company before expiry`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
 
         assertThat(
             onVertxContext {
@@ -245,8 +285,8 @@ class StatutoryDelegationOperationSchemaIT {
             createdAt = first.createdAt.plusSeconds(1),
             expiresAt = first.expiresAt.plusSeconds(1),
         )
-        onVertxContext { operations.create(first) }
-        onVertxContext { operations.create(second) }
+        onVertxContext { createOperation(first) }
+        onVertxContext { createOperation(second) }
         val newest = onVertxContext { operations.pending(first.principalPartyId, first.ruleHash, first.createdAt, 1) }
         assertThat(newest).containsExactly(second)
         val older = onVertxContext {
@@ -320,7 +360,7 @@ class StatutoryDelegationOperationSchemaIT {
             targetGrantId = grant.id,
             expectedLifecycleRevision = grant.lifecycleRevision,
         )
-        onVertxContext { operations.create(acceptance) }
+        onVertxContext { createOperation(acceptance) }
 
         assertThat(onVertxContext { operations.find(acceptance.id, grant.granteePartyId) }).isEqualTo(acceptance)
         assertThat(
@@ -365,7 +405,7 @@ class StatutoryDelegationOperationSchemaIT {
     @Test
     fun `proposal evidence and SCA decisions cannot be rewritten or reused`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         val actor = UUID.randomUUID()
         val sca = UUID.randomUUID()
         dataSource.connection.use { connection ->
@@ -404,7 +444,7 @@ class StatutoryDelegationOperationSchemaIT {
     @Test
     fun `approval requires SCA evidence while an immutable rejection must not claim one`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 "INSERT INTO delegation_statutory_decisions " +
@@ -432,7 +472,7 @@ class StatutoryDelegationOperationSchemaIT {
     @Test
     fun `decision repository stores an exact retry once and never creates a grant`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         val actor = UUID.randomUUID()
         val first = StatutoryDelegationDecision(
             proposed.id,
@@ -466,7 +506,7 @@ class StatutoryDelegationOperationSchemaIT {
     @Suppress("NestedBlockDepth") // Keep both JDBC transactions open to prove the real row-lock wait.
     fun `decision insertion waits on the operation row lock used by quorum execution`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         dataSource.connection.use { executor ->
             executor.autoCommit = false
             try {
@@ -507,7 +547,7 @@ class StatutoryDelegationOperationSchemaIT {
     @Test
     fun `quorum execution commits one grant and one outbox row or nothing`() {
         val proposed = operation()
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         val first = UUID.randomUUID()
         val second = UUID.randomUUID()
         val rule = jointRule(proposed, first, second)
@@ -607,7 +647,7 @@ class StatutoryDelegationOperationSchemaIT {
             targetGrantId = offered.id,
             expectedLifecycleRevision = 0,
         )
-        onVertxContext { operations.create(proposed) }
+        onVertxContext { createOperation(proposed) }
         val first = UUID.randomUUID()
         val second = UUID.randomUUID()
         val rule = jointRule(proposed, first, second)
@@ -699,13 +739,16 @@ class StatutoryDelegationOperationSchemaIT {
     private fun operation(): StatutoryDelegationOperation {
         val principal = UUID.randomUUID()
         val policy = UUID.randomUUID()
+        val initiator = UUID.randomUUID()
+        val other = UUID.randomUUID()
         val payload = """{"principalPartyId":"$principal","resourceId":"${UUID.randomUUID()}"}"""
-        val rule = """{"policyId":"$policy","requiredSignatures":2}"""
+        val rule = """{"policyId":"$policy","requiredSignatures":2,"eligibleRepresentatives":[""" +
+            """{"partyId":"$initiator"},{"partyId":"$other"}]}"""
         val at = Instant.parse("2026-09-17T12:00:00Z")
         return StatutoryDelegationOperation(
             id = UUID.randomUUID(),
             principalPartyId = principal,
-            initiatorPartyId = UUID.randomUUID(),
+            initiatorPartyId = initiator,
             requestKey = UUID.randomUUID().toString(),
             requestHash = sha256(payload),
             payloadJson = payload,

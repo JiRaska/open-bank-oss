@@ -72,6 +72,35 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `joint proposal opening records initiator not the company or notified roster`(): Unit = runBlocking {
+        val operationId = UUID.randomUUID()
+        val actorId = UUID.randomUUID()
+        val principal = UUID.randomUUID()
+        val payload = """
+            {"eventId":"${UUID.randomUUID()}","eventType":"StatutoryDelegationProposalOpened",
+             "aggregateType":"StatutoryDelegationOperation","aggregateId":"$operationId",
+             "principalPartyId":"$principal","actorId":"$actorId",
+             "representativePartyIds":["$actorId","${UUID.randomUUID()}"],
+             "operationKind":"ISSUE","occurredAt":"2026-09-18T12:00:00Z",
+             "sourceService":"delegation-service"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify(exactly = 1) {
+            repo.save(
+                match {
+                    it.eventType == "StatutoryDelegationProposalOpened" &&
+                        it.aggregateId == operationId.toString() &&
+                        it.actorId == actorId.toString() &&
+                        it.actorId != principal.toString()
+                },
+            )
+        }
+    }
+
+    @Test
     fun `consume records audit entry with inferred aggregate type and fallback actor fields`(): Unit = runBlocking {
         val transactionId = UUID.randomUUID()
         val occurredAt = Instant.parse("2026-05-27T12:00:00Z")

@@ -73,7 +73,7 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
         runBlocking {
             coEvery { grants.findById(grant.id) } returns grant
             coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
-            coEvery { operations.create(any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
+            coEvery { operations.create(any(), any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
 
             val operation = service.propose(grant.id, company, company, actor, "accept-1").operation
 
@@ -84,6 +84,17 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
             assertThat(operation.expiresAt).isEqualTo(clock.instant().plusSeconds(86_400))
             assertThat(operation.payloadJson).contains("\"kind\":\"ACCEPT\"")
             assertThat(operation.payloadJson).contains(grant.resourceId.toString())
+            coVerify(exactly = 1) {
+                operations.create(
+                    any(),
+                    match {
+                        it.aggregateId == operation.id &&
+                            it.actorId == actor &&
+                            it.operationKind == StatutoryOperationKind.ACCEPT &&
+                            it.representativePartyIds.toSet() == setOf(actor, other)
+                    },
+                )
+            }
         }
 
     @Test
@@ -100,7 +111,7 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
             runBlocking { service.propose(grant.id, unrelatedCompany, unrelatedCompany, actor, "accept-1") }
         }.isInstanceOf(StatutoryProposalNotFound::class.java)
         coVerify(exactly = 0) { rules.resolve(any(), any()) }
-        coVerify(exactly = 0) { operations.create(any()) }
+        coVerify(exactly = 0) { operations.create(any(), any()) }
     }
 
     @Test
@@ -114,14 +125,14 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
                 runBlocking { service.propose(grant.id, company, company, actor, "accept-1") }
             }.isInstanceOf(StatutoryProposalDenied::class.java)
         }
-        coVerify(exactly = 0) { operations.create(any()) }
+        coVerify(exactly = 0) { operations.create(any(), any()) }
     }
 
     @Test
     fun `changed offer revision or legal rule invalidates pending ballot`(): Unit = runBlocking {
         coEvery { grants.findById(grant.id) } returns grant
         coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
-        coEvery { operations.create(any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
+        coEvery { operations.create(any(), any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
         val operation = service.propose(grant.id, company, company, actor, "accept-1").operation
         coEvery { operations.find(operation.id, company) } returns operation
         assertThat(service.pending(operation.id, company, company, actor)).isEqualTo(operation)
@@ -140,7 +151,7 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
     fun `acceptance inbox requests only the acceptance family under the live company rule`(): Unit = runBlocking {
         coEvery { grants.findById(grant.id) } returns grant
         coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
-        coEvery { operations.create(any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
+        coEvery { operations.create(any(), any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
         val acceptance = service.propose(grant.id, company, company, actor, "accept-page").operation
         coEvery {
             operations.pending(

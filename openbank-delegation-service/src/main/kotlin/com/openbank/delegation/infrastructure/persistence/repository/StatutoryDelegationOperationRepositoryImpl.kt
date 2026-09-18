@@ -15,6 +15,7 @@ import com.openbank.delegation.application.port.out.StatutoryQuorumIncomplete
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalOpened
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
@@ -44,8 +45,12 @@ class StatutoryDelegationOperationRepositoryImpl(
     private val mapper: ObjectMapper,
 ) : StatutoryDelegationOperationRepository,
     PanacheRepository<StatutoryDelegationOperationEntity> {
-    override suspend fun create(operation: StatutoryDelegationOperation): StatutoryOperationCreateOutcome {
+    override suspend fun create(
+        operation: StatutoryDelegationOperation,
+        event: StatutoryDelegationProposalOpened,
+    ): StatutoryOperationCreateOutcome {
         require(operation.state == StatutoryOperationState.PENDING) { "only pending operations can be proposed" }
+        requireOpenedEventMatches(operation, event)
         return Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Any>(INSERT_SQL)
@@ -73,21 +78,50 @@ class StatutoryDelegationOperationRepositoryImpl(
                             operation.requestKey,
                         )
                             .firstResult<StatutoryDelegationOperationEntity>()
-                            .map { entity ->
+                            .flatMap { entity ->
                                 val persisted = requireNotNull(entity) {
                                     "statutory operation insert/replay produced no row"
                                 }
                                     .toDomain()
                                 if (!persisted.sameEvidenceAs(operation)) throw StatutoryOperationCreateConflict()
                                 if (inserted == 1) {
-                                    StatutoryOperationCreateOutcome.Created(persisted)
+                                    outboxRepository.persistInTransaction(
+                                        OutboxMessage(
+                                            aggregateId = operation.id,
+                                            eventType = event.eventType,
+                                            payload = mapper.writeValueAsString(event),
+                                            createdAt = operation.createdAt,
+                                        ),
+                                    ).replaceWith<StatutoryOperationCreateOutcome>(
+                                        StatutoryOperationCreateOutcome.Created(persisted),
+                                    )
                                 } else {
-                                    StatutoryOperationCreateOutcome.Replayed(persisted)
+                                    Uni.createFrom().item(StatutoryOperationCreateOutcome.Replayed(persisted))
                                 }
                             }
                     }
             }
         }.awaitSuspending()
+    }
+
+    private fun requireOpenedEventMatches(
+        operation: StatutoryDelegationOperation,
+        event: StatutoryDelegationProposalOpened,
+    ) {
+        val frozenRoster = mapper.readTree(operation.ruleSnapshotJson).path("eligibleRepresentatives")
+            .map { UUID.fromString(it.path("partyId").asText()) }.sortedBy(UUID::toString)
+        require(
+            frozenRoster.isNotEmpty() &&
+                event.aggregateId == operation.id &&
+                event.principalPartyId == operation.principalPartyId &&
+                event.actorId == operation.initiatorPartyId &&
+                event.operationKind == operation.operationKind &&
+                event.representativePartyIds == frozenRoster &&
+                event.requestHash == operation.requestHash &&
+                event.ruleHash == operation.ruleHash &&
+                event.expiresAt == operation.expiresAt &&
+                event.occurredAt == operation.createdAt,
+        ) { "proposal event must match immutable operation evidence" }
     }
 
     override suspend fun find(id: UUID, principalPartyId: UUID): StatutoryDelegationOperation? = Panache.withSession {
@@ -187,6 +221,7 @@ class StatutoryDelegationOperationRepositoryImpl(
             }
         }.awaitSuspending()
 
+    @Suppress("CyclomaticComplexMethod") // Each locked-state branch enforces a distinct race or replay invariant.
     override suspend fun cancel(
         operationId: UUID,
         principalPartyId: UUID,

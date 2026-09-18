@@ -106,6 +106,7 @@ data class StatutoryDecisionSummaryResponse(
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+@Suppress("TooManyFunctions") // One resource owns the JOINT proposal lifecycle under one principal scope.
 class StatutoryDelegationResource(
     private val service: StatutoryDelegationProposalService,
     private val cancellation: StatutoryDelegationCancellationService,

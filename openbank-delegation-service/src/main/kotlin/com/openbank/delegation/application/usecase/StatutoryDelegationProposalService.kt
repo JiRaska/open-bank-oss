@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.StatutoryDelegationOperation
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalOpened
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationKind
@@ -57,21 +58,33 @@ class StatutoryDelegationProposalService(
         val payload = evidence.payload(command)
         val snapshot = evidence.rule(rule)
         val createdAt = clock.instant()
+        val operation = StatutoryDelegationOperation(
+            id = UUID.randomUUID(),
+            principalPartyId = command.grantorPartyId,
+            initiatorPartyId = actor,
+            requestKey = requestKey,
+            requestHash = evidence.hash(payload),
+            payloadJson = payload,
+            policyId = rule.policyId,
+            policyRevision = rule.revision,
+            sourceCaseId = rule.sourceCaseId,
+            ruleHash = evidence.hash(snapshot),
+            ruleSnapshotJson = snapshot,
+            createdAt = createdAt,
+            expiresAt = createdAt.plus(PROPOSAL_LIFETIME),
+        )
         val outcome = repository.create(
-            StatutoryDelegationOperation(
-                id = UUID.randomUUID(),
-                principalPartyId = command.grantorPartyId,
-                initiatorPartyId = actor,
-                requestKey = requestKey,
-                requestHash = evidence.hash(payload),
-                payloadJson = payload,
-                policyId = rule.policyId,
-                policyRevision = rule.revision,
-                sourceCaseId = rule.sourceCaseId,
-                ruleHash = evidence.hash(snapshot),
-                ruleSnapshotJson = snapshot,
-                createdAt = createdAt,
-                expiresAt = createdAt.plus(PROPOSAL_LIFETIME),
+            operation,
+            StatutoryDelegationProposalOpened(
+                aggregateId = operation.id,
+                principalPartyId = operation.principalPartyId,
+                actorId = actor,
+                operationKind = operation.operationKind,
+                representativePartyIds = rule.eligibleRepresentatives.map { it.partyId }.sortedBy(UUID::toString),
+                requestHash = operation.requestHash,
+                ruleHash = operation.ruleHash,
+                expiresAt = operation.expiresAt,
+                occurredAt = createdAt,
             ),
         )
         if (outcome is StatutoryOperationCreateOutcome.Replayed &&

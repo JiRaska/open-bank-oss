@@ -26,6 +26,7 @@ class StatutoryDelegationCancellationService(
     constructor(rules: StatutoryRuleClient, operations: StatutoryDelegationOperationRepository) :
         this(rules, operations, Clock.systemUTC())
 
+    @Suppress("ThrowsCount") // Distinct denial states intentionally retain distinct HTTP mappings.
     suspend fun cancel(
         id: UUID,
         company: UUID,
