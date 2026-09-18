@@ -43,3 +43,9 @@ dependencies {
 }
 
 kover { reports { verify { rule { bound { minValue = 60 } } } } }
+
+// Context's Quarkus/PostgreSQL suite holds multiple application profiles in one test JVM.
+// The default test heap exhausted on CI before the suite completed; keep the correction local.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
