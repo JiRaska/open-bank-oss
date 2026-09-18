@@ -106,6 +106,36 @@ CREATE TRIGGER lending_graph_allocation_source_guard
     BEFORE INSERT ON lending_graph_allocation
     FOR EACH ROW EXECUTE FUNCTION guard_lending_graph_allocation_source();
 
+-- A collateral row can be released after an allocation is proposed. Recheck and
+-- lock the source at approval so that a stale proposal cannot become a graph edge.
+-- Rejection remains possible after release, preserving the review history.
+CREATE FUNCTION guard_lending_graph_allocation_approval() RETURNS trigger AS $$
+DECLARE
+    asset_kind VARCHAR(32);
+    legacy_type VARCHAR(32);
+    legacy_status VARCHAR(16);
+    legacy_currency CHAR(3);
+    legacy_released_at TIMESTAMPTZ;
+BEGIN
+    SELECT asset_type INTO asset_kind FROM lending_graph_asset
+        WHERE asset_id = NEW.asset_id AND status = 'APPROVED';
+    SELECT type::text, status::text, currency, released_at
+      INTO legacy_type, legacy_status, legacy_currency, legacy_released_at
+      FROM collateral WHERE id = NEW.collateral_id FOR UPDATE;
+    IF asset_kind IS NULL OR legacy_status IS DISTINCT FROM 'APPROVED' OR
+       legacy_released_at IS NOT NULL OR legacy_type IS DISTINCT FROM asset_kind OR
+       legacy_currency IS DISTINCT FROM NEW.currency THEN
+        RAISE EXCEPTION 'approved matching collateral evidence is required at decision';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER lending_graph_allocation_approval_guard
+    BEFORE UPDATE OF status ON lending_graph_allocation
+    FOR EACH ROW WHEN (NEW.status = 'APPROVED')
+    EXECUTE FUNCTION guard_lending_graph_allocation_approval();
+
 CREATE TABLE lending_graph_valuation (
     valuation_id UUID PRIMARY KEY,
     asset_id UUID NOT NULL REFERENCES lending_graph_asset(asset_id),
