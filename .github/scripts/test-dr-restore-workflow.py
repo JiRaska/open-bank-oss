@@ -71,7 +71,7 @@ elif 'port-forward' in args:
         time.sleep(0.01)
 '''
 CURL = r'''
-import os, pathlib, sys, time
+import json, os, pathlib, sys, time
 root = pathlib.Path(os.environ['DR_TEST_STATE'])
 # Model connection retry only when the actual invocation enables it.
 tries = 100 if '--retry-connrefused' in sys.argv else 1
@@ -86,8 +86,14 @@ assert header_file.read_text().startswith('Authorization: Bearer ')
 case = os.environ['DR_TEST_CASE']
 if case == 'http-failure':
     sys.exit(22)
-print({'string-boolean': '{"balanced":"True"}',
-       'unbalanced': '{"balanced":false}'}.get(case, '{"balanced":true}'))
+body = {'fiscalYear': 2026, 'balanced': True, 'accountCount': 2,
+        'totalDebit': 100.01, 'totalCredit': 100.01}
+body.update({'string-boolean': {'balanced': 'True'},
+             'unbalanced': {'balanced': False},
+             'empty-ledger': {'accountCount': 0, 'totalDebit': 0, 'totalCredit': 0},
+             'wrong-year': {'fiscalYear': 2025},
+             'mismatched-totals': {'totalCredit': 99.99}}.get(case, {}))
+print(json.dumps(body))
 '''
 
 
@@ -262,6 +268,32 @@ class DrRestoreWorkflowTest(unittest.TestCase):
         self.assertEqual(recovery.get('database'), identity['database'])
         self.assertEqual(recovery.get('owner'), identity['owner'])
 
+    def test_trial_balance_numbers_are_checked_without_float_rounding(self):
+        script = ROOT / '.github/scripts/dr-check-trial-balance.py'
+        prefix = '{"balanced":true,"fiscalYear":2026,"accountCount":2,'
+        cases = [
+            ('"totalDebit":0.1,"totalCredit":0.10}', True),
+            ('"totalDebit":9007199254740992.01,"totalCredit":9007199254740992.02}', False),
+            ('"totalDebit":NaN,"totalCredit":NaN}', False),
+            ('"totalDebit":Infinity,"totalCredit":Infinity}', False),
+            ('"totalDebit":-1,"totalCredit":-1}', False),
+            ('"totalDebit":0,"totalCredit":0}', False),
+            ('"totalDebit":true,"totalCredit":true}', False),
+            ('"totalDebit":"1","totalCredit":"1"}', False),
+            ('"totalDebit":1}', False),
+        ]
+        for suffix, accepted in cases:
+            with self.subTest(suffix=suffix):
+                result = subprocess.run([sys.executable, str(script), '2026'],
+                                        input=prefix + suffix, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+        for body in ('[]', 'null', '{', '{"balanced":true}',
+                     '{"balanced":true,"fiscalYear":2026,"accountCount":true}'):
+            with self.subTest(body=body):
+                result = subprocess.run([sys.executable, str(script), '2026'],
+                                        input=body, capture_output=True, text=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+
     def test_cleanup_failure_is_not_a_successful_drill(self):
         result, _, stopped = self.run_step('delete-failure')
         self.assertNotEqual(result.returncode, 0)
@@ -273,7 +305,8 @@ class DrRestoreWorkflowTest(unittest.TestCase):
         self.assertFalse(any(c[:2] == ['delete', 'namespace'] for c in calls))
 
     def test_failed_verification_cleans_only_its_resources(self):
-        for case in ['http-failure', 'unbalanced', 'string-boolean']:
+        for case in ['http-failure', 'unbalanced', 'string-boolean', 'empty-ledger',
+                     'wrong-year', 'mismatched-totals']:
             with self.subTest(case=case):
                 result, calls, stopped = self.run_step(case)
                 self.assertNotEqual(result.returncode, 0)

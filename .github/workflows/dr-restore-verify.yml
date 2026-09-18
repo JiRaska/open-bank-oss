@@ -5,7 +5,7 @@
 # reachable, which is all the table-top exercises confirm today.
 #
 # It restores ledger-db into a THROWAWAY namespace, boots ledger-service against it,
-# asserts GET /api/v1/ledger/close/trial-balance returns balanced:true,
+# asserts the requested fiscal year has nonempty, positive balanced activity,
 # records elapsed restore/check time and tears the namespace down. This does not yet
 # measure RPO or prove cross-service recovery consistency.
 #
@@ -126,10 +126,7 @@ jobs:
           BODY="$(curl -sf --header @"$AUTH_DIR/authorization-header" --retry 20 --retry-connrefused --retry-delay 1 --max-time 10 \
             "http://localhost:18101/api/v1/ledger/close/trial-balance?fiscalYear=${FY}")"
           RESTORE_END=$(date -u +%s); RTO=$(( RESTORE_END - RESTORE_START ))
-          BALANCED="$(printf '%s' "$BODY" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("balanced") is True)')"
-          if [ "$BALANCED" != "True" ]; then
-            echo "::error::restored ledger is UNBALANCED — backup integrity FAILED"; exit 1
-          fi
+          printf '%s' "$BODY" | python3 .github/scripts/dr-check-trial-balance.py "$FY"
 
           echo "RTO_SECONDS=${RTO}" >> "$GITHUB_STEP_SUMMARY"
           echo "RPO_NOT_MEASURED: this check does not establish a recovery-point objective." >> "$GITHUB_STEP_SUMMARY"
