@@ -101,5 +101,7 @@ class DocumentSecurityContractTest {
         val method = LendingGuaranteeEvidenceResource::class.java.declaredMethods.single { it.name == "verify" }
         assertThat(method.getAnnotation(Authorize::class.java)?.action)
             .isEqualTo("document.guaranteeEvidence.verify")
+        assertThat(method.getAnnotation(RolesAllowed::class.java)?.value?.toList())
+            .containsExactly("ROLE_LENDING_GRAPH_PROOF")
     }
 }

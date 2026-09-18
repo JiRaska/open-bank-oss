@@ -24,8 +24,10 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 - document-service → object store (phase-1 Postgres BYTEA; phase-2 S3 + Object Lock/WORM, ADR-0161).
 - **Lending guarantee proof → document-service:** a dedicated service account may ask only whether
   one signed, sealed document matches a loan, guarantor, bank and SHA-256. The response contains
-  one boolean and no metadata or bytes. This path is dormant until its separate credential is
-  provisioned; the shared backend account is denied even while OPA is advisory.
+  one boolean and no metadata or bytes. The `openbank-lending-graph` client has only
+  `ROLE_LENDING_GRAPH_PROOF`; the route also checks its exact service-account principal. This path
+  is dormant until its separate credential is provisioned; the shared backend account is denied
+  even while OPA is advisory.
 - document-service → render adapters (phase-1 in-process placeholder; phase-2 WeasyPrint/Gotenberg
   sidecar over REST, ADR-0162) — a **new** egress trust boundary when the sidecar lands.
 - document-service → seal adapter (phase-1 no-op; phase-2 EU DSS PAdES with a QSeal/HSM key,

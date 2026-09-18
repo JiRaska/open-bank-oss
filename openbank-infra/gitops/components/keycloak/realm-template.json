@@ -46,6 +46,10 @@
         "description": "Machine-to-machine API access"
       },
       {
+        "name": "ROLE_LENDING_GRAPH_PROOF",
+        "description": "Dedicated service identity for signed Lending guarantee proof only"
+      },
+      {
         "name": "ROLE_KYC",
         "description": "KYC officer (legacy — use KYC_OPENER or KYC_REVIEWER for new assignments)"
       },
@@ -234,6 +238,20 @@
         "roles"
       ],
       "secret": "__SERVICES_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-lending-graph",
+      "name": "OpenBank Lending graph evidence",
+      "description": "Dedicated client-credentials identity for purpose-limited signed guarantee proof checks; separate from the shared backend account.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": ["openid", "roles"],
+      "secret": "__LENDING_GRAPH_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-edge",
@@ -498,6 +516,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-lending-graph",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-lending-graph",
+      "realmRoles": ["ROLE_LENDING_GRAPH_PROOF"]
     },
     {
       "username": "service-account-openbank-mcp-service",

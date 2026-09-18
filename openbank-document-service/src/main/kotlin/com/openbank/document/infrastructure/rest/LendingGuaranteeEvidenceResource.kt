@@ -28,7 +28,7 @@ class LendingGuaranteeEvidenceResource(
 ) {
     @POST
     @Path("/verify")
-    @RolesAllowed("ROLE_API")
+    @RolesAllowed("ROLE_LENDING_GRAPH_PROOF")
     @Authorize(action = "document.guaranteeEvidence.verify", resource = "")
     suspend fun verify(req: LendingGuaranteeEvidenceRequest?): LendingGuaranteeEvidenceResponse {
         // The existing openbank-services credential is shared across backends. Even if OPA is

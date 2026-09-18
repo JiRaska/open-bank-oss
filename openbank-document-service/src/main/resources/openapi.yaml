@@ -208,7 +208,8 @@ paths:
       summary: Verify a signed guarantee document against a specific loan, guarantor and bank
       description: >-
         Internal boolean-only proof check for the dedicated openbank-lending-graph service
-        account (OPA action document.guaranteeEvidence.verify). Compares the sealed bytes'
+        account with ROLE_LENDING_GRAPH_PROOF (OPA action document.guaranteeEvidence.verify).
+        Compares the sealed bytes'
         SHA-256, not the pre-seal digest. Missing, archived, unsigned, unsealed or mismatched
         evidence returns matches=false without disclosing document metadata.
       operationId: verifyLendingGuaranteeEvidence

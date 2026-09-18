@@ -48,7 +48,7 @@ prohibited if {
 # handler repeats this exact-principal check while AUTHZ_ENFORCE is still advisory.
 allowed_reasons contains "service-lending-guarantee-proof" if {
     input.principal.id == "service-account-openbank-lending-graph"
-    "ROLE_API" in input.principal.roles
+    "ROLE_LENDING_GRAPH_PROOF" in input.principal.roles
     input.action == "document.guaranteeEvidence.verify"
 }
 
