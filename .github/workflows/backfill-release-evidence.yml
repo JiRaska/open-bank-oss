@@ -1,16 +1,6 @@
 name: Backfill release evidence
 
-# Backfill the signed evidence bundle for an EXISTING release tag (ADR-0029 D2 / ADR-0030 D4).
-#
-# The release-evidence job in release-please.yml attaches the bundle at the moment a tag is
-# cut. This workflow does the same for a tag that was cut WITHOUT a bundle — releases made
-# before the pipeline existed, or ones missed by a release-please run race. Same generation +
-# AWS-KMS cosign signing + REST upload as release-please.yml; the only difference is the tag
-# comes from the dispatch input (and the source is checked out AT that tag).
-#
-# Manual, read-mostly (only attaches release assets). Idempotent: re-attaches with HTTP 422
-# tolerated.
-
+# The released source is build input. It must not run with release-write or signing credentials.
 on:
   workflow_dispatch:
     inputs:
@@ -19,141 +9,152 @@ on:
         required: true
         type: string
 
-# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
-# block); the backfill job below declares its own override for the write access it needs.
 permissions:
   contents: read
 
 jobs:
-  backfill:
-    name: Backfill ${{ inputs.tag }}
-    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+  prepare:
+    name: Build evidence for ${{ inputs.tag }}
+    runs-on: ubuntu-latest
     permissions:
-      contents: write   # upload release assets
-      id-token: write   # OIDC → assume the build-runner role for KMS cosign
+      contents: read
     timeout-minutes: 30
+    outputs:
+      tag_commit: ${{ steps.map.outputs.tag_commit }}
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out released source without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag }}   # build the SBOM from the released source
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out trusted evidence tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Resolve release component
+        id: map
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^[a-z0-9][a-z0-9-]*-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.-]+)?$ ]] || exit 1
+          comp="${TAG%-v*}"; ver="${TAG##*-v}"
+          path="$(python3 -c "import json,sys; cfg=json.load(open('trusted/release-please-config.json'))['packages']; print(next((p for p,c in cfg.items() if c.get('component')==sys.argv[1]), ''))" "$comp")"
+          [ -n "$path" ] && [ -d "$path" ] || { echo "::error::unknown released component"; exit 1; }
+          tag_commit="$(git rev-parse HEAD)"
+          [ "$(git rev-list -n 1 "$TAG")" = "$tag_commit" ] || exit 1
+          printf 'comp=%s\nver=%s\npath=%s\ntag_commit=%s\n' "$comp" "$ver" "$path" "$tag_commit" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "25"
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
-          aws-region: eu-north-1   # KMS cosign key lives in eu-north-1
-
-      - name: Resolve component + module + release from tag
-        id: map
-        run: |
-          set -euo pipefail
-          api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
-          # tag = "<component>-v<version>" → component, version.
-          comp="${TAG%-v*}"; ver="${TAG##*-v}"
-          # Reverse-map component → package path via release-please-config.json.
-          path="$(python3 -c "import json,sys; cfg=json.load(open('release-please-config.json'))['packages']; print(next((p for p,c in cfg.items() if c.get('component')==sys.argv[1]), ''))" "$comp")"
-          [ -n "$path" ] || { echo "::error::no package path for component '$comp' (tag $TAG)"; exit 1; }
-          # Release upload_url for asset attachment.
-          upurl="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('upload_url','').split('{')[0])")"
-          [ -n "$upurl" ] || { echo "::error::release $TAG not found"; exit 1; }
-          {
-            echo "comp=$comp"; echo "ver=$ver"; echo "path=$path"; echo "upurl=$upurl"
-          } >> "$GITHUB_OUTPUT"
-          echo "Backfilling $TAG → component=$comp version=$ver path=$path"
-
       - name: Build SBOM
-        run: ./gradlew :${{ steps.map.outputs.path }}:cyclonedxBom --console=plain --no-daemon || true
-
-      # trivy is NOT preinstalled on hosted runners — without it the non-Gradle SBOM
-      # fallback below silently falls through (`command -v trivy` guard) and the
-      # backfill hard-fails for any module without the cyclonedx plugin (admin-ui).
-      # Same maintained, commit-pinned setup action security.yml / auto-deploy.yml use.
-      - name: Install Trivy (SBOM fallback for non-Gradle modules)
+        env:
+          MOD: ${{ steps.map.outputs.path }}
+        run: ./gradlew ":${MOD}:cyclonedxBom" --console=plain --no-daemon || true
+      - name: Install Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.72.0
-
-      - name: Build, sign and attach the evidence bundle
+      - name: Assemble unsigned evidence
         env:
           COMP: ${{ steps.map.outputs.comp }}
           VER: ${{ steps.map.outputs.ver }}
           MOD: ${{ steps.map.outputs.path }}
-          UPURL: ${{ steps.map.outputs.upurl }}
+          TAG_COMMIT: ${{ steps.map.outputs.tag_commit }}
+        shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
+          mkdir evidence
           sbom_out="${TAG}.cdx.json"
           bom="${MOD}/build/reports/bom.json"
-          if [ -f "$bom" ]; then
-            cp "$bom" "$sbom_out"
-          elif command -v trivy >/dev/null 2>&1 && trivy fs --format cyclonedx --output "$sbom_out" "$MOD" 2>/dev/null && [ -s "$sbom_out" ]; then
-            echo "::notice::${MOD} has no gradle SBOM — generated via trivy fs"
+          if [ -s "$bom" ]; then
+            cp "$bom" "evidence/$sbom_out"
+          elif trivy fs --format cyclonedx --output "evidence/$sbom_out" "$MOD" && [ -s "evidence/$sbom_out" ]; then
+            echo "::notice::generated SBOM with Trivy"
           else
-            echo "::error::no SBOM for ${MOD} (no gradle plugin and trivy fs produced none) — cannot backfill ${TAG}"; exit 1
+            echo "::error::cannot generate SBOM"; exit 1
           fi
-          # cosign v2 + KMS (same as release-please.yml).
-          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"; COSIGN_VERSION="v2.4.3"
-          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
-          bin="$(command -v cosign || true)"
-          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
-            bin="${RUNNER_TEMP}/cosign2"
-            # sha256 pins from the release's cosign_checksums.txt — bump together with
-            # COSIGN_VERSION (same block as release-please.yml).
-            case "${os}-${arch}" in
-              linux-amd64)  COSIGN_SHA256="caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708" ;;
-              linux-arm64)  COSIGN_SHA256="bd0f9763bca54de88699c3656ade2f39c9a1c7a2916ff35601caf23a79be0629" ;;
-              darwin-amd64) COSIGN_SHA256="98a3bfd691f42c6a5b721880116f89210d8fdff61cc0224cd3ef2f8e55a466fb" ;;
-              darwin-arm64) COSIGN_SHA256="edfc761b27ced77f0f9ca288ff4fac7caa898e1e9db38f4dfdf72160cdf8e638" ;;
-              *) echo "::error::no pinned cosign checksum for ${os}-${arch}"; exit 1 ;;
-            esac
-            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
-              -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
-            SHATOOL="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SHATOOL="shasum -a 256"
-            echo "${COSIGN_SHA256}  ${bin}" | ${SHATOOL} -c - \
-              || { echo "::error::cosign ${COSIGN_VERSION} download failed checksum verification"; exit 1; }
-            chmod +x "$bin"
-          fi
-          sign() { COSIGN_YES=true "$bin" sign-blob --key "$COSIGN_KEY" --output-signature "${1}.sig" "$1"; }
-          upload_asset() {
-            local code
-            code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/octet-stream" \
-              --data-binary @"$1" "${UPURL}?name=$(basename "$1")")"
-            case "$code" in
-              201) echo "  uploaded $1" ;;
-              422) echo "::notice::$1 already present (HTTP 422)" ;;
-              *)   echo "::warning::upload of $1 failed (HTTP $code)"; return 1 ;;
-            esac
-          }
+          GITHUB_SHA="$TAG_COMMIT" \
+          WORKFLOW_REF="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/backfill-release-evidence.yml" \
+          BUILD_TYPE="https://openbank.tech/backfill-release-evidence/v1" \
+            bash trusted/.github/scripts/build-release-evidence.sh "$COMP" "$VER" "$TAG" "$MOD" "evidence/$sbom_out"
+          mv "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json" evidence/
+          printf '%s\n' "$TAG_COMMIT" > evidence/tag-commit.txt
+          (cd evidence && sha256sum "${TAG}.cdx.json" "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json" tag-commit.txt > SHA256SUMS)
+      - name: Upload unsigned evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-unsigned
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 1
 
-          sign "$sbom_out" || { echo "::error::cosign sign-blob failed for $sbom_out"; exit 1; }
-          # The workspace is checked out AT THE TAG, where build-release-evidence.sh may not
-          # exist yet (older releases predate the pipeline). Source the script from main so the
-          # full bundle (SLSA+VEX+manifest) is always assembled; the SBOM itself stays tag-sourced.
-          EV_SCRIPT=".github/scripts/build-release-evidence.sh"
-          if [ ! -f "$EV_SCRIPT" ]; then
-            git fetch --depth=1 origin main 2>/dev/null || true
-            EV_SCRIPT="${RUNNER_TEMP}/build-release-evidence.sh"
-            git show origin/main:.github/scripts/build-release-evidence.sh > "$EV_SCRIPT" 2>/dev/null || true
-          fi
-          bash "$EV_SCRIPT" "$COMP" "$VER" "$TAG" "$MOD" "$sbom_out" \
-            || echo "::warning::evidence assembly had issues for $TAG"
-
-          assets="$sbom_out ${sbom_out}.sig"
-          for doc in "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json"; do
-            [ -f "$doc" ] || continue
-            sign "$doc" && assets="$assets $doc ${doc}.sig" || echo "::warning::sign failed for $doc"
+  backfill:
+    name: Sign and attach ${{ inputs.tag }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}
+    steps:
+      - name: Download unsigned evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-evidence-unsigned
+          path: evidence
+      - name: Verify artifact and current release target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^[a-z0-9][a-z0-9-]*-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.-]+)?$ ]] || exit 1
+          cd evidence
+          sha256sum -c SHA256SUMS
+          [ "$(cat tag-commit.txt)" = "$TAG_COMMIT" ] || exit 1
+          jq -e --arg tag "$TAG" --arg sha "$TAG_COMMIT" \
+            '.tag == $tag and .git_commit == $sha and .sbom.file == ($tag + ".cdx.json")' \
+            "${TAG}.evidence.json" > /dev/null
+          jq -e --arg sha "$TAG_COMMIT" \
+            '.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit == $sha' \
+            "${TAG}.slsa.json" > /dev/null
+          actual="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+          [ "$actual" = "$TAG_COMMIT" ] || { echo "::error::release tag moved after evidence build"; exit 1; }
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq .upload_url | sed 's/{.*//' > upload-url.txt
+          [ -s upload-url.txt ] || exit 1
+      - name: Configure signing identity
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+      - name: Sign and attach evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd evidence
+          COSIGN_VERSION=v2.4.3
+          COSIGN_SHA256=caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+            -o cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  cosign" | sha256sum -c -
+          chmod +x cosign
+          upload_url="$(cat upload-url.txt)"
+          for suffix in cdx.json slsa.json vex.json evidence.json; do
+            file="${TAG}.${suffix}"
+            COSIGN_YES=true ./cosign sign-blob --key awskms:///alias/openbank-cosign-signing --output-signature "${file}.sig" "$file"
+            for asset in "$file" "${file}.sig"; do
+              curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Content-Type: application/octet-stream' --data-binary "@${asset}" \
+                "${upload_url}?name=${asset}" > /dev/null
+            done
           done
-          rc=0
-          for f in $assets; do upload_asset "$f" || rc=1; done
-          echo "Backfilled $TAG: $assets"
-          [ "$rc" -eq 0 ] || echo "::warning::some assets failed to upload for $TAG"

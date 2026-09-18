@@ -24,7 +24,8 @@ SERVER="${GITHUB_SERVER_URL:-https://github.com}"
 SHA="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 RUN_ID="${GITHUB_RUN_ID:-local}"
 RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
-WORKFLOW_REF="${SERVER}/${REPO}/.github/workflows/release-please.yml"
+WORKFLOW_REF="${WORKFLOW_REF:-${SERVER}/${REPO}/.github/workflows/release-please.yml}"
+BUILD_TYPE="${BUILD_TYPE:-https://openbank.tech/release-please-evidence/v1}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
@@ -35,7 +36,7 @@ SBOM_SHA="$(sha256 "$SBOM_FILE")"
 SLSA_OUT="${TAG}.slsa.json"
 SBOM_BASENAME="$(basename "$SBOM_FILE")" \
 SBOM_SHA="$SBOM_SHA" REPO="$REPO" SERVER="$SERVER" SHA="$SHA" TAG="$TAG" \
-COMPONENT="$COMPONENT" VERSION="$VERSION" WORKFLOW_REF="$WORKFLOW_REF" RUN_URL="$RUN_URL" \
+COMPONENT="$COMPONENT" VERSION="$VERSION" WORKFLOW_REF="$WORKFLOW_REF" BUILD_TYPE="$BUILD_TYPE" RUN_URL="$RUN_URL" \
 python3 - > "$SLSA_OUT" <<'PY'
 import json, os
 stmt = {
@@ -45,7 +46,7 @@ stmt = {
     "predicateType": "https://slsa.dev/provenance/v1",
     "predicate": {
         "buildDefinition": {
-            "buildType": "https://openbank.tech/release-please-evidence/v1",
+            "buildType": os.environ["BUILD_TYPE"],
             "externalParameters": {
                 "component": os.environ["COMPONENT"],
                 "version": os.environ["VERSION"],

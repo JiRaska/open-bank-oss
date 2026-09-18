@@ -107,6 +107,28 @@ class SupplyChainTest(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 self.assertTrue(guard.findings('services-ci.yml', doc))
 
+    def test_release_backfill_keeps_untrusted_build_out_of_publisher(self):
+        name = 'backfill-release-evidence.yml'
+        original = yaml.safe_load((guard.ROOT / '.github/workflows' / name).read_text())
+        self.assertFalse(guard.findings(name, original))
+        for mutation in ('builder-write', 'publisher-checkout', 'publisher-build',
+                         'missing-verification', 'missing-dependency'):
+            doc = copy.deepcopy(original)
+            prepare = doc['jobs']['prepare']
+            publisher = doc['jobs']['backfill']
+            if mutation == 'builder-write':
+                prepare['permissions']['id-token'] = 'write'
+            elif mutation == 'publisher-checkout':
+                publisher['steps'].append({'uses': 'actions/checkout@' + 'a' * 40})
+            elif mutation == 'publisher-build':
+                publisher['steps'].append({'run': './gradlew build'})
+            elif mutation == 'missing-verification':
+                publisher['steps'][1]['run'] = 'echo verified'
+            else:
+                publisher.pop('needs')
+            with self.subTest(mutation=mutation):
+                self.assertTrue(guard.findings(name, doc))
+
 
     def test_security_regression_partial_graphql_errors_fail_closed(self):
         workflow = yaml.safe_load(
