@@ -356,7 +356,7 @@ jobs:
   # retry step does next is the pattern CLAUDE.md records.
   raise-issue:
     name: Raise issue on retry failure
-    needs: retry
+    needs: [discover, retry]
     if: ${{ failure() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5 # API calls only
@@ -387,60 +387,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TARGET_NAME: batched CI reconciliation
-          TARGET_CONCLUSION: one or more retry candidates failed processing
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          RETRY_RESULT: ${{ needs.retry.result }}
         run: |
           set -euo pipefail
-          TITLE="Spot-kill auto-retry is failing — reclaimed CI runs are not being re-run"
+          TITLE="Spot-kill reconciliation failed — automatic CI recovery unverified"
           # Body written with a plain redirect + --body-file, NOT `BODY=$(cat <<EOF ...)`.
           # A heredoc nested inside $( ) mis-parses an apostrophe as an opening quote on
           # bash 3.2 (still the default /bin/bash on macOS), so that shape cannot be dry-run
           # locally — a step only its own CI can syntax-check is a step nobody tests before
           # pushing. Flush-left because `run: |` strips only the common YAML indent.
           cat > "${RUNNER_TEMP:-/tmp}/issue-body.md" <<EOF
-          \`auto-retry-cancelled.yml\` FAILED, so a CI run killed by a spot reclaim was **not**
-          re-run and is sitting red waiting for a human.
+          \`auto-retry-cancelled.yml\` failed, so automatic recovery was not verified.
+          This alarm alone does not establish that any particular CI run was spot-killed.
 
           | | |
           |---|---|
-          | this run | ${RUN_URL} |
-          | triggering run | ${TARGET_URL} |
-          | triggering workflow | \`${TARGET_NAME}\` |
-          | its conclusion | \`${TARGET_CONCLUSION}\` |
+          | reconciliation run | ${RUN_URL} |
+          | candidate discovery | \`${DISCOVER_RESULT}\` |
+          | candidate retry | \`${RETRY_RESULT}\` |
 
-          **Which branch was taken** follows from that conclusion: \`cancelled\` is the
-          whole-run path (full re-run), \`failure\` is the partial-spot-kill path, which
-          re-runs only the failed jobs and only when one of them has a \`cancelled\` step and
-          no \`failed\` step.
+          If discovery failed, no candidate was established. Inspect the discovery job's API
+          error before deciding whether a run needs recovery. If retry failed, inspect the
+          retry job's \`decision=\` lines and verify the candidate still matches its PR's
+          current head before taking any manual action. Never rerun this alarm run as if it
+          were the interrupted service or security check.
 
-          **This is latent, not cosmetic.** The reclaimed run looks like an ordinary build
-          failure from every angle, so the cost is the human round-trip #2330 removed —
-          silently reinstated. Nothing else reports it: a \`workflow_run\` job has no PR to
-          redden and no commit status anyone reads, which is why this job exists (#2901).
-
-          **Check the repo context first.** The 208 failures that preceded this job were all
-          one cause: \`gh run rerun\` with no \`-R\` in a job with no \`actions/checkout\`, so
-          \`gh\` could not resolve the repository and exited 1 (\`failed to determine base
-          repo\`, fixed in #2898). If the log says that, something dropped the \`-R\` or the
-          \`GH_REPO\` env — \`.github/scripts/check-gh-repo-context.py\` should have caught it
-          at PR time, so check that gate too.
-
-          **If instead the log says \`HTTP 5xx\` / \`Server Error\` or a rate limit, detection
-          worked and only the API call lost.** Both calls go through
-          \`.github/scripts/gh-retry.sh\`, which retries a 5xx/connection error with exponential
-          backoff and waits out a rate limit until it RESETS (capped at
-          \`GH_RETRY_MAX_WAIT_SECONDS\`), for \`SPOT_KILL_ATTEMPTS\` attempts — so reaching this
-          issue means every attempt lost across that whole window. Re-run the triggering run by
-          hand and check GitHub's status page. The \`decision=\` line in the retry job's log and
-          step summary says what was examined and what was decided on every path, including the
-          no-op ones, and now names the actual last error rather than \`unknown\`.
-
-          Read the step output from **after the last** \`##[endgroup]\`: GitHub prints the
-          step's own script into the log header, so grepping the whole log matches strings
-          that never executed.
-
-          This issue is refreshed on each further failure; close it once a run is green.
+          The issue is refreshed on further failures. Close it only after a successful
+          reconciliation and after any previously interrupted candidate has been assessed.
           EOF
           # `.[0].number` off a title search used to live here. It pins nothing: the candidate
           # set's size was never checked, so two same-titled issues silently split the alarm
