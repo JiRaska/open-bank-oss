@@ -129,6 +129,36 @@ propagation and an egress review are required together before enabling the produ
 This design does not authorize owner evidence ingestion or change the P0/P1 invariant
 that their projection stores only opaque references.
 
+## Fraud case reference ingress
+
+The dedicated Fraud topic contains only an event type, case ID, revision and event
+time. Context checks the broker topic, partition key, event identity/type headers,
+the exact four-field payload and lifecycle revision before inserting an append-only,
+bank-scoped reference row. The consumer's own DLQ and Kafka group are isolated from
+payment, AML and KYB streams. Replay is idempotent; a conflicting event ID or case
+revision fails instead of rewriting prior knowledge. PostgreSQL forces bank-scoped
+RLS, and the application sets scope and statement timeout within each transaction.
+No read endpoint or inferred customer edge is introduced by this ingestion step.
+
+Context now exposes a data-free 204/403/503 access decision for one exact Fraud case
+root. It requires the investigator's current root assignment, FRAUD_INVESTIGATION
+purpose, human-admin policy allow and committed read audit. Fraud passes the human
+bearer to this decision endpoint before its source-owned evidence route returns any
+account or counterparty identifier. The Fraud network lens now first authorizes and
+read-audits the exact root, then fetches its current OPEN source associations with
+the investigator's bearer over HTTPS. Candidate discovery uses only the same
+investigator's currently valid Fraud case assignments and is limited to four case
+IDs. Each candidate receives a separate policy decision, committed read audit, and
+current OPEN source check before identifiers are compared. Only same-role account
+or counterparty UUID equality creates a visible edge; score identity is source
+evidence but never a cross-case match. A candidate denial is omitted; source,
+policy, audit or reference-store failure fails the whole request. Truncation is
+disclosed, and a missing edge is not a completeness or innocence claim. A case
+pointer or exact identifier match is a lead, not a finding or permission to inspect
+an unassigned customer. Context stores no account/counterparty values from this feed.
+The source case and outbox remain authoritative if the topic or Context consumer
+lags. A malformed or unauthorized broker record is nacked to the dedicated DLQ.
+
 ## Invariants
 
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.

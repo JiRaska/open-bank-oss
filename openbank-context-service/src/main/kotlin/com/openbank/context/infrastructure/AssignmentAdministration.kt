@@ -176,7 +176,11 @@ class AssignmentAdministrationService(
             caseId = request.caseId.trim()
             purpose = request.purpose.trim()
             rootRef = request.rootRef?.let { root ->
-                val prefix = if (request.purpose == "AML_INVESTIGATION") "aml-case:" else "delegation:"
+                val prefix = when (request.purpose) {
+                    "AML_INVESTIGATION" -> "aml-case:"
+                    "KYB_OWNERSHIP_REVIEW" -> "kyb-case:"
+                    else -> "delegation:"
+                }
                 "$prefix${UUID.fromString(root.removePrefix(prefix))}"
             }
             this.validFrom = validFrom
@@ -284,6 +288,13 @@ class AssignmentAdministrationService(
             require(root.startsWith("aml-case:") && root.length == AML_CASE_ROOT_LENGTH) { "invalid AML case root" }
             val id = UUID.fromString(root.removePrefix("aml-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the AML source case" }
+        } else if (request.purpose == "KYB_OWNERSHIP_REVIEW") {
+            val root = requireNotNull(request.rootRef) { "KYB_OWNERSHIP_REVIEW requires a KYB case root" }
+            require(root.startsWith("kyb-case:") && root.length == KYB_CASE_ROOT_LENGTH) {
+                "invalid KYB case root"
+            }
+            val id = UUID.fromString(root.removePrefix("kyb-case:"))
+            require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
         } else {
             require(request.rootRef == null) { "root scope is not supported for this purpose" }
         }
@@ -336,13 +347,20 @@ class AssignmentAdministrationService(
     private companion object {
         const val DELEGATION_ROOT_LENGTH = 47
         const val AML_CASE_ROOT_LENGTH = 45
+        const val KYB_CASE_ROOT_LENGTH = 45
         const val MAX_QUEUE_SIZE = 200
         const val MAX_PRINCIPAL_LENGTH = 200
         const val MAX_CASE_LENGTH = 200
         const val MAX_VALIDITY_DAYS = 31L
         val MAX_CLOCK_SKEW: Duration = Duration.ofMinutes(5)
         val ALLOWED_PURPOSES =
-            setOf("PAYMENT_COMPLAINT", "INCIDENT_IMPACT", "AUTHORIZATION_REVIEW", "AML_INVESTIGATION")
+            setOf(
+                "PAYMENT_COMPLAINT",
+                "INCIDENT_IMPACT",
+                "AUTHORIZATION_REVIEW",
+                "AML_INVESTIGATION",
+                "KYB_OWNERSHIP_REVIEW",
+            )
     }
 }
 

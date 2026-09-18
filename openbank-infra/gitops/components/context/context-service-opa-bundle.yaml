@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "6c9885b22f3700cb"
+    openbank.tech/policy-checksum: "8da104078aa79c55"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -616,6 +616,64 @@ data:
     prohibited if {
         input.action == "context.aml-case.read"
         count({r | r := input.principal.roles[_]; r in {"ROLE_COMPLIANCE", "ROLE_ADMIN"}}) == 0
+    }
+
+    prohibited if {
+        input.action == "context.kyb-case.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.fraud-case.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.fraud-case.read"
+        object.get(input.attributes, "assignmentVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.fraud-case.read"
+        object.get(input.attributes, "purpose", "") != "FRAUD_INVESTIGATION"
+    }
+
+    prohibited if {
+        input.action == "context.fraud-case.read"
+        count({r | r := input.principal.roles[_]; r == "ROLE_ADMIN"}) == 0
+    }
+
+    allowed_reasons contains "context-fraud-investigation" if {
+        input.action == "context.fraud-case.read"
+        input.principal.type == "HUMAN"
+        "ROLE_ADMIN" in input.principal.roles
+        object.get(input.attributes, "assignmentVerified", false) == true
+        object.get(input.attributes, "rootScopeVerified", false) == true
+        object.get(input.attributes, "purpose", "") == "FRAUD_INVESTIGATION"
+    }
+
+    prohibited if {
+        input.action == "context.kyb-case.read"
+        object.get(input.attributes, "assignmentVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.kyb-case.read"
+        object.get(input.attributes, "purpose", "") != "KYB_OWNERSHIP_REVIEW"
+    }
+
+    prohibited if {
+        input.action == "context.kyb-case.read"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_KYC", "ROLE_ADMIN"}}) == 0
+    }
+
+    allowed_reasons contains "context-kyb-ownership-review" if {
+        input.action == "context.kyb-case.read"
+        input.principal.type == "HUMAN"
+        object.get(input.attributes, "assignmentVerified", false) == true
+        object.get(input.attributes, "rootScopeVerified", false) == true
+        object.get(input.attributes, "purpose", "") == "KYB_OWNERSHIP_REVIEW"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_KYC", "ROLE_ADMIN"}}) > 0
     }
 
     # Assignment administration changes who can see restricted banking context. Only a human

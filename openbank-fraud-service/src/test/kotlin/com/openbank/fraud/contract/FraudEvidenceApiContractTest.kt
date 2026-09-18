@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+package com.openbank.fraud.contract
+
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+
+class FraudEvidenceApiContractTest {
+    @Test
+    fun `restricted evidence route declares source associations and fail closed responses`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+        val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/evidence:")
+            .substringBefore("/api/v1/fraud/cases/{caseId}/close-without-finding:")
+        assertThat(operation).contains(
+            "getFraudInvestigationEvidence",
+            "InvestigationPurpose",
+            "FraudInvestigationEvidence",
+            "'403'",
+            "'503'",
+        )
+        assertThat(contract).contains("accountId:", "counterpartyId:")
+    }
+}

@@ -11,6 +11,7 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { LoadingState, PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { KybOwnershipInvestigation } from '@/components/context/KybOwnershipInvestigation'
 import { Building2, RefreshCw, ShieldAlert, AlertTriangle, Check, Search, History } from 'lucide-react'
 
 const SVC = 'kyb-service'
@@ -506,6 +507,7 @@ export default function BusinessOnboardingPage() {
           <RefreshCw size={14} aria-hidden="true" style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
         </button>}
       />
+      <Can permission="business-onboarding:ownership-evidence"><KybOwnershipInvestigation /></Can>
       {loading && cases.length === 0 ? (
         <LoadingState
           label={t('Načítám frontu…', 'Loading the queue…')}

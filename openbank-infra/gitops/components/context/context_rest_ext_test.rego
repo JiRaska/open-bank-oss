@@ -6,6 +6,91 @@ import rego.v1
 
 bundle := {"version": "v0.0.0-test"}
 
+test_fraud_case_read_allows_assigned_human_admin if {
+    decision := rest.allow with input as {
+        "principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+        "action": "context.fraud-case.read",
+        "attributes": {
+            "assignmentVerified": true,
+            "rootScopeVerified": true,
+            "purpose": "FRAUD_INVESTIGATION",
+        },
+    }
+        with data.openbank.bundle as bundle
+    decision.allow
+}
+
+test_fraud_case_read_denies_unassigned_wrong_purpose_or_role if {
+    every example in [
+        {"roles": ["ROLE_ADMIN"], "assigned": false, "root": true, "purpose": "FRAUD_INVESTIGATION"},
+        {"roles": ["ROLE_ADMIN"], "assigned": true, "root": false, "purpose": "FRAUD_INVESTIGATION"},
+        {"roles": ["ROLE_ADMIN"], "assigned": true, "root": true, "purpose": "AML_INVESTIGATION"},
+        {"roles": ["ROLE_OPERATOR"], "assigned": true, "root": true, "purpose": "FRAUD_INVESTIGATION"},
+    ] {
+        not rest.allow with input as {
+            "principal": {"id": "investigator-1", "type": "HUMAN", "roles": example.roles},
+            "action": "context.fraud-case.read",
+            "attributes": {
+                "assignmentVerified": example.assigned,
+                "rootScopeVerified": example.root,
+                "purpose": example.purpose,
+            },
+        }
+            with data.openbank.bundle as bundle
+    }
+}
+
+test_kyb_ownership_requires_root_scope_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.kyb-case.read",
+		"attributes": {"assignmentVerified": true, "purpose": "KYB_OWNERSHIP_REVIEW"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_kyb_ownership_requires_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.kyb-case.read",
+		"attributes": {"rootScopeVerified": true, "purpose": "KYB_OWNERSHIP_REVIEW"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_kyb_ownership_allows_assigned_kyc if {
+	decision := rest.allow with input as {
+		"principal": {"id": "kyc-1", "type": "HUMAN", "roles": ["ROLE_KYC"]},
+		"action": "context.kyb-case.read",
+		"attributes": {
+			"assignmentVerified": true,
+			"rootScopeVerified": true,
+			"purpose": "KYB_OWNERSHIP_REVIEW",
+		},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow
+}
+
+test_kyb_ownership_denies_wrong_role_purpose_and_service_account if {
+	every example in [
+		{"id": "operator-1", "roles": ["ROLE_OPERATOR"], "purpose": "KYB_OWNERSHIP_REVIEW"},
+		{"id": "kyc-1", "roles": ["ROLE_KYC"], "purpose": "PAYMENT_COMPLAINT"},
+		{"id": "service-account-kyb", "roles": ["ROLE_ADMIN"], "purpose": "KYB_OWNERSHIP_REVIEW"},
+	] {
+		not rest.allow with input as {
+			"principal": {"id": example.id, "type": "HUMAN", "roles": example.roles},
+			"action": "context.kyb-case.read",
+			"attributes": {
+				"assignmentVerified": true,
+				"rootScopeVerified": true,
+				"purpose": example.purpose,
+			},
+		}
+			with data.openbank.bundle as bundle
+	}
+}
+
 test_aml_case_read_requires_root_assignment_even_for_admin if {
 	not rest.allow with input as {
 		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},

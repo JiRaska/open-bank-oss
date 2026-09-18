@@ -26,12 +26,28 @@ quarkus:
       url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
       connect-timeout: 250
       read-timeout: 1250
+    fraud-service:
+      url: ${FRAUD_CASE_SOURCE_URL:http://localhost:8133}
+      connect-timeout: 250
+      read-timeout: 1250
   smallrye-openapi:
     store-schema-directory: target/openapi
   management:
     enabled: true
     port: 8085
     root-path: /q
+"%prod":
+  quarkus:
+    tls:
+      fraud-source:
+        trust-store:
+          pem:
+            certs: /mnt/fraud-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      fraud-service:
+        tls-configuration-name: fraud-source
+
 "%dev":
   quarkus:
     oidc:
@@ -52,6 +68,10 @@ quarkus:
         context-audit-commitments-out:
           connector: smallrye-in-memory
       incoming:
+        fraud-case-references-in:
+          connector: smallrye-in-memory
+        kyb-ubo-observation-references-in:
+          connector: smallrye-in-memory
         aml-case-evidence-in:
           connector: smallrye-in-memory
         delegation-history-in:
@@ -84,6 +104,32 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      fraud-case-references-in:
+        connector: smallrye-kafka
+        topic: openbank.fraud.investigation.case.references
+        group:
+          id: openbank-context-service-fraud-cases
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.fraud-case-references
+      kyb-ubo-observation-references-in:
+        connector: smallrye-kafka
+        topic: openbank.kyb.ubo-observation-references
+        group:
+          id: openbank-context-service
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.kyb-ubo-observations
       aml-case-evidence-in:
         connector: smallrye-kafka
         topic: openbank.aml.events

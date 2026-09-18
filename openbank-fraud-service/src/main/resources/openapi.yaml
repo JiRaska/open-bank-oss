@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.2.0
+  version: 1.4.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -19,6 +19,100 @@ tags:
   - name: Fraud
 
 paths:
+  /api/v1/fraud/cases:
+    post:
+      tags: [Fraud]
+      operationId: openFraudInvestigationCase
+      summary: Open a manual investigation from an existing REVIEW score
+      description: Creates no fraud finding and does not change a payment or temporary hold.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InvestigationPurpose'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenFraudInvestigationRequest'
+      responses:
+        '201':
+          description: Case opened, or the case already linked to this score
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudInvestigationCase'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No eligible REVIEW score with an account was found }
+  /api/v1/fraud/cases/{caseId}:
+    get:
+      tags: [Fraud]
+      operationId: getFraudInvestigationCase
+      summary: Read current investigation status as an administrator
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/InvestigationPurpose'
+      responses:
+        '200':
+          description: Current source status without score details or party identifiers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudInvestigationCase'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Case not found }
+  /api/v1/fraud/cases/{caseId}/evidence:
+    get:
+      tags: [Fraud]
+      operationId: getFraudInvestigationEvidence
+      summary: Read source-owned score associations after live case-scoped Context authorization
+      description: Account and counterparty identifiers are evidence leads, never a fraud finding.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/InvestigationPurpose'
+      responses:
+        '200':
+          description: Source-owned associations for this exact assigned case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudInvestigationEvidence'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role, policy, assignment or current open-case check denied }
+        '404': { description: Case not found after authorization }
+        '503': { description: Context assignment or policy check unavailable }
+  /api/v1/fraud/cases/{caseId}/close-without-finding:
+    post:
+      tags: [Fraud]
+      operationId: closeFraudInvestigationCaseWithoutFinding
+      summary: Close a case without declaring fraud
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/InvestigationPurpose'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Case closed, or already closed without a finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudInvestigationCase'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Case not found }
   /api/v1/fraud/review-queue:
     get:
       tags: [Fraud]
@@ -62,6 +156,23 @@ paths:
           $ref: '#/components/responses/Forbidden'
 
 components:
+  parameters:
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    InvestigationPurpose:
+      name: X-Investigation-Purpose
+      in: header
+      required: true
+      schema: { type: string, enum: [FRAUD_INVESTIGATION] }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Retry identifier. Opening is also deduplicated by score; closing is idempotent by case.
+      schema: { type: string, minLength: 1, maxLength: 128 }
   securitySchemes:
     bearerAuth:
       type: http
@@ -93,6 +204,33 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    OpenFraudInvestigationRequest:
+      type: object
+      required: [scoreId]
+      properties:
+        scoreId: { type: string, format: uuid }
+    FraudInvestigationCase:
+      type: object
+      required: [caseId, scoreId, status, revision, openedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        scoreId: { type: string, format: uuid }
+        status: { type: string, enum: [OPEN, CLOSED_NO_FINDING] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time, nullable: true }
+    FraudInvestigationEvidence:
+      type: object
+      required: [caseId, scoreId, accountId, status, revision, openedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        scoreId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        counterpartyId: { type: string, format: uuid, nullable: true }
+        status: { type: string, enum: [OPEN, CLOSED_NO_FINDING] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time, nullable: true }
     ScoreFraudRequest:
       type: object
       required: [amount, currency, rail]

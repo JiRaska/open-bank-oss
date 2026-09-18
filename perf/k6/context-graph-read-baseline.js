@@ -47,8 +47,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml or aml-network");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network, kyb or fraud-network");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -70,6 +70,8 @@ export default function () {
     authority: `/api/v1/context/authorizations/${reference}`,
     aml: `/api/v1/context/aml-cases/${reference}`,
     "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
+    kyb: `/api/v1/context/kyb-cases/${reference}/ownership-observations`,
+    "fraud-network": `/api/v1/context/fraud-cases/${reference}/network`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -113,10 +115,37 @@ export default function () {
         return Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
           hasEvidence(body.root, 100) && body.related.every((caseHistory) => hasEvidence(caseHistory, 20));
       }
+      if (lens === "kyb") {
+        return body.root === `kyb-case:${__ENV.CONTEXT_PERF_REFERENCE}` &&
+          Array.isArray(body.observations) && body.observations.length > 0 &&
+          body.observations.length <= 50 && typeof body.truncated === "boolean" &&
+          body.observations.every((item) => Number.isInteger(item.revision) && item.revision > 0 &&
+            /^[0-9a-f]{64}$/.test(item.sourceSha256));
+      }
+      if (lens === "fraud-network") {
+        return hasFraudEvidence(body.root, __ENV.CONTEXT_PERF_REFERENCE) &&
+          Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
+          Number.isInteger(body.inspectedCandidates) && body.inspectedCandidates <= 4 &&
+          typeof body.candidateTruncated === "boolean" &&
+          body.related.every((item) => hasFraudEvidence(item.evidence) &&
+            Array.isArray(item.shared) && item.shared.length > 0 && item.shared.length <= 2 &&
+            item.shared.every((edge) =>
+              (edge.type === "ACCOUNT" && edge.sourceId === body.root.accountId && edge.sourceId === item.evidence.accountId) ||
+              (edge.type === "COUNTERPARTY" && edge.sourceId === body.root.counterpartyId && edge.sourceId === item.evidence.counterpartyId)));
+      }
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
+}
+
+function hasFraudEvidence(evidence, caseId) {
+  return evidence !== null && typeof evidence === "object" &&
+    (!caseId || evidence.caseId === caseId) &&
+    evidence.status === "OPEN" &&
+    typeof evidence.scoreId === "string" && typeof evidence.accountId === "string" &&
+    Number.isInteger(evidence.revision) && evidence.revision > 0 &&
+    typeof evidence.openedAt === "string" && evidence.closedAt === null;
 }
 
 function hasEvidence(history, limit) {

@@ -44,6 +44,9 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: context
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: fx
         - namespaceSelector:
             matchLabels:
@@ -54,6 +57,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8133
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:
