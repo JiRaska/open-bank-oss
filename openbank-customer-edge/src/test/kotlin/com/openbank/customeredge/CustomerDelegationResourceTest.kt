@@ -454,6 +454,35 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
+    fun `joint cancellation forwards selected company and authenticated human for both operation kinds`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = mutableListOf<String>()
+        val party = mutableListOf<String>()
+        val headers = mutableListOf<Map<String, String>>()
+        every { upstream.post(capture(url), capture(party), eq(""), isNull(), capture(headers)) } returns
+            Response.ok("{}").build()
+        val selected = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(resource(upstream).cancelStatutory(GRANT_ID).status).isEqualTo(403)
+        assertThat(resource(upstream).cancelStatutoryAcceptance(GRANT_ID).status).isEqualTo(403)
+        assertThat(selected.cancelStatutory(GRANT_ID).status).isEqualTo(200)
+        assertThat(selected.cancelStatutoryAcceptance(GRANT_ID).status).isEqualTo(200)
+        assertThat(url).containsExactly(
+            "$svc/api/v1/delegations/statutory-operations/$GRANT_ID/cancel",
+            "$svc/api/v1/delegations/statutory-acceptances/$GRANT_ID/cancel",
+        )
+        assertThat(party).containsExactly(entity.toString(), entity.toString())
+        assertThat(headers.map { it["X-Customer-Actor-Party-Id"] })
+            .containsExactly(caller.toString(), caller.toString())
+    }
+
+    @Test
     fun `quorum execution forwards only authenticated company and human identities`() {
         val entity = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()

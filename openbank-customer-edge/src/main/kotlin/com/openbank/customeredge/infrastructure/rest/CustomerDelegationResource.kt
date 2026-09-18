@@ -443,6 +443,24 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** An initiator may cancel an inert company proposal; a signed decision cannot be withdrawn. */
+    @POST
+    @Path("/statutory-operations/{id}/cancel")
+    @Blocking
+    fun cancelStatutory(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/$id/cancel",
+            context.principal.toString(),
+            "",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /** Ask delegation-service to recheck live law and issue one grant only after a complete quorum. */
     @POST
     @Path("/statutory-operations/{id}/execute")
@@ -563,6 +581,23 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         return upstream.get(
             "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/progress",
             context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @POST
+    @Path("/statutory-acceptances/{id}/cancel")
+    @Blocking
+    fun cancelStatutoryAcceptance(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/cancel",
+            context.principal.toString(),
+            "",
+            null,
             mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
         )
     }

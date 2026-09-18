@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.78.0
+  version: 1.79.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3886,6 +3886,29 @@ paths:
         '403': {description: Caller is not a current company representative}
         '409': {description: Stale proposal, conflicting decision or wrong SCA binding}
         '503': {description: Legal rule or SCA consumption cannot be verified}
+  /delegations/statutory-operations/{id}/cancel:
+    post:
+      tags: [Delegation]
+      summary: Initiator cancels a pending joint company grant proposal
+      description: >-
+        The human actor and selected company come from the authenticated session. The
+        initiator must still represent that company; cancellation cannot revoke an issued
+        grant. Exact retries return the same cancelled evidence.
+      operationId: cancelStatutoryDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Cancelled proposal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationProposal'}
+        '403': {description: Caller is not the initiator or a current representative}
+        '404': {description: Proposal not found for this company}
+        '409': {description: Proposal expired or already executed}
+        '503': {description: Current legal rule cannot be verified}
   /delegations/statutory-operations/{id}/execute:
     post:
       tags: [Delegation]
@@ -4081,6 +4104,28 @@ paths:
               schema: {$ref: '#/components/schemas/StatutorySigningProgress'}
         '403': {description: No current joint representation}
         '409': {description: Acceptance no longer pending or exact offer changed}
+  /delegations/statutory-acceptances/{id}/cancel:
+    post:
+      tags: [Delegation]
+      summary: Initiator cancels a pending joint company acceptance
+      description: >-
+        Cancels only the inert acceptance proposal, leaving the offered grant untouched.
+        Exact retries return the same cancelled evidence.
+      operationId: cancelStatutoryAcceptance
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Cancelled acceptance proposal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationAcceptance'}
+        '403': {description: Caller is not the initiator or a current representative}
+        '404': {description: Acceptance not found for this company}
+        '409': {description: Acceptance expired or already executed}
+        '503': {description: Current legal rule cannot be verified}
   /delegations/statutory-acceptances/{id}/execute:
     post:
       tags: [Delegation]
@@ -5407,6 +5452,7 @@ components:
         createdAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         grantId: {type: [string, 'null'], format: uuid}
+        canCancel: {type: boolean, description: Advisory; initiator is revalidated on cancellation}
     StatutoryDelegationAcceptance:
       type: object
       required: [id, principalPartyId, initiatorPartyId, targetGrantId, expectedLifecycleRevision, requestHash, offer, ruleHash, rule, state, createdAt, expiresAt]
@@ -5427,6 +5473,7 @@ components:
         createdAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         grantId: {type: [string, 'null'], format: uuid}
+        canCancel: {type: boolean, description: Advisory; initiator is revalidated on cancellation}
     StatutoryDelegationAcceptancePage:
       type: object
       required: [items, nextCursor]

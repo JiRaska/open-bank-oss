@@ -243,3 +243,14 @@ Trust boundaries:
   chain; the grantor is the token party, and the optional filters can only narrow a set already
   scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
   to owner-only.
+
+## Joint proposal cancellation
+
+The customer may cancel a pending statutory issuance or acceptance proposal only while
+acting for the selected company. The edge derives the human from the authenticated token
+and passes both identities upstream; it does not accept an actor in the request body.
+Delegation-service independently verifies the current roster and that this human initiated
+the exact proposal, then serializes cancellation with decisions and execution on the row
+lock. Cancelling acceptance leaves the original OFFERED grant untouched; cancelling issuance
+does not revoke a grant already issued. Rollback disables these additive routes and keeps
+the CANCELLED evidence rows; no old customer path can execute them.
