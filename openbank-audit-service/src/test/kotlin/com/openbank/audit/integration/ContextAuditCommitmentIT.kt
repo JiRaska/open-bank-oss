@@ -4,10 +4,13 @@ package com.openbank.audit.integration
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.audit.application.ContextAuditCommitmentConsumer
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.audit.infrastructure.persistence.ContextCommitmentReceiptEntity
 import com.openbank.audit.it.PostgresTestResource
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +43,16 @@ class ContextAuditCommitmentIT {
 
         assertThat(onEventLoop { repository.findByAggregateId(id.toString()) }.map { it.id })
             .containsExactly(id)
+        val receipt = onEventLoop {
+            Panache.withSession {
+                Panache.getSession().flatMap { session -> session.find(ContextCommitmentReceiptEntity::class.java, id) }
+            }
+                .awaitSuspending()
+        }
+        requireNotNull(receipt)
+        assertThat(receipt.commitment).isEqualTo("a".repeat(64))
+        assertThat(receipt.recordHash).matches("[0-9a-f]{64}")
+        assertThat(receipt.status).isEqualTo("PENDING")
         val verification = onEventLoop { repository.verifyChain(fromEntryId = id) }
         assertThat(verification.intact)
             .describedAs("commitment chain link must verify (broken: %s)", verification.firstBrokenEntryId)

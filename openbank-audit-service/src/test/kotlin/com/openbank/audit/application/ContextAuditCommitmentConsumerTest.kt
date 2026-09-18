@@ -32,12 +32,15 @@ class ContextAuditCommitmentConsumerTest {
         val payload = validPayload()
         every { message.payload } returns payload
         every { message.ack() } returns CompletableFuture.completedFuture(null)
-        coEvery { repository.save(any()) } returns Unit
+        coEvery { repository.save(any(), any()) } returns Unit
 
         consumer.consume(message)
 
         coVerify {
-            repository.save(match { it.actorId == null && it.payload == payload && it.eventType == EVENT_TYPE })
+            repository.save(
+                match { it.actorId == null && it.payload == payload && it.eventType == EVENT_TYPE },
+                "a".repeat(64),
+            )
         }
         verify(exactly = 1) { message.ack() }
     }
@@ -49,7 +52,7 @@ class ContextAuditCommitmentConsumerTest {
 
         assertThatThrownBy { runBlocking { consumer.consume(message) } }
             .isInstanceOf(IllegalArgumentException::class.java)
-        coVerify(exactly = 0) { repository.save(any()) }
+        coVerify(exactly = 0) { repository.save(any(), any()) }
         verify(exactly = 0) { message.ack() }
     }
 
@@ -57,7 +60,7 @@ class ContextAuditCommitmentConsumerTest {
     fun `store failure is never acknowledged`(): Unit = runBlocking {
         val message = mockk<Message<String>>()
         every { message.payload } returns validPayload()
-        coEvery { repository.save(any()) } throws IllegalStateException("store unavailable")
+        coEvery { repository.save(any(), any()) } throws IllegalStateException("store unavailable")
 
         assertThatThrownBy { runBlocking { consumer.consume(message) } }
             .isInstanceOf(IllegalStateException::class.java)

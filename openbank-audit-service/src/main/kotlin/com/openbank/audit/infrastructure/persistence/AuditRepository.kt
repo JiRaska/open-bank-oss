@@ -157,8 +157,12 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     // chain MUST move to a DB-level advisory lock first.
     private val chainMutex = kotlinx.coroutines.sync.Mutex()
 
-    suspend fun save(entry: AuditEntry) {
+    suspend fun save(entry: AuditEntry, receiptCommitment: String? = null) {
         chainMutex.withLock {
+            if (receiptCommitment != null) {
+                require(entry.eventType == "CONTEXT_READ_AUDIT_COMMITTED")
+                require(Regex("[0-9a-f]{64}").matches(receiptCommitment))
+            }
             // Kafka delivery is at least once.  The producer's immutable event id is copied to
             // entry_id, so a retry must be a no-op before it can advance the append-only chain.
             val alreadyRecorded = Panache.withSession {
@@ -208,8 +212,34 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.recordHash = chainHash(prevHash, stored)
                 it.hashVersion = HASH_VERSION_MICROS
             }
-            Panache.withTransaction { persist(e) }.awaitSuspending()
+            persistEntryAndReceipt(e, stored, receiptCommitment)
         }
+    }
+
+    private suspend fun persistEntryAndReceipt(
+        entry: AuditEntryEntity,
+        stored: AuditEntry,
+        receiptCommitment: String?,
+    ) {
+        val receipt = receiptCommitment?.let { digest ->
+            ContextCommitmentReceiptEntity().apply {
+                eventId = entry.entryId
+                commitment = digest
+                recordHash = requireNotNull(entry.recordHash)
+                occurredAt = stored.occurredAt
+                status = "PENDING"
+                updatedAt = stored.recordedAt
+            }
+        }
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                if (receipt == null) {
+                    session.persist(entry)
+                } else {
+                    session.persist(entry).flatMap { session.persist(receipt) }
+                }
+            }
+        }.awaitSuspending()
     }
 
     /**

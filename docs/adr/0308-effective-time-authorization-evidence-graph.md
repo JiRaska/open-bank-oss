@@ -140,6 +140,23 @@ payment-path p95 before enabling a real-data lens. Rollback disables new sensiti
 relay while retaining both append-only stores and pending outbox rows; it does not delete an
 audit trail or treat an unexported commitment as exported.
 
+For automatic per-record confirmation, a proposed **separate** Audit→Context receipt flow
+would persist a receipt outbox row in the same transaction as the fleet chain entry. The
+dedicated `openbank.audit.context.receipts` topic would carry only schema version, event type,
+random audit event ID, the original SHA-256 commitment, the fleet record hash and event time.
+It would carry no bank, investigator, customer, case, root, evidence reference or free text.
+Its proposed ACL permits only Audit Write and Context Read, with a dedicated Context consumer
+group; a separate Context-owned DLQ has Context Write only. Both topics retain records for
+30 days. A bounded relay would be disabled until this exact egress, topic and operational
+monitoring are approved. Context would compare each receipt with its immutable outbox digest,
+store the fleet record hash, reject a conflict and alert on a missing receipt after the lag
+budget. A receipt proves fleet persistence, not signed-anchor verification; the independent
+full-history comparison remains necessary. Older central records are not bulk-backfilled by
+the schema migration; the full-history comparison remains their verification path until a
+separately bounded migration is reviewed. The atomic Audit-side receipt outbox write exists
+in an unmerged branch and has passed local PostgreSQL tests. The relay, topic, Context
+consumer, periodic alert and sandbox delivery are not yet implemented or deployed.
+
 ### Source delegation history and root-scoped review
 
 The authority-history lens consumes the existing versioned delegation lifecycle stream and

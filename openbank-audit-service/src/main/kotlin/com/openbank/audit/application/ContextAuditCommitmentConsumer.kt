@@ -59,6 +59,7 @@ class ContextAuditCommitmentConsumer(
                 occurredAtSource = OccurredAtSource.EVENT,
                 sourceServiceSource = AttributionSource.EVENT,
             ),
+            receiptCommitment = requiredText(node, "commitment"),
         )
     }
 
