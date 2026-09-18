@@ -48,6 +48,7 @@ class CustomerBusinessCompanyOpenApiTest {
             "representatives",
             "signingRule",
             "accounts",
+            "accountsPagination",
         )
         assertThat(props.path("seat").path("properties").keys())
             .containsExactlyInAnyOrder("street", "city", "postalCode", "country")
@@ -55,5 +56,18 @@ class CustomerBusinessCompanyOpenApiTest {
             .containsExactlyInAnyOrder("name", "role", "partyId", "isYou")
         assertThat(props.path("accounts").path("items").path("properties").keys())
             .containsExactlyInAnyOrder("id", "iban", "currency", "product")
+        assertThat(props.path("accountsPagination").path("\$ref").asText())
+            .isEqualTo("#/components/schemas/Pagination")
+    }
+
+    @Test
+    fun `company account pages publish the mandate header and next cursor`() {
+        val get = spec.path("paths").path("/business/company/accounts").path("get")
+        val parameters = get.path("parameters")
+        assertThat(parameters.map { it.path("name").asText() }).containsExactly("X-Acting-For", "cursor")
+        assertThat(parameters.first().path("required").asBoolean()).isTrue()
+        val pageSchema = get.path("responses").path("200").path("content").path("application/json")
+            .path("schema").path("\$ref").asText()
+        assertThat(pageSchema).isEqualTo("#/components/schemas/AccountList")
     }
 }
