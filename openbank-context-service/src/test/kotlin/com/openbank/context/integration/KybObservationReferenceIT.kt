@@ -85,7 +85,7 @@ class KybObservationReferenceIT {
             onVertx { repository.append(recorded) }
             if (!restrictionFirst) onVertx { repository.restrict(restricted) }
             onVertx { repository.restrict(restricted) }
-            assertThat(onVertx { repository.history(caseId, Instant.now()) }.observations).isEmpty()
+            assertThat(onVertx { repository.history(caseId, repository.databaseNow()) }.observations).isEmpty()
             assertThatThrownBy {
                 onVertx { repository.restrict(restricted.copy(sourceSha256 = "b".repeat(64))) }
             }.hasStackTraceContaining("conflicting KYB observation restriction")
@@ -131,7 +131,7 @@ class KybObservationReferenceIT {
         onVertx { consumer.consume(restricted.value) }
         assertThat(restricted.acked.get()).isEqualTo(1)
         assertThat(restricted.nacked.get()).isZero()
-        assertThat(onVertx { repository.history(caseId, Instant.now()) }.observations).isEmpty()
+        assertThat(onVertx { repository.history(caseId, repository.databaseNow()) }.observations).isEmpty()
     }
 
     @Test
@@ -160,10 +160,13 @@ class KybObservationReferenceIT {
         val assignmentId = requireNotNull(
             onVertx { assignments.decide(proposal.id, true, "kyb-checker") }.assignmentId,
         )
-        request(caseId).then().statusCode(200).header("Cache-Control", "no-store")
+        val current = request(caseId).then().statusCode(200).header("Cache-Control", "no-store")
             .body("root", org.hamcrest.Matchers.equalTo("kyb-case:$caseId"))
             .body("observations.size()", org.hamcrest.Matchers.equalTo(1))
             .body("observations[0].observationId", org.hamcrest.Matchers.equalTo(observationId.toString()))
+            .extract().jsonPath()
+        assertThat(Instant.parse(current.getString("knownAt")))
+            .isAfterOrEqualTo(Instant.parse(current.getString("observations[0].recordedAt")))
         requestAccess(caseId).then().statusCode(204).header("Cache-Control", "no-store")
             .header("Content-Type", org.hamcrest.Matchers.nullValue())
         given().header("X-Investigation-Case-Id", UUID.randomUUID().toString())
