@@ -234,6 +234,12 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      - resource:
+          type: topic
+          name: openbank.fraud.investigation.case.references
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # Issue #6035, second and final backfill: the last three money-path produced topics that
       # had no Read grant here. Same shape as the four above -- without the grant the topic is
       # ACL-denied at runtime (allow.everyone.if.no.acl.found=false, components/kafka/kafka.yaml),

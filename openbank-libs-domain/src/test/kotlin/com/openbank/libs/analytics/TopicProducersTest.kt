@@ -24,6 +24,7 @@ class TopicProducersTest {
         assertEquals("fx-service", TopicProducers.sourceService("openbank.fx.conversion.completed"))
         assertEquals("transaction-service", TopicProducers.sourceService("openbank.transactions.transaction.initiated"))
         assertEquals("balance-service", TopicProducers.sourceService("openbank.balance.events"))
+        assertEquals("fraud-service", TopicProducers.sourceService("openbank.fraud.investigation.case.references"))
     }
 
     /**
