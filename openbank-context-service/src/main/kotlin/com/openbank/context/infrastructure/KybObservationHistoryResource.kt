@@ -56,6 +56,7 @@ class KybObservationHistoryResource(
                 id.toString(),
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(caseId, purpose, now, known),
+                summarize = ContextDisclosureSummaries::response,
             ) {
                 Response.ok(references.history(id, known)).header("Cache-Control", "no-store").build()
             }

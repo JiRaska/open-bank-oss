@@ -63,6 +63,7 @@ class FraudCaseNetworkResource(
                 caseId.toString(),
                 actor,
                 InvestigationContext(investigationCaseId, purpose, at),
+                summarize = ContextDisclosureSummaries::response,
             ) {
                 val root = source.read(caseId, bearer)
                 val candidates = references.assignedCandidates(caseId, actor.id, at)
@@ -94,7 +95,12 @@ class FraudCaseNetworkResource(
         at: java.time.Instant,
         root: FraudCaseSourceSnapshot,
     ): FraudRelatedCase? = try {
-        queries.fraudCaseEvidence(id.toString(), actor, InvestigationContext(id.toString(), PURPOSE, at)) {
+        queries.fraudCaseEvidence(
+            id.toString(),
+            actor,
+            InvestigationContext(id.toString(), PURPOSE, at),
+            summarize = ContextDisclosureSummaries::fraud,
+        ) {
             val evidence = source.read(id, bearer)
             sharedFraudReferences(root, evidence).takeIf(List<*>::isNotEmpty)?.let { FraudRelatedCase(evidence, it) }
         }

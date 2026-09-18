@@ -94,19 +94,24 @@ into a bank-scoped outbox in the same transaction. A bounded relay publishes onl
 and random audit ID, and a dedicated strict Audit consumer validates the exact payload and
 persists it idempotently into the fleet hash chain. Both channels are disabled by default until
 the images, topic ACLs and operational checks are in place; code and local integration tests do
-not prove sandbox delivery or fleet anchoring. Disclosure-outcome evidence, reconciliation and
-historical business-action decision ingestion also remain, so this ADR stays `partial`.
+not prove sandbox delivery or fleet anchoring. A separate, unmerged Context branch now appends
+post-materialization `DISCLOSED`/`NOT_DISCLOSED` rows linked to the preceding allowed decision,
+including a normalized query hash, projection version digest, bounded evidence references/count,
+truncation and HTTP status. The response is suppressed if this write fails. Its schema migration
+keeps earlier access-decision commitments reproducible and uses a distinct canonical hash version
+for outcomes; the Kafka envelope still carries only an ID, digest and time. This remains local
+work, not a deployed control. Reconciliation and historical business-action decision ingestion
+also remain, so this ADR stays `partial`.
 
 ### Remaining P0 audit-delivery contract
 
-The current `ALLOWED` row records a successful *access decision before the read*. It does not
-establish that any evidence was returned. Before an investigative lens is declared complete,
-Context must append a separate disclosure outcome after materializing the bounded response and
-before sending it to the caller. That outcome records the projection generation, normalized
-query hash, returned evidence references/count and whether the response was truncated. Failure
-to persist the disclosure outcome suppresses the response; a source timeout or failed query must
-never be reported as a successful disclosure. Historical decision evidence from the source
-enforcement point remains a distinct record, not an inference from either read-audit row.
+The `ALLOWED` row records a successful *access decision before the read*; it does not establish
+that evidence was returned. The local implementation now appends a separate disclosure outcome
+after materializing the bounded response and before sending it to the caller. It records the
+projection generation digest, normalized query hash, returned evidence references/count and
+truncation. Failure to persist the outcome suppresses the response; a source timeout or failed
+query must never be reported as a successful disclosure. Historical decision evidence from the
+source enforcement point remains a distinct record, not an inference from either read-audit row.
 
 Context will write each read-audit row and its export outbox entry in one database transaction.
 The outbox carries only a schema version, random audit event ID, occurrence time and SHA-256

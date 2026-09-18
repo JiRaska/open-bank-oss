@@ -21,12 +21,15 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 
 class ContextQueryServiceTest {
     private val now = Instant.parse("2026-09-13T10:00:00Z")
     private val graph = mockk<ContextGraphPort>()
     private val assignments = mockk<CaseAssignmentPort>()
-    private val audit = mockk<ContextReadAuditPort>(relaxed = true)
+    private val audit = mockk<ContextReadAuditPort> {
+        coEvery { record(any()) } returns UUID(0, 1)
+    }
     private val pdp = mockk<PolicyDecisionPoint>()
     private val service = ContextQueryService(
         graph,
@@ -82,6 +85,32 @@ class ContextQueryServiceTest {
             )
         }
         coVerify { audit.record(match { it.decision == "ALLOWED" && it.policyVersion == "bundle-9" }) }
+        coVerify {
+            audit.record(
+                match {
+                    it.decision == "DISCLOSED" &&
+                        it.accessAuditId == UUID(0, 1) &&
+                        it.queryHash?.length == 64 &&
+                        it.evidenceCount == 0 &&
+                        it.responseStatus == 200
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `failed disclosure audit suppresses an otherwise successful read`(): Unit = runBlocking {
+        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "bundle-9")
+        coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns
+            ContextNeighborhood("complaint:cmp-1", emptyList(), emptyList(), false)
+        coEvery { audit.record(match { it.decision == "DISCLOSED" }) } throws IllegalStateException("audit unavailable")
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("audit unavailable")
+        coVerify { audit.record(match { it.decision == "ALLOWED" }) }
+        coVerify { audit.record(match { it.decision == "DISCLOSED" }) }
     }
 
     @Test
@@ -152,7 +181,14 @@ class ContextQueryServiceTest {
         } returns false
 
         assertThatThrownBy {
-            runBlocking { service.fraudCaseEvidence("case-42", admin, investigation) { "secret" } }
+            runBlocking {
+                service.fraudCaseEvidence(
+                    "case-42",
+                    admin,
+                    investigation,
+                    summarize = { DisclosureSummary.materialized(emptyList(), 0, false, emptyList()) },
+                ) { "secret" }
+            }
         }.isInstanceOf(ContextAccessDenied::class.java)
         coVerify(exactly = 0) { pdp.allow(any()) }
         coVerify {
@@ -167,7 +203,14 @@ class ContextQueryServiceTest {
         coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "fraud-policy-1")
 
-        assertThat(service.fraudCaseEvidence("case-42", admin, investigation) { "allowed" }).isEqualTo("allowed")
+        assertThat(
+            service.fraudCaseEvidence(
+                "case-42",
+                admin,
+                investigation,
+                summarize = { DisclosureSummary.materialized(emptyList(), 0, false, emptyList()) },
+            ) { "allowed" },
+        ).isEqualTo("allowed")
         coVerify {
             pdp.allow(
                 match {

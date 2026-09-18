@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.context.infrastructure
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.context.application.CaseAssignmentPort
 import com.openbank.context.application.ContextGraphPort
 import com.openbank.context.application.ContextReadAudit
@@ -190,6 +191,27 @@ class ContextReadAuditEntity : PanacheEntityBase() {
 
     @Column(name = "known_at")
     var knownAt: Instant? = null
+
+    @Column(name = "access_audit_id")
+    var accessAuditId: UUID? = null
+
+    @Column(name = "query_hash")
+    var queryHash: String? = null
+
+    @Column(name = "projection_generation")
+    var projectionGeneration: String? = null
+
+    @Column(name = "evidence_refs")
+    var evidenceRefsJson: String? = null
+
+    @Column(name = "evidence_count")
+    var evidenceCount: Int? = null
+
+    @Column(name = "response_truncated")
+    var responseTruncated: Boolean? = null
+
+    @Column(name = "response_status")
+    var responseStatus: Int? = null
 }
 
 @Entity
@@ -504,10 +526,11 @@ class CaseAssignmentRepository(
 @ApplicationScoped
 class ContextReadAuditRepository(
     private val sessions: Mutiny.SessionFactory,
+    private val mapper: ObjectMapper,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextReadAuditPort {
-    override suspend fun record(entry: ContextReadAudit) {
+    override suspend fun record(entry: ContextReadAudit): UUID {
         val entity = ContextReadAuditEntity().apply {
             id = Ids.newId()
             this.bankScope = this@ContextReadAuditRepository.bankScope
@@ -524,6 +547,13 @@ class ContextReadAuditRepository(
             occurredAt = entry.occurredAt.truncatedTo(ChronoUnit.MICROS)
             effectiveAt = entry.effectiveAt?.truncatedTo(ChronoUnit.MICROS)
             knownAt = entry.knownAt?.truncatedTo(ChronoUnit.MICROS)
+            accessAuditId = entry.accessAuditId
+            queryHash = entry.queryHash
+            projectionGeneration = entry.projectionGeneration
+            evidenceRefsJson = entry.evidenceRefs?.let(mapper::writeValueAsString)
+            evidenceCount = entry.evidenceCount
+            responseTruncated = entry.responseTruncated
+            responseStatus = entry.responseStatus
         }
         val commitment = ContextAuditCommitmentOutboxEntity().apply {
             auditId = entity.id
@@ -540,5 +570,6 @@ class ContextReadAuditRepository(
                 .flatMap { session.persist(commitment) }
         }
             .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+        return entity.id
     }
 }

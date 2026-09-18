@@ -51,7 +51,12 @@ class AmlCaseEvidenceResource(
         require(purpose == PURPOSE) { "AML_INVESTIGATION is required" }
         val actor = Investigator(identity.principal.name, identity.roles.sorted())
         return try {
-            queries.amlCaseEvidence(id.toString(), actor, InvestigationContext(caseId, purpose, effective, known)) {
+            queries.amlCaseEvidence(
+                id.toString(),
+                actor,
+                InvestigationContext(caseId, purpose, effective, known),
+                summarize = ContextDisclosureSummaries::response,
+            ) {
                 if (!source.isOpen(id)) throw ContextAccessDenied()
                 val root = history.history(id, effective, known)
                 val candidates = history.assignedRelatedCases(root, actor.id, now)
@@ -63,6 +68,7 @@ class AmlCaseEvidenceResource(
                                     candidate.toString(),
                                     actor,
                                     InvestigationContext(candidate.toString(), purpose, effective, known),
+                                    summarize = ContextDisclosureSummaries::aml,
                                 ) {
                                     if (source.isOpen(candidate)) {
                                         history.history(candidate, effective, known, RELATED_OBSERVATION_LIMIT)
@@ -109,6 +115,7 @@ class AmlCaseEvidenceResource(
                 id.toString(),
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(caseId, purpose, effective, known),
+                summarize = ContextDisclosureSummaries::response,
             ) {
                 // The owning service is authoritative for the current case state. A delayed
                 // Kafka close must never leave historical evidence readable as an open case.

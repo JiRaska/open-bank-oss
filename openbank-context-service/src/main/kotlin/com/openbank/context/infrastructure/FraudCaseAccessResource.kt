@@ -38,6 +38,7 @@ class FraudCaseAccessResource(
                 caseId.toString(),
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(investigationCaseId, purpose, clock.instant()),
+                summarize = ContextDisclosureSummaries::response,
             ) {
                 Response.noContent().header("Cache-Control", "no-store").build()
             }

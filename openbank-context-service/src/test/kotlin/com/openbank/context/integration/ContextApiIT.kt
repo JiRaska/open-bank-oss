@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.context.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.context.infrastructure.AssignmentAdministrationService
 import com.openbank.context.infrastructure.ContextAuditCommitment
 import com.openbank.context.infrastructure.ContextReadAuditEntity
@@ -42,6 +43,8 @@ import jakarta.enterprise.inject.Any as AnyQualifier
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class ContextApiIT {
+    @Inject lateinit var mapper: ObjectMapper
+
     @Inject
     @AnyQualifier
     lateinit var connector: InMemoryConnector
@@ -176,14 +179,17 @@ class ContextApiIT {
             .body("nodes.size()", equalTo(2))
             .body("edges.size()", equalTo(1))
 
-        assertThat(auditDecisions(root)).containsExactly("ALLOWED")
+        assertThat(auditDecisions(root)).containsExactly("ALLOWED", "DISCLOSED")
         assertThat(auditDecisions(root, null)).isEmpty()
         assertThat(auditDecisions(root, "another-bank")).isEmpty()
-        assertThat(auditCommitments(root)).hasSize(1)
-        assertThat(auditCommitments(root).single()).matches("[0-9a-f]{64}")
-        assertThat(storedAuditCommitment(root)).isEqualTo(auditCommitments(root).single())
+        assertThat(auditCommitments(root)).hasSize(2).allMatch { it.matches(Regex("[0-9a-f]{64}")) }
+        assertThat(storedAuditCommitments(root)).containsExactlyInAnyOrderElementsOf(auditCommitments(root))
+        assertThat(disclosureEvidence(root)).contains(root, payment).hasSize(3)
         assertThat(auditCommitments(root, null)).isEmpty()
         assertThat(auditCommitments(root, "another-bank")).isEmpty()
+        val allowedId = allowedAuditId(root)
+        assertThatThrownBy { insertForgedDisclosure(allowedId, "complaint:unrelated") }
+            .hasMessageContaining("disclosure outcome does not match an allowed read")
         assertThatThrownBy {
             withAuditScope("openbank-cz") { connection ->
                 connection.prepareStatement("DELETE FROM context_read_audit WHERE root_ref = ?").use {
@@ -271,7 +277,7 @@ class ContextApiIT {
             .body("projectionStatus", equalTo("MISSING"))
             .body("total", equalTo(0))
             .body("affectedByType.size()", equalTo(0))
-        assertThat(auditDecisions("incident:$reference")).containsExactly("ALLOWED")
+        assertThat(auditDecisions("incident:$reference")).containsExactly("ALLOWED", "DISCLOSED")
     }
 
     @Test
@@ -400,31 +406,101 @@ class ContextApiIT {
             }
         }
 
-    private fun storedAuditCommitment(root: String): String = withAuditScope("openbank-cz") { connection ->
+    private fun disclosureEvidence(root: String): List<String> = withAuditScope("openbank-cz") { connection ->
+        connection.prepareStatement(
+            "SELECT evidence_refs FROM context_read_audit WHERE principal_id = ? AND root_ref = ? AND decision = 'DISCLOSED'",
+        ).use { statement ->
+            statement.setString(1, ACTOR)
+            statement.setString(2, root)
+            statement.executeQuery().use { rows ->
+                check(rows.next())
+                mapper.readTree(rows.getString(1)).map { it.asText() }
+            }
+        }
+    }
+
+    private fun allowedAuditId(root: String): UUID = withAuditScope("openbank-cz") { connection ->
+        connection.prepareStatement(
+            "SELECT audit_id FROM context_read_audit WHERE principal_id = ? AND root_ref = ? AND decision = 'ALLOWED'",
+        ).use { statement ->
+            statement.setString(1, ACTOR)
+            statement.setString(2, root)
+            statement.executeQuery().use { rows ->
+                check(rows.next())
+                rows.getObject(1, UUID::class.java)
+            }
+        }
+    }
+
+    private fun insertForgedDisclosure(accessId: UUID, forgedRoot: String) {
+        connection().use { connection ->
+            connection.autoCommit = false
+            connection.prepareStatement("SELECT set_config('openbank.bank_scope', ?, true)").use {
+                it.setString(1, "openbank-cz")
+                it.executeQuery().close()
+            }
+            connection.prepareStatement(
+                """INSERT INTO context_read_audit
+                   (audit_id, bank_scope, principal_id, case_id, purpose, action, root_ref, decision,
+                    reason_code, occurred_at, access_audit_id, query_hash, projection_generation,
+                    evidence_refs, evidence_count, response_truncated, response_status)
+                   VALUES (?, 'openbank-cz', ?, ?, ?, 'context.complaint.read', ?, 'DISCLOSED',
+                           'EVIDENCE_RETURNED', now(), ?, ?, ?, '[]', 0, false, 200)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, ACTOR)
+                statement.setString(3, CASE)
+                statement.setString(4, PURPOSE)
+                statement.setString(5, forgedRoot)
+                statement.setObject(6, accessId)
+                statement.setString(7, "a".repeat(64))
+                statement.setString(8, "b".repeat(64))
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun storedAuditCommitments(root: String): List<String> = withAuditScope("openbank-cz") { connection ->
         connection.prepareStatement(
             "SELECT * FROM context_read_audit WHERE principal_id = ? AND root_ref = ?",
         ).use { statement ->
             statement.setString(1, ACTOR)
             statement.setString(2, root)
             statement.executeQuery().use { rows ->
-                check(rows.next())
-                ContextAuditCommitment.of(
-                    ContextReadAuditEntity().apply {
-                        id = rows.getObject("audit_id", UUID::class.java)
-                        bankScope = rows.getString("bank_scope")
-                        principalId = rows.getString("principal_id")
-                        caseId = rows.getString("case_id")
-                        purpose = rows.getString("purpose")
-                        action = rows.getString("action")
-                        rootRef = rows.getString("root_ref")
-                        decision = rows.getString("decision")
-                        policyVersion = rows.getString("policy_version")
-                        reasonCode = rows.getString("reason_code")
-                        occurredAt = rows.getObject("occurred_at", OffsetDateTime::class.java).toInstant()
-                        effectiveAt = rows.getObject("effective_at", OffsetDateTime::class.java)?.toInstant()
-                        knownAt = rows.getObject("known_at", OffsetDateTime::class.java)?.toInstant()
-                    },
-                )
+                buildList {
+                    while (rows.next()) {
+                        add(
+                            ContextAuditCommitment.of(
+                                ContextReadAuditEntity().apply {
+                                    id = rows.getObject("audit_id", UUID::class.java)
+                                    bankScope = rows.getString("bank_scope")
+                                    principalId = rows.getString("principal_id")
+                                    caseId = rows.getString("case_id")
+                                    purpose = rows.getString("purpose")
+                                    action = rows.getString("action")
+                                    rootRef = rows.getString("root_ref")
+                                    decision = rows.getString("decision")
+                                    policyVersion = rows.getString("policy_version")
+                                    reasonCode = rows.getString("reason_code")
+                                    occurredAt = rows.getObject("occurred_at", OffsetDateTime::class.java).toInstant()
+                                    effectiveAt = rows.getObject(
+                                        "effective_at",
+                                        OffsetDateTime::class.java,
+                                    )?.toInstant()
+                                    knownAt = rows.getObject("known_at", OffsetDateTime::class.java)?.toInstant()
+                                    accessAuditId = rows.getObject("access_audit_id", UUID::class.java)
+                                    queryHash = rows.getString("query_hash")?.trim()
+                                    projectionGeneration = rows.getString("projection_generation")?.trim()
+                                    evidenceRefsJson = rows.getString("evidence_refs")
+                                    evidenceCount = rows.getObject("evidence_count") as? Int
+                                    responseTruncated = rows.getObject("response_truncated") as? Boolean
+                                    responseStatus = rows.getObject("response_status") as? Int
+                                },
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

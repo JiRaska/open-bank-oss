@@ -51,6 +51,7 @@ class AuthorityHistoryResource(
                 id.toString(),
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(case, purpose, effective, known),
+                summarize = ContextDisclosureSummaries::response,
             ) {
                 Response.ok(history.history(id, effective, known)).header("Cache-Control", "no-store").build()
             }

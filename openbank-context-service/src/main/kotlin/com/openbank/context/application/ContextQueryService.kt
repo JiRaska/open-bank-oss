@@ -33,6 +33,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
+        summarize: (T) -> DisclosureSummary,
         block: suspend () -> T,
     ): T = authorized(
         "context.authorization.read",
@@ -41,6 +42,7 @@ class ContextQueryService(
         "delegation:$ref",
         actor,
         context,
+        summarize,
         block,
     )
 
@@ -48,6 +50,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
+        summarize: (T) -> DisclosureSummary,
         block: suspend () -> T,
     ): T = authorized(
         "context.aml-case.read",
@@ -56,6 +59,7 @@ class ContextQueryService(
         "aml-case:$ref",
         actor,
         context,
+        summarize,
         block,
     )
 
@@ -63,6 +67,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
+        summarize: (T) -> DisclosureSummary,
         block: suspend () -> T,
     ): T = authorized(
         "context.kyb-case.read",
@@ -71,6 +76,7 @@ class ContextQueryService(
         "kyb-case:$ref",
         actor,
         context,
+        summarize,
         block,
     )
 
@@ -78,6 +84,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
+        summarize: (T) -> DisclosureSummary,
         block: suspend () -> T,
     ): T = authorized(
         "context.fraud-case.read",
@@ -86,6 +93,7 @@ class ContextQueryService(
         "fraud-case:$ref",
         actor,
         context,
+        summarize,
         block,
     )
 
@@ -97,6 +105,19 @@ class ContextQueryService(
             "complaint:$ref",
             actor,
             context,
+            summarize = { view ->
+                if (view == null) {
+                    DisclosureSummary.absent(DisclosureSummary.HTTP_NOT_FOUND)
+                } else {
+                    DisclosureSummary.materialized(
+                        evidenceRefs = (view.nodes.map { it.key } + view.edges.map { it.evidenceRef }).distinct(),
+                        evidenceCount = view.nodes.size + view.edges.size,
+                        truncated = view.truncated,
+                        versionTokens = view.nodes.map { "${it.key}:${it.sourceVersion}:${it.recordedAt}" } +
+                            view.edges.map { "${it.id}:${it.sourceVersion}:${it.recordedAt}" },
+                    )
+                }
+            },
         ) {
             graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$ref", context.asOf, maxNodes, maxEdges)
         }
@@ -108,6 +129,15 @@ class ContextQueryService(
         "incident:$ref",
         actor,
         context,
+        summarize = { impact ->
+            DisclosureSummary.materialized(
+                evidenceRefs = emptyList(),
+                evidenceCount = impact.total,
+                truncated = impact.projectionStatus == ImpactProjectionStatus.PARTIAL,
+                versionTokens = impact.affectedByType.entries.map { "${it.key}:${it.value}" } +
+                    impact.projectionStatus.name,
+            )
+        },
     ) {
         val view = graph.neighborhood(ContextNamespace.INCIDENT, "incident:$ref", context.asOf, maxNodes, maxEdges)
         val affected = view?.nodes.orEmpty().filter {
@@ -129,11 +159,12 @@ class ContextQueryService(
         root: String,
         actor: Investigator,
         context: InvestigationContext,
+        summarize: (T) -> DisclosureSummary,
         block: suspend () -> T,
     ): T {
         val started = System.nanoTime()
         try {
-            return authorizeAndRead(action, requiredPurpose, namespace, root, actor, context, block)
+            return authorizeAndRead(action, requiredPurpose, namespace, root, actor, context, summarize, block)
         } finally {
             meters.timer("openbank_context_read_duration", "action", action)
                 .record(java.time.Duration.ofNanos(System.nanoTime() - started))
@@ -148,6 +179,7 @@ class ContextQueryService(
         root: String,
         actor: Investigator,
         context: InvestigationContext,
+        summarize: (T) -> DisclosureSummary,
         block: suspend () -> T,
     ): T {
         val now = clock.instant()
@@ -199,9 +231,49 @@ class ContextQueryService(
             decisionMetric(action, "denied", "policy_denied")
             throw ContextAccessDenied()
         }
-        audit.record(entry(actor, context, action, root, "ALLOWED", decision.policyVersion, "POLICY_ALLOWED", now))
+        val accessAuditId = audit.record(
+            entry(actor, context, action, root, "ALLOWED", decision.policyVersion, "POLICY_ALLOWED", now),
+        )
         decisionMetric(action, "allowed", "policy_allowed")
-        return block()
+        val result = block()
+        val summary = summarize(result)
+        val queryHash = ContextDisclosureFingerprint.of(
+            action,
+            root,
+            context.purpose,
+            context.asOf.toString(),
+            context.knownAt?.toString(),
+            maxNodes.toString(),
+            maxEdges.toString(),
+        )
+        val wasDisclosed = summary.responseStatus in
+            DisclosureSummary.HTTP_SUCCESS_MIN..DisclosureSummary.HTTP_SUCCESS_MAX
+        val outcome = if (wasDisclosed) {
+            "DISCLOSED"
+        } else {
+            "NOT_DISCLOSED"
+        }
+        audit.record(
+            entry(
+                actor,
+                context,
+                action,
+                root,
+                outcome,
+                decision.policyVersion,
+                if (outcome == "DISCLOSED") "EVIDENCE_RETURNED" else "NO_EVIDENCE_RETURNED",
+                clock.instant(),
+            ).copy(
+                accessAuditId = accessAuditId,
+                queryHash = queryHash,
+                projectionGeneration = summary.projectionGeneration,
+                evidenceRefs = summary.evidenceRefs,
+                evidenceCount = summary.evidenceCount,
+                responseTruncated = summary.truncated,
+                responseStatus = summary.responseStatus,
+            ),
+        )
+        return result
     }
 
     private fun decisionMetric(action: String, decision: String, reason: String) = meters.counter(
