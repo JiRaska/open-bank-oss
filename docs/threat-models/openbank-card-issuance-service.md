@@ -59,6 +59,18 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
 | **E**oP | Viewer escalates to issue or block | Distinct roles enforced at JAX-RS layer (`@RolesAllowed`) + OPA; deny-by-default |
 | **T**ampering | Race between `suspend` and `block` on same card | Domain `require` guards throw `IllegalArgumentException` on illegal state; a concurrent block on a SUSPENDED card is valid by design; concurrent suspend+block both succeed on ACTIVE → last writer wins idempotently (both move toward frozen state) — acceptable; optimistic locking would make this exact (see §5) |
 
+### Customer 360 bounded party read
+
+`GET /api/v1/cards/party/{partyId}?limit=N` accepts an optional limit of 1–100 for the
+operator's Customer 360 graph. The same `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN` and
+`card.list` party-scoped authorization run before either query. The bounded path reads the newest
+rows in PostgreSQL; the response shape and fields are unchanged, and the admin BFF retains only
+the card fields needed for the graph. Omitting `limit` still returns the complete party list used
+for subject-access export. A forged or excessive limit receives 400. This change neither reads
+secure PAN/CVV details nor grants customer-facing access. Rollback of the source endpoint before
+the admin UI would make its graph request unbounded again, so deploy and roll back the source and
+UI in that order and verify source-query latency at representative party cardinalities.
+
 ## 4a. Card authorization decision point (D3) — STRIDE supplement
 
 Three new surfaces: `GET /api/v1/cards/category-taxonomy`, `GET|PUT /api/v1/cards/{id}/category-limits`,
