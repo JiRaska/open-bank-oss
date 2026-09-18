@@ -5,7 +5,8 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  # 1.18.0 -> 1.19.0: additive approvalRequired refusal flag; the existing closed
+  # 1.18.0 -> 1.19.0: additive approvalRequired refusal flag and direct
+  # business-debit authority check for a human actor. The existing closed
   # outcome enum remains unchanged for mixed-version callers.
   # 1.17.0 -> 1.18.0 (#5962): additive — declare EXPIRED on the withdrawal-proposal list filter,
   # matching WithdrawalProposalStatus, which has carried it since the enum's introduction.
@@ -449,6 +450,46 @@ paths:
                     description: Present only when `outcome` is DELEGATED.
         '400':
           description: amount supplied without a currency, or not a valid monetary value
+
+  /api/v1/accounts/{accountId}/business-payment-authorization:
+    get:
+      tags: [Accounts]
+      summary: Check whether a human may directly debit a business account
+      description: >-
+        Internal payment-path decision. A profile switch proves that a human may act
+        for a company but does not grant unilateral payment authority. Only an exact,
+        active SOLE mandate with one required signature permits this single-SCA path.
+        Joint or unknown rules require an operation-specific approval flow. The edge
+        derives actorPartyId from the authenticated human JWT and verifies that the
+        returned ownerPartyId matches the selected business profile.
+      operationId: checkBusinessPaymentAuthorization
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: actorPartyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Direct business-debit decision; all refusals are opaque to customers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized, outcome]
+                properties:
+                  authorized:
+                    type: boolean
+                  outcome:
+                    type: string
+                    enum: [SOLE, APPROVAL_REQUIRED, NO_MANDATE, ACCOUNT_NOT_FOUND]
+                  ownerPartyId:
+                    type: [string, 'null']
+                    format: uuid
+        '400':
+          description: Missing actorPartyId
 
   /api/v1/accounts/{accountId}/savings-goal/delegation/proposals:
     post:

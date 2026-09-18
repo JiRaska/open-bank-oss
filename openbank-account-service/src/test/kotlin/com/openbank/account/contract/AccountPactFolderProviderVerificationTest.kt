@@ -17,11 +17,13 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.DelegatedAccessGrant
+import com.openbank.account.domain.model.PartyMandateProjection
 import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
@@ -107,6 +109,8 @@ class AccountPactFolderProviderVerificationTest {
         private val DELEGATION_GRANTOR_PARTY_ID = UUID.fromString("33333333-4444-4555-8666-777777777777")
         private val DELEGATE_PARTY_ID = UUID.fromString("44444444-5555-4666-8777-888888888888")
         private val DELEGATION_GRANT_ID = UUID.fromString("55555555-6666-4777-8888-999999999999")
+        private val BUSINESS_ACTOR_PARTY_ID = UUID.fromString("77777777-8888-4999-8aaa-bbbbbbbbbbbb")
+        private val BUSINESS_MANDATE_ID = UUID.fromString("88888888-9999-4aaa-8bbb-cccccccccccc")
     }
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -119,6 +123,9 @@ class AccountPactFolderProviderVerificationTest {
 
     @Inject
     lateinit var delegationProjectionRepository: DelegationProjectionRepository
+
+    @Inject
+    lateinit var partyMandateProjectionRepository: PartyMandateProjectionRepository
 
     @Inject
     lateinit var vertx: Vertx
@@ -313,6 +320,28 @@ class AccountPactFolderProviderVerificationTest {
                 grant.copy(approvalPolicy = "N_OF_M", requiredApprovals = 2),
             )
             Unit
+        }
+    }
+
+    @State("a company account with an ACTIVE SOLE mandate for a human exists")
+    fun companyAccountWithSoleMandate() = seedBusinessMandate("SOLE", 1)
+
+    @State("a company account with an ACTIVE JOINT mandate for a human exists")
+    fun companyAccountWithJointMandate() = seedBusinessMandate("JOINT", 2)
+
+    private fun seedBusinessMandate(authority: String, requiredSignatures: Int) {
+        accountWithActivePaymentDelegation()
+        runOnVertxContext {
+            partyMandateProjectionRepository.upsert(
+                PartyMandateProjection(
+                    id = BUSINESS_MANDATE_ID,
+                    principalPartyId = DELEGATION_GRANTOR_PARTY_ID,
+                    agentPartyId = BUSINESS_ACTOR_PARTY_ID,
+                    authority = authority,
+                    requiredSignatures = requiredSignatures,
+                    active = true,
+                ),
+            )
         }
     }
 

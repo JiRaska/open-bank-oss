@@ -698,3 +698,18 @@ decision use first; the additive projection table may remain until its consumer 
   retail. A business account never receives the retail welcome bonus. **Risk class:** integrity of
   account opening (a forged party event could open an inert account); no money mutation, no new
   principal. Rollback: set the flag false; already-opened accounts are ordinary accounts.
+
+- **2026-09-18** — **Direct business-debit authority** (`GET /api/v1/accounts/{id}/business-payment-authorization`).
+  A company profile is not a natural person and its visibility mandate alone cannot authorize
+  a one-human payment. The additive, M2M-only check derives the owner from the account row and
+  requires an exact active SOLE/one-signature mandate for the human actor from the local
+  party-mandate projection. JOINT, unknown threshold, contradictory active mandates, missing
+  projection and missing account refuse. The edge also reads party-service's current mandate
+  without its profile-switch cache; source and projection must agree. **Risk:** spoofing/elevation
+  of privilege and stale-revocation debit. The actor id comes from the human JWT, never customer
+  input. Roll out the account endpoint first, then the edge with business payments disabled;
+  enable only after both authority sources reconcile. An older account pod or a lagging
+  projection produces a refusal, not an authorization. Roll back by disabling the edge switch,
+  never by restoring the old company direct-debit bypass. The additive endpoint has no data
+  migration and may remain while callers
+  drain. Joint payments need an immutable operation-approval snapshot, never an assumed SOLE rule.
