@@ -125,6 +125,24 @@ Broader cross-case expansion, retention/restriction workflow, load evidence and 
 controlled pilot remain required. The bounded AML and Fraud networks are not
 completion of ADR-0304.
 
+The current Fraud pilot selects the first four assigned case references by UUID
+**before** comparing source-owned account and counterparty identifiers. Once an
+investigator has more than four eligible cases, a genuinely related case can be
+outside that slice. The `candidateTruncated` response flag warns about this; an
+empty related list must not be described as an exhaustive negative finding.
+
+The next Fraud network increment will select candidates by explicit equality in
+Fraud's indexed case store. Context will supply a bounded, cursor-paged set of
+case IDs that are assigned to the investigator for this purpose; Fraud will match
+only those IDs against the live root case's account and counterparty **within the
+same identifier role**. The source response will contain candidate case IDs only,
+not account or counterparty IDs. Context will independently re-authorize, audit
+and fetch each candidate's evidence before returning it to the UI. A page limit
+or unavailable source will be reported as partial or unavailable, never as a
+complete network. The reference Kafka topic remains case-ID/revision/time only.
+Measure lookup selectivity, authorization cost and p95/p99 latency with 1× and
+10× assigned-case populations before increasing the interactive expansion cap.
+
 ## Alternatives considered
 
 - **One financial-crime permission:** rejected; fraud and AML have different purposes,
