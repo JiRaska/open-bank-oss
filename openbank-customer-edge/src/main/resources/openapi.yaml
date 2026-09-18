@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.70.0
+  version: 1.71.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1887,6 +1887,27 @@ paths:
                         performedAt: {type: string, format: date-time}
 
   /domestic-payment-proposals/drafts:
+    get:
+      tags: [Payments]
+      summary: List immutable payment proposals authored by the signed-in human
+      description: >-
+        The human JWT actor is used even while a company/FOP profile is selected. The maker
+        can see only their own historical submission data, including after grant revocation.
+        This is not current account access or permission to approve or execute a payment.
+      operationId: listDomesticPaymentProposalDrafts
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: before, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Maker-owned newest-first page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MakerProposalDraftPageResponse'}
+        '400': {description: Invalid pagination input}
+        '403': {description: Customer session or workload authority absent}
     post:
       tags: [Payments]
       summary: Prepare a delegated domestic payment for later approval
@@ -1924,6 +1945,23 @@ paths:
         '400': {description: Invalid instruction or missing Idempotency-Key}
         '403': {description: Account unavailable or maker grant absent, expired, or insufficient}
         '409': {description: Idempotency-Key belongs to another proposal}
+
+  /domestic-payment-proposals/drafts/{draftId}:
+    get:
+      tags: [Payments]
+      summary: Read a proposal authored by the signed-in human
+      operationId: getDomesticPaymentProposalDraft
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Maker-owned historical submission
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MakerProposalDraftResponse'}
+        '404': {description: Proposal absent or authored by another person}
 
   /domestic-payments:
     post:
@@ -4553,6 +4591,30 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    MakerProposalDraftPageResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/MakerProposalDraftResponse'}
+        nextCursor: {type: string, format: uuid, nullable: true}
+
+    MakerProposalDraftResponse:
+      type: object
+      required: [id, status, amount, currency, creditorAccountNumber, creditorBankCode,
+                 creditorName, createdAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [DRAFT]}
+        amount: {type: string, description: Exact decimal CZK amount}
+        currency: {type: string, enum: [CZK]}
+        creditorAccountNumber: {type: string}
+        creditorBankCode: {type: string}
+        creditorName: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+
     AmlPep:
       type: object
       required: [isPep]

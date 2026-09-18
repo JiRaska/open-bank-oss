@@ -88,4 +88,24 @@ class DomesticPaymentResourceAuthzTest {
             statusCode(403)
         }
     }
+
+    @Test
+    @TestSecurity(user = "service-account-untrusted", roles = ["ROLE_OPERATOR"])
+    fun `proposal history routes are served but reject untrusted workload before reading rows`() {
+        val maker = UUID.randomUUID().toString()
+        Given {
+            header("X-Customer-Party-Id", maker)
+        } When {
+            get("/api/v1/domestic-payment-proposals/drafts")
+        } Then {
+            statusCode(403)
+        }
+        Given {
+            header("X-Customer-Party-Id", maker)
+        } When {
+            get("/api/v1/domestic-payment-proposals/drafts/${UUID.randomUUID()}")
+        } Then {
+            statusCode(403)
+        }
+    }
 }

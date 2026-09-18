@@ -514,3 +514,14 @@ not change any existing request's outcome until explicitly flipped.
   versions must be rolled out after account-service's decision endpoint; an old account
   provider fails closed. Rollback removes the two new routes while preserving any created
   drafts and V18 for retention/export; dropping a populated table is not rollback.
+
+- **2026-09-18** — **Maker-owned history read.** GET list/item routes use the same pinned
+  edge workload identity and human maker header as the writer. A maker may read only the
+  immutable instructions they authored, even after their grant is revoked; the read DTO
+  excludes owner/account/grant identifiers and never queries live account state. A foreign
+  draft ID is indistinguishable from an absent one (404); a foreign cursor returns an empty
+  page. Keyset order is `(created_at DESC, proposal_id DESC)`, with a 50-row cap and V19
+  maker index. Rollback removes readers first; V19 may be dropped with
+  `DROP INDEX idx_domestic_payment_proposal_maker_history` after old readers are drained.
+  Existing V18 drafts are preserved; mixed writer/read versions remain compatible. New
+  proposals and every future approval/execution transition still require fresh authority.

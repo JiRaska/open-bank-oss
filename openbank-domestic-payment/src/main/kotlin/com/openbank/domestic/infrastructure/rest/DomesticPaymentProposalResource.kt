@@ -13,10 +13,14 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
@@ -67,6 +71,7 @@ class DomesticPaymentProposalResource(private val drafts: DomesticPaymentProposa
             is CreatePaymentProposalDraftOutcome.Saved -> {
                 val response = Response.status(Response.Status.CREATED)
                     .entity(result.draft.toResponse())
+                    .header("Location", "/api/v1/domestic-payment-proposals/drafts/${result.draft.id}")
                 if (result.replayed) response.header("X-Idempotency-Replayed", "true")
                 response.build()
             }
@@ -75,6 +80,45 @@ class DomesticPaymentProposalResource(private val drafts: DomesticPaymentProposa
                 .entity(mapOf("error" to "IDEMPOTENCY_KEY_REUSED"))
                 .build()
         }
+    }
+
+    @GET
+    @Path("/drafts")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.read")
+    @Operation(summary = "List the authenticated human maker's immutable proposal history")
+    suspend fun listDrafts(
+        @HeaderParam("X-Customer-Party-Id") makerHeader: String?,
+        @QueryParam("before") before: UUID?,
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+    ): Response {
+        val maker = trustedMaker(makerHeader) ?: return forbidden()
+        val page = drafts.listForMaker(maker, before, limit)
+        return Response.ok(
+            MakerProposalDraftPageResponse(
+                page.items.map { it.toMakerResponse() },
+                page.nextCursor,
+            ),
+        ).build()
+    }
+
+    @GET
+    @Path("/drafts/{draftId}")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.read")
+    @Operation(summary = "Get an immutable proposal authored by the authenticated human maker")
+    suspend fun getDraft(
+        @HeaderParam("X-Customer-Party-Id") makerHeader: String?,
+        @PathParam("draftId") draftId: UUID,
+    ): Response {
+        val maker = trustedMaker(makerHeader) ?: return forbidden()
+        val draft = drafts.findForMaker(maker, draftId) ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(draft.toMakerResponse()).build()
+    }
+
+    private fun trustedMaker(header: String?): UUID? {
+        if (!isCustomerEdge(identity.principal as? JsonWebToken)) return null
+        return header?.let { runCatching { UUID.fromString(it) }.getOrNull() }
     }
 
     private fun forbidden(): Response = Response.status(Response.Status.FORBIDDEN)
@@ -103,6 +147,33 @@ data class DomesticPaymentProposalDraftResponse(
     val creditorName: String,
     val createdAt: Instant,
     val expiresAt: Instant,
+)
+
+/** Read model deliberately omits owner, account and delegation identifiers after grant revocation. */
+data class MakerProposalDraftResponse(
+    val id: UUID,
+    val status: String,
+    val amount: String,
+    val currency: String,
+    val creditorAccountNumber: String,
+    val creditorBankCode: String,
+    val creditorName: String,
+    val createdAt: Instant,
+    val expiresAt: Instant,
+)
+
+data class MakerProposalDraftPageResponse(val items: List<MakerProposalDraftResponse>, val nextCursor: UUID?)
+
+private fun DomesticPaymentProposalDraft.toMakerResponse() = MakerProposalDraftResponse(
+    id = id,
+    status = "DRAFT",
+    amount = instruction.amount.toPlainString(),
+    currency = instruction.currency,
+    creditorAccountNumber = instruction.creditorAccountNumber,
+    creditorBankCode = instruction.creditorBankCode,
+    creditorName = instruction.creditorName,
+    createdAt = createdAt,
+    expiresAt = expiresAt,
 )
 
 private fun DomesticPaymentProposalDraft.toResponse() = DomesticPaymentProposalDraftResponse(

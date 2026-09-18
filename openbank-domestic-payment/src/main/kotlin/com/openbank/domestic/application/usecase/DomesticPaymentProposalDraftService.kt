@@ -32,6 +32,20 @@ class DomesticPaymentProposalDraftService(
     private val drafts: DomesticPaymentProposalDraftRepository,
     private val clock: Clock,
 ) {
+    /** Historical maker-owned data; current grant is intentionally not consulted for reading it. */
+    suspend fun findForMaker(makerPartyId: UUID, draftId: UUID): DomesticPaymentProposalDraft? =
+        drafts.findById(draftId)?.takeIf { it.makerPartyId == makerPartyId }
+
+    suspend fun listForMaker(makerPartyId: UUID, beforeId: UUID?, limit: Int): MakerDraftPage {
+        require(limit in 1..MAX_PAGE_SIZE) { "limit must be between 1 and $MAX_PAGE_SIZE" }
+        val before = beforeId?.let { findForMaker(makerPartyId, it) }
+        // An invalid or foreign cursor cannot become a first-page request.
+        if (beforeId != null && before == null) return MakerDraftPage(emptyList(), null)
+        val rows = drafts.listByMaker(makerPartyId, before, limit + 1)
+        val items = rows.take(limit)
+        return MakerDraftPage(items, items.lastOrNull()?.id?.takeIf { rows.size > limit })
+    }
+
     suspend fun create(makerPartyId: UUID, raw: CreateDomesticPaymentCommand): CreatePaymentProposalDraftOutcome {
         validateDraftRequest(raw)
         // Replace caller-supplied actor fields before fingerprinting. Only the authenticated edge
@@ -138,6 +152,7 @@ class DomesticPaymentProposalDraftService(
     )
 
     private companion object {
+        const val MAX_PAGE_SIZE = 50
         const val MAX_KEY_LENGTH = 128
         const val MAX_AMOUNT_SCALE = 6
         const val MAX_INTEGER_DIGITS = 14
@@ -146,3 +161,5 @@ class DomesticPaymentProposalDraftService(
         val DRAFT_TTL: Duration = Duration.ofDays(7)
     }
 }
+
+data class MakerDraftPage(val items: List<DomesticPaymentProposalDraft>, val nextCursor: UUID?)

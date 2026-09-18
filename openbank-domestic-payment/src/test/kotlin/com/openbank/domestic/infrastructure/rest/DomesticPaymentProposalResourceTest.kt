@@ -61,6 +61,26 @@ class DomesticPaymentProposalResourceTest {
         }
     }
 
+    @Test
+    fun `history read rejects forged maker header from another workload`(): Unit = runBlocking {
+        resource.identity = identity("another-client", "operator")
+
+        assertThat(resource.listDrafts(maker.toString(), null, 20).status).isEqualTo(403)
+        assertThat(resource.getDraft(maker.toString(), UUID.randomUUID()).status).isEqualTo(403)
+        coVerify(exactly = 0) { drafts.listForMaker(any(), any(), any()) }
+        coVerify(exactly = 0) { drafts.findForMaker(any(), any()) }
+    }
+
+    @Test
+    fun `trusted maker gets opaque not found for someone else's draft`(): Unit = runBlocking {
+        resource.identity = identity("openbank-edge", "service-account-openbank-edge")
+        val id = UUID.randomUUID()
+        coEvery { drafts.findForMaker(maker, id) } returns null
+
+        assertThat(resource.getDraft(maker.toString(), id).status).isEqualTo(404)
+        coVerify(exactly = 1) { drafts.findForMaker(maker, id) }
+    }
+
     private fun identity(azp: String, username: String): SecurityIdentity {
         val jwt = mockk<JsonWebToken> {
             every { getClaim<String>("azp") } returns azp

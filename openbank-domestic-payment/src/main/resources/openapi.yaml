@@ -5,7 +5,7 @@ info:
   title: Domestic Payment Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
-  version: 1.9.0
+  version: 1.10.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -23,6 +23,27 @@ tags:
 
 paths:
   /api/v1/domestic-payment-proposals/drafts:
+    get:
+      tags: [Domestic Payments]
+      summary: List the human maker's immutable proposal history
+      description: >-
+        Only the trusted edge workload can name the authenticated human maker. Read access to
+        that person's own immutable history remains after a maker grant is revoked; this route
+        does not disclose current owner/account state or grant details, and cannot approve or pay.
+        Results use newest-first keyset pagination. A foreign or unknown cursor yields an empty page.
+      operationId: listDomesticPaymentProposalDrafts
+      parameters:
+        - {name: X-Customer-Party-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: before, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Maker-owned page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MakerProposalDraftPageResponse'}
+        '400': {description: Invalid limit or cursor syntax}
+        '403': {description: Untrusted workload identity or absent maker identity}
     post:
       tags: [Domestic Payments]
       summary: Prepare a maker-only domestic payment proposal draft
@@ -47,6 +68,9 @@ paths:
         '201':
           description: An immutable DRAFT was stored, or an exact retry replayed it
           headers:
+            Location:
+              description: Canonical read-only URI for the authored draft
+              schema: {type: string}
             X-Idempotency-Replayed:
               description: Present and true only for an exact durable replay
               schema: {type: string, enum: ['true']}
@@ -57,6 +81,23 @@ paths:
         '400': {description: Malformed or unpersistable proposal input}
         '403': {description: Untrusted workload identity or absent maker authority}
         '409': {description: Idempotency-Key already belongs to a different draft}
+
+  /api/v1/domestic-payment-proposals/drafts/{draftId}:
+    get:
+      tags: [Domestic Payments]
+      summary: Read one proposal authored by the human maker
+      operationId: getDomesticPaymentProposalDraft
+      parameters:
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Customer-Party-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Maker-owned immutable draft
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MakerProposalDraftResponse'}
+        '403': {description: Untrusted workload identity or absent maker identity}
+        '404': {description: Draft absent or authored by another maker}
 
   /api/v1/domestic-payments:
     post:
@@ -320,6 +361,30 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    MakerProposalDraftPageResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/MakerProposalDraftResponse'}
+        nextCursor: {type: string, format: uuid, nullable: true}
+
+    MakerProposalDraftResponse:
+      type: object
+      required: [id, status, amount, currency, creditorAccountNumber, creditorBankCode,
+                 creditorName, createdAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [DRAFT]}
+        amount: {type: string, description: Exact decimal CZK amount}
+        currency: {type: string, enum: [CZK]}
+        creditorAccountNumber: {type: string}
+        creditorBankCode: {type: string}
+        creditorName: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+
     DomesticPaymentProposalDraftResponse:
       type: object
       required: [id, status, makerPartyId, ownerPartyId, debtorAccountId, amount, currency,

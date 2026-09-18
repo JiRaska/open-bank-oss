@@ -108,6 +108,29 @@ class DomesticPaymentProposalDraftServiceTest {
         coVerify(exactly = 0) { drafts.saveOrGetWinner(any()) }
     }
 
+    @Test
+    fun `history is maker scoped and remains available without a live grant`(): Unit = runBlocking {
+        val own = (service.create(MAKER, command()) as CreatePaymentProposalDraftOutcome.Saved).draft
+        coEvery { drafts.findById(own.id) } returns own
+        coEvery { authority.authorize(any(), any(), any(), any()) } returns null
+        coEvery { drafts.listByMaker(MAKER, null, 21) } returns listOf(own)
+
+        assertThat(service.findForMaker(MAKER, own.id)).isEqualTo(own)
+        assertThat(service.findForMaker(OWNER, own.id)).isNull()
+        assertThat(service.listForMaker(MAKER, null, 20).items).containsExactly(own)
+        coVerify(exactly = 0) { authority.authorize(any(), OWNER, any(), any()) }
+    }
+
+    @Test
+    fun `foreign cursor cannot restart pagination at first page`(): Unit = runBlocking {
+        val foreign = (service.create(MAKER, command()) as CreatePaymentProposalDraftOutcome.Saved).draft
+        coEvery { drafts.findById(foreign.id) } returns foreign
+
+        assertThat(service.listForMaker(OWNER, foreign.id, 20))
+            .isEqualTo(MakerDraftPage(emptyList(), null))
+        coVerify(exactly = 0) { drafts.listByMaker(any(), any(), any()) }
+    }
+
     private fun command() = CreateDomesticPaymentCommand(
         idempotencyKey = "proposal-key",
         debtorAccountId = ACCOUNT,

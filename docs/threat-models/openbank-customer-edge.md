@@ -288,3 +288,11 @@ Trust boundaries:
   The exact maker query is pinned by a consumer Pact using the real HTTP client; account-service's
   folder provider suite replays it against the served endpoint and a grant with only
   `ACCOUNT_PROPOSE_PAYMENT`, so direct-debit authority cannot satisfy the fixture by accident.
+
+- **2026-09-18** — **Human-authored proposal history.** Edge GET list/item routes use the
+  validated JWT human `actorPartyId` even when `X-Acting-For` selects a company. They
+  forward that actor only to the pinned workload endpoint, never the effective profile.
+  The workload returns an immutable, minimized maker-owned read model; a revoked grant
+  prevents new writes but does not erase the maker's historical submissions. A foreign
+  item is 404 and a foreign pagination cursor yields an empty page. Rollback removes the
+  edge routes before workload readers; no stored draft is deleted.

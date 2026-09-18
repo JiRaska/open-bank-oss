@@ -2861,6 +2861,34 @@ class CustomerEdgeResource(
 
     // --- Domestic payment proposals (maker-only; never a direct debit) ---
 
+    /** Historical drafts belong to the human author, not to the selected company profile. */
+    @GET
+    @Path("/domestic-payment-proposals/drafts")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun listDomesticPaymentProposalDrafts(
+        @QueryParam("before") before: UUID?,
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+    ): Response {
+        if (limit !in 1..MAX_PROPOSAL_PAGE_SIZE) {
+            return badRequest("limit must be between 1 and $MAX_PROPOSAL_PAGE_SIZE")
+        }
+        val query = "?limit=$limit" + (before?.let { "&before=$it" } ?: "")
+        return upstream.get(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/drafts$query",
+            customer().actorPartyId.toString(),
+        )
+    }
+
+    @GET
+    @Path("/domestic-payment-proposals/drafts/{draftId}")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun getDomesticPaymentProposalDraft(@PathParam("draftId") draftId: UUID): Response = upstream.get(
+        "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/drafts/$draftId",
+        customer().actorPartyId.toString(),
+    )
+
     /**
      * A person prepares a company/FOP owner's payment for a later, separate approval. The
      * account-service decision is only a maker permission, never debit authority. The payment
@@ -5627,6 +5655,7 @@ class CustomerEdgeResource(
     companion object {
 
         private const val MAX_PROPOSAL_KEY_LENGTH = 128
+        private const val MAX_PROPOSAL_PAGE_SIZE = 50
         private const val MAX_PROPOSAL_AMOUNT_SCALE = 6
         private const val MAX_PROPOSAL_INTEGER_DIGITS = 14
 

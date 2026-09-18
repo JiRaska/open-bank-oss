@@ -90,6 +90,23 @@ class CustomerPaymentProposalDraftTest {
     }
 
     @Test
+    fun `company profile history reads are scoped to the human actor`() {
+        val client = mockk<UpstreamClient>()
+        val draftId = UUID.randomUUID()
+        every {
+            client.get("http://domestic/api/v1/domestic-payment-proposals/drafts?limit=20", maker.toString())
+        } returns Response.ok("""{"items":[]}""").build()
+        every {
+            client.get("http://domestic/api/v1/domestic-payment-proposals/drafts/$draftId", maker.toString())
+        } returns Response.status(404).build()
+
+        val resource = edge(client, actingForOwner = true)
+        assertThat(resource.listDomesticPaymentProposalDrafts(null, 20).status).isEqualTo(200)
+        assertThat(resource.getDomesticPaymentProposalDraft(draftId).status).isEqualTo(404)
+        verify(exactly = 0) { client.get(any(), owner.toString()) }
+    }
+
+    @Test
     fun `FOP maker grant works without acting-for profile`() {
         val client = upstream(
             Response.ok(

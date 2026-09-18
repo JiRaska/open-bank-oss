@@ -13,4 +13,11 @@ interface DomesticPaymentProposalDraftRepository {
     suspend fun findByMakerAndKey(makerPartyId: UUID, idempotencyKey: String): DomesticPaymentProposalDraft?
 
     suspend fun findById(id: UUID): DomesticPaymentProposalDraft?
+
+    /** Stable newest-first page after [before]; caller must bind [makerPartyId] from identity. */
+    suspend fun listByMaker(
+        makerPartyId: UUID,
+        before: DomesticPaymentProposalDraft?,
+        limit: Int,
+    ): List<DomesticPaymentProposalDraft>
 }
