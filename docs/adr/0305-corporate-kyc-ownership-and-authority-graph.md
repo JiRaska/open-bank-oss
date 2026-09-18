@@ -102,6 +102,11 @@ releases no finding. KYB commits an actor, purpose, case, observation and timest
 audit row before returning detail. A missing or cross-case observation returns no detail.
 Context independently repeats its assignment decision before resolving a reference
 on an analyst's behalf.
+The same live case check precedes a permanent restriction or correction decision.
+Context will provide a data-free `204` access operation so KYB can check assignment
+without materializing the bounded history. Rollout installs and verifies that Context
+operation first, then switches KYB's client in a later release. No fallback from an
+unavailable new operation to a full-history read is permitted after that switch.
 
 The UI supports an `effectiveAt` snapshot and identifies late-recorded evidence. It must
 not render a current representative as authorized at a past date or a revoked power as
