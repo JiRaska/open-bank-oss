@@ -226,6 +226,24 @@ class DrRestoreWorkflowTest(unittest.TestCase):
             with self.subTest(setting=name):
                 self.assertEqual(env.get(name), 'false')
 
+    def test_restored_checker_receives_only_the_managed_reader_credential(self):
+        templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
+        cluster = yaml.safe_load((templates / 'cnpg-recovery-cluster.yaml.tmpl').read_text())
+        reader = cluster['spec']['managed']['roles']
+        self.assertEqual(reader, [{
+            'name': 'ledger_dr_check', 'ensure': 'present', 'login': True, 'inherit': True,
+            'superuser': False, 'createdb': False, 'createrole': False,
+            'replication': False, 'bypassrls': False, 'inRoles': ['pg_read_all_data'],
+            'passwordSecret': {'name': 'ledger-dr-check-db'},
+        }])
+        pod = yaml.safe_load((templates / 'ledger-service-dr-check.yaml.tmpl').read_text())['spec']['template']['spec']
+        env = {item['name']: item for item in pod['containers'][0]['env']}
+        for name, key in [('QUARKUS_DATASOURCE_USERNAME', 'username'), ('POSTGRES_PASSWORD', 'password')]:
+            self.assertEqual(env[name]['valueFrom'],
+                             {'secretKeyRef': {'name': 'ledger-dr-check-db', 'key': key}})
+        rbac = list(yaml.safe_load_all((ROOT / 'openbank-infra/gitops/components/platform/dr-runner-rbac.yaml').read_text()))
+        self.assertFalse(any('secrets' in rule['resources'] for rule in rbac[0]['rules']))
+
     def test_recovery_uses_source_archive_and_application_identity(self):
         templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
         source = next(d for d in yaml.safe_load_all(

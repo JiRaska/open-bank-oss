@@ -56,10 +56,15 @@ spec:
               value: jdbc:postgresql://ledger-db-restored-rw.${NS}.svc:5432/openbank_ledger
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: vertx-reactive:postgresql://ledger-db-restored-rw.${NS}.svc:5432/openbank_ledger
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-dr-check-db
+                  key: username
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: ledger-db-restored-app
+                  name: ledger-dr-check-db
                   key: password
             # Disable dispatch as defense in depth. This flag does not isolate
             # other connectors or clients; the separate NetworkPolicy limits egress.

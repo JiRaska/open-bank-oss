@@ -25,8 +25,8 @@ excludes only Redis and the outgoing ledger channel from readiness checks becaus
 this viewer-only read uses neither. Both PostgreSQL health checks remain active.
 These settings do not remove Kafka connectors or outbound clients from the image;
 network isolation remains a separate prerequisite.
-Scheduler shutdown prevents scheduled mutations but is not a database read-only
-permission boundary. Before a live drill, verify the actual image's startup
+The checker uses a separate CNPG-managed reader role; scheduler shutdown is additional
+protection against unwanted work. Before a live drill, verify the actual image's startup
 requirements and enforce network and write isolation. Do not add live credentials
 just to turn a failed probe green.
 The workflow's `balanced` assertion and elapsed time do not measure RPO or prove
@@ -99,6 +99,32 @@ It also runs with PostgreSQL only and the actual mounted properties file, with
 Kafka and Redis pointed at an unavailable local port; readiness must stay UP and
 retain its database check. Without the DR properties, readiness returns 503 while
 the authenticated trial-balance read succeeds. This is source-level regression
-proof, not a deployment test of the selected live image, CNI isolation or database
-write permissions. The Python workflow suite verifies signing, tamper rejection,
+proof, not a deployment test of the selected live image, CNI isolation or
+the deployed role's write permissions. The Python workflow suite verifies signing, tamper rejection,
 credential permissions and teardown through the workflow shell.
+
+## Database reader identity
+
+CNPG manages `ledger_dr_check` with only `pg_read_all_data` membership and no
+superuser, database-creation, role-creation, replication or RLS-bypass privileges.
+The checker mounts `ledger-dr-check-db`, never the restored owner's application
+credential. Read access covers the restored cluster; it is not a table-specific
+privacy boundary and does not bypass RLS.
+
+The trusted Kyverno controller generates that Secret only from the CNPG-created
+`ledger-db-restored-app` Secret in a nonempty `dr-verify-*` namespace. Its password
+is SHA-256 of `ledger-dr-check:` plus the source password's base64 representation.
+The source is CNPG's machine-generated random password; this derivation is not
+suitable for human passwords. It produces a distinct, purpose-separated credential
+without revealing the owner password to the reader. Missing/empty source passwords
+are rejected. `synchronize: false` keeps this one-run credential stable. Namespace
+teardown removes both credentials. The runner receives no new Secret API permission;
+its existing broad workload-creation permissions are unchanged.
+
+The application can become ready only after CNPG reconciles the role and password.
+Local tests use the same role privileges and prove SELECT succeeds while UPDATE,
+DELETE and SET ROLE to the owner fail with SQLSTATE 42501. Their fixture initializes
+a fresh database using separate Flyway owner credentials; the real restore pod has
+Flyway disabled and receives no such credentials. Actual restored-role memberships,
+object grants, ownership and source functions must still be inspected during the
+live drill; declared managed roles are not proof about every privilege in a backup.

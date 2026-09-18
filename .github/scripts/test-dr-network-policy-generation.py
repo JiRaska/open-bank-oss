@@ -7,6 +7,8 @@ Run: python3 .github/scripts/test-dr-network-policy-generation.py --kyverno /pat
 This is policy evaluation, not proof that a cluster installed or enforced the policy.
 """
 import argparse
+import base64
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -59,6 +61,60 @@ def main():
             assert result.returncode == 0 and '1 tests passed and 0 tests failed' in result.stdout, result.stdout + result.stderr
             print(f'PASS {namespace}: {"generated" if generated else "unaffected"}')
     print(f'{len(cases)} namespace bootstrap cases passed; no cluster requests made')
+    check_reader_generation(str(Path(args.kyverno).resolve()), documents)
+
+
+def check_reader_generation(binary, documents):
+    policy = next(d for d in documents if d['metadata']['name'] == 'ledger-dr-check-database-identity')
+    original = base64.b64encode(b'synthetic-test-owner-credential').decode()
+    derived = hashlib.sha256(('ledger-dr-check:' + original).encode()).hexdigest()
+    cases = [(ns, 'ledger-db-restored-app', False)
+             for ns in ('ledger', 'kube-system', 'kyverno', 'dr-verify-', 'dr-verify')]
+    cases += [('dr-verify-123-1', 'another-app', False),
+              ('dr-verify-123-1', 'ledger-db-restored-app', True)]
+    with tempfile.TemporaryDirectory(prefix='dr-reader-policy-') as directory:
+        root = Path(directory)
+        (root / 'policy.yaml').write_text(yaml.safe_dump(policy))
+        for namespace, name, generated in cases:
+            resource = dict(apiVersion='v1', kind='Secret',
+                            metadata=dict(name=name, namespace=namespace),
+                            data={'password': original})
+            (root / 'resource.yaml').write_text(yaml.safe_dump(resource))
+            if not generated:
+                result = subprocess.run([binary, 'apply', str(root / 'policy.yaml'),
+                                         '--resource', str(root / 'resource.yaml')],
+                                        capture_output=True, text=True, timeout=30)
+                assert result.returncode == 0 and 'pass: 0, fail: 0, warn: 0, error: 0, skip: 0' in result.stdout, result.stdout + result.stderr
+                continue
+            expected = dict(apiVersion='v1', kind='Secret',
+                            metadata=dict(name='ledger-dr-check-db', namespace=namespace,
+                                          labels={'cnpg.io/reload': 'true'}),
+                            type='kubernetes.io/basic-auth',
+                            stringData={'username': 'ledger_dr_check', 'password': derived})
+            (root / 'expected.yaml').write_text(yaml.safe_dump(expected))
+            check = dict(policy=policy['metadata']['name'], rule='bootstrap-dr-reader-credential',
+                         resources=[name], kind='Secret', namespace=namespace,
+                         result='pass', generatedResource='expected.yaml')
+            manifest = dict(apiVersion='cli.kyverno.io/v1alpha1', kind='Test',
+                            metadata=dict(name='dr-reader-bootstrap'),
+                            policies=['policy.yaml'], resources=['resource.yaml'], results=[check])
+            (root / 'kyverno-test.yaml').write_text(yaml.safe_dump(manifest))
+            result = subprocess.run([binary, 'test', str(root)], capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0 and '1 tests passed and 0 tests failed' in result.stdout, result.stdout + result.stderr
+        for data in ({}, {'password': ''}):
+            resource = dict(apiVersion='v1', kind='Secret',
+                            metadata=dict(name='ledger-db-restored-app', namespace='dr-verify-123-1'), data=data)
+            (root / 'resource.yaml').write_text(yaml.safe_dump(resource))
+            # Kyverno 1.12 `apply` counts a failed precondition as fail. `test`
+            # distinguishes the engine's skip result from generation or an error.
+            check = dict(policy=policy['metadata']['name'], rule='bootstrap-dr-reader-credential',
+                         resources=['ledger-db-restored-app'], kind='Secret', namespace='dr-verify-123-1',
+                         result='skip')
+            manifest['results'] = [check]
+            (root / 'kyverno-test.yaml').write_text(yaml.safe_dump(manifest))
+            result = subprocess.run([binary, 'test', str(root)], capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0 and '1 tests passed and 0 tests failed' in result.stdout, result.stdout + result.stderr
+    print(f'{len(cases) + 2} reader credential scope/derivation cases passed; no cluster requests made')
 
 
 if __name__ == '__main__':

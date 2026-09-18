@@ -151,3 +151,46 @@ spec:
               port: 53
             - protocol: TCP
               port: 53
+
+---
+# The trusted controller derives a distinct password from CNPG's randomly generated
+# restore-owner credential. SHA-256 with purpose separation retains that entropy
+# without disclosing the owner password to the read-only workload. The runner has
+# no Secret read/write grant. Never use this derivation for human-chosen passwords.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ledger-dr-check-database-identity
+spec:
+  background: false
+  rules:
+    - name: bootstrap-dr-reader-credential
+      match:
+        any:
+          - resources:
+              kinds:
+                - Secret
+              namespaces:
+                - dr-verify-?*
+              names:
+                - ledger-db-restored-app
+      preconditions:
+        all:
+          - key: "{{ request.object.data.password || '' }}"
+            operator: NotEquals
+            value: ""
+      generate:
+        apiVersion: v1
+        kind: Secret
+        name: ledger-dr-check-db
+        namespace: '{{ request.object.metadata.namespace }}'
+        # Keep the one-run credential stable rather than rotating it on source updates.
+        synchronize: false
+        data:
+          metadata:
+            labels:
+              cnpg.io/reload: "true"
+          type: kubernetes.io/basic-auth
+          stringData:
+            username: ledger_dr_check
+            password: "{{ sha256(join(':', ['ledger-dr-check', request.object.data.password])) }}"
