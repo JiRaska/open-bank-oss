@@ -20,7 +20,7 @@ class LendingGuaranteeEvidenceRoutingIT {
         "documentId" to UUID.randomUUID().toString(),
         "loanId" to UUID.randomUUID().toString(),
         "guarantorPartyId" to UUID.randomUUID().toString(),
-        "bankScope" to "test-bank-a",
+        "bankScope" to "openbank-cz",
         "sealedSha256" to "a".repeat(64),
     )
 
@@ -38,5 +38,13 @@ class LendingGuaranteeEvidenceRoutingIT {
         given().contentType(ContentType.JSON).body(body())
             .post("/api/v1/documents/lending-guarantee-evidence/verify")
             .then().statusCode(200).body("matches", equalTo(false))
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-lending-graph", roles = ["ROLE_LENDING_GRAPH_PROOF"])
+    fun `dedicated token cannot choose another deployment bank`() {
+        given().contentType(ContentType.JSON).body(body() + ("bankScope" to "another-bank"))
+            .post("/api/v1/documents/lending-guarantee-evidence/verify")
+            .then().statusCode(403)
     }
 }

@@ -229,7 +229,7 @@ paths:
         '400':
           description: Invalid proof request
         '403':
-          description: Caller is not the dedicated Lending graph service identity
+          description: Caller is not the dedicated Lending graph service identity, or the bank scope does not match this deployment
 
   /api/v1/documents/{id}:
     get:

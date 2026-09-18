@@ -27,7 +27,8 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   one boolean and no metadata or bytes. The `openbank-lending-graph` client has only
   `ROLE_LENDING_GRAPH_PROOF`; the route also checks its exact service-account principal. This path
   is dormant until its separate credential is provisioned; the shared backend account is denied
-  even while OPA is advisory.
+  even while OPA is advisory. A request naming another deployment bank is denied before document
+  lookup, so the caller cannot use a submitted scope to choose a bank partition.
 - document-service → render adapters (phase-1 in-process placeholder; phase-2 WeasyPrint/Gotenberg
   sidecar over REST, ADR-0162) — a **new** egress trust boundary when the sidecar lands.
 - document-service → seal adapter (phase-1 no-op; phase-2 EU DSS PAdES with a QSeal/HSM key,

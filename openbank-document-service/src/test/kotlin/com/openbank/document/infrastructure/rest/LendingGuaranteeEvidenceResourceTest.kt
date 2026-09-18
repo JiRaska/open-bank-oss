@@ -52,12 +52,24 @@ class LendingGuaranteeEvidenceResourceTest {
         coVerify(exactly = 0) { query.getMetadata(any()) }
     }
 
+    @Test
+    fun `cross deployment bank scope is refused before reading a document`(): Unit = runBlocking {
+        val query = mockk<DocumentQueryUseCase>()
+        assertThatThrownBy {
+            runBlocking {
+                resource(query, "service-account-openbank-lending-graph")
+                    .verify(request().copy(bankScope = "another-bank"))
+            }
+        }.isInstanceOf(ForbiddenException::class.java)
+        coVerify(exactly = 0) { query.getMetadata(any()) }
+    }
+
     private fun resource(query: DocumentQueryUseCase, principalName: String): LendingGuaranteeEvidenceResource {
         val identity = mockk<SecurityIdentity>()
         val principal = mockk<Principal>()
         every { principal.name } returns principalName
         every { identity.principal } returns principal
-        return LendingGuaranteeEvidenceResource(query, identity)
+        return LendingGuaranteeEvidenceResource(query, identity, "test-bank-a")
     }
 
     private fun request() = LendingGuaranteeEvidenceRequest(documentId, loan, guarantor, "test-bank-a", digest)

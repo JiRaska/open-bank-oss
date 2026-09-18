@@ -16,6 +16,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
 /** A purpose-limited proof check. No metadata or document bytes leave this route. */
@@ -25,6 +26,7 @@ import java.util.UUID
 class LendingGuaranteeEvidenceResource(
     private val query: DocumentQueryUseCase,
     private val identity: SecurityIdentity,
+    @ConfigProperty(name = "openbank.document.bank-scope") private val deploymentBankScope: String,
 ) {
     @POST
     @Path("/verify")
@@ -36,6 +38,7 @@ class LendingGuaranteeEvidenceResource(
         if (identity.principal?.name != LENDING_GRAPH_PRINCIPAL) throw ForbiddenException()
         val request = requireNotNull(req) { "request body is required" }
         require(request.bankScope.matches(BANK_SCOPE_PATTERN)) { "invalid bank scope" }
+        if (request.bankScope != deploymentBankScope) throw ForbiddenException()
         require(request.sealedSha256.matches(SHA256_PATTERN)) { "invalid sealed SHA-256" }
         val document = query.getMetadata(request.documentId)
         return LendingGuaranteeEvidenceResponse(document?.matches(request) == true)
