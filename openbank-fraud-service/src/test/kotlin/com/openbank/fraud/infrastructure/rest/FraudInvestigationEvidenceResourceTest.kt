@@ -24,6 +24,38 @@ class FraudInvestigationEvidenceResourceTest {
     private val bearer = "Bearer investigator-token"
 
     @Test
+    fun `status read requires the same live case assignment as evidence`(): Unit = runBlocking {
+        coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.DENIED
+        val denied = resource.get(id, "FRAUD_INVESTIGATION", bearer)
+        assertThat(denied.status).isEqualTo(403)
+        assertThat(denied.entity).isNull()
+        coVerify(exactly = 0) { cases.find(any()) }
+
+        coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.UNAVAILABLE
+        val unavailable = resource.get(id, "FRAUD_INVESTIGATION", bearer)
+        assertThat(unavailable.status).isEqualTo(503)
+        assertThat(unavailable.entity).isNull()
+        coVerify(exactly = 0) { cases.find(any()) }
+    }
+
+    @Test
+    fun `assigned status read returns only the requested case`(): Unit = runBlocking {
+        val scoreId = UUID.randomUUID()
+        coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.ALLOWED
+        coEvery { cases.find(id) } returns FraudInvestigationCase(
+            id, scoreId, UUID.randomUUID(), null,
+            FraudInvestigationStatus.CLOSED_NO_FINDING, 2, "admin-1", Instant.EPOCH, "admin-2", Instant.EPOCH,
+        )
+
+        val response = resource.get(id, "FRAUD_INVESTIGATION", bearer)
+        val status = response.entity as FraudInvestigationCaseResponse
+        assertThat(response.status).isEqualTo(200)
+        assertThat(status.caseId).isEqualTo(id)
+        assertThat(status.scoreId).isEqualTo(scoreId)
+        coVerify(exactly = 1) { cases.find(id) }
+    }
+
+    @Test
     fun `denial and outage reveal no source associations`(): Unit = runBlocking {
         coEvery { access.check(id, bearer) } returns FraudCaseAccessDecision.DENIED
         val denied = resource.evidence(id, "FRAUD_INVESTIGATION", bearer)

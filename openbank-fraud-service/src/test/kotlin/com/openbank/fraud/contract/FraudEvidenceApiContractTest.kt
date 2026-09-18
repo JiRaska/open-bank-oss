@@ -6,6 +6,20 @@ import org.junit.jupiter.api.Test
 
 class FraudEvidenceApiContractTest {
     @Test
+    fun `status route declares case-scoped authorization and fail-closed response`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+        val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}:")
+            .substringBefore("/api/v1/fraud/cases/{caseId}/evidence:")
+        assertThat(operation).contains(
+            "getFraudInvestigationCase",
+            "live case-scoped Context authorization",
+            "InvestigationPurpose",
+            "'403'",
+            "'503'",
+        )
+    }
+
+    @Test
     fun `restricted evidence route declares source associations and fail closed responses`() {
         val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
         val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/evidence:")
