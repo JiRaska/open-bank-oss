@@ -5,6 +5,7 @@
 package com.openbank.cardissuance.infrastructure.persistence.repository
 
 import com.openbank.cardissuance.application.port.out.CardRepository
+import com.openbank.cardissuance.application.port.out.MAX_PARTY_CARD_LIST_LIMIT
 import com.openbank.cardissuance.domain.model.Card
 import com.openbank.cardissuance.infrastructure.persistence.entity.CardEntity
 import com.openbank.cardissuance.infrastructure.persistence.mapper.applyFrom
@@ -13,6 +14,7 @@ import com.openbank.cardissuance.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.quarkus.panache.common.Page
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.LocalDate
@@ -56,9 +58,14 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
     override suspend fun findByPartyId(partyId: UUID): List<Card> =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun findRecentByPartyId(partyId: UUID, limit: Int): List<Card> = Panache.withSession {
-        find("partyId = ?1 ORDER BY createdAt DESC, id DESC", partyId).range(0, limit - 1).list()
-    }.awaitSuspending().map { it.toDomain() }
+    override suspend fun findRecentByPartyId(partyId: UUID, limit: Int): List<Card> {
+        require(limit in 1..MAX_PARTY_CARD_LIST_LIMIT) {
+            "limit must be between 1 and $MAX_PARTY_CARD_LIST_LIMIT"
+        }
+        return Panache.withSession {
+            find("partyId = ?1 ORDER BY createdAt DESC, id DESC", partyId).page(Page.ofSize(limit)).list()
+        }.awaitSuspending().map { it.toDomain() }
+    }
 
     override suspend fun findByDelegationGrantId(grantId: UUID): List<Card> =
         Panache.withSession { find("delegationGrantId", grantId).list() }.awaitSuspending().map { it.toDomain() }
