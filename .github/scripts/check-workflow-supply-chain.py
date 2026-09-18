@@ -90,21 +90,32 @@ def findings(name, doc):
             errors.append('all-green must fail closed when changed-service detection has no verdict')
     if name == 'backfill-release-evidence.yml':
         prepare = jobs.get('prepare', {})
+        assemble = jobs.get('assemble', {})
         publisher = jobs.get('backfill', {})
         if prepare.get('permissions') != {'contents': 'read'}:
             errors.append('release evidence builder must have contents:read only')
-        if publisher.get('needs') != 'prepare':
-            errors.append('release evidence publisher must wait for the builder')
+        if assemble.get('permissions') != {'contents': 'read'} or assemble.get('needs') != 'prepare':
+            errors.append('release evidence assembler must be read-only and follow the builder')
+        if set(publisher.get('needs', [])) != {'prepare', 'assemble'}:
+            errors.append('release evidence publisher must wait for builder and assembler')
         if publisher.get('permissions') != {'contents': 'write', 'id-token': 'write'}:
             errors.append('release evidence publisher permissions changed')
         prepare_steps = prepare.get('steps', [])
+        assemble_steps = assemble.get('steps', [])
         publisher_steps = publisher.get('steps', [])
         if not any('actions/upload-artifact@' in step.get('uses', '') for step in prepare_steps):
-            errors.append('release evidence builder must hand off an artifact')
+            errors.append('release evidence builder must hand off an SBOM')
+        if not any('actions/download-artifact@' in step.get('uses', '') for step in assemble_steps):
+            errors.append('release evidence assembler must consume the SBOM')
+        if not any('actions/upload-artifact@' in step.get('uses', '') for step in assemble_steps):
+            errors.append('release evidence assembler must hand off the bundle')
         if not any('actions/download-artifact@' in step.get('uses', '') for step in publisher_steps):
             errors.append('release evidence publisher must consume the artifact')
         if any('actions/checkout@' in step.get('uses', '') for step in publisher_steps):
             errors.append('release evidence publisher must not check out released source')
+        assemble_script = '\n'.join(step.get('run', '') for step in assemble_steps)
+        if './gradlew' in assemble_script or 'trusted/.github/scripts/build-release-evidence.sh' not in assemble_script:
+            errors.append('release evidence assembler must run only the trusted generator')
         publisher_script = '\n'.join(step.get('run', '') for step in publisher_steps)
         if './gradlew' in publisher_script or 'bash evidence/' in publisher_script:
             errors.append('release evidence publisher must not execute released build code')

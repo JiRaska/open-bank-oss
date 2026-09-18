@@ -111,13 +111,19 @@ class SupplyChainTest(unittest.TestCase):
         name = 'backfill-release-evidence.yml'
         original = yaml.safe_load((guard.ROOT / '.github/workflows' / name).read_text())
         self.assertFalse(guard.findings(name, original))
-        for mutation in ('builder-write', 'publisher-checkout', 'publisher-build',
+        for mutation in ('builder-write', 'assembler-write', 'assembler-build',
+                         'publisher-checkout', 'publisher-build',
                          'missing-verification', 'missing-dependency'):
             doc = copy.deepcopy(original)
             prepare = doc['jobs']['prepare']
+            assemble = doc['jobs']['assemble']
             publisher = doc['jobs']['backfill']
             if mutation == 'builder-write':
                 prepare['permissions']['id-token'] = 'write'
+            elif mutation == 'assembler-write':
+                assemble['permissions']['contents'] = 'write'
+            elif mutation == 'assembler-build':
+                assemble['steps'].append({'run': './gradlew build'})
             elif mutation == 'publisher-checkout':
                 publisher['steps'].append({'uses': 'actions/checkout@' + 'a' * 40})
             elif mutation == 'publisher-build':
