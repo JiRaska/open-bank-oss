@@ -61,6 +61,18 @@ class ContextAuditCommitmentIT {
         assertThatThrownBy {
             onEventLoop { consumer.persist(commitment(id, "b".repeat(64))) }
         }.isInstanceOf(IllegalArgumentException::class.java)
+
+        val differentId = UUID.randomUUID()
+        val sourceEntry = onEventLoop { repository.findByAggregateId(id.toString()).single() }
+        val forged = sourceEntry.copy(
+            id = differentId,
+            aggregateId = differentId.toString(),
+            payload = commitment(differentId, "a".repeat(64)),
+        )
+        assertThatThrownBy {
+            onEventLoop { repository.save(forged, "b".repeat(64)) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(onEventLoop { repository.findByAggregateId(differentId.toString()) }).isEmpty()
     }
 
     private fun commitment(id: UUID, digest: String): String = mapper.writeValueAsString(

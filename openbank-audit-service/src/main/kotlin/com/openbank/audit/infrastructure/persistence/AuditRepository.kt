@@ -160,8 +160,7 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     suspend fun save(entry: AuditEntry, receiptCommitment: String? = null) {
         chainMutex.withLock {
             if (receiptCommitment != null) {
-                require(entry.eventType == "CONTEXT_READ_AUDIT_COMMITTED")
-                require(Regex("[0-9a-f]{64}").matches(receiptCommitment))
+                validateContextReceiptEntry(entry, receiptCommitment)
             }
             // Kafka delivery is at least once.  The producer's immutable event id is copied to
             // entry_id, so a retry must be a no-op before it can advance the append-only chain.
