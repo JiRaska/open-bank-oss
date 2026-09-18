@@ -61,6 +61,15 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             .setParameter("p", partyId).resultList
     }.map { it.map(mapper::toDomain) }
 
+    @WithSession
+    override fun findRecentByParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanApplicationEntity WHERE partyId = :p ORDER BY createdAt DESC, id DESC",
+            LoanApplicationEntity::class.java,
+        )
+            .setParameter("p", partyId).setMaxResults(limit).resultList
+    }.map { it.map(mapper::toDomain) }
+
     /**
      * `GROUP BY status, currency` — one round trip for the whole book (issue #3294).
      *

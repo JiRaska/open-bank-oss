@@ -233,6 +233,7 @@ class CustomerIntakeResourceTest {
             unsupported<LoanApplication>()
         override fun getApplication(id: LoanApplicationId): Uni<LoanApplication?> = unsupported()
         override fun listApplications(partyId: UUID) = unsupported<List<LoanApplication>>()
+        override fun listRecentApplicationsForParty(partyId: UUID, limit: Int) = unsupported<List<LoanApplication>>()
         override fun advance(id: LoanApplicationId, actor: String) = unsupported<LoanApplication>()
         override fun expireIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
             unsupported<LoanApplication>()
