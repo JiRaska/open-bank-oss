@@ -544,14 +544,8 @@ jobs:
           # .staged-ids entry so an available artifact is re-fetched, not suppressed.
           python3 .github/scripts/extract-test-intelligence-envelope.py \
             --prune-cache openbank-admin-ui/test-run-history || exit 1
-          # Measured 2026-09-04: only 54 non-expired main-branch `test-intelligence-run-*`
-          # artifacts exist repo-wide, so this cap does not bind and lowering it saves ~4
-          # requests, not ~50. Left at 100 deliberately. What those 54 buy is the number
-          # that matters and it is not this one: 21 components across 10 CI runs spanning
-          # 0.6 HOURS, median 2 envelopes per component — a snapshot, not the per-test-case
-          # history it feeds. Artifact retention no longer binds the HISTORY (the cache
-          # above keeps envelopes past expiry); the cap now bounds only what one build
-          # downloads, not what it knows.
+          # The cache preserves history past artifact expiry. Bound only the number of
+          # candidates downloaded by this build, not the retained history.
           MAX_ENVELOPES=100
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero
@@ -560,11 +554,24 @@ jobs:
           # newest-first across the entire repository; one 100-item page is readily filled
           # by per-service evidence, so page it before applying the bounded 100-envelope cap.
           # GitHub's `name` filter is exact-match and cannot select run-id-suffixed artifacts.
+          # High-volume PR CI can push the latest main browser run beyond five
+          # repository-wide artifact pages (observed 2026-09-18). Fetch that producer's
+          # latest completed main run directly so a valid browser verdict cannot vanish
+          # merely because unrelated branches uploaded many artifacts.
           KNOWN_BEFORE=$(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ')
-          for page in 1 2 3 4 5; do
-            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-              | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
-          done \
+          {
+            browser_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-browser-synthetic.yml/runs?branch=main&status=completed&per_page=1" \
+              | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
+            if [ -n "${browser_run_id}" ]; then
+              api "https://api.github.com/repos/${REPO}/actions/runs/${browser_run_id}/artifacts?per_page=100" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            fi
+            for page in 1 2 3 4 5; do
+              api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            done
+          } \
+            | awk '!seen[$1]++' \
             | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
                 [ -n "${artifact_id}" ] || continue

@@ -761,6 +761,10 @@ def check(root: Path) -> list[str]:
     for needle, message in (
         ("for page in 1 2 3 4 5; do", "immutable run history is not paginated"),
         ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
+        ("admin-ui-browser-synthetic.yml/runs?branch=main&status=completed&per_page=1",
+         "immutable run history cannot find browser evidence beyond the repository-wide artifact window"),
+        ("actions/runs/${browser_run_id}/artifacts?per_page=100",
+         "immutable run history does not inspect the latest browser producer's artifacts"),
         ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
         ("extract-test-intelligence-envelope.py --self-test", "immutable run envelope selector is not regression-tested"),
         ("--prune-cache openbank-admin-ui/test-run-history",
