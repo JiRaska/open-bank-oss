@@ -6,24 +6,38 @@ password or row content is accepted on the command line or written to disk.
 """
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import re
 import subprocess
 import sys
 import uuid
-
+from datetime import datetime, timedelta, timezone
 
 SERVICE_NAME = re.compile(r"[A-Za-z0-9_-]+\Z")
 ROW = re.compile(r"([0-9a-f-]{36})\t([0-9a-f]{64})\t(READ|DISCLOSURE)\Z")
 
 
-def fetch(service: str, sql: str, variables: dict[str, str] | None = None) -> dict[tuple[str, str], str]:
+def fetch(
+    service: str, sql: str, variables: dict[str, str] | None = None
+) -> dict[tuple[str, str], str]:
     if not SERVICE_NAME.fullmatch(service):
         raise ValueError("libpq service name must contain only letters, digits, _ or -")
-    command = ["psql", f"service={service}", "-X", "-q", "-A", "-t", "-F", "\t", "-v", "ON_ERROR_STOP=1"]
+    command = [
+        "psql",
+        f"service={service}",
+        "-X",
+        "-q",
+        "-A",
+        "-t",
+        "-F",
+        "\t",
+        "-v",
+        "ON_ERROR_STOP=1",
+    ]
     for name, value in (variables or {}).items():
         command += ["-v", f"{name}={value}"]
-    result = subprocess.run(command, input=sql, text=True, capture_output=True, check=True)
+    result = subprocess.run(
+        command, input=sql, text=True, capture_output=True, check=True
+    )
     rows: dict[tuple[str, str], str] = {}
     for line in result.stdout.splitlines():
         match = ROW.fullmatch(line)
@@ -71,36 +85,56 @@ COMMIT;
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--context-service", required=True, help="read-only libpq service name")
-    parser.add_argument("--audit-service", required=True, help="read-only libpq service name")
+    parser.add_argument(
+        "--context-service", required=True, help="read-only libpq service name"
+    )
+    parser.add_argument(
+        "--audit-service", required=True, help="read-only libpq service name"
+    )
     parser.add_argument("--bank-scope", required=True)
     args = parser.parse_args()
     end = datetime.now(timezone.utc) - timedelta(minutes=15)
     window = {"start": (end - timedelta(hours=1)).isoformat(), "end": end.isoformat()}
     try:
-        local = fetch(args.context_service, CONTEXT_SQL, {**window, "bank": args.bank_scope})
+        local = fetch(
+            args.context_service, CONTEXT_SQL, {**window, "bank": args.bank_scope}
+        )
         if len(local) > 10000:
-            print("reconciliation inconclusive: sample exceeds 10000 commitments", file=sys.stderr)
+            print(
+                "reconciliation inconclusive: sample exceeds 10000 commitments",
+                file=sys.stderr,
+            )
             return 3
         if not local:
-            print("reconciliation inconclusive: no local commitments in the sampled hour", file=sys.stderr)
+            print(
+                "reconciliation inconclusive: no local commitments in the sampled hour",
+                file=sys.stderr,
+            )
             return 3
         central = {}
         identifiers = sorted({event_id for _, event_id in local})
         for offset in range(0, len(identifiers), 500):
             # UUIDs were canonicalized before interpolation. The unique entry_id index
             # bounds central work to this bank's local sample rather than a fleet scan.
-            values = ", ".join(f"'{event_id}'::uuid" for event_id in identifiers[offset:offset + 500])
-            central.update(fetch(args.audit_service, AUDIT_SQL.replace("/* IDS */", values)))
+            values = ", ".join(
+                f"'{event_id}'::uuid" for event_id in identifiers[offset : offset + 500]
+            )
+            central.update(
+                fetch(args.audit_service, AUDIT_SQL.replace("/* IDS */", values))
+            )
     except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as error:
         print(f"reconciliation unavailable: {type(error).__name__}", file=sys.stderr)
         return 2
     missing = local.keys() - central.keys()
-    mismatch = {key for key in local.keys() & central.keys() if local[key] != central[key]}
+    mismatch = {
+        key for key in local.keys() & central.keys() if local[key] != central[key]
+    }
     # The fleet audit store may contain other banks; only local IDs are assessed.
-    print(f"window=[{window['start']},{window['end']}) local={len(local)} "
-          f"matched={len(local) - len(missing) - len(mismatch)} "
-          f"missing={len(missing)} mismatch={len(mismatch)}")
+    print(
+        f"window=[{window['start']},{window['end']}) local={len(local)} "
+        f"matched={len(local) - len(missing) - len(mismatch)} "
+        f"missing={len(missing)} mismatch={len(mismatch)}"
+    )
     return 1 if missing or mismatch else 0
 
 
