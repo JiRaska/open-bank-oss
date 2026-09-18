@@ -87,6 +87,12 @@ independent checker approval and immediate revocation; append-only assignment-ch
 assignment verification; mandatory OPA; and durable allow/deny/unavailable read audit before graph
 disclosure. The admin UI exposes the controlled lifecycle and hides it from non-admin users. OPA
 denies service accounts from assignment administration even if a broad operational role is present.
+Every graph read now requires an exact approved root, including complaint and incident
+aggregate reads. New proposals name `complaint:reference` or `incident:UUID`; old
+purpose-only assignments remain recorded but cannot authorize a read. Operators must
+issue new maker/checker approved root grants before those views are used. Context and
+OPA both reject an unscoped grant, including for an admin; a case ID by itself is
+never proof of permission for every root sharing its purpose.
 The read-audit table now forces bank-scope row-level security, including for its table owner, and
 the audit writer sets that scope transaction-locally before persisting a decision. A missing or
 different scope cannot read the row. Context also writes a schema-versioned SHA-256 commitment

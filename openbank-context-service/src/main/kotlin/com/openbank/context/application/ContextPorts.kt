@@ -24,8 +24,7 @@ interface CaseAssignmentPort {
         purpose: String,
         root: String,
         at: Instant,
-    ): Boolean = false
-    suspend fun isAssigned(principalId: String, caseId: String, purpose: String, at: Instant): Boolean
+    ): Boolean
 }
 
 interface ContextReadAuditPort {

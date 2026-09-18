@@ -573,19 +573,6 @@ class CaseAssignmentRepository(
             .setParameter("caseId", caseId).setParameter("purpose", purpose).setParameter("root", root)
             .setParameter("at", at).singleResult
     }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
-
-    override suspend fun isAssigned(principalId: String, caseId: String, purpose: String, at: Instant): Boolean =
-        sessions.withSession { session ->
-            session.createQuery(
-                "select count(a) from CaseAssignmentEntity a where bankScope = :bankScope and principalId = :principal and caseId = :caseId and purpose = :purpose and validFrom <= :at and validTo > :at",
-                java.lang.Long::class.java,
-            )
-                .setParameter(
-                    "principal",
-                    principalId,
-                ).setParameter("bankScope", bankScope).setParameter("caseId", caseId)
-                .setParameter("purpose", purpose).setParameter("at", at).singleResult
-        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
 }
 
 @ApplicationScoped
