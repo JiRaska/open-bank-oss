@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.context.infrastructure
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.context.application.CaseAssignmentPort
+import com.openbank.context.application.ContextDisclosureAudit
 import com.openbank.context.application.ContextGraphPort
 import com.openbank.context.application.ContextReadAudit
 import com.openbank.context.application.ContextReadAuditPort
@@ -22,6 +24,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Entity
@@ -191,6 +194,102 @@ class ContextReadAuditEntity : PanacheEntityBase() {
     var knownAt: Instant? = null
 }
 
+@Entity
+@Table(name = "context_disclosure_audit")
+class ContextDisclosureAuditEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "disclosure_id")
+    lateinit var id: UUID
+
+    @Column(name = "decision_audit_id")
+    lateinit var decisionAuditId: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "query_hash")
+    lateinit var queryHash: String
+
+    @Column(name = "projection_generation")
+    var projectionGeneration: Long? = null
+
+    @Column(name = "evidence_refs_json")
+    lateinit var evidenceRefsJson: String
+
+    @Column(name = "evidence_count")
+    var evidenceCount: Int = 0
+
+    @Column(name = "truncated")
+    var truncated: Boolean = false
+
+    @Column(name = "occurred_at")
+    lateinit var occurredAt: Instant
+}
+
+@Entity
+@Table(name = "context_disclosure_commitment_outbox")
+class ContextDisclosureCommitmentOutboxEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "disclosure_id")
+    lateinit var disclosureId: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "commitment")
+    lateinit var commitment: String
+
+    @Column(name = "occurred_at")
+    lateinit var occurredAt: Instant
+
+    @Column(name = "status")
+    lateinit var status: String
+
+    @Column(name = "attempt_count")
+    var attemptCount: Int = 0
+
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+
+    @Column(name = "sent_at")
+    var sentAt: Instant? = null
+
+    @Column(name = "updated_at")
+    lateinit var updatedAt: Instant
+}
+
+@Entity
+@Table(name = "context_audit_commitment_outbox")
+class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "audit_id")
+    lateinit var auditId: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "commitment")
+    lateinit var commitment: String
+
+    @Column(name = "occurred_at")
+    lateinit var occurredAt: Instant
+
+    @Column(name = "status")
+    lateinit var status: String
+
+    @Column(name = "attempt_count")
+    var attemptCount: Int = 0
+
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+
+    @Column(name = "sent_at")
+    var sentAt: Instant? = null
+
+    @Column(name = "updated_at")
+    lateinit var updatedAt: Instant
+}
+
 @ApplicationScoped
 class ContextGraphRepository(
     private val sessions: Mutiny.SessionFactory,
@@ -296,7 +395,9 @@ class ContextGraphRepository(
                     "(sourceSystem = :clearingSource and toKey like :clearingItemPrefix and " +
                     "relationType = :submittedTo) or " +
                     "(sourceSystem = :sepaSource and toKey like :returnPrefix and " +
-                    "relationType = :returnedBy)) and " +
+                    "relationType = :returnedBy) or " +
+                    "(sourceSystem = :sepaSource and toKey like :reversalPrefix and " +
+                    "relationType = :reversedBy)) and " +
                     "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
                 ContextEdgeEntity::class.java,
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
@@ -311,6 +412,8 @@ class ContextGraphRepository(
                 .setParameter("submittedTo", SUBMITTED_TO)
                 .setParameter("returnPrefix", RETURN_EVIDENCE_PREFIX)
                 .setParameter("returnedBy", RETURNED_BY)
+                .setParameter("reversalPrefix", REVERSAL_TRANSACTION_PREFIX)
+                .setParameter("reversedBy", REVERSED_BY)
                 .setParameter("keys", transactionKeys)
                 .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
@@ -388,10 +491,12 @@ class ContextGraphRepository(
         const val CLEARING_ITEM_PREFIX = "clearing-item:%"
         const val CLEARING_EVIDENCE_PREFIX = "clearing-evidence:%"
         const val RETURN_EVIDENCE_PREFIX = "return-evidence:sepa:%"
+        const val REVERSAL_TRANSACTION_PREFIX = "reversal-transaction:%"
         const val BOOKING_REQUESTED = "BOOKING_REQUESTED"
         const val BOOKED_AS = "BOOKED_AS"
         const val SUBMITTED_TO = "SUBMITTED_TO"
         const val RETURNED_BY = "RETURNED_BY"
+        const val REVERSED_BY = "REVERSED_BY"
         const val SETTLED = "SETTLED"
         val COMPLAINT_LIFECYCLE_RELATIONS = setOf(
             "CREATED",
@@ -400,6 +505,7 @@ class ContextGraphRepository(
             "SETTLED",
             "REJECTED",
             "RETURNED_BY",
+            "REVERSED_BY",
             "CANCELLED",
         )
     }
@@ -464,12 +570,13 @@ class CaseAssignmentRepository(
 @ApplicationScoped
 class ContextReadAuditRepository(
     private val sessions: Mutiny.SessionFactory,
+    private val mapper: ObjectMapper,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextReadAuditPort {
     override suspend fun record(entry: ContextReadAudit) {
         val entity = ContextReadAuditEntity().apply {
-            id = Ids.newId()
+            id = entry.id
             this.bankScope = this@ContextReadAuditRepository.bankScope
             principalId = entry.principalId
             caseId = entry.caseId
@@ -480,11 +587,53 @@ class ContextReadAuditRepository(
             policyVersion =
                 entry.policyVersion
             reasonCode = entry.reasonCode
-            occurredAt = entry.occurredAt
-            effectiveAt = entry.effectiveAt
-            knownAt = entry.knownAt
+            // PostgreSQL timestamptz stores microseconds. Commit only the value it can retain.
+            occurredAt = entry.occurredAt.truncatedTo(ChronoUnit.MICROS)
+            effectiveAt = entry.effectiveAt?.truncatedTo(ChronoUnit.MICROS)
+            knownAt = entry.knownAt?.truncatedTo(ChronoUnit.MICROS)
         }
-        sessions.withTransaction { session, _ -> session.persist(entity) }
+        val commitment = ContextAuditCommitmentOutboxEntity().apply {
+            auditId = entity.id
+            this.bankScope = entity.bankScope
+            this.commitment = ContextAuditCommitment.of(entity)
+            occurredAt = entity.occurredAt
+            status = "PENDING"
+            updatedAt = entity.occurredAt
+        }
+        sessions.withTransaction { session, _ ->
+            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                .setParameter("bank", bankScope).singleResult
+                .flatMap { session.persist(entity) }
+                .flatMap { session.persist(commitment) }
+        }
             .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+    }
+
+    override suspend fun recordDisclosure(entry: ContextDisclosureAudit) {
+        val entity = ContextDisclosureAuditEntity().apply {
+            id = Ids.newId()
+            decisionAuditId = entry.decisionAuditId
+            bankScope = this@ContextReadAuditRepository.bankScope
+            queryHash = entry.queryHash
+            projectionGeneration = entry.disclosure.projectionGeneration
+            evidenceRefsJson = mapper.writeValueAsString(entry.disclosure.evidenceRefs)
+            evidenceCount = entry.disclosure.evidenceCount
+            truncated = entry.disclosure.truncated
+            occurredAt = entry.occurredAt.truncatedTo(ChronoUnit.MICROS)
+        }
+        val commitment = ContextDisclosureCommitmentOutboxEntity().apply {
+            disclosureId = entity.id
+            bankScope = entity.bankScope
+            this.commitment = ContextDisclosureCommitment.of(entity)
+            occurredAt = entity.occurredAt
+            status = "PENDING"
+            updatedAt = entity.occurredAt
+        }
+        sessions.withTransaction { session, _ ->
+            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                .setParameter("bank", bankScope).singleResult
+                .flatMap { session.persist(entity) }
+                .flatMap { session.persist(commitment) }
+        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
     }
 }

@@ -19,6 +19,7 @@ const graph = {
     node('clearing-item:item-1', 'CLEARING_ITEM', 2, '2026-09-13T10:04:00Z', 'clearing-service'),
     node('clearing-evidence:item-1:2', 'CLEARING_EVIDENCE', 2, '2026-09-13T10:05:00Z', 'clearing-service'),
     node('return-evidence:sepa:payment:4', 'RETURN_EVIDENCE', 4, '2026-09-13T10:06:00Z', 'sepa-payment'),
+    node('reversal-transaction:reversal-1', 'REVERSAL_TRANSACTION', 4, '2026-09-13T10:07:00Z', 'sepa-payment'),
   ],
   edges: [
     edge('complaint-payment', graphRoot(), payment, 'CONCERNS_TRANSACTION', 1),
@@ -29,6 +30,7 @@ const graph = {
     edge('clearing-item', payment, 'clearing-item:item-1', 'SUBMITTED_TO', 2),
     edge('cleared', 'clearing-item:item-1', 'clearing-evidence:item-1:2', 'SETTLED', 2),
     edge('returned', payment, 'return-evidence:sepa:payment:4', 'RETURNED_BY', 4),
+    edge('reversed', payment, 'reversal-transaction:reversal-1', 'REVERSED_BY', 4),
   ],
 }
 
@@ -66,7 +68,7 @@ describe('complaint context investigation', () => {
 
     const timeline = await screen.findByRole('heading', { name: 'Payment timeline' })
     const items = timeline.parentElement?.querySelectorAll('li') ?? []
-    expect(items).toHaveLength(7)
+    expect(items).toHaveLength(8)
     expect(items[0]).toHaveTextContent('CREATED')
     expect(items[1]).toHaveTextContent('SUBMITTED TO')
     expect(items[2]).toHaveTextContent('BOOKING REQUESTED')
@@ -74,6 +76,7 @@ describe('complaint context investigation', () => {
     expect(items[4]).toHaveTextContent('SUBMITTED TO')
     expect(items[5]).toHaveTextContent('SETTLED')
     expect(items[6]).toHaveTextContent('RETURNED BY')
+    expect(items[7]).toHaveTextContent('REVERSED BY')
     fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'case-other' } })
     expect(screen.queryByRole('heading', { name: 'Payment timeline' })).not.toBeInTheDocument()
     expect(global.fetch).toHaveBeenCalledWith(

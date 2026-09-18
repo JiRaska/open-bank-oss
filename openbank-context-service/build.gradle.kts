@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.scheduler)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(project(":openbank-libs-domain"))

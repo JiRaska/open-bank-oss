@@ -147,8 +147,9 @@ bearer to this decision endpoint before its source-owned evidence route returns 
 account or counterparty identifier. The Fraud network lens now first authorizes and
 read-audits the exact root, then fetches its current OPEN source associations with
 the investigator's bearer over HTTPS. Candidate discovery uses only the same
-investigator's currently valid Fraud case assignments and is limited to four case
-IDs. Each candidate receives a separate policy decision, committed read audit, and
+investigator's currently valid Fraud case assignments; it inspects at most 256
+assigned references and returns at most four source-matched case IDs. Each returned
+candidate receives a separate policy decision, committed read audit, and
 current OPEN source check before identifiers are compared. Only same-role account
 or counterparty UUID equality creates a visible edge; score identity is source
 evidence but never a cross-case match. A candidate denial is omitted; source,

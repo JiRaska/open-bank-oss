@@ -49,3 +49,20 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# A malformed Context commitment is quarantined and alerted; it is never acknowledged as stored.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.audit.context-audit-commitments-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

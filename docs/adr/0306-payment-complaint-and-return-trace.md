@@ -88,7 +88,13 @@ the same fixed trace while ignoring all unrelated records on the shared topics. 
 the same authorized payload as both graph and ordered payment timeline.
 The staged production manifest requires explicit revisions from the first replica; timestamp fallback
 remains a local compatibility aid for controlled legacy replay only. Other rails, timeout evidence and
-an authoritative reversal result remain follow-up work, so this ADR stays `partial`.
+the full authoritative reversal result remain follow-up work, so this ADR stays `partial`.
+When transaction-service returns a new reversal transaction ID, the SEPA return evidence now carries
+that optional ID and the bounded complaint graph exposes a `REVERSED_BY` edge to it. An idempotent
+conflict can confirm a prior reversal without returning its ID; that event remains an unlinked
+confirmation, and the graph does not invent the missing transaction reference. This link still needs
+the transaction/ledger event and reconciliation evidence before the reversal outcome can be described
+as a fully traced booking.
 
 The investigation UI invalidates displayed and in-flight evidence whenever the
 complaint reference, assignment case or purpose changes. A late response for the

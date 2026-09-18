@@ -3,7 +3,9 @@ package com.openbank.context.infrastructure
 
 import com.openbank.context.application.ContextAccessDenied
 import com.openbank.context.application.ContextAuthorizationUnavailable
+import com.openbank.context.application.ContextDisclosure
 import com.openbank.context.application.ContextQueryService
+import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
@@ -64,12 +66,15 @@ class AmlCaseEvidenceResource(
                                     actor,
                                     InvestigationContext(candidate.toString(), purpose, effective, known),
                                 ) {
-                                    if (source.isOpen(candidate)) {
-                                        history.history(candidate, effective, known, RELATED_OBSERVATION_LIMIT)
-                                            .takeIf { related -> sharedReferences(root, related) }
-                                    } else {
-                                        null
-                                    }
+                                    ContextReadResult(
+                                        if (source.isOpen(candidate)) {
+                                            history.history(candidate, effective, known, RELATED_OBSERVATION_LIMIT)
+                                                .takeIf { related -> sharedReferences(root, related) }
+                                        } else {
+                                            null
+                                        },
+                                        null,
+                                    )
                                 }
                             } catch (_: ContextAccessDenied) {
                                 // Revocation between candidate discovery and authorization is expected.
@@ -78,7 +83,15 @@ class AmlCaseEvidenceResource(
                         }
                     }.awaitAll().filterNotNull()
                 }
-                Response.ok(AmlCaseNetwork(root, related)).header("Cache-Control", "no-store").build()
+                val visible = listOf(root) + related
+                ContextReadResult(
+                    Response.ok(AmlCaseNetwork(root, related)).header("Cache-Control", "no-store").build(),
+                    ContextDisclosure(
+                        visible.flatMap { selected -> selected.observations.map { it.evidenceRef } },
+                        visible.sumOf { it.observations.size },
+                        visible.any { it.truncated },
+                    ),
+                )
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
@@ -113,10 +126,20 @@ class AmlCaseEvidenceResource(
                 // The owning service is authoritative for the current case state. A delayed
                 // Kafka close must never leave historical evidence readable as an open case.
                 if (!source.isOpen(id)) {
-                    Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+                    ContextReadResult(
+                        Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build(),
+                        null,
+                    )
                 } else {
                     val selected = history.history(id, effective, known)
-                    Response.ok(selected).header("Cache-Control", "no-store").build()
+                    ContextReadResult(
+                        Response.ok(selected).header("Cache-Control", "no-store").build(),
+                        ContextDisclosure(
+                            selected.observations.map { it.evidenceRef },
+                            selected.observations.size,
+                            selected.truncated,
+                        ),
+                    )
                 }
             }
         } catch (_: ContextAccessDenied) {

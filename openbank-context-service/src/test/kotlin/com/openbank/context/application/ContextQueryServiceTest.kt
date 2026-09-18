@@ -38,6 +38,7 @@ class ContextQueryServiceTest {
         100,
         200,
         "openbank-cz",
+        1,
     )
     private val actor = Investigator("operator-7", listOf("ROLE_COMPLIANCE"))
     private val context = InvestigationContext("case-42", "PAYMENT_COMPLAINT", now)
@@ -82,6 +83,40 @@ class ContextQueryServiceTest {
             )
         }
         coVerify { audit.record(match { it.decision == "ALLOWED" && it.policyVersion == "bundle-9" }) }
+        coVerify {
+            audit.recordDisclosure(
+                match {
+                    it.disclosure.evidenceCount == 0 && it.disclosure.projectionGeneration == 1L
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `failed disclosure write suppresses an otherwise successful graph response`(): Unit = runBlocking {
+        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns
+            ContextNeighborhood("complaint:cmp-1", emptyList(), emptyList(), false)
+        coEvery { audit.recordDisclosure(any()) } throws IllegalStateException("audit unavailable")
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        coVerify(exactly = 1) { audit.record(match { it.decision == "ALLOWED" }) }
+        coVerify(exactly = 1) { audit.recordDisclosure(any()) }
+    }
+
+    @Test
+    fun `failed graph query never records disclosure`(): Unit = runBlocking {
+        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery {
+            graph.neighborhood(any(), any(), any(), any(), any())
+        } throws IllegalStateException("projection unavailable")
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        coVerify(exactly = 0) { audit.recordDisclosure(any()) }
     }
 
     @Test
@@ -118,6 +153,7 @@ class ContextQueryServiceTest {
         assertThat(impact.projectionStatus).isEqualTo(ImpactProjectionStatus.MISSING)
         assertThat(impact.affectedByType).isEmpty()
         coVerify { audit.record(match { it.decision == "ALLOWED" && it.rootRef == "incident:missing" }) }
+        coVerify { audit.recordDisclosure(match { it.disclosure.evidenceCount == 0 }) }
     }
 
     @Test

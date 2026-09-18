@@ -13,6 +13,7 @@ import { Trend } from "k6/metrics";
 http.setResponseCallback(http.expectedStatuses(200));
 
 const lens = __ENV.CONTEXT_PERF_LENS;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
 
 export const options = {
@@ -62,6 +63,13 @@ export function setup() {
   if (lens === "kyb" && (!/^[1-9][0-9]*$/.test(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS || "") ||
       Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) > 50)) {
     fail("KYB baseline requires CONTEXT_PERF_MIN_KYB_REVISIONS between 1 and 50");
+  }
+  if (lens === "fraud-network") {
+    const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
+    if (!Number.isSafeInteger(assigned) || assigned < 2 || assigned > 10000 ||
+        !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID || "")) {
+      fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
+    }
   }
 }
 
@@ -129,30 +137,35 @@ export default function () {
           body.observations.every((item, index) => index === 0 ||
             item.revision < body.observations[index - 1].revision);
       }
-      if (lens === "fraud-network") {
-        return hasFraudEvidence(body.root, __ENV.CONTEXT_PERF_REFERENCE) &&
-          Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
-          Number.isInteger(body.inspectedCandidates) && body.inspectedCandidates <= 4 &&
-          typeof body.candidateTruncated === "boolean" &&
-          body.related.every((item) => hasFraudEvidence(item.evidence) &&
-            Array.isArray(item.shared) && item.shared.length > 0 && item.shared.length <= 2 &&
-            item.shared.every((edge) =>
-              (edge.type === "ACCOUNT" && edge.sourceId === body.root.accountId && edge.sourceId === item.evidence.accountId) ||
-              (edge.type === "COUNTERPARTY" && edge.sourceId === body.root.counterpartyId && edge.sourceId === item.evidence.counterpartyId)));
-      }
+      if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
 }
 
-function hasFraudEvidence(evidence, caseId) {
-  return evidence !== null && typeof evidence === "object" &&
-    (!caseId || evidence.caseId === caseId) &&
-    evidence.status === "OPEN" &&
-    typeof evidence.scoreId === "string" && typeof evidence.accountId === "string" &&
-    Number.isInteger(evidence.revision) && evidence.revision > 0 &&
-    typeof evidence.openedAt === "string" && evidence.closedAt === null;
+function hasFraudNetworkEvidence(body) {
+  const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
+  const expected = __ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID.toLowerCase();
+  if (!body || body.root?.status !== "OPEN" ||
+      body.root.caseId?.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+      !Array.isArray(body.related) || body.related.length < 1 || body.related.length > 4 ||
+      !Number.isInteger(body.inspectedCandidates) || body.inspectedCandidates < body.related.length ||
+      body.inspectedCandidates > 4 || body.comparedCandidates !== Math.min(assigned, 256) ||
+      typeof body.candidateTruncated !== "boolean" ||
+      (assigned > 256 && !body.candidateTruncated)) return false;
+  const seen = new Set([body.root.caseId]);
+  return body.related.every((item) => {
+    const evidence = item?.evidence;
+    if (evidence?.status !== "OPEN" || seen.has(evidence.caseId) ||
+        !Array.isArray(item.shared) || item.shared.length < 1 || item.shared.length > 2) return false;
+    seen.add(evidence.caseId);
+    return item.shared.every((edge) =>
+      typeof edge.sourceId === "string" && UUID.test(edge.sourceId) &&
+      ((edge.type === "ACCOUNT" && edge.sourceId === body.root.accountId && edge.sourceId === evidence.accountId) ||
+        (edge.type === "COUNTERPARTY" && edge.sourceId === body.root.counterpartyId &&
+          edge.sourceId === evidence.counterpartyId)));
+  }) && seen.has(expected);
 }
 
 function hasEvidence(history, limit) {
