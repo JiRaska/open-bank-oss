@@ -125,13 +125,13 @@ Broader cross-case expansion, retention/restriction workflow, load evidence and 
 controlled pilot remain required. The bounded AML and Fraud networks are not
 completion of ADR-0304.
 
-The current Fraud pilot selects the first four assigned case references by UUID
+The first Fraud pilot selects the first four assigned case references by UUID
 **before** comparing source-owned account and counterparty identifiers. Once an
 investigator has more than four eligible cases, a genuinely related case can be
 outside that slice. The `candidateTruncated` response flag warns about this; an
 empty related list must not be described as an exhaustive negative finding.
 
-The next Fraud network increment will select candidates by explicit equality in
+The subsequent Fraud network increment selects candidates by explicit equality in
 Fraud's indexed case store. Fraud will fetch a bounded set of case IDs directly
 from Context under the investigator's bearer, after a fresh root-scoped assignment,
 policy and audit decision. The caller cannot supply candidate IDs. Fraud will match
@@ -154,6 +154,20 @@ equality. Context independently re-authorizes and audits each matching case befo
 disclosing its source evidence. A plain caller-controlled header or a client-side-only
 filter does not satisfy this condition. Until dual authorization and bounded 1×/10×
 load behavior are verified, the four-case pilot remains the exposed behavior.
+
+Fraud case transitions create two outbox records in the same source transaction.
+The approved reference feed retains exactly four fields and Context-only read access.
+A separate Audit-only feed records event ID, case ID, actor, revision, event time and
+producer identity; it carries no account, counterparty, score, amount or reason.
+Audit consumes that feed on a strict channel and acknowledges only after the
+append-only hash-chain write. It has an independent group, DLQ, seven-day source
+retention and earliest-offset replay so an Audit image deployed after Fraud can
+catch up within that retention window. A stalled or DLQ-routed audit event must
+raise an operational finding; Kafka send success alone is not proof of an Audit row.
+The reference feed is excluded from the legacy audit-subscription gate only because
+the separate audit feed is subscribed, attributed and ACL-granted. Deployment must
+verify a real open/close event in Audit before treating lifecycle provenance as live;
+local database tests do not prove broker delivery.
 
 Rollout is sequenced: provision the dedicated OIDC client credential in the
 existing secret store, verify its service-account principal and sole investigation

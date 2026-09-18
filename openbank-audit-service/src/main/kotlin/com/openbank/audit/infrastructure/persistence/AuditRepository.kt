@@ -164,7 +164,17 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             val alreadyRecorded = Panache.withSession {
                 find("entryId", entry.id).firstResult()
             }.awaitSuspending()
-            if (alreadyRecorded != null) return
+            if (alreadyRecorded != null) {
+                check(
+                    alreadyRecorded.payload == entry.payload &&
+                        alreadyRecorded.eventType == entry.eventType &&
+                        alreadyRecorded.aggregateType == entry.aggregateType &&
+                        alreadyRecorded.aggregateId == entry.aggregateId &&
+                        alreadyRecorded.actorId == entry.actorId &&
+                        alreadyRecorded.sourceService == entry.sourceService,
+                ) { "conflicting audit replay for event ${entry.id}" }
+                return
+            }
             val prev = Panache.withSession {
                 find("ORDER BY id DESC").page(0, 1).firstResult()
             }.awaitSuspending()

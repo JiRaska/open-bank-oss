@@ -234,6 +234,12 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      - resource:
+          type: topic
+          name: openbank.fraud.investigation.case.audit
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # Issue #6035, second and final backfill: the last three money-path produced topics that
       # had no Read grant here. Same shape as the four above -- without the grant the topic is
       # ACL-denied at runtime (allow.everyone.if.no.acl.found=false, components/kafka/kafka.yaml),
@@ -269,6 +275,18 @@ spec:
           name: audit-service-agent-provenance
           patternType: literal
         operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: audit-service-fraud-case
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.audit.fraud-case-audit-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
       # #5745: SmallRye dead-letter topic for the `agent-audit-events-in` channel (the D5
       # provenance stream — AgentAuditConsumer acks only after append-only persistence, so it

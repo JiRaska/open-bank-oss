@@ -101,6 +101,21 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-audit-service :: channel `fraud-case-audit-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.audit.fraud-case-audit-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-aml-service :: channel `party-events-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
