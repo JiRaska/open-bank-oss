@@ -44,6 +44,9 @@ spec:
             - { name: QUARKUS_OIDC_AUTH_SERVER_URL, value: http://keycloak.iam.svc:8080/realms/openbank }
             - name: OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: context-service-oidc, key: OIDC_CLIENT_SECRET } }
+            - { name: CONTEXT_INVESTIGATION_OIDC_URL, value: "$(QUARKUS_OIDC_AUTH_SERVER_URL)" }
+            - name: CONTEXT_INVESTIGATION_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: context-investigation-oidc, key: CONTEXT_INVESTIGATION_CLIENT_SECRET } }
             - name: AML_CASE_SOURCE_URL
               valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
             - name: FRAUD_CASE_SOURCE_URL

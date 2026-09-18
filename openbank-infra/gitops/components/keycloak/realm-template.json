@@ -46,6 +46,10 @@
         "description": "Machine-to-machine API access"
       },
       {
+        "name": "ROLE_CONTEXT_INVESTIGATION",
+        "description": "Dedicated Context-to-Fraud investigation candidate lookup"
+      },
+      {
         "name": "ROLE_KYC",
         "description": "KYC officer (legacy — use KYC_OPENER or KYC_REVIEWER for new assignments)"
       },
@@ -234,6 +238,20 @@
         "roles"
       ],
       "secret": "__SERVICES_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-context-investigation",
+      "name": "OpenBank Context investigation",
+      "description": "Dedicated service identity for bounded Fraud case matching; never a human investigator token.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": ["openid", "roles"],
+      "secret": "__CONTEXT_INVESTIGATION_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-edge",
@@ -498,6 +516,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-context-investigation",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-context-investigation",
+      "realmRoles": ["ROLE_CONTEXT_INVESTIGATION"]
     },
     {
       "username": "service-account-openbank-mcp-service",

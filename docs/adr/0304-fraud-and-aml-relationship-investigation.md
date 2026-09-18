@@ -132,9 +132,10 @@ outside that slice. The `candidateTruncated` response flag warns about this; an
 empty related list must not be described as an exhaustive negative finding.
 
 The next Fraud network increment will select candidates by explicit equality in
-Fraud's indexed case store. Context will supply a bounded, cursor-paged set of
-case IDs that are assigned to the investigator for this purpose; Fraud will match
-only those IDs against the live root case's account and counterparty **within the
+Fraud's indexed case store. Fraud will fetch a bounded set of case IDs directly
+from Context under the investigator's bearer, after a fresh root-scoped assignment,
+policy and audit decision. The caller cannot supply candidate IDs. Fraud will match
+only the returned IDs against the live root case's account and counterparty **within the
 same identifier role**. The source response will contain candidate case IDs only,
 not account or counterparty IDs. Context will independently re-authorize, audit
 and fetch each candidate's evidence before returning it to the UI. A page limit
@@ -147,11 +148,20 @@ Candidate IDs supplied in an HTTP body are **not proof of assignment**. Fraud mu
 not return a match, count, truncation signal or timing-distinguishable result for
 an unverified candidate: a caller with access to the root could otherwise probe
 guessed case IDs. The source lookup therefore requires authenticated Context
-service identity *and* the human investigator's bearer, with a server-side
-case-scoped candidate authorization check before equality is evaluated. A plain
-caller-controlled header or a client-side-only filter does not satisfy this
-condition. Until that dual authorization and its bounded 1×/10× load behavior
-are implemented and verified, the four-case pilot remains the exposed behavior.
+service identity *and* the human investigator's bearer. Fraud obtains candidates
+only from Context's live, human-authorized case-scoped endpoint before evaluating
+equality. Context independently re-authorizes and audits each matching case before
+disclosing its source evidence. A plain caller-controlled header or a client-side-only
+filter does not satisfy this condition. Until dual authorization and bounded 1×/10×
+load behavior are verified, the four-case pilot remains the exposed behavior.
+
+Rollout is sequenced: provision the dedicated OIDC client credential in the
+existing secret store, verify its service-account principal and sole investigation
+role against the sandbox realm, and wait for the Context ExternalSecret to be
+Ready before applying the Deployment reference. The Context Deployment retains
+`maxUnavailable: 0`, so an absent secret stalls the new pod while the existing
+replica serves. Do not count the matcher as deployed until a real token exchange,
+denied direct-admin request, authorized case read and 1×/10× latency check pass.
 
 ## Alternatives considered
 
