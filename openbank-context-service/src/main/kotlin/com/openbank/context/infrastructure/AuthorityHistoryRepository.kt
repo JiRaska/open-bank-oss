@@ -18,6 +18,7 @@ import org.hibernate.reactive.mutiny.Mutiny
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
@@ -89,6 +90,11 @@ class AuthorityHistoryRepository(
                 }.invoke { stored -> check(stored == hash) { "conflicting authority evidence revision" } }
         }.bounded().awaitSuspending()
     }
+
+    /** PostgreSQL owns recordedAt; use its clock for an omitted knownAt cutoff. */
+    suspend fun databaseNow(): Instant = transaction { session ->
+        session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
+    }.bounded().awaitSuspending().toInstant()
 
     suspend fun history(id: UUID, effectiveAt: Instant, knownAt: Instant): AuthorityHistory {
         val rows = transaction { session ->

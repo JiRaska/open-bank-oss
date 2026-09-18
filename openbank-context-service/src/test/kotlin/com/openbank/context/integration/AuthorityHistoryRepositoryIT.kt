@@ -45,7 +45,7 @@ class AuthorityHistoryRepositoryIT {
         assertThatThrownBy {
             onVertx { repository.append(original.copy(eventType = "DelegationRevoked")) }
         }.hasStackTraceContaining("conflicting authority evidence revision")
-        val history = onVertx { repository.history(original.delegationId, Instant.now(), Instant.now()) }
+        val history = onVertx { repository.history(original.delegationId, Instant.now(), repository.databaseNow()) }
         assertThat(history.observations.map { it.evidence }).containsExactly(original)
         assertThat(history.truncated).isFalse()
     }
@@ -54,9 +54,9 @@ class AuthorityHistoryRepositoryIT {
     fun `out of order evidence is retained in revision order with known time cutoff`() {
         val id = UUID.randomUUID()
         onVertx { repository.append(evidence(id, 2)) }
-        val first = onVertx { repository.history(id, Instant.now(), Instant.now()) }.observations.single()
+        val first = onVertx { repository.history(id, Instant.now(), repository.databaseNow()) }.observations.single()
         onVertx { repository.append(evidence(id, 1)) }
-        val current = onVertx { repository.history(id, Instant.now(), Instant.now()) }
+        val current = onVertx { repository.history(id, Instant.now(), repository.databaseNow()) }
         assertThat(current.observations.map { it.evidence.revision }).containsExactly(2L, 1L)
         val prior = onVertx { repository.history(id, Instant.now(), first.recordedAt) }
         assertThat(prior.observations.map { it.evidence.revision }).containsExactly(2L)
@@ -70,12 +70,20 @@ class AuthorityHistoryRepositoryIT {
         val otherBank = AuthorityHistoryRepository(sessions, mapper, "synthetic-bank-${UUID.randomUUID()}", 5000)
         val other = evidence(id, 1).copy(eventType = "DelegationRevoked")
         onVertx { otherBank.append(other) }
-        assertThat(onVertx { repository.history(id, Instant.now(), Instant.now()) }.observations).isEmpty()
+        assertThat(onVertx { repository.history(id, Instant.now(), repository.databaseNow()) }.observations).isEmpty()
         val local = evidence(id, 1)
         onVertx { repository.append(local) }
-        assertThat(onVertx { repository.history(id, Instant.now(), Instant.now()) }.observations.map { it.evidence })
+        assertThat(
+            onVertx {
+                repository.history(id, Instant.now(), repository.databaseNow())
+            }.observations.map { it.evidence },
+        )
             .containsExactly(local)
-        assertThat(onVertx { otherBank.history(id, Instant.now(), Instant.now()) }.observations.map { it.evidence })
+        assertThat(
+            onVertx {
+                otherBank.history(id, Instant.now(), otherBank.databaseNow())
+            }.observations.map { it.evidence },
+        )
             .containsExactly(other)
     }
 
@@ -83,7 +91,7 @@ class AuthorityHistoryRepositoryIT {
     fun `history returns newest hundred observations and explicitly reports truncation`() {
         val id = UUID.randomUUID()
         onVertx { (1L..101L).forEach { repository.append(evidence(id, it)) } }
-        val history = onVertx { repository.history(id, Instant.now(), Instant.now()) }
+        val history = onVertx { repository.history(id, Instant.now(), repository.databaseNow()) }
         assertThat(history.truncated).isTrue()
         assertThat(history.observations).hasSize(100)
         assertThat(

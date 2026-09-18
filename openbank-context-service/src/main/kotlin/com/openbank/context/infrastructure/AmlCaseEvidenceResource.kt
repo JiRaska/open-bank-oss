@@ -47,15 +47,16 @@ class AmlCaseEvidenceResource(
     ): Response {
         val now = clock.instant()
         val effective = timestamp(effectiveAt, now)
-        val known = timestamp(knownAt, now)
-        require(effective <= now && known <= now) { "AML evidence cannot establish future activity" }
+        val known = knownAt?.let { timestamp(it, now) }
+        require(effective <= now && (known == null || known <= now)) { "AML evidence cannot establish future activity" }
         require(caseId == id.toString()) { "caseId must identify the assigned AML case" }
         require(purpose == PURPOSE) { "AML_INVESTIGATION is required" }
         val actor = Investigator(identity.principal.name, identity.roles.sorted())
         return try {
             queries.amlCaseEvidence(id.toString(), actor, InvestigationContext(caseId, purpose, effective, known)) {
                 if (!source.isOpen(id)) throw ContextAccessDenied()
-                val root = history.history(id, effective, known)
+                val cutoff = known ?: history.databaseNow()
+                val root = history.history(id, effective, cutoff)
                 val candidates = history.assignedRelatedCases(root, actor.id, now)
                 val related = coroutineScope {
                     candidates.map { candidate ->
@@ -68,7 +69,7 @@ class AmlCaseEvidenceResource(
                                 ) {
                                     ContextReadResult(
                                         if (source.isOpen(candidate)) {
-                                            history.history(candidate, effective, known, RELATED_OBSERVATION_LIMIT)
+                                            history.history(candidate, effective, cutoff, RELATED_OBSERVATION_LIMIT)
                                                 .takeIf { related -> sharedReferences(root, related) }
                                         } else {
                                             null
@@ -113,8 +114,8 @@ class AmlCaseEvidenceResource(
     ): Response {
         val now = clock.instant()
         val effective = timestamp(effectiveAt, now)
-        val known = timestamp(knownAt, now)
-        require(effective <= now && known <= now) { "AML evidence cannot establish future activity" }
+        val known = knownAt?.let { timestamp(it, now) }
+        require(effective <= now && (known == null || known <= now)) { "AML evidence cannot establish future activity" }
         require(caseId == id.toString()) { "caseId must identify the assigned AML case" }
         require(purpose == PURPOSE) { "AML_INVESTIGATION is required" }
         return try {
@@ -131,7 +132,7 @@ class AmlCaseEvidenceResource(
                         null,
                     )
                 } else {
-                    val selected = history.history(id, effective, known)
+                    val selected = history.history(id, effective, known ?: history.databaseNow())
                     ContextReadResult(
                         Response.ok(selected).header("Cache-Control", "no-store").build(),
                         ContextDisclosure(
