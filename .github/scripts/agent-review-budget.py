@@ -5,6 +5,7 @@
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -95,9 +96,24 @@ def main():
     require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'manual dispatch required')
     require(os.environ.get('GITHUB_RUN_ATTEMPT') == '1', 'reruns are forbidden')
     repo = os.environ['GITHUB_REPOSITORY']
-    default = gh(f'repos/{repo}')['default_branch']
-    require(os.environ.get('GITHUB_REF') == f'refs/heads/{default}', 'default branch controller required')
-    require(os.environ.get('GITHUB_SHA') == gh(f'repos/{repo}/commits/{default}')['sha'], 'controller is stale')
+    if sys.argv[1:] == ['--owner-anchored']:
+        # Match the producer's immutable controller contract. This opt-in changes
+        # controller selection only; both lanes share the same history and circuit.
+        # The trusted workflow injects the repository variable; the independent
+        # admission verifier rereads it from GitHub before accepting any evidence.
+        anchor = os.environ.get('SOLO_REVIEW_POLICY_SHA', '')
+        require(re.fullmatch(r'[0-9a-f]{40}', anchor) is not None,
+                'valid owner anchor required')
+        require(os.environ.get('GITHUB_SHA') == anchor, 'controller differs from owner anchor')
+        require(os.environ.get('GITHUB_REF', '').startswith('refs/heads/'),
+                'branch controller required')
+        checkout = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+        require(checkout == anchor, 'checkout differs from owner anchor')
+    else:
+        require(not sys.argv[1:], 'unknown controller mode')
+        default = gh(f'repos/{repo}')['default_branch']
+        require(os.environ.get('GITHUB_REF') == f'refs/heads/{default}', 'default branch controller required')
+        require(os.environ.get('GITHUB_SHA') == gh(f'repos/{repo}/commits/{default}')['sha'], 'controller is stale')
     now = datetime.now(timezone.utc).replace(microsecond=0)
     cutoff = (now - timedelta(days=7)).isoformat().replace('+00:00', 'Z')
     endpoint = f'repos/{repo}/actions/workflows/agent-review.yml/runs?event=workflow_dispatch&created=>={cutoff}&per_page=100'

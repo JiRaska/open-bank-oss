@@ -477,7 +477,7 @@ class SourceAndAcceptanceTest(unittest.TestCase):
         self.assertIn("vars.AGENT_REVIEW_API_ENABLED == 'true'", jobs["solo-prepare"]["if"])
         prepare = jobs["solo-prepare"]["steps"]
         budget_index = next(i for i, step in enumerate(prepare)
-                            if step.get("run") == "python3 .github/scripts/agent-review-budget.py")
+                            if step.get("run") == "python3 .github/scripts/agent-review-budget.py --owner-anchored")
         subject_index = next(i for i, step in enumerate(prepare) if step.get("id") == "subject")
         self.assertLess(budget_index, subject_index)
         self.assertEqual(jobs["solo-review"]["needs"], "solo-prepare")

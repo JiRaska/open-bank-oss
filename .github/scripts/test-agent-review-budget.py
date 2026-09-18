@@ -123,6 +123,58 @@ class BudgetTest(unittest.TestCase):
                     budget.main()
                 history.assert_not_called()
 
+    def test_owner_anchored_controller_still_checks_shared_allowance(self):
+        anchor = 'a' * 40
+        env = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_RUN_ATTEMPT='1',
+                   GITHUB_REPOSITORY='example/repo', GITHUB_SHA=anchor,
+                   GITHUB_REF='refs/heads/review-policy', SOLO_REVIEW_POLICY_SHA=anchor,
+                   GITHUB_RUN_ID='1')
+        with patch.dict('os.environ', env, clear=True), patch.object(
+                budget.sys, 'argv', ['budget', '--owner-anchored']), patch.object(
+                budget, 'gh') as remote, patch.object(
+                budget.subprocess, 'check_output', side_effect=[anchor + '\n', '[]']) as calls:
+            with self.assertRaisesRegex(ValueError, 'missing run history'):
+                budget.main()
+            remote.assert_not_called()
+            self.assertEqual(calls.call_args_list[1].args[0][:4], ['gh', 'api', '--paginate', '--slurp'])
+
+    def test_anchored_mode_preserves_failure_circuit_and_weekly_limit(self):
+        anchor = 'a' * 40
+        env = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_RUN_ATTEMPT='1',
+                   GITHUB_REPOSITORY='example/repo', GITHUB_SHA=anchor,
+                   GITHUB_REF='refs/heads/policy', SOLO_REVIEW_POLICY_SHA=anchor,
+                   GITHUB_RUN_ID='3')
+        created = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        for history, error in (
+                (pages(run(1, created_at=created, conclusion='failure'), run(3, created_at=created)),
+                 'circuit open'),
+                (pages(*(run(i, created_at=created) for i in (1, 2, 3))), 'allowance exhausted')):
+            with self.subTest(error=error), patch.dict('os.environ', env, clear=True), patch.object(
+                    budget.sys, 'argv', ['budget', '--owner-anchored']), patch.object(
+                    budget.subprocess, 'check_output', side_effect=[anchor, json.dumps(history)]):
+                with self.assertRaisesRegex(ValueError, error):
+                    budget.main()
+
+    def test_owner_anchor_missing_mismatched_or_wrong_checkout_rejected(self):
+        for anchor, sha, checkout, ref in (
+                ('', 'a' * 40, 'a' * 40, 'refs/heads/policy'),
+                ('invalid', 'invalid', 'invalid', 'refs/heads/policy'),
+                ('a' * 40, 'b' * 40, 'a' * 40, 'refs/heads/policy'),
+                ('a' * 40, 'a' * 40, 'b' * 40, 'refs/heads/policy'),
+                ('a' * 40, 'a' * 40, 'a' * 40, 'refs/tags/policy')):
+            env = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_RUN_ATTEMPT='1',
+                       GITHUB_REPOSITORY='example/repo', GITHUB_SHA=sha, GITHUB_REF=ref,
+                       SOLO_REVIEW_POLICY_SHA=anchor, GITHUB_RUN_ID='1')
+            with self.subTest(anchor=anchor, sha=sha, checkout=checkout, ref=ref), patch.dict(
+                    'os.environ', env, clear=True), patch.object(
+                    budget.sys, 'argv', ['budget', '--owner-anchored']), patch.object(
+                    budget, 'gh') as remote, patch.object(
+                    budget.subprocess, 'check_output', return_value=checkout + '\n') as calls:
+                with self.assertRaises(ValueError):
+                    budget.main()
+                remote.assert_not_called()
+                self.assertTrue(all(c.args[0][0] == 'git' for c in calls.call_args_list))
+
     def test_api_failure_does_not_admit(self):
         env = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_RUN_ATTEMPT='1',
                    GITHUB_REPOSITORY='example/repo')

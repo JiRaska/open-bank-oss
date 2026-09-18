@@ -68,7 +68,7 @@ jobs:
       - name: Admit the complete two-model dispatch before provider work
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/agent-review-budget.py
+        run: python3 .github/scripts/agent-review-budget.py --owner-anchored
       - id: subject
         env:
           GH_TOKEN: ${{ github.token }}
