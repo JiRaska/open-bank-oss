@@ -15,6 +15,7 @@ import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.TemplateSensitivity
+import com.openbank.notification.infrastructure.kafka.DelegationNotificationConsumer
 import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationOutboxEntity
@@ -35,6 +36,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.Metadata
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
@@ -68,16 +70,21 @@ import java.util.function.Supplier
 @QuarkusTest
 @QuarkusTestResource(NotificationConsumerIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@Suppress("LargeClass") // One shared in-memory channel and Postgres fixture for the delivery lifecycle.
 class NotificationConsumerIT {
 
     @Inject
     lateinit var notificationConsumer: NotificationConsumer
+
+    @Inject
+    lateinit var delegationNotificationConsumer: DelegationNotificationConsumer
 
     private fun seedStaleJointNotification(
         partyId: UUID,
         expiry: Instant,
         retryCount: Int = 0,
         channel: NotificationChannel = NotificationChannel.PUSH,
+        operationId: UUID = UUID.randomUUID(),
     ): NotificationEntity = VertxContextSupport.subscribeAndAwait {
         Panache.withTransaction {
             repository.persist(
@@ -90,7 +97,7 @@ class NotificationConsumerIT {
                     it.subject = "Joint signing request"
                     it.body = GENERIC_PUSH_BODY
                     it.status = "PENDING"
-                    it.correlationId = UUID.randomUUID()
+                    it.correlationId = operationId
                     it.deduplicationKey = UUID.randomUUID()
                     it.deliveryNotAfter = expiry
                     it.deliveryRetryCount = retryCount
@@ -166,6 +173,118 @@ class NotificationConsumerIT {
         assertThat(statusFor(partyId)).isEqualTo("PENDING")
         assertThat(notificationsFor(partyId).single().deliveryRetryCount).isZero()
         assertThat(outcomeRowsFor(email.notificationId)).isEmpty()
+    }
+
+    private fun cancelJoint(
+        operationId: UUID,
+        principal: UUID = UUID.randomUUID(),
+        actor: UUID = UUID.randomUUID(),
+        cancelledAt: Instant = Instant.now(),
+    ) {
+        VertxContextSupport.subscribeAndAwait {
+            notificationConsumer.recordJointCancellation(
+                operationId,
+                principal,
+                actor,
+                "ISSUE",
+                cancelledAt,
+            )
+        }
+    }
+
+    @Test
+    fun `exact cancellation event replay preserves one immutable tombstone`() {
+        val operationId = UUID.randomUUID()
+        val principal = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val at = Instant.parse("2026-09-18T12:00:00.123456789Z")
+
+        cancelJoint(operationId, principal, actor, at)
+        cancelJoint(operationId, principal, actor, at)
+        assertThatThrownBy { cancelJoint(operationId, principal, UUID.randomUUID(), at) }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        val partyId = UUID.randomUUID()
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED,
+                recipient = partyId.toString(),
+                variables = emptyMap(),
+                correlationId = operationId,
+                deduplicationKey = UUID.randomUUID(),
+                deepLink = "openbank://delegations/joint-issuance",
+                deliveryNotAfter = Instant.now().plusSeconds(3600),
+            ),
+        )
+        assertThat(countFor(partyId)).isZero()
+    }
+
+    @Test
+    fun `cancellation arriving before opened request prevents a stale prompt`() {
+        val operationId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        val cancellationEvent = objectMapper.writeValueAsString(
+            mapOf(
+                "eventType" to "StatutoryDelegationProposalCancelled",
+                "aggregateType" to "StatutoryDelegationOperation",
+                "version" to 1,
+                "sourceService" to "delegation-service",
+                "aggregateId" to operationId.toString(),
+                "principalPartyId" to UUID.randomUUID().toString(),
+                "actorId" to UUID.randomUUID().toString(),
+                "operationKind" to "ISSUE",
+                "requestHash" to "a".repeat(64),
+                "ruleHash" to "b".repeat(64),
+                "occurredAt" to Instant.now().toString(),
+            ),
+        )
+        VertxContextSupport.subscribeAndAwait { delegationNotificationConsumer.consume(cancellationEvent) }
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED,
+                recipient = partyId.toString(),
+                variables = emptyMap(),
+                correlationId = operationId,
+                deduplicationKey = UUID.randomUUID(),
+                deepLink = "openbank://delegations/joint-issuance",
+                deliveryNotAfter = Instant.now().plusSeconds(3600),
+            ),
+        )
+
+        assertThat(countFor(partyId)).isZero()
+    }
+
+    @Test
+    fun `cancellation closes pending push and fallback email without sending either`() {
+        val operationId = UUID.randomUUID()
+        val pushParty = UUID.randomUUID()
+        val emailParty = UUID.randomUUID()
+        val expiry = Instant.now().plusSeconds(3600)
+        val push = seedStaleJointNotification(pushParty, expiry, operationId = operationId)
+        val email = seedStaleJointNotification(
+            emailParty,
+            expiry,
+            channel = NotificationChannel.EMAIL,
+            operationId = operationId,
+        )
+        cancelJoint(operationId)
+
+        val claimed = claimStaleJoint(Instant.now())
+        assertThat(claimed).contains(push.notificationId, email.notificationId)
+        retryJoint(push.notificationId)
+        retryJoint(email.notificationId)
+
+        assertThat(statusFor(pushParty)).isEqualTo("FAILED")
+        assertThat(statusFor(emailParty)).isEqualTo("FAILED")
+        assertThat(failureReasonFor(pushParty)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED)
+        assertThat(failureReasonFor(emailParty)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED)
+        assertThat(outcomeRowsFor(push.notificationId)).hasSize(1)
+        assertThat(outcomeRowsFor(email.notificationId)).hasSize(1)
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

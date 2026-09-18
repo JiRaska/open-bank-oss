@@ -40,6 +40,7 @@ import com.openbank.notification.infrastructure.client.PartyMergeResolver
 import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
+import com.openbank.notification.infrastructure.persistence.repository.JointProposalCancellationRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -176,6 +177,8 @@ class NotificationConsumer @Inject constructor(
 
     @Inject lateinit var notificationRepo: NotificationRepository
 
+    @Inject lateinit var jointCancellationRepo: JointProposalCancellationRepository
+
     /**
      * ADR-0239 D2. Field injection, not a constructor parameter: detekt's `LongParameterList`
      * fires AT `constructorThreshold: 9`, and this bean is already at the ceiling — the fleet
@@ -308,11 +311,19 @@ class NotificationConsumer @Inject constructor(
             log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
-        if (req.template in JOINT_SIGNATURE_TEMPLATES && req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true) {
-            log.warnf("Dropping expired or undated JOINT signing notification template=%s", req.template)
-            return Uni.createFrom().voidItem()
+        val delivery = if (req.template in JOINT_SIGNATURE_TEMPLATES) {
+            val operationId = req.correlationId
+            if (operationId == null || req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true) {
+                log.warnf("Dropping expired or undated JOINT signing notification template=%s", req.template)
+                return Uni.createFrom().voidItem()
+            }
+            jointCancellationRepo.isCancelled(operationId).chain { cancelled ->
+                if (cancelled) Uni.createFrom().voidItem() else dispatch(req)
+            }
+        } else {
+            dispatch(req)
         }
-        return dispatch(req)
+        return delivery
             .onFailure().invoke { e ->
                 // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
                 // logged and ACKED here — "redelivery is safe" was never true, because acking is
@@ -366,17 +377,28 @@ class NotificationConsumer @Inject constructor(
         return persistOnce(entity, req.deduplicationKey)
             .chain { persisted ->
                 if (!persisted) return@chain Uni.createFrom().voidItem()
-                // Consent gate BEFORE the channel dispatch (ADR-0198 D4, issue #2369). Deliberately
-                // NOT a per-channel check: the defect the issue names is precisely that gating lived
-                // inside the channel branches, so PUSH got a (default-true) check and EMAIL got none,
-                // and any channel added later would inherit whichever the author remembered. One gate
-                // ahead of the `when` cannot be forgotten by a new branch.
-                if (req.template.category == NotificationCategory.MARKETING) {
-                    gateMarketingOnConsent(req, subject, body, entity)
+                val cancelled = if (req.template in JOINT_SIGNATURE_TEMPLATES) {
+                    jointCancellationRepo.isCancelled(requireNotNull(req.correlationId))
                 } else {
-                    when (req.channel) {
-                        NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                        NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                    Uni.createFrom().item(false)
+                }
+                cancelled.chain { wasCancelled ->
+                    when {
+                        wasCancelled -> markJointRetryTerminal(
+                            req,
+                            entity,
+                            NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED,
+                        )
+                        req.template in JOINT_SIGNATURE_TEMPLATES &&
+                            req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true ->
+                            markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
+                        // Consent gate BEFORE channel dispatch (ADR-0198 D4, issue #2369).
+                        req.template.category == NotificationCategory.MARKETING ->
+                            gateMarketingOnConsent(req, subject, body, entity)
+                        else -> when (req.channel) {
+                            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+                            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                        }
                     }
                 }
             }
@@ -388,14 +410,11 @@ class NotificationConsumer @Inject constructor(
     }
 
     /** Reuses the persisted row after a stale JOINT PENDING claim; never inserts a second fact. */
+    @Suppress("CyclomaticComplexMethod") // Expiry, cancellation, channel and retry budget must be checked together.
     fun retryJointPending(notificationId: UUID): Uni<Void> = Panache.withSession {
         notificationRepo.find("notificationId", notificationId).firstResult()
     }.chain { entity ->
-        if (
-            entity == null ||
-            entity.status != NotificationStatus.PENDING.name ||
-            entity.channel != NotificationChannel.PUSH.name
-        ) {
+        if (entity == null || entity.status != NotificationStatus.PENDING.name) {
             return@chain Uni.createFrom().voidItem()
         }
         val template = when (entity.template) {
@@ -412,7 +431,7 @@ class NotificationConsumer @Inject constructor(
         }
         val req = NotificationRequest(
             partyId = entity.partyId,
-            channel = NotificationChannel.PUSH,
+            channel = NotificationChannel.valueOf(entity.channel),
             template = template,
             recipient = entity.recipient,
             variables = emptyMap(),
@@ -422,14 +441,36 @@ class NotificationConsumer @Inject constructor(
             deliveryNotAfter = entity.deliveryNotAfter,
         )
         val notAfter = entity.deliveryNotAfter
-        when {
-            notAfter == null || !notAfter.isAfter(Instant.now(clock)) ->
-                markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
-            entity.deliveryRetryCount > MAX_JOINT_RETRY_ATTEMPTS ->
-                markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_RETRY_EXHAUSTED)
-            else -> sendPush(req, entity.subject ?: renderTemplate(template, emptyMap()).first, entity)
+        val operationId = entity.correlationId
+        return@chain if (operationId == null) {
+            Uni.createFrom().voidItem()
+        } else {
+            jointCancellationRepo.isCancelled(operationId).chain { cancelled ->
+                when {
+                    cancelled -> markJointRetryTerminal(
+                        req,
+                        entity,
+                        NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED,
+                    )
+                    entity.channel != NotificationChannel.PUSH.name -> Uni.createFrom().voidItem()
+                    notAfter == null || !notAfter.isAfter(Instant.now(clock)) ->
+                        markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
+                    entity.deliveryRetryCount > MAX_JOINT_RETRY_ATTEMPTS ->
+                        markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_RETRY_EXHAUSTED)
+                    else -> sendPush(req, entity.subject ?: renderTemplate(template, emptyMap()).first, entity)
+                }
+            }
         }
     }
+
+    /** Persists the cancellation before acking its event; stale pending rows close on the retry sweep. */
+    fun recordJointCancellation(
+        operationId: UUID,
+        principalPartyId: UUID,
+        actorId: UUID,
+        operationKind: String,
+        cancelledAt: Instant,
+    ): Uni<Void> = jointCancellationRepo.record(operationId, principalPartyId, actorId, operationKind, cancelledAt)
 
     private fun markJointRetryTerminal(
         req: NotificationRequest,
@@ -913,7 +954,30 @@ class NotificationConsumer @Inject constructor(
                     )
                 },
             )
-            .chain(Supplier { sendEmail(fallbackRequest, subject, GENERIC_FALLBACK_EMAIL_BODY, fallbackEntity) })
+            .chain(
+                Supplier {
+                    if (req.template in JOINT_SIGNATURE_TEMPLATES) {
+                        jointCancellationRepo.isCancelled(requireNotNull(req.correlationId)).chain { cancelled ->
+                            when {
+                                cancelled -> markJointRetryTerminal(
+                                    fallbackRequest,
+                                    fallbackEntity,
+                                    NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED,
+                                )
+                                req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true ->
+                                    markJointRetryTerminal(
+                                        fallbackRequest,
+                                        fallbackEntity,
+                                        NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED,
+                                    )
+                                else -> sendEmail(fallbackRequest, subject, GENERIC_FALLBACK_EMAIL_BODY, fallbackEntity)
+                            }
+                        }
+                    } else {
+                        sendEmail(fallbackRequest, subject, GENERIC_FALLBACK_EMAIL_BODY, fallbackEntity)
+                    }
+                },
+            )
     }
 
     /** Builds the separate generic EMAIL notification persisted with the original reroute evidence. */
@@ -927,6 +991,7 @@ class NotificationConsumer @Inject constructor(
             entity.subject = subject
             entity.body = GENERIC_FALLBACK_EMAIL_BODY
             entity.correlationId = req.correlationId
+            entity.deliveryNotAfter = req.deliveryNotAfter
             entity.status = "PENDING"
             entity.createdAt = Instant.now(clock)
         }

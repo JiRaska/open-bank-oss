@@ -127,9 +127,14 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
             WITH candidates AS (
                 SELECT id FROM notifications
                 WHERE status = 'PENDING'
-                  AND channel = 'PUSH'
                   AND template IN ('JOINT_ISSUANCE_SIGNATURE_REQUESTED', 'JOINT_ACCEPTANCE_SIGNATURE_REQUESTED')
-                  AND delivery_not_after IS NOT NULL
+                  AND (
+                    (channel = 'PUSH' AND delivery_not_after IS NOT NULL)
+                    OR EXISTS (
+                        SELECT 1 FROM joint_proposal_cancellations c
+                        WHERE c.operation_id = notifications.correlation_id
+                    )
+                  )
                   AND created_at <= :olderThan
                   AND (delivery_retry_claimed_at IS NULL OR delivery_retry_claimed_at <= :staleClaim)
                 ORDER BY created_at, id

@@ -36,6 +36,8 @@ import java.util.UUID
  *  - `DelegationExpired` -> **both**: the grant is gone either way.
  *  - `StatutoryDelegationProposalOpened` -> each human on the frozen JOINT roster, once per
  *    operation/person. It is only an inbox hint; the signing API rechecks live authority.
+ *  - `StatutoryDelegationProposalCancelled` -> a durable operation tombstone, not a new push.
+ *    A late opened event or retry must not solicit a signature after cancellation.
  *  - Any future/unknown type is deliberately not notified until its recipient semantics are reviewed.
  *
  * **Delivery reuses the real pipeline, in-process.** Rather than re-implement rendering, the
@@ -109,6 +111,18 @@ class DelegationNotificationConsumer(
             // Proposal events can carry a human roster: never echo raw Kafka payloads to logs.
             log.warnf("Dropping unprocessable delegation event (poison pill): %s", e.javaClass.simpleName)
             return Uni.createFrom().voidItem()
+        }
+        if (node.path("eventType").asText() == STATUTORY_PROPOSAL_CANCELLED) {
+            val cancellation = statutoryCancellation(node) ?: return Uni.createFrom().voidItem()
+            return notificationConsumer.recordJointCancellation(
+                cancellation.operationId,
+                cancellation.principalPartyId,
+                cancellation.actorId,
+                cancellation.operationKind,
+                cancellation.cancelledAt,
+            ).onFailure().invoke { e ->
+                log.errorf(e, "Failed to record JOINT proposal cancellation operationId=%s", cancellation.operationId)
+            }
         }
         val requests = requestsFor(node)
         if (requests.isEmpty()) return Uni.createFrom().voidItem()
@@ -232,11 +246,42 @@ class DelegationNotificationConsumer(
         runCatching { UUID.fromString(raw).takeIf { it.toString() == raw } }.getOrNull()
     }
 
+    private data class JointCancellation(
+        val operationId: UUID,
+        val principalPartyId: UUID,
+        val actorId: UUID,
+        val operationKind: String,
+        val cancelledAt: Instant,
+    )
+
+    private fun statutoryCancellation(node: JsonNode): JointCancellation? {
+        if (node.path("sourceService").asText() != DELEGATION_SOURCE_SERVICE ||
+            node.path("aggregateType").asText() != "StatutoryDelegationOperation" ||
+            node.path("version").asLong(-1) != 1L
+        ) {
+            return null
+        }
+        val operationId = canonicalUuid(node.path("aggregateId")) ?: return null
+        val principal = canonicalUuid(node.path("principalPartyId")) ?: return null
+        val actor = canonicalUuid(node.path("actorId"))?.takeIf { it != principal } ?: return null
+        val kind = node.path("operationKind").asText().takeIf { it == "ISSUE" || it == "ACCEPT" } ?: return null
+        val cancelledAt = runCatching { Instant.parse(node.path("occurredAt").asText()) }.getOrNull()
+            ?: return null
+        if (!SHA256_HEX.matches(node.path("requestHash").asText()) ||
+            !SHA256_HEX.matches(node.path("ruleHash").asText())
+        ) {
+            return null
+        }
+        return JointCancellation(operationId, principal, actor, kind, cancelledAt)
+    }
+
     private companion object {
         const val SPEND_CONFIRMED = "SpendConfirmed"
         const val RECERTIFICATION_DUE = "DelegationRecertificationDue"
         const val STATUTORY_PROPOSAL_OPENED = "StatutoryDelegationProposalOpened"
+        const val STATUTORY_PROPOSAL_CANCELLED = "StatutoryDelegationProposalCancelled"
         const val DELEGATION_SOURCE_SERVICE = "delegation-service"
+        val SHA256_HEX = Regex("[0-9a-f]{64}")
         val REVIEW_AUDIENCES = setOf("PERSONAL", "FOP", "SME", "CORPORATE")
 
         val TEMPLATE_BY_EVENT_TYPE: Map<String, NotificationTemplate> = mapOf(

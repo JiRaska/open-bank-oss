@@ -38,6 +38,8 @@ class DelegationNotificationConsumerTest {
     fun setUp() {
         consumer = DelegationNotificationConsumer(notificationConsumer, objectMapper)
         every { notificationConsumer.consume(any()) } returns Uni.createFrom().voidItem()
+        every { notificationConsumer.recordJointCancellation(any(), any(), any(), any(), any()) } returns
+            Uni.createFrom().voidItem()
     }
 
     /** Captures the [NotificationRequest] JSON(s) handed to [NotificationConsumer.consume]. */
@@ -85,6 +87,40 @@ class DelegationNotificationConsumerTest {
             "expiresAt" to expiresAt,
         ),
     )
+
+    private fun statutoryCancelled(sourceService: String = "delegation-service"): String =
+        objectMapper.writeValueAsString(
+            mapOf(
+                "eventType" to "StatutoryDelegationProposalCancelled",
+                "aggregateType" to "StatutoryDelegationOperation",
+                "version" to 1,
+                "sourceService" to sourceService,
+                "aggregateId" to grantId.toString(),
+                "principalPartyId" to UUID.randomUUID().toString(),
+                "actorId" to grantorPartyId.toString(),
+                "operationKind" to "ISSUE",
+                "requestHash" to "a".repeat(64),
+                "ruleHash" to "b".repeat(64),
+                "occurredAt" to "2026-09-18T12:00:00Z",
+            ),
+        )
+
+    @Test
+    fun `joint cancellation records a tombstone and sends no new prompt`() {
+        consumer.consume(statutoryCancelled()).subscribe().with({}, {})
+
+        verify(exactly = 1) {
+            notificationConsumer.recordJointCancellation(grantId, any(), grantorPartyId, "ISSUE", any())
+        }
+        verify(exactly = 0) { notificationConsumer.consume(any()) }
+    }
+
+    @Test
+    fun `joint cancellation with forged source is ignored`() {
+        consumer.consume(statutoryCancelled(sourceService = "other-service")).subscribe().with({}, {})
+
+        verify(exactly = 0) { notificationConsumer.recordJointCancellation(any(), any(), any(), any(), any()) }
+    }
 
     @Test
     fun `joint proposal notifies each frozen human with a distinct replay safe key`() {
