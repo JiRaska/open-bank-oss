@@ -3675,9 +3675,10 @@ paths:
       description: >-
         Requires `X-Acting-For: <business partyId>` naming an entity the signed-in human holds an ACTIVE
         mandate for; without the header, naming the human themselves, or without a mandate it is a 403.
-        Only system-of-record data: party-service (entity, mandates), kyb-service's register extract
-        (signing rule, register-only representatives) and account-service. A value no source holds is
-        null, never a placeholder.
+        Only system-of-record data: party-service (entity, mandates), kyb-service's fresh cached
+        extract (signing rule, register-only representatives) and account-service. A cache miss does
+        not trigger an external lookup. Accounts are the first page; `accountsPagination` tells the
+        client when to fetch more from `/business/company/accounts`. A value no source holds is null.
       operationId: getBusinessCompany
       security:
         - customerOidc: [profile:read]
@@ -3695,6 +3696,26 @@ paths:
               schema: {$ref: '#/components/schemas/BusinessCompany'}
         '403': {description: No X-Acting-For, or no active mandate for the named company}
         '404': {description: The company party does not exist}
+        '502': {description: An upstream account page was unavailable or malformed}
+
+  /business/company/accounts:
+    get:
+      tags: [Business]
+      summary: Page through the accounts of the company the customer acts for
+      operationId: listBusinessCompanyAccounts
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: X-Acting-For, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: One account page and its next cursor
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountList'}
+        '403': {description: No active mandate for the named company}
+        '502': {description: An upstream account page was unavailable or malformed}
 
   /business/schemes:
     get:
@@ -4559,7 +4580,7 @@ components:
   schemas:
     BusinessCompany:
       type: object
-      required: [partyId, representatives, accounts]
+      required: [partyId, representatives, accounts, accountsPagination]
       properties:
         partyId: { type: string, format: uuid }
         legalName: { type: string, nullable: true }
@@ -4594,6 +4615,8 @@ components:
               iban: { type: string, nullable: true }
               currency: { type: string, nullable: true }
               product: { type: string, nullable: true }
+        accountsPagination:
+          $ref: '#/components/schemas/Pagination'
     AmlPep:
       type: object
       required: [isPep]

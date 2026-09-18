@@ -53,9 +53,10 @@ class CustomerBusinessCompanyResourceTest {
         every { upstream.get("$partyBase/api/v1/parties/$colleague", company.toString()) } returns
             Response.ok("""{"id":"$colleague","legalName":"Petr Svoboda"}""").build()
         every { upstream.get("$accountBase/api/v1/accounts?partyId=$company", company.toString()) } returns Response.ok(
-            """{"data":[{"id":"$account","accountNumber":"CZ6508000000192000145399","currencyCode":"CZK","accountType":"CURRENT","partyId":"$company"}]}""",
+            """{"data":[{"id":"$account","accountNumber":"CZ6508000000192000145399","currencyCode":"CZK","accountType":"CURRENT","partyId":"$company"}],"pagination":{"limit":20,"hasNextPage":false,"nextCursor":null}}""",
         ).build()
-        every { upstream.post("$kybBase/api/v1/kyb/lookup", company.toString(), any(), null) } returns (
+        val cachedLookup = "$kybBase/api/v1/kyb/lookup/cached?scheme=CZ_ICO&identifier=45274649"
+        every { upstream.get(cachedLookup, company.toString()) } returns (
             kyb ?: Response.ok(
                 """{"representatives":[{"fullName":"Jana  NOVÁKOVÁ","role":"jednatel"},""" +
                     """{"fullName":"Karel Dvořák","role":"jednatel"}],""" +
@@ -121,6 +122,8 @@ class CustomerBusinessCompanyResourceTest {
                 ),
             ),
         )
+        assertThat((b["accountsPagination"] as com.fasterxml.jackson.databind.JsonNode).path("hasNextPage").asBoolean())
+            .isFalse()
     }
 
     @Test
@@ -149,6 +152,42 @@ class CustomerBusinessCompanyResourceTest {
         @Suppress("UNCHECKED_CAST")
         val reps = body(r)["representatives"] as List<Map<String, Any?>>
         assertThat(reps.map { it["partyId"] }).containsExactly(human, colleague)
+    }
+
+    @Test
+    fun `a company with more than twenty accounts receives a cursor instead of silent truncation`() {
+        val upstream = upstream()
+        val first = (1..20).joinToString(",") { index ->
+            """{"id":"${UUID.randomUUID()}","accountNumber":"CZ$index","currencyCode":"CZK","accountType":"CURRENT"}"""
+        }
+        every { upstream.get("$accountBase/api/v1/accounts?partyId=$company", company.toString()) } returns Response.ok(
+            """{"data":[$first],"pagination":{"limit":20,"hasNextPage":true,"nextCursor":"next+cursor"}}""",
+        ).build()
+        val nextPage = "$accountBase/api/v1/accounts?partyId=$company&cursor=next%2Bcursor"
+        every { upstream.get(nextPage, company.toString()) } returns
+            Response.ok(
+                """{"data":[{"id":"$account","accountNumber":"CZ21","currencyCode":"CZK","accountType":"CURRENT"}],"pagination":{"limit":20,"hasNextPage":false,"nextCursor":null}}""",
+            ).build()
+
+        val resource = resource(upstream)
+        val profile = body(resource.company(company.toString()))
+        @Suppress("UNCHECKED_CAST")
+        assertThat(profile["accounts"] as List<Any>).hasSize(20)
+        val pagination = profile["accountsPagination"] as com.fasterxml.jackson.databind.JsonNode
+        assertThat(pagination.path("hasNextPage").asBoolean()).isTrue()
+        assertThat(pagination.path("nextCursor").asText()).isEqualTo("next+cursor")
+        val next = body(resource.companyAccounts(company.toString(), "next+cursor"))
+        @Suppress("UNCHECKED_CAST")
+        assertThat(next["data"] as List<Any>).hasSize(1)
+    }
+
+    @Test
+    fun `a failed account read cannot look like an empty account list`() {
+        val upstream = upstream()
+        every { upstream.get("$accountBase/api/v1/accounts?partyId=$company", company.toString()) } returns
+            Response.status(503).build()
+
+        assertThat(resource(upstream).company(company.toString()).status).isEqualTo(502)
     }
 
     @Test

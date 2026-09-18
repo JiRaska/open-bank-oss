@@ -16,10 +16,13 @@ import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
@@ -76,10 +79,7 @@ class CustomerBusinessCompanyResource(
     @Blocking
     fun company(@HeaderParam(ACTING_FOR) actingFor: String?): Response {
         val human = human()
-        if (actingFor.isNullOrBlank()) throw ForbiddenException("X-Acting-For is required for the company profile")
-        // Fail-closed 403 on a malformed id or a missing/inactive mandate.
-        val company = actingForResolver.resolve(human, actingFor)
-        if (company == human) throw ForbiddenException("X-Acting-For must name a company, not the customer")
+        val company = companyId(human, actingFor)
 
         val party = upstream.get("$partyServiceUrl/api/v1/parties/$company", company.toString())
         if (party.status != OK) {
@@ -90,6 +90,9 @@ class CustomerBusinessCompanyResource(
 
         val extract = registerExtract(node, company)
         val representatives = representatives(company, human, extract)
+        val accountPage = accountPage(company, null)
+            ?: return Response.status(Response.Status.BAD_GATEWAY)
+                .entity(mapOf("error" to "account-service returned an unreadable account page")).build()
         val result = linkedMapOf(
             "partyId" to company,
             "legalName" to text(node, "legalName"),
@@ -99,9 +102,29 @@ class CustomerBusinessCompanyResource(
             "status" to text(node, "status"),
             "representatives" to representatives,
             "signingRule" to extract?.path("representationRule")?.let { text(it, "sourceText") },
-            "accounts" to accounts(company),
+            "accounts" to accountPage.accounts,
+            "accountsPagination" to accountPage.pagination,
         )
         return Response.ok(result).build()
+    }
+
+    @GET
+    @Path("/accounts")
+    @Authorize(action = "customer.business.company.read", resource = "")
+    @Blocking
+    fun companyAccounts(@HeaderParam(ACTING_FOR) actingFor: String?, @QueryParam("cursor") cursor: String?): Response {
+        val company = companyId(human(), actingFor)
+        val page = accountPage(company, cursor)
+            ?: return Response.status(Response.Status.BAD_GATEWAY)
+                .entity(mapOf("error" to "account-service returned an unreadable account page")).build()
+        return Response.ok(mapOf("data" to page.accounts, "pagination" to page.pagination)).build()
+    }
+
+    private fun companyId(human: UUID, actingFor: String?): UUID {
+        if (actingFor.isNullOrBlank()) throw ForbiddenException("X-Acting-For is required for the company profile")
+        val company = actingForResolver.resolve(human, actingFor)
+        if (company == human) throw ForbiddenException("X-Acting-For must name a company, not the customer")
+        return company
     }
 
     private fun representatives(company: UUID, human: UUID, extract: JsonNode?): List<Map<String, Any?>> {
@@ -132,9 +155,12 @@ class CustomerBusinessCompanyResource(
             "SK" -> "SK_ICO"
             else -> return null
         }
-        val body = objectMapper.writeValueAsString(mapOf("scheme" to scheme, "identifier" to number))
+        val encoded = URLEncoder.encode(number, StandardCharsets.UTF_8)
         return try {
-            val response = upstream.post("$kybServiceUrl/api/v1/kyb/lookup", company.toString(), body, null)
+            val response = upstream.get(
+                "$kybServiceUrl/api/v1/kyb/lookup/cached?scheme=$scheme&identifier=$encoded",
+                company.toString(),
+            )
             if (response.status == OK) read(response) else null
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
@@ -144,11 +170,16 @@ class CustomerBusinessCompanyResource(
         }
     }
 
-    private fun accounts(company: UUID): List<Map<String, Any?>> {
-        val node = read(upstream.get("$accountServiceUrl/api/v1/accounts?partyId=$company", company.toString()))
-            ?: return emptyList()
-        val rows = if (node.isArray) node else node.path("data").takeIf { it.isArray } ?: node.path("items")
-        return rows.filter { it.isObject }.map { a ->
+    private data class AccountPage(val accounts: List<Map<String, String?>>, val pagination: JsonNode)
+
+    private fun accountPage(company: UUID, cursor: String?): AccountPage? {
+        val suffix = cursor?.takeIf { it.isNotBlank() }
+            ?.let { "&cursor=${URLEncoder.encode(it, StandardCharsets.UTF_8)}" }.orEmpty()
+        val node = read(upstream.get("$accountServiceUrl/api/v1/accounts?partyId=$company$suffix", company.toString()))
+            ?: return null
+        val rows = node.path("data").takeIf { it.isArray } ?: return null
+        val pagination = node.path("pagination").takeIf { it.isObject } ?: return null
+        val accounts = rows.filter { it.isObject }.map { a ->
             linkedMapOf(
                 "id" to text(a, "id"),
                 "iban" to text(a, "accountNumber"),
@@ -156,6 +187,7 @@ class CustomerBusinessCompanyResource(
                 "product" to text(a, "accountType"),
             )
         }
+        return AccountPage(accounts, pagination)
     }
 
     private fun seat(address: JsonNode?): Map<String, String?>? {
@@ -179,8 +211,6 @@ class CustomerBusinessCompanyResource(
     private fun text(node: JsonNode, field: String): String? =
         node.path(field).takeIf { it.isValueNode && !it.isNull }?.asText()?.takeIf { it.isNotBlank() }
 
-    private fun normalise(name: String) = name.trim().lowercase().replace(Regex("\\s+"), " ")
-
     private fun human(): UUID {
         val claim = CustomerEdgeResource.resolvePartyIdClaim(jwt.getClaim<String>("party_id"), jwt.subject)
             ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
@@ -195,3 +225,5 @@ class CustomerBusinessCompanyResource(
         const val ACTIVE = "ACTIVE"
     }
 }
+
+private fun normalise(name: String) = name.trim().lowercase().replace(Regex("\\s+"), " ")
