@@ -49,7 +49,7 @@ class UboObservationApiIT {
     @Test
     fun `correction HTTP operations and supersession field are declared in OpenAPI`() {
         val spec = YAMLMapper().readTree(checkNotNull(javaClass.getResourceAsStream("/openapi.yaml")))
-        assertThat(spec.at("/info/version").asText()).isEqualTo("1.10.0")
+        assertThat(spec.at("/info/version").asText()).isEqualTo("1.11.0")
         assertThat(
             spec.at("/paths/~1api~1v1~1kyb~1cases~1{id}~1ubo-observations~1{observationId}~1corrections/post")
                 .isMissingNode,
@@ -62,6 +62,9 @@ class UboObservationApiIT {
         ).isFalse()
         assertThat(spec.at("/components/schemas/UboObservation/properties/supersedesObservationId/format").asText())
             .isEqualTo("uuid")
+        val restriction = spec.path("paths")
+            .path("/api/v1/kyb/cases/{id}/ubo-observations/{observationId}/restrict")
+        assertThat(restriction.path("post").path("responses").path("503").isMissingNode).isFalse()
     }
 
     @Test
@@ -130,6 +133,40 @@ class UboObservationApiIT {
 
     @Test
     @TestSecurity(user = "kyb-admin", roles = ["ROLE_ADMIN"])
+    fun `restriction fails closed before source mutation`() {
+        val caseId = UUID.randomUUID()
+        val observationId = UUID.randomUUID()
+        seed(caseId, observationId)
+        access.decisions[caseId] = UboObservationAccessDecision.ALLOWED
+        val restriction = "/api/v1/kyb/cases/$caseId/ubo-observations/$observationId/restrict"
+
+        Given {
+            contentType("application/json")
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
+        } When { post(restriction) } Then { statusCode(403) }
+        access.decisions[caseId] = UboObservationAccessDecision.UNAVAILABLE
+        Given {
+            contentType("application/json")
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
+            body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
+        } When { post(restriction) } Then { statusCode(503) }
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                "SELECT count(*) FROM kyb_ubo_observation_restrictions WHERE observation_id = ?",
+            ).use { statement ->
+                statement.setObject(1, observationId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isZero()
+                }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "kyb-admin", roles = ["ROLE_ADMIN"])
     fun `restriction immediately hides source detail and commits one reference-only event`() {
         val caseId = UUID.randomUUID()
         val observationId = UUID.randomUUID()
@@ -141,11 +178,13 @@ class UboObservationApiIT {
         Given {
             contentType("application/json")
             header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
             body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
         } When { post(restriction) } Then { statusCode(204) }
         Given {
             contentType("application/json")
             header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
             body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
         } When { post(restriction) } Then { statusCode(204) }
         Given {
