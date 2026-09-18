@@ -154,6 +154,14 @@ jobs:
               echo "Dependency-diff API is readable; repeating the full policy review."
               exit 0
             fi
+            # A known installation-quota failure needs a later complete review
+            # after reset; this job must not spend its bounded wait probing the
+            # exhausted quota. Keep the dependency verdict red/unknown.
+            if grep -qi 'API rate limit exceeded for installation' /tmp/dependency-diff.error; then
+              cat /tmp/dependency-diff.error >&2
+              echo "::error title=dependency-review: could not run::GitHub installation API quota is exhausted; dependency review has no verdict."
+              exit 1
+            fi
             echo "Dependency-diff API unavailable; retrying after bounded backoff."
           done
           cat /tmp/dependency-diff.error >&2
