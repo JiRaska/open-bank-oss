@@ -55,6 +55,9 @@ describe('Customer graph live overlay route', () => {
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
       `http://lending-service.lending.svc:8126/api/v1/lending/applications?partyId=${PARTY}&limit=31`,
     )
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `http://notification-service.notifications.svc:8112/api/v1/devices?partyId=${PARTY}&limit=21`,
+    )
     expect(body.unavailable).toEqual([])
     expect(body.truncated).toEqual([])
     expect(body.accounts).toHaveLength(1)

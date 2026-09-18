@@ -54,7 +54,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     read('aml', serverSvcUrl('aml-service', 'aml', 8117, '/api/v1/aml/cases', {
       partyId, limit: String(LIMITS.aml + 1), offset: '0',
     }), bearer),
-    read('devices', serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/devices', { partyId }), bearer),
+    read('devices', serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/devices', {
+      partyId, limit: String(LIMITS.devices + 1),
+    }), bearer),
     read('documents', serverSvcUrl('document-service', 'documents', 8143, '/api/v1/documents', {
       partyRef: partyId, page: '0', size: String(LIMITS.documents + 1),
     }), bearer),
