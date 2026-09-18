@@ -178,7 +178,6 @@ lie about who the customer paid.
 | **I**nfo disclosure | The catalogue becomes a record of where a cardholder was | The table is keyed by acquirer descriptor and holds public business data only — nothing in it is keyed by customer, card or transaction, stated in both `V16__create_merchant_catalog.sql` and the entity KDoc. `GET /unmatched` returns raw descriptors and their counts, never the transactions or accounts they came from |
 | **D**oS | `GET /unmatched` scans the whole transactions table on every operator refresh | `recentDescriptions` is a bounded, ordered window — `scan` is clamped to `MAX_SCAN` (20 000) and page size to `MAX_PAGE_SIZE`, both server-side via `coerceIn`, so a caller cannot widen the query. It lives in `TransactionDescriptorRepository` rather than the domain repository, keeping catalogue curation off the transaction persistence port |
 | **E**oP | A viewer edits the catalogue | Read and write roles are separate: `list`/`unmatched` admit `VIEWER`, `upsert`/`delete` do not, and the OPA action differs too, so a viewer is denied at both layers |
-
 ## 4e. Self-hosted merchant logos — STRIDE supplement
 
 `merchant_logo` stores the logo bitmaps and `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`
@@ -281,6 +280,26 @@ allowlist needs no policy change at all.
 **Rollback:** revert, or simply unset the allowlist — with no hosts configured the endpoint refuses
 every URL and the upload path is unaffected.
 
+## 4h. Customer-set spend categories (#8573) — STRIDE supplement
+
+`TransactionCategoryResource` (`PUT`/`DELETE /api/v1/transactions/{id}/category`,
+`GET /category-overrides`) is a new inbound REST surface. It writes no money and creates no
+transaction, but it decides what a customer's own statement says their spending was, so a bad row
+is the bank misdescribing where the money went.
+
+Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has since taken §4f (per-town locations) and §4g (logo ingest) — both of which landed while this branch was open, so the section number it reserved was already spent twice over.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **S**poofing | An unauthenticated or under-privileged caller writes categories | `@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)` plus OPA `@Authorize(action = "transaction.categorise")`, declared in `rules-opa-data.yaml` so `AUTHZ_ENFORCE=true` fails closed rather than defaulting to allow |
+| **T**ampering | A caller forges a counterparty key and writes a row scoped to a counterparty the customer never dealt with | The key is never accepted as input. The caller names a transaction; the server derives the key through `CounterpartyKey.of`, which is also the only producer used on the read path, so a client cannot address a row it could not reach by reading |
+| **T**ampering | The category is filed against the wrong account on an internal transfer, which touches two | `accountId` is required and checked against the transaction's `sourceAccountId`/`targetAccountId`; a mismatch is a 400. It is deliberately not inferred — only the caller knows which statement it is viewing |
+| **R**epudiation | No record of who set a category | `created_at`/`updated_at` are stamped. **Not** an audit trail: the row carries no actor identity. Recorded as a gap, not claimed as a control |
+| **I**nfo disclosure | One customer reads another's categorisation of their counterparties | Every repository method takes `accountId` and every query filters on it — the account is the only tenancy boundary this table has. `findFor` additionally scopes to the counterparty keys on the page being read |
+| **I**nfo disclosure | The stored category leaks a retired or unrecognised value back to a client | The read path drops values failing `SpendCategory.isKnown`, so a category retired from the shared vocabulary renders as absent rather than as a name no client can display or undo |
+| **D**oS | Unbounded override rows per account | Rows are keyed `(account_id, counterparty_key)`, so an account has at most one row per counterparty it has actually transacted with; there is no path that mints keys without a matching transaction |
+| **E**oP | An M2M service account recategorises a customer's spending | **Not mitigated.** `transaction.categorise` sits in the `ROLE_OPERATOR` matrix, which the shared M2M service account holds, and is declared in `shared_m2m_matrix_write_grants` (#3765). Declaring is an acknowledgement, not a control. No money moves, but the statement's description of the customer's own spending can be changed by a non-human caller. The narrower fix is an identity-scoped rule naming the caller, which does not exist for operator writes fleet-wide |
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -325,6 +344,7 @@ every URL and the upload path is unaffected.
 
 - **2026-09-07** — Merchant logos are stored and served by this service (`merchant_logo`, `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`), and `merchant.logoUrl` became a derived origin-relative path instead of a catalogue-controlled URL (§4e). Two boundaries moved: operator-uploaded binary content that a customer app renders, and a URL clients dereference. The design point is privacy — an external logo host would have learned each customer's IP together with the merchant they paid, every statement render. Uploads are re-encoded rather than stored, which is what refuses SVG/polyglots and strips EXIF; header dimensions are checked before any pixel buffer is allocated. Rollback: revert; the field returns to null and the additive migration can stay or be dropped.
 
+- **2026-09-06** — New inbound REST surface `TransactionCategoryResource`: a customer sets, clears and lists their own spend category, keyed by counterparty rather than by transaction (#8573). New trust boundary crossing, hence §4f. No money path touched and `merchantCategory` keeps its MCC meaning — the resolved value is a new additive field. Two gaps recorded rather than claimed away: the row has no actor identity, and the new action is reachable by the shared M2M service account. Rollback: revert the commit and drop the table (see the migration's Rollback note); the read path falls back to the merchant catalogue, which is what renders today.
 - **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
