@@ -132,6 +132,15 @@ class DrRestoreWorkflowTest(unittest.TestCase):
         grants = [r for r in roles[0]['rules'] if 'networkpolicies' in r['resources']]
         self.assertEqual(grants, [{'apiGroups': ['networking.k8s.io'], 'resources': ['networkpolicies'], 'resourceNames': ['ledger-dr-check-isolation'], 'verbs': ['get']}])
 
+    def test_check_workload_disables_background_database_mutations(self):
+        template = ROOT / 'openbank-infra/gitops/dr-restore-templates/ledger-service-dr-check.yaml.tmpl'
+        pod = yaml.safe_load(template.read_text())['spec']['template']['spec']
+        env = {item['name']: item.get('value') for item in pod['containers'][0]['env']}
+        for name in ('QUARKUS_SCHEDULER_ENABLED', 'OPENBANK_OUTBOX_DISPATCH_ENABLED',
+                     'QUARKUS_FLYWAY_MIGRATE_AT_START'):
+            with self.subTest(setting=name):
+                self.assertEqual(env.get(name), 'false')
+
     def test_recovery_uses_source_archive_and_application_identity(self):
         templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
         source = next(d for d in yaml.safe_load_all(

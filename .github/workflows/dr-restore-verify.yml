@@ -4,8 +4,8 @@
 # internally consistent (double-entry invariant holds) — not just that the S3 archive is
 # reachable, which is all the table-top exercises confirm today.
 #
-# It restores ledger-db into a THROWAWAY namespace, boots ledger-service against it (no
-# Kafka, no OIDC), asserts GET /api/v1/ledger/close/trial-balance returns balanced:true,
+# It restores ledger-db into a THROWAWAY namespace, boots ledger-service against it,
+# asserts GET /api/v1/ledger/close/trial-balance returns balanced:true,
 # records elapsed restore/check time and tears the namespace down. This does not yet
 # measure RPO or prove cross-service recovery consistency.
 #

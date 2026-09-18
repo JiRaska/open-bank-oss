@@ -18,9 +18,12 @@ The template creates a Deployment, with no Service. The workflow forwards direct
 to that Deployment. It reads the image from the existing ledger Rollout and waits for
 both the restored database and check workload before requesting the trial balance.
 
-The Deployment disables outbox dispatch, OIDC and Flyway startup migration. These
-settings express an intent; they do not remove Kafka connectors, Redis health checks,
-other schedulers, endpoint role checks or outbound clients from the image. Before a
+The Deployment disables all Quarkus scheduled jobs, outbox dispatch, OIDC and Flyway
+startup migration. These settings do not remove Kafka connectors, Redis health checks,
+endpoint role checks or outbound clients from the image. Disabling the OIDC tenant
+does not make the trial-balance endpoint anonymous: isolated authentication remains
+a prerequisite. Scheduler shutdown prevents scheduled mutations, but is not a
+database read-only permission boundary. Before a
 live drill, verify the actual image's startup requirements and enforce network and
 write isolation. Do not add live credentials just to turn a failed probe green.
 The workflow's `balanced` assertion and elapsed time do not measure RPO or prove

@@ -52,8 +52,13 @@ spec:
             # other connectors or clients; the separate NetworkPolicy limits egress.
             - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
               value: "false"
-            # No live Keycloak in a throwaway namespace; the drill calls only the
-            # read-only trial-balance endpoint, which does not need auth for this check.
+            # Stop accounting-day, partition maintenance, FX and tie-out jobs too;
+            # disabling outbox dispatch alone does not prevent scheduled writes.
+            - name: QUARKUS_SCHEDULER_ENABLED
+              value: "false"
+            # No live Keycloak in a throwaway namespace. Disabling this tenant does
+            # not bypass endpoint roles: an isolated authentication path is still
+            # required before the trial-balance request can succeed.
             - name: QUARKUS_OIDC_TENANT_ENABLED
               value: "false"
             # Flyway must NOT run here: this is already-migrated restored data, and a
