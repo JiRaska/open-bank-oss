@@ -114,7 +114,11 @@ while IFS= read -r pin; do
     lagging+=("${epoch}	$svc")
   fi
 done < <(
-  grep -rhoE 'openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' "$GITOPS_ROOT" 2>/dev/null \
+  # Only YAML image fields are deployed pins. Searching arbitrary text also picks up
+  # historical tags in policy comments and re-drives that service every tick (#8690).
+  grep -rhE '^[[:space:]]*image:[[:space:]]*[^#[:space:]]*openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' \
+    "$GITOPS_ROOT" 2>/dev/null \
+    | grep -oE 'openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' \
     | sort -u
 )
 

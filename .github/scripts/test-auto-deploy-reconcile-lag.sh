@@ -97,6 +97,9 @@ fi
 cat > gitops/deploy.yaml <<EOF
 image: repo/openbank-current-svc:sandbox-${TIP}-run32826611610
 image: repo/openbank-stale-svc:sandbox-${TIP}
+# Incident notes may mention a former image tag. They are not deployed images and must
+# never re-drive a service on every schedule tick.
+# formerly openbank-stale-svc:sandbox-${C0}
 EOF
 GOT2="$(bash "$PROBE" "$WORK/gitops")"
 if [ "$(echo "$GOT2" | jq -c .)" != "[]" ]; then
