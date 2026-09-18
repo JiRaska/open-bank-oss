@@ -40,7 +40,11 @@ class ContextAuditCommitmentIT {
 
         assertThat(onEventLoop { repository.findByAggregateId(id.toString()) }.map { it.id })
             .containsExactly(id)
-        assertThat(onEventLoop { repository.verifyChain().intact }).isTrue()
+        val verification = onEventLoop { repository.verifyChain(fromEntryId = id) }
+        assertThat(verification.intact)
+            .describedAs("commitment chain link must verify (broken: %s)", verification.firstBrokenEntryId)
+            .isTrue()
+        assertThat(verification.checked).isGreaterThanOrEqualTo(1)
         assertThatThrownBy {
             onEventLoop { consumer.persist(commitment(id, "b".repeat(64))) }
         }.isInstanceOf(IllegalArgumentException::class.java)
