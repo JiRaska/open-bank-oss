@@ -51,12 +51,14 @@ export function ContextAssignmentAdministration() {
   async function propose(event: FormEvent) {
     event.preventDefault(); setMessage(null); setBusy('propose')
     try {
-      if (purpose === 'AML_INVESTIGATION' && !AUTHORITY_UUID.test(caseId.trim())) throw new Error('Invalid AML case UUID')
-      const proposedCaseId = purpose === 'AML_INVESTIGATION' ? caseId.trim().toLowerCase() : caseId.trim()
+      const sourceCase = ['AML_INVESTIGATION', 'KYB_OWNERSHIP_REVIEW', 'FRAUD_INVESTIGATION'].includes(purpose)
+      if (sourceCase && !AUTHORITY_UUID.test(caseId.trim())) throw new Error('Invalid source case UUID')
+      const proposedCaseId = sourceCase ? caseId.trim().toLowerCase() : caseId.trim()
+      const sourcePrefix = purpose === 'FRAUD_INVESTIGATION' ? 'fraud-case:' : purpose === 'KYB_OWNERSHIP_REVIEW' ? 'kyb-case:' : 'aml-case:'
       const validTo = new Date(Date.now() + Math.min(Math.max(hours, 1), 24 * 31) * 3_600_000).toISOString()
       const response = await fetch('/api/context/assignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ principalId: principalId.trim(), caseId: proposedCaseId, purpose, validTo, rootRef: purpose === 'AML_INVESTIGATION' ? `aml-case:${proposedCaseId}` : rootRef.trim() }),
+        body: JSON.stringify({ principalId: principalId.trim(), caseId: proposedCaseId, purpose, validTo, rootRef: sourceCase ? `${sourcePrefix}${proposedCaseId}` : rootRef.trim() }),
       })
       if (!response.ok) throw new Error('proposal rejected')
       setPrincipalId(''); setCaseId(''); setMessage(t('Návrh čeká na nezávislé schválení.', 'The proposal awaits independent approval.')); await load()
@@ -92,10 +94,10 @@ export function ContextAssignmentAdministration() {
     <form onSubmit={propose} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 8 }}>
       <input required className="input" value={principalId} onChange={e => setPrincipalId(e.target.value)} placeholder={t('Uživatel', 'Principal')} aria-label={t('Uživatel', 'Principal')} />
       <input required className="input" value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
-      <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option><option>AUTHORIZATION_REVIEW</option><option>AML_INVESTIGATION</option></select>
+      <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option><option>AUTHORIZATION_REVIEW</option><option>AML_INVESTIGATION</option><option>KYB_OWNERSHIP_REVIEW</option><option>FRAUD_INVESTIGATION</option></select>
       <input className="input" type="number" min={1} max={744} value={hours} onChange={e => setHours(Number(e.target.value))} aria-label={t('Platnost v hodinách', 'Validity in hours')} />
-      {purpose !== 'AML_INVESTIGATION' && <input className="input" required value={rootRef} onChange={e => setRootRef(e.target.value)} aria-label={t('Schvalovaný objekt', 'Approved root')} placeholder={purpose === 'AUTHORIZATION_REVIEW' ? 'delegation:UUID' : purpose === 'INCIDENT_IMPACT' ? 'incident:UUID' : 'complaint:reference'} />}
-      {purpose === 'AML_INVESTIGATION' && <input className="input" readOnly value={caseId.trim() ? `aml-case:${caseId.trim().toLowerCase()}` : ''} aria-label={t('Schvalovaný objekt AML', 'Approved AML root')} placeholder="aml-case:UUID" />}
+      {!['AML_INVESTIGATION', 'KYB_OWNERSHIP_REVIEW', 'FRAUD_INVESTIGATION'].includes(purpose) && <input className="input" required value={rootRef} onChange={e => setRootRef(e.target.value)} aria-label={t('Schvalovaný objekt', 'Approved root')} placeholder={purpose === 'AUTHORIZATION_REVIEW' ? 'delegation:UUID' : purpose === 'INCIDENT_IMPACT' ? 'incident:UUID' : 'complaint:reference'} />}
+      {['AML_INVESTIGATION', 'KYB_OWNERSHIP_REVIEW', 'FRAUD_INVESTIGATION'].includes(purpose) && <input className="input" readOnly value={caseId.trim() ? `${purpose === 'FRAUD_INVESTIGATION' ? 'fraud-case:' : purpose === 'KYB_OWNERSHIP_REVIEW' ? 'kyb-case:' : 'aml-case:'}${caseId.trim().toLowerCase()}` : ''} aria-label={t('Schvalovaný objekt', 'Approved root')} placeholder="case:UUID" />}
       <button className="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'propose'}>{busy === 'propose' ? t('Ukládám…', 'Saving…') : t('Navrhnout', 'Propose')}</button>
     </form>
     {message && <p role="status">{message}</p>}

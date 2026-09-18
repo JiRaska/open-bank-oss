@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.9.1
+  version: 1.10.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/fraud-cases/{caseId}/network:
@@ -400,7 +400,7 @@ components:
         rootRef:
           type: [string, "null"]
           maxLength: 300
-          description: Required exact root for every purpose — delegation:UUID, aml-case:UUID, kyb-case:UUID, incident:UUID or complaint:reference. An old unscoped assignment never authorizes a graph read.
+          description: Required exact root for every purpose — delegation:UUID, aml-case:UUID, kyb-case:UUID, fraud-case:UUID, incident:UUID or complaint:reference. An old unscoped assignment never authorizes a graph read.
     DecideAssignment:
       type: object
       required: [approve]

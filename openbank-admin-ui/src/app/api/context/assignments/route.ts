@@ -49,6 +49,11 @@ function validProposal(value: unknown): value is Record<string, unknown> {
       ? typeof body.caseId === 'string' && AUTHORITY_UUID.test(body.caseId) &&
         typeof body.rootRef === 'string' && body.rootRef.startsWith('aml-case:') &&
         AUTHORITY_UUID.test(body.rootRef.slice(9)) && body.rootRef.slice(9).toLowerCase() === body.caseId.toLowerCase()
+      : body.purpose === 'FRAUD_INVESTIGATION' || body.purpose === 'KYB_OWNERSHIP_REVIEW'
+        ? typeof body.caseId === 'string' && AUTHORITY_UUID.test(body.caseId) &&
+          typeof body.rootRef === 'string' && body.rootRef.startsWith(body.purpose === 'FRAUD_INVESTIGATION' ? 'fraud-case:' : 'kyb-case:') &&
+          AUTHORITY_UUID.test(body.rootRef.slice(body.purpose === 'FRAUD_INVESTIGATION' ? 11 : 9)) &&
+          body.rootRef.slice(body.purpose === 'FRAUD_INVESTIGATION' ? 11 : 9).toLowerCase() === body.caseId.toLowerCase()
       : body.purpose === 'INCIDENT_IMPACT'
         ? typeof body.rootRef === 'string' && body.rootRef.startsWith('incident:') && AUTHORITY_UUID.test(body.rootRef.slice(9))
         : body.purpose === 'PAYMENT_COMPLAINT'

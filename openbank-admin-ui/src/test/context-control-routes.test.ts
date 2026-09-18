@@ -49,6 +49,26 @@ describe('context graph control BFFs', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('accepts only exact Fraud case assignment roots', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'p-1' }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { POST } = await import('@/app/api/context/assignments/route')
+    const base = { principalId: 'analyst-1', caseId: '11111111-1111-4111-8111-111111111111',
+      purpose: 'FRAUD_INVESTIGATION', validTo: '2026-09-14T10:00:00Z' }
+    for (const rootRef of [undefined, 'fraud-case:22222222-2222-4222-8222-222222222222', 'aml-case:11111111-1111-4111-8111-111111111111']) {
+      const request = new NextRequest('http://localhost/api/context/assignments', {
+        method: 'POST', body: JSON.stringify({ ...base, rootRef }),
+      })
+      expect((await POST(request)).status).toBe(400)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+    const valid = new NextRequest('http://localhost/api/context/assignments', {
+      method: 'POST', body: JSON.stringify({ ...base, rootRef: `fraud-case:${base.caseId}` }),
+    })
+    expect((await POST(valid)).status).toBe(201)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('relays only aggregate incident impact and investigation headers', async () => {
     vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'operator-token', roles: ['ROLE_OPERATOR'] } } as never)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ affectedByType: { SERVICE: 2 }, total: 2, drilldownAvailable: false }), { status: 200 })))
