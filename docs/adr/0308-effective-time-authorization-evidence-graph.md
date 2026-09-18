@@ -94,6 +94,40 @@ to the fleet tamper-evident audit chain.
 Export to the fleet tamper-evident audit store and historical authorization evidence ingestion remain,
 so this ADR stays `partial`.
 
+### Remaining P0 audit-delivery contract
+
+The current `ALLOWED` row records a successful *access decision before the read*. It does not
+establish that any evidence was returned. Before an investigative lens is declared complete,
+Context must append a separate disclosure outcome after materializing the bounded response and
+before sending it to the caller. That outcome records the projection generation, normalized
+query hash, returned evidence references/count and whether the response was truncated. Failure
+to persist the disclosure outcome suppresses the response; a source timeout or failed query must
+never be reported as a successful disclosure. Historical decision evidence from the source
+enforcement point remains a distinct record, not an inference from either read-audit row.
+
+Context will write each read-audit row and its export outbox entry in one database transaction.
+The outbox carries only a schema version, random audit event ID, occurrence time and SHA-256
+commitment over a canonical, length-delimited representation of the complete local row, including
+the random ID. It carries no investigator, customer, case, root or evidence reference in clear
+text. Re-delivery keeps the same event ID and commitment. A dedicated Kafka topic allows Context
+to write and Audit to read; neither the legacy best-effort `AuditConsumer` nor its shared topic
+qualifies because they acknowledge persistence failures. A dedicated Audit consumer must validate
+the version and digest format, persist idempotently into the hash-chained, anchored audit store,
+and acknowledge only after commit. Its own DLQ, retention, Kafka ACLs and lag/backlog alerts are
+part of the delivery, including an alarm on any DLQ record. A poisoned commitment is quarantined
+for investigation, never silently treated as exported.
+
+The local row remains the only place holding the restricted detail. An authorized, purpose-bound
+verification operation can recompute its commitment by audit event ID and compare it with the
+anchored fleet record; a mismatch or a local row without a fleet record is a finding. Periodic
+reconciliation compares committed local IDs with centrally stored IDs, so a lost or stalled relay
+cannot appear healthy merely because requests still return. Context read latency depends on the
+local atomic insert, not Kafka or Audit availability, while bounded outbox age and central
+verification are release gates. Measure that insert at populated 1× and 10× load together with
+payment-path p95 before enabling a real-data lens. Rollback disables new sensitive reads and the
+relay while retaining both append-only stores and pending outbox rows; it does not delete an
+audit trail or treat an unexported commitment as exported.
+
 ### Source delegation history and root-scoped review
 
 The authority-history lens consumes the existing versioned delegation lifecycle stream and
