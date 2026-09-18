@@ -22,6 +22,10 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 - Caller (operator / in-cluster service, OIDC bearer, `ROLE_OPERATOR`/`ROLE_ADMIN`/service token) →
   document-service REST.
 - document-service → object store (phase-1 Postgres BYTEA; phase-2 S3 + Object Lock/WORM, ADR-0161).
+- **Lending guarantee proof → document-service:** a dedicated service account may ask only whether
+  one signed, sealed document matches a loan, guarantor, bank and SHA-256. The response contains
+  one boolean and no metadata or bytes. This path is dormant until its separate credential is
+  provisioned; the shared backend account is denied even while OPA is advisory.
 - document-service → render adapters (phase-1 in-process placeholder; phase-2 WeasyPrint/Gotenberg
   sidecar over REST, ADR-0162) — a **new** egress trust boundary when the sidecar lands.
 - document-service → seal adapter (phase-1 no-op; phase-2 EU DSS PAdES with a QSeal/HSM key,
@@ -54,6 +58,7 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 | **Tampering — SSTI / XSS via template + data** | The phase-1 renderer is logic-less `{{token}}` substitution (regex only, no engine), and substituted values are HTML-escaped. Production Handlebars/Qute adapter (ADR-0162) must stay logic-less and sandboxed behind the same port. |
 | **Repudiation** | Lifecycle transitions emit domain events to the outbox → audit pipeline; phase-2 PAdES sealing makes the signed artifact independently verifiable (non-repudiation). Ceremony records each signer's decision + timestamp. |
 | **Information disclosure** | Content is `restricted`-class; access is role-gated; no PII in logs (JSON console, no body logging). Content bytes are served only via an authenticated `/{id}/content` endpoint. Phase-2 pre-signed URLs must be short-lived and scoped. |
+| **Cross-bank or unsealed guarantee evidence** | The proof endpoint compares a server-owned, immutable `documents.bank_scope` column, post-seal SHA-256, `SIGNED` status, loan `caseRef` and guarantor `partyRef`. Pre-migration documents retain a null scope and fail closed; caller-supplied JSON metadata is never bank authority. OPA and the handler both restrict the endpoint to the dedicated Lending graph principal; mismatch and missing document return the same boolean false. |
 | **Denial of service** | Rendering is bounded and event-driven, off the money path; platform rate-limit (`openbank.rate-limit`, 200 concurrent). The PDF/seal sidecars (phase-2) need their own timeouts + bulkheads at the port. |
 | **Elevation / cluster pivot** | Restricted PSS, non-root, OPA authz (`@Authorize`, advisory→enforce, ADR-0034); egress NetworkPolicy allowlists only Postgres, Kafka, OIDC, OPA (and, in phase-2, the render sidecar + KMS/HSM). |
 
@@ -68,6 +73,8 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 - **QUALIFIED signature level** is declared but phase-2 — the QES/QSCD path is not implemented.
 - **10-year retention enforcement** (`retainUntil`) is captured as metadata but not yet enforced by a
   retention/erasure job — a tracked follow-up.
+- **Lending graph rollout:** the dedicated Keycloak client, its secret projection, the Lending
+  writer and source recheck are not yet provisioned. This API alone must not create a Context edge.
 
 ## Change log
 

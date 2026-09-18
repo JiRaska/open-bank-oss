@@ -42,3 +42,17 @@ prohibited if {
 	input.principal.id == "service-account-openbank-edge"
 	input.action in business_agreement_actions
 }
+
+# Lending's guarantee proof is a boolean check on a signed, case-bound document.
+# The shared backend credential and every staff/edge principal are excluded. The
+# handler repeats this exact-principal check while AUTHZ_ENFORCE is still advisory.
+allowed_reasons contains "service-lending-guarantee-proof" if {
+    input.principal.id == "service-account-openbank-lending-graph"
+    "ROLE_API" in input.principal.roles
+    input.action == "document.guaranteeEvidence.verify"
+}
+
+prohibited if {
+    input.action == "document.guaranteeEvidence.verify"
+    input.principal.id != "service-account-openbank-lending-graph"
+}

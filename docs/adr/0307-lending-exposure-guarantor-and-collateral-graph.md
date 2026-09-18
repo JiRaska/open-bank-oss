@@ -154,14 +154,21 @@ fails closed; it is not converted into a graph fact. The document check must
 compare `documentId`, expected SHA-256, case/loan reference and bank scope in
 one purpose-limited operation, returning only a match decision. Lending must
 not use the generic document metadata/content endpoints for this check: they
-disclose more than the decision needs, and the current
-shared backend client does not identify Lending uniquely. Provision a dedicated
-Lending service identity and allow only this action in the Document policy;
-Document must resolve the bank of the case through its authoritative owner
-because its current metadata row has no bank-scope field;
-keep the document bytes and free text out of the graph event. The fact's
+disclose more than the decision needs, and the current shared backend client
+does not identify Lending uniquely. Provision a dedicated Lending service
+identity and allow only this action in the Document policy. Document compares
+its server-assigned `documents.bank_scope` (nullable for pre-migration rows),
+while Lending independently verifies the loan's bank. Keep the document bytes
+and free text out of the graph event. The fact's
 `source_sha256` pins the exact document version the checker verified, so a
 later document change does not retroactively alter what the checker saw.
+For a guarantee, the dedicated boolean proof endpoint checks a `SIGNED`
+document's post-seal SHA-256, the loan `caseRef`, guarantor `partyRef` and bank
+scope. Old documents with a null bank scope fail closed; JSON metadata is never
+used as bank authority. The endpoint remains unusable in a deployment until
+the separate `openbank-lending-graph` client is provisioned and its secret is
+available to Lending. Neither that client nor a Lending writer exists in the
+schema-only stage.
 
 Approval then rechecks current source state in the same logical decision flow
 and emits the versioned, reference-only event through Lending's transactional

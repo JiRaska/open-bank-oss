@@ -40,6 +40,9 @@ data class Document(
     // [sha256] stays the digest the signers approved (the SCA dynamic-linking value); sealing
     // rewrites the stored PDF, so the two differ for every signed document. Null until sealed.
     val sealedSha256: String? = null,
+    // Null for pre-V13 documents. Only DocumentRenderService assigns this from deployment
+    // configuration; historical caller-supplied metadata must never be trusted as a bank proof.
+    val bankScope: String? = null,
 ) {
     fun markPendingSignature(): Document {
         require(status == DocumentStatus.GENERATED) { "Only GENERATED documents can enter signing" }
