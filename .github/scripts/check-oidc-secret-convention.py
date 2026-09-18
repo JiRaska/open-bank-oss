@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""One OIDC client secret, one KV key: every ExternalSecret must read it from `account-service`.
+"""One KV key per real OIDC client: the shared fleet client reads `account-service`.
 
-WHY THIS IS A GATE AND NOT A COMMENT. Every service in the fleet authenticates as the SAME
-Keycloak confidential client, `openbank-services` -- verified by reading `quarkus.oidc.client-id`
-out of each service's own application.yaml, where it is the literal `openbank-services` (anacredit
-writes it as `${QUARKUS_OIDC_CLIENT_ID:openbank-services}`, same value). There is no dedicated
-realm client behind any per-service KV key, so the key NAME carries no meaning at all: it is pure
-storage convention, and the two conventions in the tree are indistinguishable to a reader.
+WHY THIS IS A GATE AND NOT A COMMENT. The fleet's shared service client is
+`openbank-services`; a per-service KV key for that same client changes no identity and can
+silently point to a missing credential. Context investigation is the explicit exception: it
+has a separate Keycloak client, service-account principal and narrowly scoped role.
 
 Getting it wrong is silent and expensive. `openbank-delegation-service` shipped with
 `remoteRef.key: delegation-service`, an entry nobody had ever written. ESO answered
@@ -20,11 +18,10 @@ and `gitops_ref_integrity` is satisfied because the ExternalSecret DOES declare 
 just never materialises. The defect lives one layer further out, in the KV key the ref names.
 
 THE RULE (rules.yaml: oidc_secret_convention). Under `openbank-infra/gitops/components/`, an
-ExternalSecret data entry that projects the OIDC client secret -- `remoteRef.property` or
-`secretKey` equal to `OIDC_CLIENT_SECRET` -- must use `remoteRef.key: account-service`. That is
-the entry 28 of today's 38 already read and the only one demonstrably populated (28 live
-consumers). A per-service key requires a KV write nobody is prompted to make, which is exactly
-the step that was skipped.
+ExternalSecret data entry that projects the shared OIDC client secret -- `remoteRef.property` or
+`secretKey` equal to `OIDC_CLIENT_SECRET` -- must use `remoteRef.key: account-service`, except
+for the exact dedicated Context investigation projection. An arbitrary per-service key requires
+a KV write nobody is prompted to make, which is exactly the step that was skipped.
 
 BASELINE IS NOW EMPTY, and the reason is a measurement rather than a decision. #3485 froze the
 10 per-service entries because "this repo cannot see what those KV entries hold", and the stated
@@ -44,12 +41,17 @@ The baseline stays SHRINK-ONLY and empty. A stale entry (one that no longer viol
 too, so a later migration cannot leave a dead exemption behind, and a new service cannot join the
 losing side quietly.
 
+Context investigation uses a separate Keycloak confidential client with its own service account
+and role. Its exact ExternalSecret path and KV key are allowed below. This is not evidence that
+the KV secret has been seeded: rollout must prove ExternalSecret readiness and a real token exchange.
+
 Run standalone:  .github/scripts/check-oidc-secret-convention.py [--enforce]
 Self-test:       .github/scripts/check-oidc-secret-convention.py --self-test
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -62,6 +64,13 @@ COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
 
 SECRET_FIELD = "OIDC_CLIENT_SECRET"
 SHARED_KEY = "account-service"
+# A separate Keycloak client, rather than another copy of openbank-services. Keep this
+# exception exact: arbitrary per-service KV keys remain a deployment failure.
+DEDICATED_CLIENT_KEYS = {
+    "context/external-secret-investigation-oidc.yaml": "context-investigation-service",
+}
+DEDICATED_CLIENT = "openbank-context-investigation"
+DEDICATED_ROLE = "ROLE_CONTEXT_INVESTIGATION"
 
 # path relative to gitops/components  ->  the KV key it reads.
 # EMPTY, and it must stay that way. SHRINK-ONLY: an entry may only be removed, never added.
@@ -104,16 +113,16 @@ def classify(found, baseline: dict[str, str] | None = None):
     violations, conforming = [], 0
     still_violating: set[str] = set()
     for rel, key in found:
-        if key == SHARED_KEY:
+        if key == SHARED_KEY or DEDICATED_CLIENT_KEYS.get(rel) == key:
             conforming += 1
             continue
         if baseline.get(rel) == key:
             still_violating.add(rel)
             continue
         violations.append(
-            f"{rel}: OIDC_CLIENT_SECRET is read from remoteRef.key `{key}`. Every service "
-            f"authenticates as the same Keycloak client `openbank-services`, so the shared KV "
-            f"entry `{SHARED_KEY}` is the convention (rules.yaml: oidc_secret_convention). A "
+            f"{rel}: OIDC_CLIENT_SECRET is read from remoteRef.key `{key}`. Shared-client services "
+            f"authenticate as `openbank-services`, so the shared KV entry `{SHARED_KEY}` is "
+            f"required (rules.yaml: oidc_secret_convention). A "
             f"per-service key needs a KV write nobody prompts you for; when it is missing ESO "
             f"answers `Secret does not exist`, the Secret is never created and the pod sits in "
             f"CreateContainerConfigError (#3471)."
@@ -141,7 +150,32 @@ def audit() -> tuple[list[str], list[str], int, int]:
         for doc in docs:
             found += entries_in(doc, rel)
     violations, stale, conforming = classify(found)
+    violations.extend(dedicated_client_contract())
     return violations, stale, conforming, scanned
+
+
+def dedicated_client_contract() -> list[str]:
+    """The key exception must describe a real, isolated client and exact projection."""
+    rel, key = next(iter(DEDICATED_CLIENT_KEYS.items()))
+    manifest = yaml.safe_load((COMPONENTS / rel).read_text())
+    realm = json.loads((COMPONENTS / "keycloak/realm-template.json").read_text())
+    entries = (manifest.get("spec") or {}).get("data") or []
+    expected = {"secretKey": "CONTEXT_INVESTIGATION_CLIENT_SECRET",
+                "remoteRef": {"key": key, "property": SECRET_FIELD}}
+    clients = [client for client in realm.get("clients", [])
+               if client.get("clientId") == DEDICATED_CLIENT]
+    accounts = [user for user in realm.get("users", [])
+                if user.get("serviceAccountClientId") == DEDICATED_CLIENT]
+    problems = []
+    if manifest.get("metadata", {}).get("name") != "context-investigation-oidc" or entries != [expected]:
+        problems.append(f"{rel}: dedicated secret projection no longer matches its exact contract")
+    if len(clients) != 1 or not all((clients[0].get("serviceAccountsEnabled") is True,
+                                    clients[0].get("publicClient") is False,
+                                    clients[0].get("secret") == "__CONTEXT_INVESTIGATION_CLIENT_SECRET__")):
+        problems.append("Keycloak Context investigation client is missing or is not confidential")
+    if len(accounts) != 1 or accounts[0].get("realmRoles") != [DEDICATED_ROLE]:
+        problems.append("Keycloak Context investigation service account must have only its dedicated role")
+    return problems
 
 
 def _es(key: str, *, prop: str | None = SECRET_FIELD, secret_key: str = SECRET_FIELD) -> dict:
@@ -166,6 +200,15 @@ def self_test() -> int:
          [("delegation/oidc-externalsecret.yaml", "delegation-service")], 1, len(SYNTH)),
         ("the shared key passes",
          [("delegation/oidc-externalsecret.yaml", SHARED_KEY)], 0, len(SYNTH)),
+        ("the dedicated Context investigation client passes only at its declared path",
+         [("context/external-secret-investigation-oidc.yaml", "context-investigation-service")],
+         0, len(SYNTH)),
+        ("the dedicated key elsewhere is rejected",
+         [("delegation/oidc-externalsecret.yaml", "context-investigation-service")],
+         1, len(SYNTH)),
+        ("a different key at the dedicated path is rejected",
+         [("context/external-secret-investigation-oidc.yaml", "unseeded-key")],
+         1, len(SYNTH)),
         ("a baselined entry is exempt, and not reported stale",
          [a_baselined], 0, len(SYNTH) - 1),
         ("a baselined path that MIGRATED is reported stale",
@@ -211,9 +254,12 @@ def self_test() -> int:
     failed += not scope_ok
     print(f"  {'PASS' if scope_ok else 'FAIL'}  scope: walked {scanned} manifest(s) under "
           f"gitops/components and found {total} OIDC_CLIENT_SECRET projection(s) "
-          f"({conforming} on `{SHARED_KEY}`, {len(BASELINE)} baselined)")
+          f"({conforming} conforming, {len(BASELINE)} baselined)")
+    contract = dedicated_client_contract()
+    failed += bool(contract)
+    print(f"  {'PASS' if not contract else 'FAIL'}  dedicated client contract")
 
-    n = len(cases) + len(parse_cases) + 1
+    n = len(cases) + len(parse_cases) + 2
     print(f"self-test: {n - failed}/{n} passed")
     return 1 if failed else 0
 
@@ -223,14 +269,15 @@ def main() -> int:
         return self_test()
     enforce = "--enforce" in sys.argv
     violations, stale, conforming, scanned = audit()
-    total = conforming + len(BASELINE) - len(stale) + len(violations)
+    total = conforming + len(BASELINE) - len(stale)
     print(f"check-oidc-secret-convention: walked {scanned} manifest(s) under "
           f"gitops/components; {total} OIDC_CLIENT_SECRET projection(s) "
-          f"({conforming} on `{SHARED_KEY}`, {len(BASELINE) - len(stale)} baselined).")
+          f"({conforming} conforming, {len(BASELINE) - len(stale)} baselined).")
     findings = violations + stale
     if not findings:
-        print("check-oidc-secret-convention: OK — every non-baselined projection reads "
-              f"`{SHARED_KEY}`, and the baseline is exact.")
+        print("check-oidc-secret-convention: OK — shared-client projections use "
+              f"`{SHARED_KEY}`, the dedicated client uses its exact declared key, "
+              "and the baseline is exact.")
         return 0
     for f in findings:
         print(f"{'::error::' if enforce else '::warning::'}{f}")
