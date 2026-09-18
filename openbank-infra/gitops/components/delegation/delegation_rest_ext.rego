@@ -95,6 +95,7 @@ allowed_reasons contains "edge-service-delegation" if {
 		"delegation.revoke",
         "delegation.disclosure.prepare",
         "delegation.disclosure.read",
+        "delegation.disclosure.manage",
 		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
 		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
 		# any handler whose claimed party differs from it, so these carry no more authority than

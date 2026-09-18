@@ -24,6 +24,48 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET disclosure snapshot content with the wrong pinned digest",
+      "providerStates": [
+        {
+          "name": "an immutable disclosure snapshot exists but the supplied digest is wrong"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Expected-SHA256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "method": "GET",
+        "path": "/api/v1/documents/disclosure-snapshots/99999999-aaaa-4bbb-8ccc-dddddddddddd/content"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
+      "description": "GET exact disclosure snapshot content with its pinned digest",
+      "providerStates": [
+        {
+          "name": "an immutable disclosure snapshot with the expected digest exists"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Expected-SHA256": "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
+        },
+        "method": "GET",
+        "path": "/api/v1/documents/disclosure-snapshots/99999999-aaaa-4bbb-8ccc-dddddddddddd/content"
+      },
+      "response": {
+        "body": "JVBERi0xLjcgc2VhbGVkIGRpc2Nsb3N1cmU=",
+        "headers": {
+          "Cache-Control": "private, no-store",
+          "Content-Type": "application/pdf",
+          "ETag": "\"397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399\""
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {

@@ -14,9 +14,11 @@ import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
@@ -82,6 +84,14 @@ interface DocumentServiceRestClient {
     @GET
     @Path("/{id}")
     suspend fun getDocument(@PathParam("id") id: UUID): DocumentOwnerResponse
+
+    @GET
+    @Path("/disclosure-snapshots/{id}/content")
+    @Produces("application/pdf")
+    suspend fun getDisclosureSnapshotContent(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Expected-SHA256") expectedSha256: String,
+    ): ByteArray
 }
 
 /**

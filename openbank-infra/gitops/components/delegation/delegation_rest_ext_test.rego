@@ -117,6 +117,20 @@ test_edge_may_revoke if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.revoke"}
 }
 
+test_edge_may_manage_disclosure_redemption if {
+	"edge-service-delegation" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "delegation.disclosure.manage",
+	}
+}
+
+test_shared_backend_may_not_manage_disclosure_redemption if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": services_m2m,
+		"action": "delegation.disclosure.manage",
+	}
+}
+
 test_edge_may_manage_its_customer_approval_groups if {
 	"edge-service-delegation" in allowed_reasons with input as {
 		"principal": edge,

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "6f6bd3ab70f1ecc0"
+    openbank.tech/policy-checksum: "eabf62f4d81c930c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -640,6 +640,7 @@ data:
     		"delegation.revoke",
             "delegation.disclosure.prepare",
             "delegation.disclosure.read",
+            "delegation.disclosure.manage",
     		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
     		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
     		# any handler whose claimed party differs from it, so these carry no more authority than
