@@ -149,6 +149,27 @@ operations and may invalidate pending ones under an explicit policy, but never r
 evidence. This keeps legal authority, customer workflow and execution evidence separate while
 scaling from sole traders through SMEs to corporate groups.
 
+The snapshot is a **conjunction of requirement clauses**, not one flattened N-of-M count.
+For an entity payment, the statutory clause captures the eligible active signatories, their
+mandate references and the exact register threshold. An optional employee clause captures one
+owner-assigned approval group's id, revision, member roster and threshold. Every clause must be
+satisfied by distinct human decisions bound by SCA to the immutable payment instruction and
+snapshot version; the proposal maker's decision cannot count. A person eligible in both clauses
+may appear in both rosters, but one decision never counts as two people within either clause.
+For a personal owner without an entity mandate, the owner-SCA clause replaces the statutory
+clause. Unknown historical `JOINT` thresholds, missing eligibility evidence, or a quorum left
+impossible after excluding the maker refuse opening the operation; no threshold is guessed.
+
+Group selection is explicit governance, not a list-order convention: an SCA-authorised owner
+assigns at most one active group to a resource and operation class. The assignment is versioned
+separately from the group's roster, so a new proposal can resolve exactly which revision to
+snapshot while old evidence remains unchanged. An unassigned resource has no employee clause;
+the mere existence of a group never silently attaches it to every account. Revoking a statutory
+mandate or deactivating an assigned group blocks pending execution until the explicit
+invalidation policy has been applied; it cannot edit a historical snapshot. The money-moving
+service owns the atomic unique-person count and single execution transition, not the client,
+the delegation projection, or the mutable group service.
+
 **D4 — The customer edge switches profiles with `X-Acting-For`, fail-closed.** The JWT still
 identifies the human. `GET /customer/v1/profiles` lists the personal profile (with `hasProducts`)
 plus one business profile per active mandate — always off the token, never off the header, so a
