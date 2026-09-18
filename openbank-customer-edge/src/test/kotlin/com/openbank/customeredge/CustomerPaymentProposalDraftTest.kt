@@ -107,6 +107,26 @@ class CustomerPaymentProposalDraftTest {
     }
 
     @Test
+    fun `personal proposal history survives a stale company profile`() {
+        val client = mockk<UpstreamClient>()
+        val draftId = UUID.randomUUID()
+        every {
+            client.get("http://domestic/api/v1/domestic-payment-proposals/drafts?limit=20", maker.toString())
+        } returns Response.ok("""{"items":[]}""").build()
+        every {
+            client.get("http://domestic/api/v1/domestic-payment-proposals/drafts/$draftId", maker.toString())
+        } returns Response.status(404).build()
+        val resource = edge(client, actingForOwner = true)
+        resource.actingForResolver = mockk {
+            every { resolve(maker, owner.toString()) } throws jakarta.ws.rs.ForbiddenException("mandate revoked")
+        }
+
+        assertThat(resource.listDomesticPaymentProposalDrafts(null, 20).status).isEqualTo(200)
+        assertThat(resource.getDomesticPaymentProposalDraft(draftId).status).isEqualTo(404)
+        verify(exactly = 0) { resource.actingForResolver.resolve(any(), any()) }
+    }
+
+    @Test
     fun `FOP maker grant works without acting-for profile`() {
         val client = upstream(
             Response.ok(

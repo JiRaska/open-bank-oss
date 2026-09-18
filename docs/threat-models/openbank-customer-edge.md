@@ -296,3 +296,6 @@ Trust boundaries:
   prevents new writes but does not erase the maker's historical submissions. A foreign
   item is 404 and a foreign pagination cursor yields an empty page. Rollback removes the
   edge routes before workload readers; no stored draft is deleted.
+  These personal-history GETs resolve the human JWT/party-merge identity without resolving
+  `X-Acting-For`: a stale or revoked company mandate cannot mask the human's own record.
+  All other company operations, including a new proposal, retain fail-closed mandate checks.

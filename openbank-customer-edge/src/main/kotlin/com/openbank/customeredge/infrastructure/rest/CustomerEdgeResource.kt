@@ -2876,7 +2876,7 @@ class CustomerEdgeResource(
         val query = "?limit=$limit" + (before?.let { "&before=$it" } ?: "")
         return upstream.get(
             "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/drafts$query",
-            customer().actorPartyId.toString(),
+            humanPartyId().toString(),
         )
     }
 
@@ -2886,7 +2886,7 @@ class CustomerEdgeResource(
     @Blocking
     fun getDomesticPaymentProposalDraft(@PathParam("draftId") draftId: UUID): Response = upstream.get(
         "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/drafts/$draftId",
-        customer().actorPartyId.toString(),
+        humanPartyId().toString(),
     )
 
     /**
@@ -5337,7 +5337,7 @@ class CustomerEdgeResource(
      * creation enforces the invariant: Keycloak user.id == partyId AND user attribute
      * party_id == partyId (see scripts/seed-test-customer.sh and ADR-0069 §2).
      */
-    private fun customer(): CustomerIdentity {
+    private fun humanPartyId(): UUID {
         val partyIdStr = resolvePartyIdClaim(
             partyIdClaim = jwt.getClaim<String>("party_id"),
             sub = jwt.subject,
@@ -5352,7 +5352,11 @@ class CustomerEdgeResource(
         // with the surviving id — otherwise a merged customer sees an empty bank (no accounts,
         // no loans, no KYC case) while their data sits under the survivor. Fail-open: on any
         // upstream trouble the resolver hands back `claimed` unchanged. See PartyMergeResolver.
-        val human = partyMergeResolver.resolve(claimed)
+        return partyMergeResolver.resolve(claimed)
+    }
+
+    private fun customer(): CustomerIdentity {
+        val human = humanPartyId()
         // ADR-0284 D4: `X-Acting-For: <entityPartyId>` switches every downstream call to a legal
         // entity the human holds an ACTIVE mandate for — verified against party-service and
         // FAIL-CLOSED (403), the opposite of the merge resolver above: an unverified switch would

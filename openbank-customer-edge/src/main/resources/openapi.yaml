@@ -1893,6 +1893,8 @@ paths:
       description: >-
         The human JWT actor is used even while a company/FOP profile is selected. The maker
         can see only their own historical submission data, including after grant revocation.
+        X-Acting-For is ignored for this personal history; a stale company mandate cannot
+        hide the person's own submissions.
         This is not current account access or permission to approve or execute a payment.
       operationId: listDomesticPaymentProposalDrafts
       security:
