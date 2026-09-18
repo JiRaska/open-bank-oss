@@ -12,8 +12,6 @@ import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
-import org.hamcrest.Matchers.hasKey
-import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.util.UUID
@@ -65,10 +63,8 @@ class FraudInvestigationCaseIT {
         assertThat(outboxCount(caseId)).isEqualTo(2)
         assertReference(caseId, 2, "fraud.case_closed", accountId, counterpartyId)
         given().header("X-Investigation-Purpose", PURPOSE)
-            .get("/api/v1/fraud/cases/$caseId").then().statusCode(200)
-            .body("status", equalTo("CLOSED_NO_FINDING"))
-            .body("$", not(hasKey("accountId")))
-            .body("$", not(hasKey("counterpartyId")))
+            .get("/api/v1/fraud/cases/$caseId").then().statusCode(403)
+            .header("Cache-Control", "no-store")
     }
 
     @Test

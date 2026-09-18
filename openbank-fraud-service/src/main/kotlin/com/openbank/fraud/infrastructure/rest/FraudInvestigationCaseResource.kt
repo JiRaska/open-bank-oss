@@ -57,13 +57,17 @@ class FraudInvestigationCaseResource(
     @Path("/{caseId}")
     @RolesAllowed("ROLE_ADMIN")
     @Authorize(action = "fraud.case.read", resource = "#caseId")
-    @Operation(summary = "Read the current fraud investigation status for an administrator")
+    @Operation(summary = "Read current fraud investigation status after live case-scoped authorization")
     suspend fun get(
         @PathParam("caseId") caseId: UUID,
         @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Authorization") authorization: String?,
     ): Response {
         require(purpose == PURPOSE) { "FRAUD_INVESTIGATION is required" }
-        val result = cases.find(caseId) ?: return Response.status(Response.Status.NOT_FOUND).build()
+        val accessFailure = checkCaseAccess(caseId, authorization)
+        if (accessFailure != null) return accessFailure
+        val result = cases.find(caseId) ?: return Response.status(Response.Status.NOT_FOUND)
+            .header("Cache-Control", "no-store").build()
         return Response.ok(result.toResponse()).header("Cache-Control", "no-store").build()
     }
 
@@ -78,6 +82,17 @@ class FraudInvestigationCaseResource(
         @HeaderParam("Authorization") authorization: String?,
     ): Response {
         require(purpose == PURPOSE) { "FRAUD_INVESTIGATION is required" }
+        val accessFailure = checkCaseAccess(caseId, authorization)
+        if (accessFailure != null) return accessFailure
+        val result = cases.find(caseId) ?: return Response.status(Response.Status.NOT_FOUND)
+            .header("Cache-Control", "no-store").build()
+        if (result.status != FraudInvestigationStatus.OPEN) {
+            return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        }
+        return Response.ok(result.toEvidence()).header("Cache-Control", "no-store").build()
+    }
+
+    private suspend fun checkCaseAccess(caseId: UUID, authorization: String?): Response? {
         val bearer = authorization?.takeIf { it.startsWith("Bearer ") && it.length > "Bearer ".length }
             ?: return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
         when (contextAccess.check(caseId, bearer)) {
@@ -85,14 +100,8 @@ class FraudInvestigationCaseResource(
                 return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
             FraudCaseAccessDecision.UNAVAILABLE ->
                 return Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
-            FraudCaseAccessDecision.ALLOWED -> Unit
+            FraudCaseAccessDecision.ALLOWED -> return null
         }
-        val result = cases.find(caseId) ?: return Response.status(Response.Status.NOT_FOUND)
-            .header("Cache-Control", "no-store").build()
-        if (result.status != FraudInvestigationStatus.OPEN) {
-            return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
-        }
-        return Response.ok(result.toEvidence()).header("Cache-Control", "no-store").build()
     }
 
     @POST

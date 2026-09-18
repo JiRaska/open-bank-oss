@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -51,7 +51,7 @@ paths:
     get:
       tags: [Fraud]
       operationId: getFraudInvestigationCase
-      summary: Read current investigation status as an administrator
+      summary: Read current investigation status after live case-scoped Context authorization
       security:
         - bearerAuth: []
       parameters:
@@ -67,7 +67,8 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { description: Case not found }
+        '404': { description: Case not found after authorization }
+        '503': { description: Context assignment or policy check unavailable }
   /api/v1/fraud/cases/{caseId}/evidence:
     get:
       tags: [Fraud]
