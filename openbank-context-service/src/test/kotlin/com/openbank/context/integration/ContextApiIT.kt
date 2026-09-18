@@ -256,6 +256,8 @@ class ContextApiIT {
             .extract().asString()
 
         assertThat(response).doesNotContain("ledger-service")
+        assertThat(disclosureRows("incident:$incidentId"))
+            .containsExactly(1 to "[\"incident:$incidentId:ICT_INCIDENT_STATUS_CHANGED:${version + 1}\"]")
     }
 
     @Test

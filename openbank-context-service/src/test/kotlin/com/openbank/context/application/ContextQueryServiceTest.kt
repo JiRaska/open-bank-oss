@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.context.application
 
+import com.openbank.context.domain.ContextEdge
 import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.domain.ContextNeighborhood
 import com.openbank.context.domain.ContextNode
@@ -120,27 +121,38 @@ class ContextQueryServiceTest {
     }
 
     @Test
-    fun `incident response aggregates types and never returns identifiers`(): Unit = runBlocking {
+    fun `incident response aggregates reported services and audits their source event`(): Unit = runBlocking {
         coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true)
         coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns ContextNeighborhood(
             "incident:inc-1",
             listOf(
                 node("incident:inc-1", "INCIDENT"),
-                node("payment:p1", "PAYMENT"),
-                node("payment:p2", "PAYMENT"),
-                node("workflow:w1", "WORKFLOW"),
+                node("service:ledger-service", "SERVICE"),
             ),
-            emptyList(),
+            listOf(
+                ContextEdge(
+                    "edge-1", ContextNamespace.INCIDENT, "incident:inc-1", "service:ledger-service",
+                    "AFFECTS_SERVICE", "incident:inc-1:ICT_INCIDENT_REPORTED:1", now, null, now, 1,
+                ),
+            ),
             false,
         )
 
         val impact = service.incident("inc-1", actor, context.copy(purpose = "INCIDENT_IMPACT"))
-        assertThat(impact.affectedByType).containsEntry("PAYMENT", 2).containsEntry("WORKFLOW", 1)
-        assertThat(impact.total).isEqualTo(3)
+        assertThat(impact.affectedByType).containsEntry("SERVICE", 1)
+        assertThat(impact.total).isEqualTo(1)
         assertThat(impact.projectionStatus).isEqualTo(ImpactProjectionStatus.AVAILABLE)
         assertThat(impact.drilldownAvailable).isFalse()
-        assertThat(impact.toString()).doesNotContain("payment:p1", "workflow:w1")
+        assertThat(impact.toString()).doesNotContain("ledger-service", "incident:inc-1:ICT_INCIDENT_REPORTED:1")
+        coVerify {
+            audit.recordDisclosure(
+                match {
+                    it.disclosure.evidenceRefs == listOf("incident:inc-1:ICT_INCIDENT_REPORTED:1") &&
+                        it.disclosure.evidenceCount == 1
+                },
+            )
+        }
     }
 
     @Test
@@ -171,6 +183,7 @@ class ContextQueryServiceTest {
         assertThat(impact.projectionStatus).isEqualTo(ImpactProjectionStatus.PARTIAL)
         assertThat(impact.total).isEqualTo(1)
         assertThat(impact.toString()).doesNotContain("service:s1")
+        coVerify { audit.recordDisclosure(match { it.disclosure.evidenceCount == 1 && it.disclosure.truncated }) }
     }
 
     @Test

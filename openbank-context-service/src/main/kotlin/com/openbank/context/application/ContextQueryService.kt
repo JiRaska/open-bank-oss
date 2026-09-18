@@ -135,6 +135,7 @@ class ContextQueryService(
         val affected = view?.nodes.orEmpty().filter {
             it.key != "incident:$ref"
         }.groupingBy { it.type }.eachCount().toSortedMap()
+        val evidenceRefs = view?.edges.orEmpty().map { it.evidenceRef }.distinct()
         val status = when {
             view == null -> ImpactProjectionStatus.MISSING
             view.truncated -> ImpactProjectionStatus.PARTIAL
@@ -142,7 +143,12 @@ class ContextQueryService(
         }
         ContextReadResult(
             IncidentImpact(ref, affected, affected.values.sum(), drilldownAvailable = false, projectionStatus = status),
-            ContextDisclosure(emptyList(), affected.values.sum(), view?.truncated ?: false, projectionGeneration),
+            ContextDisclosure(
+                evidenceRefs,
+                maxOf(affected.values.sum(), evidenceRefs.size),
+                view?.truncated ?: false,
+                projectionGeneration,
+            ),
         )
     }
 
