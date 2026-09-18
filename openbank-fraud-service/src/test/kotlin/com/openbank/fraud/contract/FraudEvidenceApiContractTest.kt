@@ -54,6 +54,7 @@ class FraudEvidenceApiContractTest {
         val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/match-assigned:")
             .substringBefore("/api/v1/fraud/cases/{caseId}/close-without-finding:")
         assertThat(operation).contains(
+            "get:",
             "matchAssignedFraudCases",
             "the caller cannot choose candidate IDs",
             "FraudAssignedMatchResponse",
@@ -62,7 +63,7 @@ class FraudEvidenceApiContractTest {
             "'403'",
             "'503'",
         )
-        assertThat(operation).doesNotContain("requestBody:")
+        assertThat(operation).doesNotContain("post:", "requestBody:")
         val response = contract.substringAfter("    FraudAssignedMatchResponse:")
             .substringBefore("    FraudInvestigationCase:")
         assertThat(response).contains("candidateIds", "maxItems: 4", "inspectedCandidates", "truncated")

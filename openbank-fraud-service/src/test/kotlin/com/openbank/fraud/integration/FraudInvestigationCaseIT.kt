@@ -97,19 +97,17 @@ class FraudInvestigationCaseIT {
     @Test
     @TestSecurity(user = "fraud-admin", roles = ["ROLE_ADMIN"])
     fun `human administrator cannot invoke service-only matching even with guessed case IDs`() {
-        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+        given().header("X-Investigation-Purpose", PURPOSE)
             .header("X-Investigator-Authorization", BEARER)
-            .body(mapOf("candidateIds" to listOf(UUID.randomUUID())))
-            .post("/api/v1/fraud/cases/${UUID.randomUUID()}/match-assigned").then().statusCode(403)
+            .get("/api/v1/fraud/cases/${UUID.randomUUID()}/match-assigned").then().statusCode(403)
     }
 
     @Test
     @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_CONTEXT_INVESTIGATION"])
     fun `a shared service principal cannot masquerade as Context`() {
-        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+        given().header("X-Investigation-Purpose", PURPOSE)
             .header("X-Investigator-Authorization", BEARER)
-            .body(mapOf("candidateIds" to listOf(UUID.randomUUID())))
-            .post("/api/v1/fraud/cases/${UUID.randomUUID()}/match-assigned").then().statusCode(403)
+            .get("/api/v1/fraud/cases/${UUID.randomUUID()}/match-assigned").then().statusCode(403)
     }
 
     @Test
@@ -117,7 +115,7 @@ class FraudInvestigationCaseIT {
         user = "service-account-openbank-context-investigation",
         roles = ["ROLE_CONTEXT_INVESTIGATION"],
     )
-    fun `dedicated Context identity matches only supplied open same-role cases`() {
+    fun `dedicated Context identity matches only assigned open same-role cases`() {
         val account = UUID.randomUUID()
         val counterparty = UUID.randomUUID()
         val root = seedCase(account, counterparty)
@@ -128,10 +126,10 @@ class FraudInvestigationCaseIT {
         val candidates = listOf(crossed, counterpartyMatch, accountMatch)
         coEvery { access.assignedCandidates(root, BEARER) } returns FraudAssignedCandidates(candidates, false)
 
-        val response = given().contentType("application/json")
+        val response = given()
             .header("X-Investigation-Purpose", PURPOSE)
             .header("X-Investigator-Authorization", BEARER)
-            .post("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(200)
+            .get("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(200)
             .header("Cache-Control", "no-store").extract().response()
         assertThat(response.jsonPath().getList<String>("candidateIds"))
             .containsExactlyInAnyOrder(accountMatch.toString(), counterpartyMatch.toString())
@@ -141,14 +139,14 @@ class FraudInvestigationCaseIT {
         coVerify(exactly = 1) { access.assignedCandidates(root, BEARER) }
         coVerify(exactly = 0) { access.check(root, BEARER) }
 
-        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+        given().header("X-Investigation-Purpose", PURPOSE)
             .header("X-Investigator-Authorization", BEARER)
-            .body(mapOf("candidateIds" to listOf(notSupplied)))
-            .post("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(200)
+            .queryParam("candidateIds", notSupplied.toString())
+            .get("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(200)
             .body("candidateIds.size()", equalTo(2))
 
-        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
-            .post("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(403)
+        given().header("X-Investigation-Purpose", PURPOSE)
+            .get("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(403)
     }
 
     @Test

@@ -93,7 +93,7 @@ paths:
         '404': { description: Case not found after authorization }
         '503': { description: Context assignment or policy check unavailable }
   /api/v1/fraud/cases/{caseId}/match-assigned:
-    post:
+    get:
       tags: [Fraud]
       operationId: matchAssignedFraudCases
       summary: Match only already assigned open cases by source-owned account or counterparty equality

@@ -92,7 +92,7 @@ class FraudInvestigationCaseResource(
         return Response.ok(result.toEvidence()).header("Cache-Control", "no-store").build()
     }
 
-    @POST
+    @GET
     @Path("/{caseId}/match-assigned")
     @RolesAllowed("ROLE_CONTEXT_INVESTIGATION")
     @Operation(summary = "Find source-equal open cases within an already assigned candidate set")
