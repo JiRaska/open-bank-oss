@@ -143,6 +143,16 @@ complete network. The reference Kafka topic remains case-ID/revision/time only.
 Measure lookup selectivity, authorization cost and p95/p99 latency with 1× and
 10× assigned-case populations before increasing the interactive expansion cap.
 
+Candidate IDs supplied in an HTTP body are **not proof of assignment**. Fraud must
+not return a match, count, truncation signal or timing-distinguishable result for
+an unverified candidate: a caller with access to the root could otherwise probe
+guessed case IDs. The source lookup therefore requires authenticated Context
+service identity *and* the human investigator's bearer, with a server-side
+case-scoped candidate authorization check before equality is evaluated. A plain
+caller-controlled header or a client-side-only filter does not satisfy this
+condition. Until that dual authorization and its bounded 1×/10× load behavior
+are implemented and verified, the four-case pilot remains the exposed behavior.
+
 ## Alternatives considered
 
 - **One financial-crime permission:** rejected; fraud and AML have different purposes,
