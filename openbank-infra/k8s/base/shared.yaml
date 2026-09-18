@@ -15,23 +15,6 @@ data:
   QUARKUS_MAILER_HOST: mailhog.openbank.svc.cluster.local
   QUARKUS_MAILER_PORT: "1025"
   QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: openbank-shared-secrets
-type: Opaque
-stringData:
-  QUARKUS_DATASOURCE_USERNAME: openbank
-  QUARKUS_DATASOURCE_PASSWORD: change-me
-  QUARKUS_OIDC_CREDENTIALS_SECRET: change-me
-  QUARKUS_REDIS_PASSWORD: change-me
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: openbank-cnpg-bootstrap
-type: Opaque
-stringData:
-  username: openbank
-  password: change-me
+# Provision openbank-shared-secrets and openbank-cnpg-bootstrap separately through
+# your secret manager before applying workloads; see ../README.md. No credential
+# defaults are shipped in this base.

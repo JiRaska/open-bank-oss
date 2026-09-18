@@ -386,3 +386,58 @@ replacing the former in-memory stub), so settlement state is durable across rest
   old DTO against it `SettlementReversalIT` fails 3 of 7 with `value failed for JSON property
   availableBalance` — the production failure, reproduced in CI.
 
+
+## Unacknowledged forward movement
+
+A failed debit/credit activity does not prove that its remote write rolled back. Lost responses
+or a failed local state write can follow a committed movement. New workflow histories record
+`BALANCE_STATE_UNKNOWN` after such a failure and defer all counter-movements and rejection.
+The status remains non-terminal, is exported by the stranded gauge and has a critical alert.
+
+Residual risk: recovery requires reconciliation and an approved correction; there is no atomic
+cancel-or-reverse API yet. Old workflow histories retain their original command sequence for
+replay compatibility. A caller must not interpret the creation response as completed settlement.
+
+## Ledger-only settlement protocol
+
+A settlement must not directly debit/credit balance and then post the same sub-account journal:
+`AccountBookedChanged` projects that journal into balance and would apply the transfer again.
+New `LEDGER_PROJECTION` rows use a distinct Temporal workflow type: reserve the complete payer
+amount with the settlement ID as reference, then post the ledger journal. Balance projection owns
+the booked movement and atomic consumption of that cover. The ledger response must confirm both
+`POSTED` and the expected transaction ID. A transport success alone is insufficient.
+
+The protocol is immutable per row. The origination flag defaults off; toggling it does not migrate
+existing rows or change old Temporal histories. A lost reservation reply records
+`BALANCE_STATE_UNKNOWN`; a lost journal reply records `LEDGER_STATE_UNKNOWN`. Neither releases
+cover or issues an automatic counter-movement. A late uncertainty write cannot overwrite a
+confirmed `BOOKED` row. A confirmed journal may still await asynchronous balance projection.
+
+Residual risks: unknown outcomes require reconciliation, existing legacy histories retain their
+old behavior, and historic double application is not repaired automatically. Production activation
+requires the hold and journal calls to work with enforced authorization and required four-eyes
+approval; this change grants no exemption and does not prove that approval workflow. General audit
+publisher durability is a separate release requirement. See the rollout note in
+`docs/runbooks/settlement-ledger-projection.md`.
+
+
+## Durable state audit producer
+
+`SettlementRepositoryImpl` locks the aggregate before checking a transition and persists its
+`SettlementAuditWriter` event in the same transaction. An outbox failure rolls back the state;
+suppressed late or repeated writes produce no fictional transition. The row's immutable event ID
+survives dispatcher retries. `SettlementOutboxRepositoryImpl` claims with SKIP LOCKED and recovers
+stale leases; `KafkaSettlementOutboxEventPublisher` waits for broker acknowledgement. Delivery is
+at least once and may reorder across dispatchers. Consumer deduplication remains mandatory.
+
+The new Kafka trust boundary grants settlement-service Write/Describe only on its state topic
+and audit-service Read/Describe. Certificate projection and broker-network access use the existing
+mTLS deployment mechanism. `SettlementAuditBacklogGauge` includes every non-SENT status, including
+exhausted retries; workflow liveness monitors the collector. Broker acceptance does not prove
+that the audit service stored the record. See the settlement audit recovery runbook.
+
+Old writers must drain before relying on full transition coverage. Existing state history cannot
+be reconstructed as contemporaneous evidence. Initiating-person attribution and durable synthetic
+origin are not supplied by this state event; actorType SERVICE must not be interpreted as either.
+Tests use isolated infrastructure and test security, and do not prove production OPA decisions,
+certificate issuance, broker high availability or retention capacity.

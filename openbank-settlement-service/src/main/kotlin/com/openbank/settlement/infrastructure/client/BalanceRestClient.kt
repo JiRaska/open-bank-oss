@@ -32,6 +32,10 @@ interface BalanceRestClient {
     @POST
     @Path("/{accountId}/credit")
     fun credit(@PathParam("accountId") accountId: UUID, body: MoneyMovementRequest): Uni<BalanceResponse>
+
+    @POST
+    @Path("/{accountId}/holds")
+    fun reserve(@PathParam("accountId") accountId: UUID, body: SettlementCoverRequest): Uni<SettlementCoverResponse>
 }
 
 data class MoneyMovementRequest(
@@ -63,3 +67,22 @@ data class MoneyMovementRequest(
  * the movement, and it cannot break again when balance-service adds a field.
  */
 data class BalanceResponse(val accountId: UUID, val currency: String)
+
+/** No TTL: an unknown ledger outcome must not make the reserved funds spendable again. */
+data class SettlementCoverRequest(
+    val amount: BigDecimal,
+    val currency: String,
+    val reason: String,
+    val referenceId: String,
+    val ttlSeconds: Long? = null,
+)
+
+data class SettlementCoverResponse(
+    val id: UUID,
+    val accountId: UUID,
+    val amount: BigDecimal,
+    val currency: String,
+    val referenceId: String,
+    val expiresAt: String?,
+    val releasedAt: String?,
+)

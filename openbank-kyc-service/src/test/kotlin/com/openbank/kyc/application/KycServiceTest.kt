@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
 package com.openbank.kyc.application
 
+import com.openbank.kyc.application.port.out.AdverseMediaScreeningPort
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.domain.model.CheckStatus
@@ -13,6 +14,7 @@ import com.openbank.kyc.domain.model.RiskLevel
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
@@ -27,6 +29,7 @@ import java.util.UUID
 
 class KycServiceTest {
 
+    private val adverseMediaSource = mockk<AdverseMediaScreeningPort>()
     private val repo = mockk<KycCaseRepository>()
     private val metrics = mockk<DomainMetrics>(relaxed = true)
     private val clock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
@@ -35,10 +38,12 @@ class KycServiceTest {
 
     @BeforeEach
     fun setUp() {
+        every { adverseMediaSource.sourceId } returns null
         service = KycService().also {
             it.repo = repo
             it.metrics = metrics
             it.clock = clock
+            it.adverseMediaSource = adverseMediaSource
         }
     }
 
@@ -60,6 +65,7 @@ class KycServiceTest {
             CheckType.SANCTIONS_SCREENING,
         )
         assertThat(result.checks).allMatch { it.status == CheckStatus.PENDING }
+        assertThat(result.checks).allMatch { it.caseId == result.id }
         assertThat(result.expiresAt).isAfter(result.createdAt)
 
         coVerify { repo.save(match<KycCase> { it.partyId == partyId && it.checks.size == 4 }, any()) }
@@ -656,7 +662,43 @@ class KycServiceTest {
             CheckType.ADVERSE_MEDIA,
         )
         assertThat(case.checks.map { it.checkType }).doesNotContain(CheckType.IDENTITY, CheckType.ADDRESS)
+        val adverseMedia = case.checks.single { it.checkType == CheckType.ADVERSE_MEDIA }
+        assertThat(adverseMedia.status).isEqualTo(CheckStatus.MANUAL_REVIEW)
+        assertThat(adverseMedia.result).isEqualTo("SOURCE_NOT_CONFIGURED")
+        assertThat(adverseMedia.provider).isNull()
+        assertThat(adverseMedia.performedAt).isNull()
+
         io.mockk.verify { metrics.kycSubmitted("business") }
+    }
+
+    @Test
+    fun `a configured source alone does not count as a performed adverse media screen`(): Unit = runBlocking {
+        every { adverseMediaSource.sourceId } returns "test-source"
+        coEvery { repo.findActiveByPartyId(any()) } returns null
+        coEvery { repo.save(any(), any()) } answers { firstArg() }
+
+        val case = service.openCase(UUID.randomUUID(), com.openbank.kyc.domain.model.SubjectType.BUSINESS)
+        val check = case.checks.single { it.checkType == CheckType.ADVERSE_MEDIA }
+
+        assertThat(check.status).isEqualTo(CheckStatus.PENDING)
+        assertThat(check.result).isNull()
+        assertThat(check.provider).isNull()
+        assertThat(check.performedAt).isNull()
+        coVerify(exactly = 0) { adverseMediaSource.screen(any(), any()) }
+    }
+
+    @Test
+    fun `sandbox auto approval labels missing source checks as sandbox results`(): Unit = runBlocking {
+        service.autoApprove = true
+        coEvery { repo.findActiveByPartyId(any()) } returns null
+        coEvery { repo.save(any(), any()) } answers { firstArg() }
+        coEvery { repo.update(any(), any()) } answers { firstArg() }
+
+        val case = service.openCaseForParty(UUID.randomUUID(), com.openbank.kyc.domain.model.SubjectType.BUSINESS).case
+
+        assertThat(case.status).isEqualTo(KycCaseStatus.APPROVED)
+        assertThat(case.checks).allMatch { it.result == "sandbox-auto" && it.status == CheckStatus.PASSED }
+        assertThat(case.reviewedBy).isEqualTo("sandbox-auto-approval")
     }
 
     @Test

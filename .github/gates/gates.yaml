@@ -4851,6 +4851,7 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/check-agent-review-happened.sh --self-test
+      python3 .github/scripts/test-agent-review-transport.py
 
   # ADR-0251's other half: WHICH PRs get reviewed. Both of this rule's clauses were wrong in
   # the first draft, and both failed silently toward reviewing LESS than the ADR claimed —
@@ -5435,3 +5436,14 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-agent-admission.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
+
+  - id: dr-restore-orchestration
+    name: "DR restore transport, result validation and owned cleanup"
+    group: gitops
+    mode: enforced
+    rationale: "A restore drill must reach its generated workload, reject invalid evidence and clean only resources owned by the current attempt. These orchestration tests do not establish database recovery or RPO."
+    review_after: "2027-03-13"
+    budget_seconds: 45
+    min_subjects: 1
+    selftest_exempt: "is-a-test-suite — executes the restore workflow orchestration harness directly"
+    run: python3 .github/scripts/test-dr-restore-workflow.py

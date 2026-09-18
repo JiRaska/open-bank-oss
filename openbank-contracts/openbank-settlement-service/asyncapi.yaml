@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+asyncapi: 3.0.0
+info:
+  title: OpenBank Settlement state events
+  version: 1.0.0
+  description: Durable state facts emitted from the settlement transactional outbox.
+channels:
+  settlementEvents:
+    address: openbank.settlement.events
+    messages:
+      stateChanged:
+        $ref: '#/components/messages/SettlementStateChanged'
+operations:
+  publishStateChanged:
+    action: send
+    channel:
+      $ref: '#/channels/settlementEvents'
+components:
+  messages:
+    SettlementStateChanged:
+      name: SETTLEMENT_STATE_CHANGED
+      contentType: application/json
+      description: |
+        Written with the aggregate in one transaction, including origination (previousStatus null).
+        Suppressed or repeated same-state writes emit nothing. Delivery is at least once;
+        deduplicate by eventId. Different dispatchers may deliver transitions out of order.
+        status is the observed settlement state, not proof of customer receipt or finality.
+        actorType identifies a service-owned transition, not the initiating person.
+      payload:
+        type: object
+        required: [eventId, eventType, schemaVersion, aggregateType, aggregateId, sourceService,
+                   actorType, occurredAt, previousStatus, status, protocol, payerAccountId,
+                   payeeAccountId, amount, currency]
+        properties:
+          eventId: {type: string, format: uuid}
+          eventType: {type: string, const: SETTLEMENT_STATE_CHANGED}
+          schemaVersion: {type: integer, const: 1}
+          aggregateType: {type: string, const: SETTLEMENT}
+          aggregateId: {type: string, format: uuid}
+          sourceService: {type: string, const: settlement-service}
+          actorType: {type: string, const: SERVICE}
+          occurredAt: {type: string, format: date-time}
+          previousStatus: {type: [string, 'null']}
+          status: {type: string}
+          protocol: {type: string, enum: [LEGACY, LEDGER_PROJECTION]}
+          payerAccountId: {type: string, format: uuid}
+          payeeAccountId: {type: string, format: uuid}
+          amount: {type: string, pattern: '^[0-9]+(\.[0-9]+)?$'}
+          currency: {type: string, pattern: '^[A-Z]{3}$'}

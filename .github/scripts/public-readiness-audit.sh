@@ -53,13 +53,12 @@ fi
 
 # ---------------------------------------------------------------------------
 hdr "2. No literal secrets in Kubernetes manifests"
-# Every secret must arrive via ExternalSecret/SealedSecret, never inline data:/stringData:.
-lit=$(grep -rln 'kind: Secret' openbank-infra 2>/dev/null | while read -r f; do
-        grep -qE '^\s+(data|stringData):' "$f" && echo "$f"; done)
-if [ -z "$lit" ]; then
-  ok "no inline data:/stringData: in any kind:Secret ($(grep -rln 'ExternalSecret' openbank-infra 2>/dev/null | wc -l | tr -d ' ') ExternalSecret refs)"
+# Parse resource boundaries: a Kyverno template is not a literal Secret, while
+# top-level data/stringData is (regardless of indentation or document order).
+if python3 .github/scripts/check-manifest-secret-literals.py openbank-infra; then
+  ok "no inline Secret credentials; generated credentials use verified runtime derivation"
 else
-  bad "literal secret data found in: $lit"
+  bad "literal Secret credential or unverifiable manifest — inspect the reported paths"
 fi
 
 # ---------------------------------------------------------------------------

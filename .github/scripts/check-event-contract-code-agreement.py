@@ -429,6 +429,26 @@ def parse_named_data_class(service_dir: pathlib.Path, class_name: str) -> dict |
     return None
 
 
+def unambiguous_string_constants(src: str) -> dict[str, str]:
+    """Resolve literal constants only when the name has one value throughout the file.
+
+    Qualified, interpolated and ambiguous references stay unknown rather than borrowing
+    the value of a different scope. This covers constant-backed OutboxMessage event types
+    without requiring producers to duplicate their discriminator as a string literal.
+    """
+    values: dict[str, set[str]] = {}
+    pattern = r'\bconst\s+val\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*String\s*)?=\s*"([^"\\$\n]+)"'
+    for name, value in re.findall(pattern, src):
+        values.setdefault(name, set()).add(value)
+    remaining = STRING_LITERAL_RE.sub('""', re.sub(pattern, '', src))
+    return {
+        name: next(iter(items)) for name, items in values.items()
+        if len(items) == 1 and not re.search(
+            rf"\b(?:val|var)\s+{re.escape(name)}\b|\b{re.escape(name)}\s*:", remaining,
+        )
+    }
+
+
 def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
     """The hand-built-outbox idiom's event-type literals — see the regexes' own docstrings.
 
@@ -456,6 +476,8 @@ def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
         src = strip_kotlin_comments(kt.read_text(encoding="utf-8", errors="replace"))
         # Payload key sets, keyed by the event type declared in the same OutboxMessage(...) call.
         keys_by_type: dict[str, set[str]] = {}
+        constants = unambiguous_string_constants(src)
+        constant_types: set[str] = set()
         for om in re.finditer(r"\bOutboxMessage\s*\(", src):
             span = balanced_span(src, om.end() - 1)
             if span is None:
@@ -466,12 +488,26 @@ def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
             # named after (engagement-service). Same call, same payload — same association.
             tm = BARE_EVENT_TYPE_RE.search(src[start:end]) or TEMPLATE_PREFIX_RE.search(src[start:end])
             if tm is None:
-                continue
+                reference = re.search(r"\beventType\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?=[,)])", src[start:end])
+                literal = constants.get(reference.group(1)) if reference else None
+                if literal is None:
+                    continue
+                # A routing discriminator can differ from the public event type (domestic
+                # payment is one example). Only promote this previously unknown idiom when
+                # the payload writes the same constant into its eventType field.
+                region = outbox_payload_region(src, start, end)
+                wire_type = re.search(
+                    rf'"eventType"\s+to\s+{re.escape(reference.group(1))}\b', region or '',
+                )
+                if wire_type is None:
+                    continue
+                constant_types.add(literal)
+            else:
+                literal = tm.group(1)
             region = outbox_payload_region(src, start, end)
             keys = payload_keys(region) if region else None
             if keys is None:
                 continue
-            literal = tm.group(1)
             if literal in keys_by_type and keys_by_type[literal] != keys:
                 conflicting.add(literal)
             keys_by_type[literal] = keys
@@ -486,6 +522,13 @@ def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
                     "domain_event": False,
                     "path": str(kt.relative_to(REPO)),
                 }
+        for literal in constant_types:
+            by_event_type.setdefault(literal, {
+                "class": None,
+                "props": keys_by_type.get(literal),
+                "domain_event": False,
+                "path": str(kt.relative_to(REPO)),
+            })
     for literal in conflicting:
         by_event_type[literal]["props"] = None
     return by_event_type
@@ -960,6 +1003,49 @@ def self_test() -> int:
             "x-openbank-transport: planned-kafka",
         ),
         "is not a topic",
+    )
+
+    case(
+        "constant-backed outbox discriminator changes",
+        "openbank-sca-service",
+        lambda t: edit(
+            t / "openbank-sca-service/src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt",
+            'const val DEVICE_ENROLLED_EVENT_TYPE = "DEVICE_ENROLLED"',
+            'const val DEVICE_ENROLLED_EVENT_TYPE = "DEVICE_ENROLL_CHANGED"',
+        ),
+        "no class",
+    )
+    case(
+        "constant-backed outbox payload field disappears",
+        "openbank-sca-service",
+        lambda t: edit(
+            t / "openbank-sca-service/src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt",
+            '"algorithm" to device.algorithm.name,',
+            '',
+        ),
+        "does not carry",
+    )
+
+    case(
+        "a local variable cannot borrow a file constant's discriminator",
+        "openbank-sca-service",
+        lambda t: edit(
+            t / "openbank-sca-service/src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt",
+            'override suspend fun enroll(command: EnrollDeviceCommand): EnrolledDevice {',
+            'override suspend fun enroll(command: EnrollDeviceCommand): EnrolledDevice {\n'
+            '        val DEVICE_ENROLLED_EVENT_TYPE = "SHADOWED_EVENT"',
+        ),
+        "no class",
+    )
+    case(
+        "outbox routing kind does not substitute for a different wire discriminator",
+        "openbank-sca-service",
+        lambda t: edit(
+            t / "openbank-sca-service/src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt",
+            '"eventType" to DEVICE_ENROLLED_EVENT_TYPE,',
+            '"eventType" to "DIFFERENT_WIRE_EVENT",',
+        ),
+        "no class",
     )
 
     failures = 0

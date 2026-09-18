@@ -54,11 +54,11 @@
 #
 # LOOP SAFETY
 # GitHub's run_attempt is 1 for the original run and 2 for the first rerun,
-# so gating on run_attempt == 1 gives exactly one automatic retry per run — a cancelled retry
-# (run_attempt 2) never re-triggers, and a run cancelled for a real reason (superseded by a
-# newer push to the same PR — the concurrency group's normal operation) is only retried once,
-# where it fails fast if the branch has moved. Deliberately NOT retried: `action_required`
-# (approval gates are a human's job).
+# so gating on run_attempt == 1 bounds automatic retries. Before every rerun attempt,
+# the script verifies that an associated PR remains open at the run's immutable head.
+# Superseded runs are declined before they can cancel newer CI through shared concurrency.
+# Unreadable PR metadata fails closed. Main push runs retain per-commit retry semantics.
+# Deliberately NOT retried: `action_required`.
 #
 # This paragraph used to end "and runs cancelled by anything other than the runner dying —
 # indistinguishable from the outside, so we accept one wasted retry on a manually cancelled run".
@@ -172,6 +172,7 @@ jobs:
     permissions:
       contents: read
       actions: write
+      pull-requests: read
     # A rate-limit wait is now "until the limit resets" (capped at GH_RETRY_MAX_WAIT_SECONDS,
     # 600s here) rather than a flat 15s, because a 45-second budget cannot outlast an
     # installation limit whose window is minutes — that is #6853/#7976 and it reproduced on run

@@ -464,6 +464,26 @@ spec:
               Its compensations ran but it never reached REJECTED, so the settlements table now
               disagrees with the ledger about a settlement that was unwound. Reconcile before the
               next accounting-day close.
+        - alert: SettlementBalanceStateUnknown
+          expr: |
+            max by (status) (
+              openbank_settlement_non_terminal{
+                service="settlement", status="BALANCE_STATE_UNKNOWN"
+              }
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            summary: "Settlement balance outcome requires reconciliation"
+            description: >-
+              A forward debit or credit exhausted its activity attempts without establishing
+              whether the balance movement committed. Do not issue a blind refund or mark the
+              settlement rejected. Reconcile the original movement references and preserve dual
+              control for any required correction.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-settlement.md"
+
         - alert: SettlementReversalFailed
           # REVERSAL_FAILED is written by SettlementActivitiesImpl.compensate when a balance
           # reversal was ATTEMPTED AND REFUSED — the common cause is a payee who already spent the
@@ -634,3 +654,29 @@ spec:
               {{ $value | humanizePercentage }} of settlements reaching a terminal state in the last
               hour were REJECTED after their compensations ran — each one debited and credited real
               accounts and then reversed them. Treat as a money-path incident, not a error-rate blip.
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-settlement-audit-alerts
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: openbank.settlement.audit
+      rules:
+        - alert: SettlementAuditUnsent
+          expr: openbank_settlement_audit_unsent_oldest_age_seconds{service="settlement"} > 300
+          for: 5m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            summary: Settlement audit evidence has remained unsent for over five minutes
+            description: >-
+              The settlement outbox contains old records without broker acknowledgement,
+              including exhausted retries or abandoned claims. Check broker connectivity,
+              certificates, topic ACLs and the dispatcher before replaying unchanged event IDs.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/settlement-audit-recovery.md

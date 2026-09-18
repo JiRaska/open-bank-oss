@@ -41,8 +41,8 @@ dependencies {
 
     // #6035: AuditSubscriptionSurfaceIT pushes records INTO the `audit-events-in` channel rather
     // than calling AuditConsumer directly — a direct call cannot tell a registered channel from an
-    // unregistered one (#3371). The in-memory connector is the fleet's established way to do that;
-    // there is no Kafka Testcontainers usage anywhere in this repo.
+    // unregistered one (#3371). This test uses the in-memory connector; AuditDlqIT separately
+    // exercises the Kafka failure strategy against a real broker.
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 
     // #1201: isolated PostgreSQL per test JVM via Testcontainers (audit-service had no IT
@@ -52,6 +52,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
 }
 
 kover {

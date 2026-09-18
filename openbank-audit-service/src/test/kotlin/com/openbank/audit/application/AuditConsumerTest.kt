@@ -11,7 +11,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatCode
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -355,10 +355,10 @@ class AuditConsumerTest {
     }
 
     @Test
-    fun `consume swallows malformed payloads without persisting`() {
-        assertThatCode {
+    fun `body-only replay propagates malformed payloads without persisting`() {
+        assertThatThrownBy {
             runBlocking { consumer.consume("{bad-json") }
-        }.doesNotThrowAnyException()
+        }.isInstanceOf(com.fasterxml.jackson.core.JsonProcessingException::class.java)
 
         coVerify(exactly = 0) { repo.save(any()) }
     }

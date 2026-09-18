@@ -1,77 +1,74 @@
-# Automated DR restore-and-verify (design)
+# Automated DR restore-and-verify
 
-Status: **design + workflow skeleton** (SSDLC-audit follow-up 2026-07-06). The BCP policy
-(`bcp-policy.md`) and DR test log (`dr-test-log.md`) record **table-top** exercises only —
-runbooks are read, the S3 archive is confirmed reachable, but no restore is actually
-executed and no integrity check runs. This document specifies the automated quarterly
-restore that closes that gap, and `.github/workflows/dr-restore-verify.yml` is its
-runnable-once-wired skeleton.
+The quarterly and manually dispatchable `.github/workflows/dr-restore-verify.yml`
+uses the cluster-attached DR runner. It restores the ledger backup into a temporary
+namespace, starts the ledger check workload and requests its trial balance. Missing
+cluster access fails the job; a skipped restore is not successful evidence.
 
-Almost no OSS banking reference implementation actually *proves* its backups restore. Doing
-it automatically, quarterly, with a ledger-integrity assertion is a genuine differentiator.
+## What the current check establishes
 
-## What it proves
+A successful run establishes that this ledger backup could be restored, the check
+workload became ready and the selected fiscal year's trial balance returned the JSON
+boolean `balanced: true`, the requested fiscal year, a positive account count and
+finite, positive, equal debit/credit totals. It recomputes totals from the account
+lines, checks balance within each currency, rejects duplicate account/currency lines
+and verifies the distinct account count. Empty years fail this evidence check, even
+though they are valid results for the general ledger API. Select a year with known activity.
+The job records elapsed time from restore start through that response. It does **not**
+measure RPO, prove that every expected posting survived, or prove consistency with balances,
+transactions, settlements and pending events. An incomplete ledger can still have positive
+balanced totals. Do not treat this check alone as full money-path
+recovery evidence or a measured customer-facing RTO.
 
-A backup you have never restored is a hope, not a control. This exercise proves, without a
-human in the loop:
+## Execution and cleanup
 
-1. **The CNPG barman S3 archive for `ledger-db` is restorable** — a fresh cluster bootstraps
-   from it (`bootstrap.recovery`), not just "the bucket is reachable".
-2. **The restored ledger is internally consistent** — the double-entry invariant holds after
-   restore. The assertion is the existing read-only integrity surface:
-   `GET /api/v1/ledger/close/trial-balance` must return `balanced: true` (debits == credits
-   across the general ledger). A restore that silently truncated WAL mid-transaction would
-   leave an unbalanced GL and fail here.
-3. **RTO/RPO are measured, not asserted** — wall-clock from restore-start to a green
-   trial-balance is the real RTO; the gap between the latest WAL and the backup target is the
-   real RPO. Both get appended to `dr-test-log.md`.
+The workflow creates `dr-verify-<run-id>-<attempt>` and records whether it created that
+namespace. Cleanup deletes only a namespace created by the current attempt; a naming
+collision must fail without deleting the existing namespace. It stops and reaps the
+port-forward process on success and failure. Namespace deletion has a bounded wait;
+a deletion error fails the run instead of hiding an orphaned restore namespace.
 
-## Isolation (non-negotiable)
+The manifests live in `openbank-infra/gitops/dr-restore-templates/`. The ledger image is
+read from the existing Rollout. The check connects directly to the generated Deployment,
+which has no Service. HTTP connection retries allow the port-forward listener to start;
+a fixed delay does not prove readiness. Database restore and workload readiness retain
+bounded Kubernetes waits.
 
-The restore targets a **throwaway namespace** (`dr-verify-<run-id>`) with its own CNPG
-`Cluster` and a single ledger-service pod. It never touches the live `ledger-db`, never
-publishes to Kafka (outbox dispatch disabled), and is torn down at the end of the run
-(`kubectl delete namespace`). The restore is READ side only — no writes are replayed into any
-live system.
+The intended isolation is described in the template README. A deployment that merely
+sets outbox dispatch off must not be assumed to disable all consumers, schedulers or
+outbound clients. Verify actual startup, authorization, network isolation and side
+effects before accepting a live drill. Local orchestration tests exercise shell control
+flow with fake Kubernetes/HTTP boundaries; they neither restore data nor prove isolation.
 
-## Flow
+## Remaining production proof
 
-```
-1. Create namespace dr-verify-<run-id>
-2. Apply a CNPG Cluster with:
-     bootstrap.recovery.source = ledger-db barman S3 store (read-only creds)
-     externalClusters[ledger-db].barmanObjectStore = s3://openbank-sandbox-db-backups/ledger-db
-3. Wait for the restored cluster to reach "Cluster in healthy state"   ← RTO clock starts at step 2
-4. Deploy ledger-service against the restored DB, OUTBOX_DISPATCH_ENABLED=false, OIDC off
-5. curl /q/health/ready, then GET /api/v1/ledger/close/trial-balance?fiscalYear=<current>
-6. Assert balanced == true                                            ← RTO clock stops
-7. Append {date, RTO, RPO, PASS/FAIL, lessons} to docs/bcp/dr-test-log.md (PR or job summary)
-8. kubectl delete namespace dr-verify-<run-id>   (always, even on failure)
-```
+- Run the restore with verified least-privilege backup access and isolated network paths.
+- Capture a known source watermark and verify retained records, not only balanced totals.
+- Measure RPO against the chosen recovery point and the agreed acceptance threshold.
+- Restore and reconcile the whole money path, including replay/deduplication and pending
+  outboxes, without sending effects into live payment or notification systems.
+- Record measured recovery times, consistency checks and drill artifacts in the DR log.
 
-## Why the workflow is dispatch-only / gated
+The quarterly schedule is a trigger, not evidence these acceptance conditions passed.
 
-`dr-restore-verify.yml` needs **cluster access** (a self-hosted runner in the deploy pool
-with `kubectl` + IRSA for the read-only backup bucket) that a hosted runner does not have. It
-is therefore `workflow_dispatch`-only and **skips with a notice** unless the runner is
-cluster-attached. The steps that require live infra are marked `# WIRING:` in the workflow —
-they are the deliberate remaining work, not hidden failures. Once wired and green, promote to
-a quarterly `schedule:` (aligns with the `bcp-policy.md` quarterly cadence, next due
-2026-09-30).
+## Check workload network boundary
 
-## Remaining wiring (tracked)
+The trusted Kyverno namespace bootstrap creates `ledger-dr-check-isolation` for
+new `dr-verify-*` namespaces. The DR runner has only `get` permission for that
+policy name, no network-policy write permission. It polls up to 60 times, two
+seconds apart, with a five-second API request timeout, before creating any restore workload. Missing bootstrap fails the drill
+and cleans up the attempt's namespace; the runner cannot grant itself access.
+The deployed chart's background controller already owns network-policy generation;
+this change adds no controller permission or scanner exception.
 
-- [ ] Read-only IAM role for `s3://openbank-sandbox-db-backups/ledger-db` usable from the DR namespace SA
-- [ ] CNPG `Cluster` recovery manifest template (parameterized by run-id)
-- [ ] ledger-service ephemeral Deployment manifest for the DR namespace (no Kafka, no OIDC)
-- [ ] Self-hosted runner label for the deploy pool with kubectl access
-- [ ] Flip `dr-restore-verify.yml` to a quarterly schedule after the first green manual run
-- [ ] Extend to balance-service and transaction-service (T0 set) once ledger is proven
+The generated policy selects only the ledger check pod, denies pod ingress and
+allows egress only to the same namespace's restored CNPG pods on TCP 5432 and
+kube-system DNS pods on TCP/UDP 53. CNPG pods are not selected, so backup access
+requires its own boundary. The check pod mounts no Kubernetes API token.
 
-## Note on referenced runbooks
-
-`bcp-policy.md` cites `runbook-0002-disaster-recovery.md` and `runbook-0003-pg-pitr.md`, but
-`docs/runbooks/` currently holds `0002-vault-*` and `0003-postgresql-*` under those numbers —
-the DR runbooks are not yet written under those names. Writing them is part of closing
-ADR-0146 (key-ceremony + DR runbooks); this automated check is the executable complement to
-them.
+Creation is not proof that the CNI has programmed the policy. The cluster's
+standard enforcement mode can initially allow traffic while rules are installed.
+A live drill must prove enforcement from startup and actual DNS/database access;
+neither these manifests nor fake-boundary tests establish runtime isolation.
+Startup, authorization, write isolation and full money-path recovery remain open.
+Port-forward and kubelet readiness are not pod-to-pod ingress tests.

@@ -76,7 +76,7 @@ jobs:
     needs: changes-ui
     if: needs.changes-ui.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: openbank-admin-ui
@@ -118,35 +118,73 @@ jobs:
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
 
-      - name: Install Playwright browsers
-        # Download the Chromium binary (always works, no root required).
-        run: npx playwright install chromium
-
-      - name: Install Playwright system dependencies
-        # On Linux, Chromium needs OS-level libs (libnspr4, libnss3, etc.).
-        # This requires sudo / root; self-hosted runners may not have it yet.
-        # Linux-only: install-deps is a no-op on macOS, and on a self-hosted Mac
-        # runner `sudo` without NOPASSWD hangs on the password prompt until the
-        # JOB timeout kills the run (continue-on-error can't catch a job timeout).
-        # The step timeout is the belt-and-braces for an unprepared Linux runner —
-        # the E2E step still skips gracefully if deps are absent (see below).
-        # When the runner is eventually set up with NOPASSWD sudo, remove the flag.
-        if: runner.os == 'Linux'
-        run: sudo npx playwright install-deps chromium
-        timeout-minutes: 5
+      - name: Build Admin UI Test Intelligence envelope
+        if: always()
         continue-on-error: true
+        run: python3 ../.github/scripts/collect-test-run-evidence.py --service . --component openbank-admin-ui --out build/test-intelligence/run.json
+
+      - name: Retain Admin UI test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-admin-ui-unit-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run.json
+          retention-days: 30
+
+      - name: Publish latest Admin UI test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-openbank-admin-ui-unit
+          path: |
+            openbank-admin-ui/build/test-intelligence/run.json
+            openbank-admin-ui/build/test-results/**/*.xml
+          retention-days: 14
+          overwrite: true
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  # Hosted jobs were forcibly reclaimed at 12 minutes despite the former 25-minute
+  # timeout. Running lint, 3k Vitest cases, Playwright and the
+  # production build serially therefore produced three cancellations with no test
+  # failure. Keep browser proof independent and let the stable `Admin UI` context
+  # aggregate both jobs; this shortens the critical path without weakening a gate.
+  ui-e2e:
+    name: Admin UI E2E (${{ matrix.shard }}/3)
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Keep each browser run short enough to finish and publish its evidence even
+    # when hosted runner lifetimes are constrained. Every shard remains required.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers and system dependencies
+        run: npx playwright install --with-deps chromium
 
       - name: E2E tests (Playwright)
         id: browser_e2e
-        run: npm run test:e2e
-        # ADR-0076 Phase 2: Playwright E2E for /services docs-coverage page.
-        # Mocks all BFF endpoints via page.route() — no live services required.
-        # Enforced (issue #653): this job runs solely on hosted ubuntu-latest (a single,
-        # uniform pool member — no ARC/self-hosted split for Admin UI build), the deps
-        # step above installs cleanly every run, and #646 fixed the suite from silently
-        # testing /auth/login (every route redirected there, no Keycloak in CI) to
-        # actually exercising /services via a minted session cookie. Verified stable:
-        # 5/5 passing across 3 consecutive main-branch runs, locally with --repeat-each=3.
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
         env:
           CI: "true"
           NEXTAUTH_URL: "http://localhost:3001"
@@ -154,7 +192,7 @@ jobs:
           OPENBANK_REPO_ROOT: "${{ github.workspace }}"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
 
-      - name: Build Admin UI Test Intelligence envelope
+      - name: Build Admin UI E2E Test Intelligence envelope
         if: always()
         continue-on-error: true
         run: |
@@ -166,49 +204,27 @@ jobs:
             --service . --component openbank-admin-ui --out build/test-intelligence/run.json \
             "${DIAGNOSTIC_ARGS[@]}"
 
-      - name: Retain Admin UI test evidence
+      - name: Retain Admin UI E2E evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-intelligence-run-openbank-admin-ui-${{ github.run_id }}-a${{ github.run_attempt }}
-          path: openbank-admin-ui/build/test-intelligence/run.json
-          retention-days: 30
-
-      - name: Publish latest Admin UI test evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: test-intelligence-openbank-admin-ui
+          name: test-intelligence-run-openbank-admin-ui-e2e-${{ github.run_id }}-a${{ github.run_attempt }}-s${{ matrix.shard }}
           path: |
             openbank-admin-ui/build/test-intelligence/run.json
-            openbank-admin-ui/build/test-results/**/*.xml
-          retention-days: 14
-          overwrite: true
+            openbank-admin-ui/build/test-results/e2e/playwright.xml
+          retention-days: 30
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        # `always() &&` is load-bearing. A step `if:` that names no status-check function is
-        # implicitly ANDed with success(), so `browser_e2e.outcome == 'failure'` could never hold:
-        # the E2E step has no continue-on-error, so its failure puts the job in a failed state and
-        # every later plain-`if:` step is skipped. Measured on five main runs (21590f0e8, bebbfc4fd,
-        # 8713dc4ba, 8db73dbbd, d57a02b6f): e2e=failure, the always() envelope step beside this one
-        # ran, and this upload was skipped — so the report existed for exactly the runs that did not
-        # need it. The three sibling `outcome == 'failure'` guards in dependency-review.yml and
-        # security.yml are correct as written because those steps DO set continue-on-error.
         if: always() && steps.browser_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}-s${{ matrix.shard }}
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
 
-      - name: Build
-        run: npm run build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-
   # Gate job — always runs, maps to the "Admin UI" required check name.
-  # Passes when ui-build succeeded or was skipped (no UI changes); fails when
-  # ui-build itself failed. Backend-only PRs therefore never get blocked.
+  # Passes when both ui-build and ui-e2e succeeded or were skipped (no UI changes);
+  # backend-only PRs therefore never get blocked.
   #
   # `cancelled` is deliberately NOT the same bucket as `failure` (issue #2185).
   # The concurrency group above is `ci-${{ github.ref }}` with cancel-in-progress,
@@ -230,34 +246,35 @@ jobs:
   #                      vacuous green this repo works to avoid.
   ui:
     name: Admin UI
-    needs: [changes-ui, ui-build]
+    needs: [changes-ui, ui-build, ui-e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Check build result
         env:
-          RESULT: ${{ needs.ui-build.result }}
+          BUILD_RESULT: ${{ needs.ui-build.result }}
+          E2E_RESULT: ${{ needs.ui-e2e.result }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          if [ "$RESULT" = "failure" ]; then
-            echo "Admin UI build FAILED — this is a real build failure, not a superseded run."
+          if [ "$BUILD_RESULT" = "failure" ] || [ "$E2E_RESULT" = "failure" ]; then
+            echo "Admin UI failed — build=$BUILD_RESULT, e2e=$E2E_RESULT."
             exit 1
           fi
-          if [ "$RESULT" = "cancelled" ]; then
+          if [ "$BUILD_RESULT" = "cancelled" ] || [ "$E2E_RESULT" = "cancelled" ]; then
             if [ "$EVENT" = "push" ]; then
-              echo "::warning::Admin UI build was CANCELLED, not failed: a newer push to this ref" \
+              echo "::warning::Admin UI verification was CANCELLED, not failed: a newer push to this ref" \
                    "superseded it (concurrency group ci-$REF). Read that newer run's" \
                    "gate — this one built nothing and is not evidence of a broken build (#2185)."
               exit 0
             fi
-            echo "Admin UI build was cancelled before it finished, so nothing was built."
+            echo "Admin UI verification was cancelled before both jobs finished."
             echo "Re-run it (or push again) — a cancelled run must not read as a passing gate."
             exit 1
           fi
-          echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
+          echo "Admin UI: build=$BUILD_RESULT, e2e=$E2E_RESULT (skipped = no UI changes in this PR)."
 
   # ---------------------------------------------------------------------------
   # Static config validation — the governance gates.

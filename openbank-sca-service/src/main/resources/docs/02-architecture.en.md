@@ -43,7 +43,7 @@ Pure Kotlin, no framework. Holds the invariants:
 ### Adapters (`com.openbank.sca.infrastructure`)
 - **REST**: `ScaResource` (`@Path("/api/v1/sca")`) — coroutine handlers, `@Authorize` on mutating endpoints, per-party ownership enforcement via `SecurityIdentity`, and a set of `ExceptionMapper`s translating domain exceptions to the `ApiError` model.
 - **Persistence**: Panache reactive repositories (`ScaChallengeRepositoryImpl`, `EnrolledDeviceRepositoryImpl`, `ScaOutboxRepositoryImpl`) + entities.
-- **Redis adapters** (`ScaAdapters`): `SecureOtpGenerator`, `RedisOtpStore`, `RedisScaIdempotencyStore`, `LoggingNotificationSender`. Decoupled-decision store lives in `DeviceApprovalAdapters`, the JCA signature verifier in the infrastructure layer (`JcaDeviceAssertionVerifier`).
+- **Redis adapters** (`ScaAdapters`): `SecureOtpGenerator`, `RedisOtpStore`, `RedisScaIdempotencyStore`, `LoggingNotificationSender`. Decoupled decisions and their audit events commit together in `PostgresScaDecisionStore`; signatures are checked by `JcaDeviceAssertionVerifier`. Redis continues to serve OTP and idempotency data.
 - **Messaging/outbox**: `ScaOutboxDispatcher` + `KafkaScaOutboxEventPublisher`.
 - **authz**: `AuthzProducer` (OPA client wiring, ADR-0034).
 

@@ -461,6 +461,18 @@ not change any existing request's outcome until explicitly flipped.
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
 
+- **2026-09-13** — **Settlement audit edge in the shared payments manifest.**
+  The settlement producer now publishes state events using its own Kafka identity and
+  topic ACL. The shared `payments-services.yaml` also holds this service's workload; a
+  parsed resource comparison confirms that only the settlement Rollout changes. This
+  service receives no new credential mount, Kafka grant, ingress or environment value.
+  The added event exposes settlement account identifiers and amounts to the audit
+  consumer, as assessed in [the settlement threat model](openbank-settlement-service.md).
+  A broker acknowledgement does not establish payment finality or audit persistence;
+  upstream payment status must continue to follow the existing settlement protocol.
+  Rollback removes the settlement relay configuration while retaining its pending outbox
+  rows for recovery; no payment-service schema rollback is required.
+
 - **2026-09-13** — **Additive lifecycle evidence contract for ADR-0306.**
   `domestic_payments.aggregate_revision` starts at 1 and every valid transition increments it while
   holding a pessimistic row lock. The aggregate update and status event remain in the same existing

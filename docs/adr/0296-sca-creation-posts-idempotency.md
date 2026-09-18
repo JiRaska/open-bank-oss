@@ -60,3 +60,27 @@ entries re-point here:
 Documents the replay protection on the PSD2 SCA initiation path (a duplicate challenge would
 mean a duplicate customer authentication prompt, and downstream a second consumable
 authorisation) and on device credential ownership. No new obligation introduced.
+
+## Inventory correction: one-use consumption (2026-09-14)
+
+`POST /api/v1/sca/challenges/{id}/consume` was already served before the production-readiness
+changes but was absent from the published OpenAPI inventory. Publishing that existing route
+makes the idempotency gate observe an additional operation; it does not introduce a new
+keyless creation endpoint. The required challenge UUID identifies the existing authorization.
+
+This operation has an ADR-linked lifecycle exception to the header-based inventory.
+`ScaChallengeRepositoryImpl.markConsumed` atomically updates only an unconsumed, completed,
+unexpired challenge, setting `consumedAt` and incrementing its version. At most one caller
+receives HTTP 200; subsequent callers receive HTTP 409. Eligibility, party ownership and
+purpose-specific dynamic linking are checked before consumption. A lost successful response
+remains an uncertain outcome for the caller: retrying does not grant another authorization.
+
+`ScaLifecycleSafetyIT` drives eight concurrent real HTTP requests against PostgreSQL and
+asserts exactly one 200, seven 409s, a recent consumption timestamp and exactly one version
+increment. Its companion tests cover expired/unapproved challenges and stale-write rejection.
+These tests prove the consumption transition, not atomicity with a downstream payment.
+
+The baseline gains this one explicitly justified inventory correction. The checker and its
+requirements for new money-path creation operations remain unchanged. Returning a cached 200
+for another consume request would let downstream callers mistake a replay for fresh permission;
+adding a mandatory header would break existing callers without strengthening the database CAS.

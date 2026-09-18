@@ -647,22 +647,22 @@ class AuditAttributionTest {
     }
 
     @Test
-    fun `a message is always acked, even when it cannot be stored`(): Unit = runBlocking {
-        // The one way this change could be WORSE than the defect it fixes. Taking Message<String>
-        // switches SmallRye from auto-ack to manual ack; an un-acked message stalls the partition
-        // and the audit trail stops dead. Unparseable payload = the path most likely to skip it.
+    fun `unparseable message is not acknowledged`(): Unit = runBlocking {
         val acked = AtomicBoolean(false)
+        val nacked = AtomicBoolean(false)
         val message = Message.of(
             "this is not json",
             Supplier<CompletionStage<Void>> {
                 acked.set(true)
                 CompletableFuture.completedFuture(null)
             },
-        )
-
+        ).withNack {
+            nacked.set(true)
+            CompletableFuture.completedFuture(null)
+        }
         consumer.consume(message)
-
-        assertThat(acked.get()).isTrue()
+        assertThat(acked.get()).isFalse()
+        assertThat(nacked.get()).isTrue()
     }
 
     @Test

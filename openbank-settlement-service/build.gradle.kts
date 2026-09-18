@@ -16,6 +16,8 @@ dependencies {
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
+    implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
     // SettlementStrandedGauge's 30s refresh tick (issue #5705).
@@ -40,6 +42,7 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.mockk)
     // Test-only (#5705): SettlementStrandedGaugeTest, SettlementActivitiesImplTest and
     // SettlementMetricsAdapterTest assert the alert expressions in
@@ -57,6 +60,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
     // Real-HTTP stand-in for balance-service so the reversal adapters' REST calls actually leave
@@ -92,3 +97,9 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Multiple Quarkus profiles plus the in-process Temporal engine retain more than the default
+// 512m test heap (measured at >98% old generation with repeated full GC). Scope this to tests.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}

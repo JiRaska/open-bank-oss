@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.6.0"
+  version: "1.7.1"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -49,7 +49,9 @@ components:
         id: { type: string, format: uuid }
         payerAccountId: { type: string, format: uuid }
         payeeAccountId: { type: string, format: uuid }
-        amount: { type: string }
+        amount:
+          type: string
+          description: Persisted decimal amount, using the database precision of four fractional digits.
         currency: { type: string }
         status:
           type: string
@@ -66,6 +68,8 @@ components:
             Those three are separate values rather than one because they call for different
             actions, and reporting the wrong one either summons an accountant to correct an entry
             that does not exist or asserts a clean ledger nobody checked.
+            An uncertain forward balance movement is exposed as PENDING with recoveryRequired=true
+            and recoveryReason=BALANCE_STATE_UNKNOWN. PENDING does not prove no money has moved.
             LEDGER_REVERSED is deprecated and is no longer produced —
             the code path that wrote it updated this column without reversing anything.
             REJECTED means the saga unwound COMPLETELY: it is written only when every compensation
@@ -87,3 +91,13 @@ components:
             - LEDGER_REVERSED
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        recoveryRequired:
+          type: boolean
+          description: An uncertain forward balance movement requires reconciliation before settlement can finish.
+        recoveryReason:
+          type: string
+          nullable: true
+          description: >-
+            Reason for required reconciliation, or null. BALANCE_STATE_UNKNOWN means a forward
+            debit or credit may have committed without a reliable completion result. Clients must
+            tolerate additional reasons. No automatic counter-movement or rejection is attempted.
