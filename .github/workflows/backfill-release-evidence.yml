@@ -149,12 +149,32 @@ jobs:
           echo "${COSIGN_SHA256}  cosign" | sha256sum -c -
           chmod +x cosign
           upload_url="$(cat upload-url.txt)"
+          existing_dir="$(mktemp -d)"
+          upload_or_verify() {
+            local asset="$1" code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Content-Type: application/octet-stream' --data-binary "@${asset}" \
+              "${upload_url}?name=${asset}")"
+            case "$code" in
+              201) return 0 ;;
+              422)
+                gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+                  --pattern "$asset" --dir "$existing_dir" --clobber
+                if [[ "$asset" == *.sig ]]; then
+                  COSIGN_YES=true ./cosign verify-blob --key awskms:///alias/openbank-cosign-signing \
+                    --signature "$existing_dir/$asset" "${asset%.sig}" > /dev/null
+                else
+                  cmp -s "$asset" "$existing_dir/$asset"
+                fi
+                ;;
+              *) echo "::error::upload of $asset failed (HTTP $code)"; return 1 ;;
+            esac
+          }
           for suffix in cdx.json slsa.json vex.json evidence.json; do
             file="${TAG}.${suffix}"
             COSIGN_YES=true ./cosign sign-blob --key awskms:///alias/openbank-cosign-signing --output-signature "${file}.sig" "$file"
             for asset in "$file" "${file}.sig"; do
-              curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
-                -H 'Content-Type: application/octet-stream' --data-binary "@${asset}" \
-                "${upload_url}?name=${asset}" > /dev/null
+              upload_or_verify "$asset"
             done
           done
