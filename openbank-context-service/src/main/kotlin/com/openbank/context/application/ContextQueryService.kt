@@ -73,7 +73,7 @@ class ContextQueryService(
         "kyb-case:$ref",
         actor,
         context,
-        block,
+        { ContextReadResult(block(), ContextDisclosure(listOf("kyb-case:$ref"), 1, false, projectionGeneration)) },
     )
 
     internal suspend fun <T> fraudCaseEvidence(
@@ -88,7 +88,7 @@ class ContextQueryService(
         "fraud-case:$ref",
         actor,
         context,
-        block,
+        { ContextReadResult(block(), ContextDisclosure(listOf("fraud-case:$ref"), 1, false, projectionGeneration)) },
     )
 
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =
@@ -178,7 +178,7 @@ class ContextQueryService(
         val now = clock.instant()
         if (context.purpose != requiredPurpose) {
             audit.record(entry(actor, context, action, root, "DENIED", null, "PURPOSE_MISMATCH", now))
-            decisionMetric(action, "denied", "purpose_mismatch")
+            decisionMetric(meters, action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
         val rootScoped = namespace in setOf(
@@ -194,7 +194,7 @@ class ContextQueryService(
         }
         if (!assigned) {
             audit.record(entry(actor, context, action, root, "DENIED", null, "NO_ACTIVE_ASSIGNMENT", now))
-            decisionMetric(action, "denied", "no_active_assignment")
+            decisionMetric(meters, action, "denied", "no_active_assignment")
             throw ContextAccessDenied()
         }
         val decision = try {
@@ -216,17 +216,17 @@ class ContextQueryService(
             )
         } catch (_: Exception) {
             audit.record(entry(actor, context, action, root, "UNAVAILABLE", null, "PDP_UNAVAILABLE", now))
-            decisionMetric(action, "unavailable", "pdp_unavailable")
+            decisionMetric(meters, action, "unavailable", "pdp_unavailable")
             throw ContextAuthorizationUnavailable()
         }
         if (!decision.allow) {
             audit.record(entry(actor, context, action, root, "DENIED", decision.policyVersion, "POLICY_DENIED", now))
-            decisionMetric(action, "denied", "policy_denied")
+            decisionMetric(meters, action, "denied", "policy_denied")
             throw ContextAccessDenied()
         }
         val allowed = entry(actor, context, action, root, "ALLOWED", decision.policyVersion, "POLICY_ALLOWED", now)
         audit.record(allowed)
-        decisionMetric(action, "allowed", "policy_allowed")
+        decisionMetric(meters, action, "allowed", "policy_allowed")
         val result = block()
         result.disclosure?.let { disclosure ->
             require(
@@ -236,37 +236,16 @@ class ContextQueryService(
                 "invalid disclosure evidence count"
             }
             audit.recordDisclosure(
-                ContextDisclosureAudit(allowed.id, queryHash(action, root, context), disclosure, clock.instant()),
+                ContextDisclosureAudit(
+                    allowed.id,
+                    queryHash(bankScope, action, root, context),
+                    disclosure,
+                    clock.instant(),
+                ),
             )
         }
         return result.value
     }
-
-    private fun queryHash(action: String, root: String, context: InvestigationContext): String {
-        val fields =
-            listOf(
-                bankScope,
-                action,
-                root,
-                context.caseId,
-                context.purpose,
-                context.asOf.toString(),
-                context.knownAt?.toString().orEmpty(),
-            )
-        val bytes = fields.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
-        return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-    }
-
-    private fun decisionMetric(action: String, decision: String, reason: String) = meters.counter(
-        "openbank_context_access_decisions_total",
-        "action",
-        action,
-        "decision",
-        decision,
-        "reason",
-        reason,
-    )
-        .increment()
 
     private fun entry(
         actor: Investigator,
@@ -283,3 +262,27 @@ class ContextQueryService(
         const val MAX_EVIDENCE_REFS = 512
     }
 }
+
+private fun queryHash(bankScope: String, action: String, root: String, context: InvestigationContext): String {
+    val fields = listOf(
+        bankScope,
+        action,
+        root,
+        context.caseId,
+        context.purpose,
+        context.asOf.toString(),
+        context.knownAt?.toString().orEmpty(),
+    )
+    val bytes = fields.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
+    return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+}
+
+private fun decisionMetric(meters: MeterRegistry, action: String, decision: String, reason: String) = meters.counter(
+    "openbank_context_access_decisions_total",
+    "action",
+    action,
+    "decision",
+    decision,
+    "reason",
+    reason,
+).increment()

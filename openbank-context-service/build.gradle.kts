@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 plugins { id("openbank.quarkus-service") }
 
+// The source-backed integration suite boots several Quarkus profiles in one test JVM.
+// Keep its heap bounded per module so the full gate can finish without exhausted forks.
+tasks.withType<Test>().configureEach { maxHeapSize = "2g" }
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)
