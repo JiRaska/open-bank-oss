@@ -133,11 +133,12 @@ be prebuilt concurrently before the Flyway migration so startup does not build
 it under write load. The graph requests one extra row to mark truncation.
 This overlay is not the case-scoped Lending exposure read contract in step 4.
 The database checks proposal/decision separation and local referential lineage.
-Each graph fact has an explicit bank scope; composite foreign keys prevent linking
-a graph asset, allocation, valuation or correction across bank scopes, and source
-identity uniqueness is scoped to the bank. The legacy `loan` and `collateral` tables
-have no bank-scope column, so the future writer must verify their bank ownership
-with the owning service before proposal or approval. The schema cannot establish
+ADR-0152 makes Lending single-bank per deployment. V18 therefore uses local IDs
+and foreign keys without a per-row bank dimension; the existing `loan` and
+`collateral` tables follow the same boundary. A writer must derive the bank
+identifier for outgoing Context references from trusted deployment configuration,
+never from proposal data, and must reject a mismatch with Document's server-stamped
+provenance. The schema cannot establish
 that a guarantor party is verified, an asset identity is unique across documents,
 or a document hash matches the authoritative file.
 The future source adapter must verify these with their owners and recheck the
@@ -146,8 +147,8 @@ eligible to become a Context edge.
 
 ### Source proof boundary for the first writer
 
-The writer must derive `bank_scope` from the Lending deployment or a verified
-tenant claim, never from the proposal body. On both proposal and approval it
+The writer must derive the outgoing Context `bank_scope` from the Lending
+deployment, never from the proposal body or a tenant claim. On both proposal and approval it
 resolves the loan/collateral in Lending, the guarantor in Party, and the cited
 document in Document. A missing, archived, mismatched or unavailable source
 fails closed; it is not converted into a graph fact. The document check must

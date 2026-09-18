@@ -752,9 +752,10 @@ create a false cross-borrower disclosure. The planned source model therefore
 requires verified IDs, independent maker/checker decisions, effective intervals,
 source hashes and immutable correction lineage before Context receives any P3
 reference. The present collateral/provisioning calculation must remain unchanged
-during an additive migration. Graph facts carry bank scope and use composite
-foreign keys for graph-owned relationships; the older loan/collateral tables do
-not, so the source writer must verify their bank ownership before a graph fact
-is proposed or approved. A graph row alone is not that verification. Cross-borrower expansion and any financial total
+during an additive migration. Under ADR-0152, the Lending database belongs to one
+bank per deployment: graph facts use local foreign keys, and the future writer
+must stamp outgoing Context references from trusted deployment configuration.
+It must compare that identifier with Document's server-stamped provenance; a
+request-supplied bank identifier cannot establish ownership. Cross-borrower expansion and any financial total
 require separate authorization and reconciliation to authoritative snapshots;
 missing data must produce `UNKNOWN` or `TOTAL_UNAVAILABLE`, never a reassuring zero.
