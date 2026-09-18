@@ -127,9 +127,13 @@ for investigation, never silently treated as exported.
 
 The local row remains the only place holding the restricted detail. An authorized, purpose-bound
 verification operation can recompute its commitment by audit event ID and compare it with the
-anchored fleet record; a mismatch or a local row without a fleet record is a finding. Periodic
-reconciliation compares committed local IDs with centrally stored IDs, so a lost or stalled relay
-cannot appear healthy merely because requests still return. Context read latency depends on the
+anchored fleet record; a mismatch or a local row without a fleet record is a finding. A local
+streaming comparison of minimized Context and fleet exports is now available in
+[runbook 0024](../runbooks/0024-context-audit-commitment-reconciliation.md); it reports missing
+IDs and digest mismatches without trusting the producer's `SENT` flag. It does not yet run
+periodically or prove sandbox delivery. Periodic reconciliation must compare committed local IDs
+with centrally stored IDs so a lost or stalled relay cannot appear healthy merely because requests
+still return. Context read latency depends on the
 local atomic insert, not Kafka or Audit availability, while bounded outbox age and central
 verification are release gates. Measure that insert at populated 1× and 10× load together with
 payment-path p95 before enabling a real-data lens. Rollback disables new sensitive reads and the
