@@ -10,7 +10,9 @@ cluster access fails the job; a skipped restore is not successful evidence.
 A successful run establishes that this ledger backup could be restored, the check
 workload became ready and the selected fiscal year's trial balance returned the JSON
 boolean `balanced: true`, the requested fiscal year, a positive account count and
-finite, positive, equal debit/credit totals. Empty years fail this evidence check, even
+finite, positive, equal debit/credit totals. It recomputes totals from the account
+lines, checks balance within each currency, rejects duplicate account/currency lines
+and verifies the distinct account count. Empty years fail this evidence check, even
 though they are valid results for the general ledger API. Select a year with known activity.
 The job records elapsed time from restore start through that response. It does **not**
 measure RPO, prove that every expected posting survived, or prove consistency with balances,

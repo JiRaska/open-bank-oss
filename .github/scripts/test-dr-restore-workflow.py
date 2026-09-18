@@ -87,12 +87,17 @@ case = os.environ['DR_TEST_CASE']
 if case == 'http-failure':
     sys.exit(22)
 body = {'fiscalYear': 2026, 'balanced': True, 'accountCount': 2,
-        'totalDebit': 100.01, 'totalCredit': 100.01}
+        'totalDebit': 100.01, 'totalCredit': 100.01,
+        'sections': [{'lines': [
+            {'glAccountId': 'account-a', 'currency': 'EUR', 'totalDebit': 100.01, 'totalCredit': 0},
+            {'glAccountId': 'account-b', 'currency': 'EUR', 'totalDebit': 0, 'totalCredit': 100.01}]}]}
 body.update({'string-boolean': {'balanced': 'True'},
              'unbalanced': {'balanced': False},
              'empty-ledger': {'accountCount': 0, 'totalDebit': 0, 'totalCredit': 0},
              'wrong-year': {'fiscalYear': 2025},
              'mismatched-totals': {'totalCredit': 99.99}}.get(case, {}))
+if case == 'cross-currency':
+    body['sections'][0]['lines'][1]['currency'] = 'USD'
 print(json.dumps(body))
 '''
 
@@ -270,7 +275,10 @@ class DrRestoreWorkflowTest(unittest.TestCase):
 
     def test_trial_balance_numbers_are_checked_without_float_rounding(self):
         script = ROOT / '.github/scripts/dr-check-trial-balance.py'
-        prefix = '{"balanced":true,"fiscalYear":2026,"accountCount":2,'
+        prefix = ('{"balanced":true,"fiscalYear":2026,"accountCount":2,'
+                  '"sections":[{"lines":['
+                  '{"glAccountId":"a","currency":"EUR","totalDebit":0.1,"totalCredit":0},'
+                  '{"glAccountId":"b","currency":"EUR","totalDebit":0,"totalCredit":0.1}]}],')
         cases = [
             ('"totalDebit":0.1,"totalCredit":0.10}', True),
             ('"totalDebit":9007199254740992.01,"totalCredit":9007199254740992.02}', False),
@@ -294,6 +302,45 @@ class DrRestoreWorkflowTest(unittest.TestCase):
                                         input=body, capture_output=True, text=True, timeout=5)
                 self.assertNotEqual(result.returncode, 0)
 
+    def test_trial_balance_lines_prove_per_currency_balance_and_summary_consistency(self):
+        script = ROOT / '.github/scripts/dr-check-trial-balance.py'
+        body = {'balanced': True, 'fiscalYear': 2026, 'accountCount': 2,
+                'totalDebit': 3, 'totalCredit': 3, 'sections': [{'lines': [
+                    {'glAccountId': 'a', 'currency': 'EUR', 'totalDebit': 1, 'totalCredit': 0},
+                    {'glAccountId': 'b', 'currency': 'EUR', 'totalDebit': 0, 'totalCredit': 1},
+                    {'glAccountId': 'a', 'currency': 'USD', 'totalDebit': 2, 'totalCredit': 0},
+                    {'glAccountId': 'b', 'currency': 'USD', 'totalDebit': 0, 'totalCredit': 2},
+                ]}]}
+        def check(value, accepted):
+            result = subprocess.run([sys.executable, str(script), '2026'],
+                                    input=json.dumps(value), capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode == 0, accepted, result.stderr)
+        check(body, True)
+        for field, value in [('accountCount', 3), ('sections', []), ('sections', None),
+                             ('totalDebit', 4), ('totalCredit', 4)]:
+            with self.subTest(field=field, value=value):
+                check(dict(body, **{field: value}), False)
+        for field, value in [('currency', 'GBP'), ('currency', None), ('currency', ''),
+                             ('glAccountId', ''), ('totalDebit', -1), ('totalDebit', None)]:
+            with self.subTest(field=field, value=value):
+                changed = json.loads(json.dumps(body))
+                changed['sections'][0]['lines'][0][field] = value
+                check(changed, False)
+        duplicate = json.loads(json.dumps(body))
+        duplicate['sections'][0]['lines'].append(duplicate['sections'][0]['lines'][0])
+        check(duplicate, False)
+        # Both currencies can balance while the summary lies about the amount.
+        check(dict(body, totalDebit=4, totalCredit=4), False)
+        # Default Decimal arithmetic precision must not erase a small posting next
+        # to a large one: the lines total 1e30 + 1, not the advertised 1e30.
+        large = json.loads(json.dumps(body))
+        large['sections'][0]['lines'][0]['totalDebit'] = 1e30
+        large['sections'][0]['lines'][1]['totalCredit'] = 1e30
+        large['sections'][0]['lines'][2]['totalDebit'] = 1
+        large['sections'][0]['lines'][3]['totalCredit'] = 1
+        large.update(totalDebit=1e30, totalCredit=1e30)
+        check(large, False)
+
     def test_cleanup_failure_is_not_a_successful_drill(self):
         result, _, stopped = self.run_step('delete-failure')
         self.assertNotEqual(result.returncode, 0)
@@ -306,7 +353,7 @@ class DrRestoreWorkflowTest(unittest.TestCase):
 
     def test_failed_verification_cleans_only_its_resources(self):
         for case in ['http-failure', 'unbalanced', 'string-boolean', 'empty-ledger',
-                     'wrong-year', 'mismatched-totals']:
+                     'wrong-year', 'mismatched-totals', 'cross-currency']:
             with self.subTest(case=case):
                 result, calls, stopped = self.run_step(case)
                 self.assertNotEqual(result.returncode, 0)
