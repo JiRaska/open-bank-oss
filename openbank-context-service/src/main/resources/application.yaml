@@ -26,6 +26,8 @@ quarkus:
     client-id: openbank-context-investigation
     credentials:
       secret: ${CONTEXT_INVESTIGATION_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
   rest-client:
     aml-service:
       url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
