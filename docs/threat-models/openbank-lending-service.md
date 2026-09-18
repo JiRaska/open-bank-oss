@@ -102,7 +102,14 @@
     signs explicitly (increase: DEBIT expense / CREDIT allowance; decrease: reversed) and asserts the
     loan principal GL (Loans Receivable) is never touched by a provisioning entry.
   - **Batch completeness:** `findUnprovisioned` drains successive batches of every nonterminal exposure,
-    including defaulted loans. Daily immutable keys support current-date completeness checks.
+    including defaulted loans. Daily immutable keys support current-date completeness checks; the
+    scheduler records workflow success only after the missing-eligible count is zero.
+  - **Residual date-rollover recovery risk:** a process failure can interrupt a date before all
+    eligible loans receive rows. The next daily tick uses a new date; `snapshotFor` reads mutable
+    current loan, installment, collateral and risk state, so calling it with yesterday's `asOf`
+    cannot reconstruct yesterday's ECL. Do not backdate those current inputs or treat today's
+    successful pass as proof that the prior date was complete. Historical-input-backed recovery
+    or a controlled accounting reconciliation remains necessary.
   - **Crash and concurrency integrity:** provisioning and terminal transitions lock and refresh the loan.
     Snapshot/state changes and frozen allowance commands commit in one database transaction. The
     outbox retries the same amount, accounting date and ledger idempotency reference; provisioning
