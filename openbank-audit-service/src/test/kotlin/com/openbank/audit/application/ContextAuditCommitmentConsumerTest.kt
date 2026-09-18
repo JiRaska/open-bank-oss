@@ -43,6 +43,50 @@ class ContextAuditCommitmentConsumerTest {
     }
 
     @Test
+    fun `disclosure commitment is accepted without local evidence details`(): Unit = runBlocking {
+        val message = mockk<Message<String>>()
+        val payload = validPayload("CONTEXT_DISCLOSURE_COMMITTED", "CONTEXT_DISCLOSURE")
+        every { message.payload } returns payload
+        every { message.ack() } returns CompletableFuture.completedFuture(null)
+        coEvery { repository.save(any()) } returns Unit
+
+        consumer.consume(message)
+
+        coVerify {
+            repository.save(
+                match {
+                    it.eventType == "CONTEXT_DISCLOSURE_COMMITTED" &&
+                        it.aggregateType == "CONTEXT_DISCLOSURE"
+                },
+            )
+        }
+        verify(exactly = 1) { message.ack() }
+    }
+
+    @Test
+    fun `disclosure type cannot be paired with read audit aggregate`(): Unit = runBlocking {
+        val message = mockk<Message<String>>()
+        every { message.payload } returns validPayload("CONTEXT_DISCLOSURE_COMMITTED", "CONTEXT_READ_AUDIT")
+
+        assertThatThrownBy { runBlocking { consumer.consume(message) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        coVerify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { message.ack() }
+    }
+
+    @Test
+    fun `disclosure commitment rejects evidence references on the transport`(): Unit = runBlocking {
+        val message = mockk<Message<String>>()
+        every { message.payload } returns validPayload("CONTEXT_DISCLOSURE_COMMITTED", "CONTEXT_DISCLOSURE")
+            .replaceFirst("{", "{\"evidenceRefs\":[\"synthetic-ref\"],")
+
+        assertThatThrownBy { runBlocking { consumer.consume(message) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        coVerify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { message.ack() }
+    }
+
+    @Test
     fun `rejects an identity field before storage or acknowledgment`(): Unit = runBlocking {
         val message = mockk<Message<String>>()
         every { message.payload } returns validPayload().replaceFirst("{", "{\"principalId\":\"person-1\",")
@@ -64,14 +108,14 @@ class ContextAuditCommitmentConsumerTest {
         verify(exactly = 0) { message.ack() }
     }
 
-    private fun validPayload(): String {
+    private fun validPayload(eventType: String = EVENT_TYPE, aggregateType: String = "CONTEXT_READ_AUDIT"): String {
         val id = UUID.randomUUID()
         return jacksonObjectMapper().writeValueAsString(
             mapOf(
                 "schemaVersion" to 1,
                 "eventId" to id.toString(),
-                "eventType" to EVENT_TYPE,
-                "aggregateType" to "CONTEXT_READ_AUDIT",
+                "eventType" to eventType,
+                "aggregateType" to aggregateType,
                 "aggregateId" to id.toString(),
                 "sourceService" to "context-service",
                 "occurredAt" to "2026-09-18T11:59:00Z",

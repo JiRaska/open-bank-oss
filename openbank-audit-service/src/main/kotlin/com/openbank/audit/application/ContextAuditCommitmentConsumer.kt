@@ -36,8 +36,9 @@ class ContextAuditCommitmentConsumer(
             "Context audit commitment has unexpected fields"
         }
         require(node.required("schemaVersion").isIntegralNumber && node.path("schemaVersion").intValue() == 1)
-        require(node.required("eventType").textValue() == EVENT_TYPE)
-        require(node.required("aggregateType").textValue() == "CONTEXT_READ_AUDIT")
+        val eventType = requiredText(node, "eventType")
+        val aggregateType = requiredText(node, "aggregateType")
+        require(EVENT_TYPES[eventType] == aggregateType) { "Unsupported Context commitment type" }
         require(node.required("sourceService").textValue() == "context-service")
         val id = UUID.fromString(requiredText(node, "eventId"))
         require(requiredText(node, "aggregateId") == id.toString())
@@ -46,8 +47,8 @@ class ContextAuditCommitmentConsumer(
         repository.save(
             AuditEntry(
                 id = id,
-                eventType = EVENT_TYPE,
-                aggregateType = "CONTEXT_READ_AUDIT",
+                eventType = eventType,
+                aggregateType = aggregateType,
                 aggregateId = id.toString(),
                 actorId = null,
                 actorType = null,
@@ -69,7 +70,10 @@ class ContextAuditCommitmentConsumer(
     }
 
     companion object {
-        private const val EVENT_TYPE = "CONTEXT_READ_AUDIT_COMMITTED"
+        private val EVENT_TYPES = mapOf(
+            "CONTEXT_READ_AUDIT_COMMITTED" to "CONTEXT_READ_AUDIT",
+            "CONTEXT_DISCLOSURE_COMMITTED" to "CONTEXT_DISCLOSURE",
+        )
         private const val MAX_PAYLOAD_BYTES = 2048
         private val COMMITMENT = Regex("[0-9a-f]{64}")
         private val FIELDS = setOf(

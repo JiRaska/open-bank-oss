@@ -50,12 +50,37 @@ class ContextAuditCommitmentIT {
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
-    private fun commitment(id: UUID, digest: String): String = mapper.writeValueAsString(
+    @Test
+    fun `disclosure commitment is chained once and conflicting replay is rejected`() {
+        val id = UUID.randomUUID()
+        val payload = commitment(id, "c".repeat(64), "CONTEXT_DISCLOSURE_COMMITTED", "CONTEXT_DISCLOSURE")
+
+        onEventLoop {
+            consumer.persist(payload)
+            consumer.persist(payload)
+        }
+
+        assertThat(onEventLoop { repository.findByAggregateId(id.toString()) }.map { it.id })
+            .containsExactly(id)
+        assertThat(onEventLoop { repository.verifyChain(fromEntryId = id) }.intact).isTrue()
+        assertThatThrownBy {
+            onEventLoop {
+                consumer.persist(commitment(id, "d".repeat(64), "CONTEXT_DISCLOSURE_COMMITTED", "CONTEXT_DISCLOSURE"))
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    private fun commitment(
+        id: UUID,
+        digest: String,
+        eventType: String = "CONTEXT_READ_AUDIT_COMMITTED",
+        aggregateType: String = "CONTEXT_READ_AUDIT",
+    ): String = mapper.writeValueAsString(
         mapOf(
             "schemaVersion" to 1,
             "eventId" to id.toString(),
-            "eventType" to "CONTEXT_READ_AUDIT_COMMITTED",
-            "aggregateType" to "CONTEXT_READ_AUDIT",
+            "eventType" to eventType,
+            "aggregateType" to aggregateType,
             "aggregateId" to id.toString(),
             "sourceService" to "context-service",
             "occurredAt" to Instant.parse("2026-09-18T12:00:00Z").toString(),
