@@ -17,7 +17,7 @@ describe('Fraud network boundary', () => {
     ] }], inspectedCandidates: 2, candidateTruncated: true })
     expect(network.related[0].shared.map(ref => ref.type)).toEqual(['ACCOUNT', 'COUNTERPARTY'])
     expect(network.candidateTruncated).toBe(true)
-    expect(parseFraudCaseNetwork({ root, related: [], inspectedCandidates: 6, candidateTruncated: false }).inspectedCandidates).toBe(6)
+    expect(parseFraudCaseNetwork({ root, related: [], inspectedCandidates: 0, comparedCandidates: 6, candidateTruncated: false }).comparedCandidates).toBe(6)
   })
 
   it('rejects invented, cross-role, closed and over-limit connections', () => {
@@ -25,6 +25,6 @@ describe('Fraud network boundary', () => {
     expect(() => parseFraudCaseNetwork({ root, related: [{ evidence: crossed, shared: [{ type: 'ACCOUNT', sourceId: counterparty }] }], inspectedCandidates: 1, candidateTruncated: false })).toThrow()
     expect(() => parseFraudCaseNetwork({ root, related: [{ evidence: related, shared: [{ type: 'ACCOUNT', sourceId: counterparty }] }], inspectedCandidates: 1, candidateTruncated: false })).toThrow()
     expect(() => parseFraudCaseNetwork({ root: { ...root, status: 'CLOSED_NO_FINDING' }, related: [], inspectedCandidates: 0, candidateTruncated: false })).toThrow()
-    expect(() => parseFraudCaseNetwork({ root, related: [], inspectedCandidates: 257, candidateTruncated: false })).toThrow()
+    expect(() => parseFraudCaseNetwork({ root, related: [], inspectedCandidates: 0, comparedCandidates: 257, candidateTruncated: false })).toThrow()
   })
 })

@@ -63,7 +63,7 @@ export function FraudCaseInvestigation({ initialCaseId = '' }: { initialCaseId?:
         <div className={styles.chips}>
           <span className={styles.chip}>{t('Živý zdroj', 'Live source')}</span>
           <span className={styles.chip}>{t('Přístup dle případu', 'Case-scoped access')}</span>
-          <span className={styles.chip}>{network.inspectedCandidates} {t('prověřené přidělené případy', 'assigned cases inspected')}</span>
+          <span className={styles.chip}>{network.comparedCandidates ?? network.inspectedCandidates} {t('porovnané přidělené případy', 'assigned cases compared')}</span>
         </div>
         {network.candidateTruncated && <p role="status" className={styles.alert}>{t('Částečný pohled: další přidělené případy nebyly v tomto limitu prohledány.', 'Partial view: additional assigned cases were not searched within this limit.')}</p>}
         <div className={styles.stage}>

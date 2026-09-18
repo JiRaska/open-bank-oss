@@ -13,13 +13,14 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Fraud case investigation', () => {
   it('shows a source-backed, visibly partial graph and selectable evidence', async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root, related: [{ evidence: related, shared: [{ type: 'ACCOUNT', sourceId: account }] }], inspectedCandidates: 4, candidateTruncated: true })))
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root, related: [{ evidence: related, shared: [{ type: 'ACCOUNT', sourceId: account }] }], inspectedCandidates: 1, comparedCandidates: 6, candidateTruncated: true })))
     vi.stubGlobal('fetch', fetcher)
     render(<LanguageProvider initialLanguage="en"><FraudCaseInvestigation initialCaseId={id} /></LanguageProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Open graph' }))
 
     expect(await screen.findByRole('img', { name: 'Explicit Fraud evidence graph' })).toHaveTextContent('RELATED CASE')
     expect(screen.getByText(/additional assigned cases were not searched/)).toBeInTheDocument()
+    expect(screen.getByText('6 assigned cases compared')).toBeInTheDocument()
     expect(screen.getByText(/not a fraud finding/)).toBeInTheDocument()
     expect(fetcher).toHaveBeenCalledWith(`/api/context/fraud-cases/${id}/network`, { cache: 'no-store' })
     fireEvent.click(screen.getByRole('button', { name: /Evidence match/ }))
