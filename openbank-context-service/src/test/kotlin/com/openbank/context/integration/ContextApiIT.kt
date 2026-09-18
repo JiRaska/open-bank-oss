@@ -588,11 +588,12 @@ class ContextApiIT {
         status: String = "OPEN",
     ): String {
         val affectedServices = services.joinToString(",") { "\"$it\"" }
+        val containedAt = if (status == "CONTAINED") "\"${NOW.plusSeconds(10)}\"" else "null"
         return """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
             """"eventType":"ICT_INCIDENT_STATUS_CHANGED",""" +
             """"sourceService":"security-scanner","occurredAt":"$NOW","incident":{"id":"$incidentId",""" +
             """"severity":"P1_CRITICAL","status":"$status","affectedServices":[$affectedServices],""" +
-            """"detectedAt":"$NOW","updatedAt":"$NOW"}}"""
+            """"detectedAt":"$NOW","containedAt":$containedAt,"resolvedAt":null,"updatedAt":"$NOW"}}"""
     }
 
     private fun domesticPaymentEvent(paymentId: UUID, revision: Long, status: String): String {

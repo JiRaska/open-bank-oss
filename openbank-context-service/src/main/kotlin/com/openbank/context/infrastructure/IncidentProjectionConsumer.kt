@@ -58,7 +58,11 @@ class IncidentProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
+    private fun project(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> =
+        session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+            .setParameter("bank", bankScope).singleResult.flatMap { projectScoped(session, event) }
+
+    private fun projectScoped(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
         session,
         """INSERT INTO context_projection_events
                 (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
@@ -79,7 +83,11 @@ class IncidentProjectionConsumer(
             Uni.createFrom().voidItem()
         } else {
             upsertIncident(session, event).flatMap { changed ->
-                if (changed == 0) Uni.createFrom().voidItem() else replaceAffectedServices(session, event)
+                if (changed == 0) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    upsertIncidentWindow(session, event).flatMap { replaceAffectedServices(session, event) }
+                }
             }
         }
     }
@@ -92,6 +100,29 @@ class IncidentProjectionConsumer(
         label = "${event.severity} · ${event.status}",
         validFrom = event.detectedAt,
         sourceVersion = event.sourceVersion,
+    )
+
+    private fun upsertIncidentWindow(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Int> = mutation(
+        session,
+        """INSERT INTO context_incident_windows
+            (bank_scope, incident_id, detected_at, contained_at, resolved_at, status, source_version, recorded_at)
+            VALUES (:bankScope, :incidentId, :detectedAt, :containedAt, :resolvedAt, :status, :version, :recordedAt)
+            ON CONFLICT (bank_scope, incident_id) DO UPDATE SET
+              detected_at = EXCLUDED.detected_at, contained_at = EXCLUDED.contained_at,
+              resolved_at = EXCLUDED.resolved_at, status = EXCLUDED.status,
+              source_version = EXCLUDED.source_version, recorded_at = EXCLUDED.recorded_at
+            WHERE context_incident_windows.source_version < EXCLUDED.source_version
+        """.trimIndent(),
+        mapOf(
+            "bankScope" to bankScope,
+            "incidentId" to UUID.fromString(event.id),
+            "detectedAt" to event.detectedAt,
+            "containedAt" to event.containedAt,
+            "resolvedAt" to event.resolvedAt,
+            "status" to event.status,
+            "version" to event.sourceVersion,
+            "recordedAt" to clock.instant(),
+        ),
     )
 
     private fun replaceAffectedServices(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
@@ -172,12 +203,6 @@ class IncidentProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
-
     private fun parse(root: JsonNode): IncidentProjectionEvent {
         val incident = root.path("incident")
         val id = incident.text("id")
@@ -195,6 +220,8 @@ class IncidentProjectionConsumer(
         val status = incident.text("status")
         val occurredAt = Instant.parse(root.text("occurredAt"))
         val detectedAt = Instant.parse(incident.text("detectedAt"))
+        val containedAt = incident.optionalInstant("containedAt")
+        val resolvedAt = incident.optionalInstant("resolvedAt")
         val servicesNode = incident.path("affectedServices")
         val services = servicesNode.takeIf { it.isArray }?.map { it.asText().trim() }.orEmpty()
         require(
@@ -203,7 +230,7 @@ class IncidentProjectionConsumer(
                 sourceVersion > 0 &&
                 eventType in EVENT_TYPES &&
                 severity.isNotBlank() &&
-                status.isNotBlank() &&
+                status in INCIDENT_STATUSES &&
                 servicesNode.isArray &&
                 services.size <= MAX_AFFECTED_SERVICES &&
                 services.all { it.isNotBlank() && it.length <= MAX_SERVICE_LENGTH },
@@ -216,6 +243,8 @@ class IncidentProjectionConsumer(
             status,
             services,
             detectedAt,
+            containedAt,
+            resolvedAt,
             occurredAt,
             sourceVersion,
             eventType,
@@ -224,8 +253,6 @@ class IncidentProjectionConsumer(
 
     private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
     private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
-    private fun stableId(value: String): UUID = UUID.nameUUIDFromBytes(value.toByteArray(StandardCharsets.UTF_8))
-
     private companion object {
         const val SOURCE_SERVICE = "security-scanner"
         const val SCHEMA_VERSION = 1L
@@ -240,6 +267,23 @@ class IncidentProjectionConsumer(
             "ICT_INCIDENT_STATUS_CHANGED",
             "ICT_INCIDENT_REPORTED_TO_REGULATOR",
         )
+        val INCIDENT_STATUSES = setOf("OPEN", "INVESTIGATING", "CONTAINED", "RESOLVED", "CLOSED")
+    }
+}
+
+private fun stableId(value: String): UUID = UUID.nameUUIDFromBytes(value.toByteArray(StandardCharsets.UTF_8))
+
+private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any?>): Uni<Int> {
+    val query = session.createNativeMutationQuery(sql)
+    values.forEach { (name, value) -> query.setParameter(name, value) }
+    return query.executeUpdate()
+}
+
+private fun JsonNode.optionalInstant(name: String): Instant? = path(name).let { value ->
+    when {
+        value.isMissingNode || value.isNull -> null
+        value.isTextual -> Instant.parse(value.asText())
+        else -> throw IllegalArgumentException("ICT incident $name must be a timestamp or null")
     }
 }
 
@@ -249,6 +293,8 @@ private data class IncidentProjectionEvent(
     val status: String,
     val affectedServices: List<String>,
     val detectedAt: Instant,
+    val containedAt: Instant?,
+    val resolvedAt: Instant?,
     val occurredAt: Instant,
     val sourceVersion: Long,
     val eventType: String,

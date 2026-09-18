@@ -87,6 +87,15 @@ On 2026-09-18 the sandbox's base Context deployment was observed at one ready re
 This proves a running consumer, not successful incident replay or case-level impact.
 The observed instance had no incident projection-event sample in its metrics since start.
 
+The pending Context V13 migration stores the source incident's detected, contained and
+resolved timestamps and current source revision in a bank-scoped, row-policy-protected
+window. The projector changes this window only after accepting a newer source revision,
+in the same transaction as its service edges. This is a bounded lifecycle pointer, not
+an observed business impact claim. Security-scanner does not currently validate that
+its lifecycle timestamps are chronologically ordered, so correlation must check their
+ordering and treat inconsistent windows as unknown. No case edge or confirmed impact
+may be inferred from time overlap alone.
+
 The aggregate API now distinguishes a missing root (`MISSING`), a bounded slice
 (`PARTIAL`) and an available projection (`AVAILABLE`). Availability describes the
 projection, not completeness of telemetry or confirmed customer impact. The admin
