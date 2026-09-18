@@ -4,6 +4,8 @@
 """Offline regression tests: no provider calls or credentials."""
 import importlib.util
 import json
+import os
+import subprocess
 import unittest
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -131,10 +133,31 @@ class BudgetTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 budget.main()
 
+    def test_auth_selection_never_falls_back_or_exposes_credentials(self):
+        script = Path(__file__).with_name('agent-review-auth.sh')
+        for mode, api, oauth, rc, selected in (
+                ('api', 'fake-api', 'fake-oauth', 0, 'api'),
+                ('subscription', 'fake-api', 'fake-oauth', 0, 'subscription'),
+                ('api', '', 'fake-oauth', 1, ''),
+                ('subscription', 'fake-api', '', 1, ''),
+                ('unknown', 'fake-api', 'fake-oauth', 1, '')):
+            env = dict(os.environ, REVIEW_AUTH_MODE=mode, ANTHROPIC_API_KEY=api,
+                       CLAUDE_CODE_OAUTH_TOKEN=oauth)
+            command = 'source "$1" || exit $?; if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo api; fi; if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then echo subscription; fi'
+            with self.subTest(mode=mode, api=bool(api), oauth=bool(oauth)):
+                result = subprocess.run(['bash', '-c', command, 'test', str(script)],
+                                        env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, rc)
+                self.assertEqual(result.stdout.strip(), selected)
+                self.assertNotIn('fake-api', result.stdout + result.stderr)
+                self.assertNotIn('fake-oauth', result.stdout + result.stderr)
+
     def test_workflow_isolated_and_workers_parked(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / '.github/workflows/agent-review.yml').read_text()
-        self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', workflow)
+        self.assertIn("vars.AGENT_REVIEW_AUTH_MODE == 'subscription' && secrets.CLAUDE_CODE_OAUTH_TOKEN", workflow)
+        self.assertIn("vars.AGENT_REVIEW_SUBSCRIPTION_ENABLED == 'true'", workflow)
+        self.assertIn('source .github/scripts/agent-review-auth.sh', workflow)
         self.assertNotIn('Reply with exactly the word ALIVE', workflow)
         self.assertIn('AGENT_REVIEW_ANTHROPIC_API_KEY', workflow)
         self.assertIn('needs: budget-tests', workflow)

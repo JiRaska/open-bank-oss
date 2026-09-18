@@ -103,7 +103,7 @@ def main():
     endpoint = f'repos/{repo}/actions/workflows/agent-review.yml/runs?event=workflow_dispatch&created=>={cutoff}&per_page=100'
     pages = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp', endpoint], text=True))
     admit(pages, int(os.environ['GITHUB_RUN_ID']), now)
-    print('Admitted: manual, first attempt, dedicated API only, rolling-window allowance available')
+    print('Admitted: manual, first attempt, rolling-window allowance available')
 
 
 if __name__ == '__main__':

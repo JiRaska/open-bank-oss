@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 # Advisory review only: never a required approval or authorization to merge.
-# Dedicated API credentials isolate CI from personal subscription allowances.
-# Opt-in remains off until the API project has a provider-enforced spending limit.
+# Credentials are explicitly selected; subscription use has its own owner opt-in.
+# CLI dollar estimates are not subscription quota limits; shared dispatch bounds apply.
 # Rolling dispatch admission is conservative: failures and cancellations consume slots.
 # GitHub history must be retained; administrators can change this policy, not agents.
 name: agent-review
@@ -14,6 +14,7 @@ on:
       - '.github/workflows/agent-issue-worker.yml'
       - '.github/workflows/agent-pr-steward.yml'
       - '.github/scripts/agent-review-budget.py'
+      - '.github/scripts/agent-review-auth.sh'
       - '.github/scripts/test-agent-review-budget.py'
   workflow_dispatch:
     inputs:
@@ -54,13 +55,16 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event_name == 'workflow_dispatch' && vars.AGENT_REVIEW_API_ENABLED == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      ((vars.AGENT_REVIEW_AUTH_MODE == 'subscription' && vars.AGENT_REVIEW_SUBSCRIPTION_ENABLED == 'true') ||
+       (vars.AGENT_REVIEW_AUTH_MODE != 'subscription' && vars.AGENT_REVIEW_API_ENABLED == 'true'))
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Admit a bounded API review
+      - name: Admit a bounded review
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 .github/scripts/agent-review-budget.py
@@ -175,7 +179,9 @@ jobs:
         if: steps.scope.outputs.in_scope == 'true'
         continue-on-error: true
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.AGENT_REVIEW_ANTHROPIC_API_KEY }}
+          REVIEW_AUTH_MODE: ${{ vars.AGENT_REVIEW_AUTH_MODE || 'api' }}
+          ANTHROPIC_API_KEY: ${{ vars.AGENT_REVIEW_AUTH_MODE != 'subscription' && secrets.AGENT_REVIEW_ANTHROPIC_API_KEY || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.AGENT_REVIEW_AUTH_MODE == 'subscription' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096"
           CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
           TRUNCATED: ${{ steps.diff.outputs.truncated }}
@@ -189,10 +195,7 @@ jobs:
           npm ci --prefix .github/scripts/agent-review-claude-cli >/dev/null 2>&1
           export PATH="$PWD/.github/scripts/agent-review-claude-cli/node_modules/.bin:$PATH"
 
-          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            echo "::error::dedicated review API key is missing; no subscription fallback"
-            exit 1
-          fi
+          source .github/scripts/agent-review-auth.sh
           {
             echo "You are reviewing a pull request in a banking platform monorepo."
             echo "Title: ${PR_TITLE}"
