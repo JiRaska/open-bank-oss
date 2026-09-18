@@ -347,3 +347,18 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   denied assignment, malformed candidate set or Context outage fails closed.
   Rollback: leave the four-case pilot active and disable the dedicated matcher;
   retain source cases and their minimal reference history.
+
+- **2026-09-18** — Case lifecycle audit delivery is isolated from the Context reference
+  topic. Each open/close commits both outbox rows with the case transition, and Fraud
+  writes the audit event to a separate topic that only Audit can read. Its payload
+  contains the case ID, event ID, revision, actor, time and source identity; account,
+  counterparty, score, amount and reason stay in Fraud. Audit validates the exact
+  envelope and acknowledges after append-only persistence. A source outage after
+  commit leaves both rows retryable; a poison audit event goes to its own DLQ rather
+  than stopping the consumer. The new topic has seven-day retention, so deployment
+  order must allow Audit to replay from earliest before those records expire.
+  Residual risks: a secret or ACL misconfiguration can halt the Audit consumer, and
+  local tests do not establish broker delivery. Sandbox rollout must prove a real
+  event's Audit row, source attribution and chain hash, plus lag/DLQ alerting.
+  Rollback disables the new producer/consumer after draining the outbox and preserves
+  source cases and existing audit rows; it never deletes evidentiary history.

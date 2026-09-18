@@ -143,8 +143,11 @@ class FraudInvestigationCaseRepository(
                                     if (inserted == 1) {
                                         outbox.persistInTransaction(
                                             reference(result, FraudCaseOpenedReference.EVENT_TYPE),
-                                        )
-                                            .replaceWith(result)
+                                        ).flatMap {
+                                            outbox.persistInTransaction(
+                                                auditEvent(result, FraudCaseOpenedReference.EVENT_TYPE),
+                                            )
+                                        }.replaceWith(result)
                                     } else {
                                         Uni.createFrom().item(result)
                                     }
@@ -178,7 +181,11 @@ class FraudInvestigationCaseRepository(
                             .setParameter("previousRevision", row.revision).executeUpdate().flatMap { changed ->
                                 if (changed == 1) {
                                     outbox.persistInTransaction(reference(next, FraudCaseClosedReference.EVENT_TYPE))
-                                        .replaceWith(next)
+                                        .flatMap {
+                                            outbox.persistInTransaction(
+                                                auditEvent(next, FraudCaseClosedReference.EVENT_TYPE),
+                                            )
+                                        }.replaceWith(next)
                                 } else {
                                     // A competing close won the row update. PostgreSQL waits for that
                                     // transaction before reporting zero changed rows; refresh clears the
@@ -218,6 +225,40 @@ class FraudInvestigationCaseRepository(
         )
     }
 
+    /** A separate Audit-only event; Context's four-field reference contract stays unchanged. */
+    private fun auditEvent(case: FraudInvestigationCase, lifecycleType: String): OutboxMessage {
+        val eventId = Ids.newId()
+        val occurredAt = case.closedAt ?: case.openedAt
+        val (eventType, payload) = when (lifecycleType) {
+            FraudCaseOpenedReference.EVENT_TYPE -> {
+                val payload = objectMapper.writeValueAsString(
+                    FraudCaseOpenedAuditEvent(eventId, case.id, case.openedBy, case.revision, occurredAt),
+                )
+                FraudCaseOpenedAuditEvent.EVENT_TYPE to payload
+            }
+            FraudCaseClosedReference.EVENT_TYPE -> {
+                val payload = objectMapper.writeValueAsString(
+                    FraudCaseClosedAuditEvent(
+                        eventId,
+                        case.id,
+                        requireNotNull(case.closedBy),
+                        case.revision,
+                        occurredAt,
+                    ),
+                )
+                FraudCaseClosedAuditEvent.EVENT_TYPE to payload
+            }
+            else -> error("unsupported Fraud case audit transition: $lifecycleType")
+        }
+        return OutboxMessage(
+            eventId = eventId,
+            aggregateId = case.id,
+            eventType = eventType,
+            payload = payload,
+            createdAt = occurredAt,
+        )
+    }
+
     private companion object {
         const val MAX_MATCHES = 4
     }
@@ -243,5 +284,36 @@ data class FraudCaseClosedReference(
 ) {
     companion object {
         const val EVENT_TYPE = "fraud.case_closed"
+    }
+}
+
+/** Only Audit can read this event. Operational identifiers remain in the Fraud case store. */
+data class FraudCaseOpenedAuditEvent(
+    val eventId: UUID,
+    val aggregateId: UUID,
+    val actorId: String,
+    val revision: Long,
+    val occurredAt: Instant,
+    val eventType: String = EVENT_TYPE,
+    val aggregateType: String = "FRAUD_CASE",
+    val sourceService: String = "fraud-service",
+) {
+    companion object {
+        const val EVENT_TYPE = "fraud.case_opened.audit"
+    }
+}
+
+data class FraudCaseClosedAuditEvent(
+    val eventId: UUID,
+    val aggregateId: UUID,
+    val actorId: String,
+    val revision: Long,
+    val occurredAt: Instant,
+    val eventType: String = EVENT_TYPE,
+    val aggregateType: String = "FRAUD_CASE",
+    val sourceService: String = "fraud-service",
+) {
+    companion object {
+        const val EVENT_TYPE = "fraud.case_closed.audit"
     }
 }

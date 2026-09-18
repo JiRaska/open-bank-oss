@@ -66,14 +66,15 @@ class FraudInvestigationCaseIT {
             .post("/api/v1/fraud/cases").then().statusCode(201)
             .body("caseId", equalTo(caseId.toString()))
         assertThat(caseCount(scoreId)).isEqualTo(1)
-        assertThat(outboxCount(caseId)).isEqualTo(1)
+        assertThat(outboxCount(caseId)).isEqualTo(2)
         assertReference(caseId, 1, "fraud.case_opened", accountId, counterpartyId)
+        assertAuditEvent(caseId, 1, "fraud.case_opened.audit", accountId, counterpartyId)
 
         given().header("X-Investigation-Purpose", PURPOSE)
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(403)
             .header("Cache-Control", "no-store")
-        assertThat(outboxCount(caseId)).isEqualTo(1)
+        assertThat(outboxCount(caseId)).isEqualTo(2)
 
         given().header("X-Investigation-Purpose", PURPOSE)
             .header("Idempotency-Key", UUID.randomUUID().toString())
@@ -86,8 +87,9 @@ class FraudInvestigationCaseIT {
             .header("Authorization", BEARER)
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
             .body("revision", equalTo(2))
-        assertThat(outboxCount(caseId)).isEqualTo(2)
+        assertThat(outboxCount(caseId)).isEqualTo(4)
         assertReference(caseId, 2, "fraud.case_closed", accountId, counterpartyId)
+        assertAuditEvent(caseId, 2, "fraud.case_closed.audit", accountId, counterpartyId)
         given().header("X-Investigation-Purpose", PURPOSE).header("Authorization", BEARER)
             .get("/api/v1/fraud/cases/$caseId").then().statusCode(200)
             .header("Cache-Control", "no-store")
@@ -255,7 +257,7 @@ class FraudInvestigationCaseIT {
         }
         // This fixture performs the winner transition directly to force the race; the
         // losing application request must not publish a duplicate close reference.
-        assertThat(outboxCount(UUID.fromString(caseId))).isEqualTo(1)
+        assertThat(outboxCount(UUID.fromString(caseId))).isEqualTo(2)
     }
 
     private fun waitForBlockedClose(
@@ -356,6 +358,38 @@ class FraudInvestigationCaseIT {
                         .containsExactlyInAnyOrder("eventType", "caseId", "revision", "occurredAt")
                     assertThat(fields.get("caseId").asText()).isEqualTo(caseId.toString())
                     assertThat(fields.get("revision").asInt()).isEqualTo(revision)
+                    assertThat(payload).doesNotContain(accountId.toString(), counterpartyId.toString())
+                }
+            }
+        }
+    }
+
+    private fun assertAuditEvent(caseId: UUID, revision: Int, type: String, accountId: UUID, counterpartyId: UUID) {
+        connection().use { connection ->
+            connection.prepareStatement(
+                "SELECT event_id, payload FROM fraud_outbox WHERE aggregate_id = ? AND event_type = ?",
+            ).use { stmt ->
+                stmt.setObject(1, caseId)
+                stmt.setString(2, type)
+                stmt.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    val eventId = rows.getObject(1, UUID::class.java)
+                    val payload = rows.getString(2)
+                    val fields = com.fasterxml.jackson.databind.ObjectMapper().readTree(payload)
+                    assertThat(fields.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+                        "eventId",
+                        "eventType",
+                        "aggregateId",
+                        "actorId",
+                        "revision",
+                        "occurredAt",
+                        "aggregateType",
+                        "sourceService",
+                    )
+                    assertThat(fields.get("eventId").asText()).isEqualTo(eventId.toString())
+                    assertThat(fields.get("aggregateId").asText()).isEqualTo(caseId.toString())
+                    assertThat(fields.get("revision").asInt()).isEqualTo(revision)
+                    assertThat(fields.get("actorId").asText()).isEqualTo("fraud-admin")
                     assertThat(payload).doesNotContain(accountId.toString(), counterpartyId.toString())
                 }
             }
