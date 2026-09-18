@@ -120,6 +120,9 @@ class NotificationModelTest {
         assertThat(MobileDeepLink.isAllowed("openbank://delegations/123e4567-e89b-42d3-a456-426614174000")).isTrue()
         assertThat(MobileDeepLink.isAllowed("openbank://delegations/01995e74-19c7-7d79-9b22-63076d7fd321")).isTrue()
         assertThat(MobileDeepLink.isAllowed("openbank://delegations/not-a-uuid")).isFalse()
+        assertThat(MobileDeepLink.isAllowed("openbank://delegations/joint-issuance")).isTrue()
+        assertThat(MobileDeepLink.isAllowed("openbank://delegations/joint-acceptance")).isTrue()
+        assertThat(MobileDeepLink.isAllowed("openbank://delegations/joint-issuance/anything")).isFalse()
         assertThat(
             MobileDeepLink.isAllowed(
                 "openbank://delegations/123e4567-e89b-42d3-a456-426614174000?next=https://evil.invalid",

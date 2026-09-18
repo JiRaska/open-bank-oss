@@ -230,6 +230,8 @@ object MobileDeepLink {
         "openbank://cards",
         "openbank://payments",
         "openbank://products",
+        "openbank://delegations/joint-issuance",
+        "openbank://delegations/joint-acceptance",
     )
 
     fun isAllowed(value: String?): Boolean = value == null || value in allowed || isCanonicalDelegationDetail(value)
