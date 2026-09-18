@@ -68,11 +68,11 @@ class KybObservationHistoryResource(
     ): Response {
         val now = clock.instant()
         val known = try {
-            knownAt?.let(Instant::parse) ?: now
+            knownAt?.let(Instant::parse)
         } catch (exception: DateTimeParseException) {
             throw IllegalArgumentException("knownAt must use RFC 3339", exception)
         }
-        require(known <= now) { "historical evidence cannot be read in the future" }
+        require(known == null || known <= now) { "historical evidence cannot be read in the future" }
         require(caseId == id.toString()) { "caseId must identify the KYB case" }
         require(purpose == PURPOSE) { "KYB_OWNERSHIP_REVIEW is required" }
         return try {
@@ -81,7 +81,8 @@ class KybObservationHistoryResource(
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(caseId, purpose, now, known),
             ) {
-                Response.ok(references.history(id, known)).header("Cache-Control", "no-store").build()
+                Response.ok(references.history(id, known ?: references.databaseNow()))
+                    .header("Cache-Control", "no-store").build()
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()

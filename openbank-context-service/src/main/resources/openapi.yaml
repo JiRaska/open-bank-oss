@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.6.0
+  version: 1.6.1
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/kyb-cases/{id}/access:
@@ -30,6 +30,7 @@ paths:
         - $ref: '#/components/parameters/purpose'
         - name: knownAt
           in: query
+          description: Omit for the current database-recorded snapshot; provide a timestamp for an exact historical cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
