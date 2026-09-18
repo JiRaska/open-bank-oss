@@ -539,6 +539,11 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           touch openbank-admin-ui/test-run-history/.staged-ids
+          # The restored cache can predate ZIP validation. Remove non-main or malformed
+          # envelopes before the collector reads them; a missing file overrides its old
+          # .staged-ids entry so an available artifact is re-fetched, not suppressed.
+          python3 .github/scripts/extract-test-intelligence-envelope.py \
+            --prune-cache openbank-admin-ui/test-run-history || exit 1
           # Measured 2026-09-04: only 54 non-expired main-branch `test-intelligence-run-*`
           # artifacts exist repo-wide, so this cap does not bind and lowering it saves ~4
           # requests, not ~50. Left at 100 deliberately. What those 54 buy is the number
@@ -563,23 +568,28 @@ jobs:
             | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
                 [ -n "${artifact_id}" ] || continue
-                # Diff-forward: skip any artifact id the cache already staged, whatever its
-                # current expiry state — the staged envelope outlives the artifact. The
-                # candidate list above is still bounded at MAX_ENVELOPES BEFORE any download;
-                # this skip is why steady state downloads a handful, not the bound.
-                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids && continue
+                # Diff-forward: a validated cached file is authoritative, even if its ID
+                # ledger entry is missing. A stale ID without a file must not suppress repair.
+                # The candidate list is bounded before any download.
+                cached="openbank-admin-ui/test-run-history/${artifact_name}.json"
+                if [ -f "${cached}" ]; then
+                  grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
+                    || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                  continue
+                fi
                 archive="/tmp/${artifact_name}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
                 # Browser variants retain run-chromium.json / run-firefox.json,
                 # unlike service envelopes named run.json. Require exactly one
                 # schema-valid main envelope; never guess among ZIP members.
                 if ! python3 .github/scripts/extract-test-intelligence-envelope.py \
-                  "${archive}" "openbank-admin-ui/test-run-history/${artifact_name}.json"; then
+                  "${archive}" "${cached}"; then
                   continue
                 fi
-                echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
+                  || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
               done
-          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) downloaded this build."
+          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
 
       - name: Save staged test-run history
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
