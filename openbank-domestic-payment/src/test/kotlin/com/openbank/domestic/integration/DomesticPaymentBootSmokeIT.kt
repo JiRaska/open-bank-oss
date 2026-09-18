@@ -83,6 +83,13 @@ class DomesticPaymentBootSmokeIT {
                     assertThat(rows.next()).isTrue()
                     assertThat(rows.getString(1)).contains("maker_party_id", "created_at DESC", "proposal_id DESC")
                 }
+                statement.executeQuery(
+                    "SELECT indexdef FROM pg_indexes " +
+                        "WHERE indexname = 'idx_domestic_payment_proposal_owner_inbox'",
+                ).use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(1)).contains("owner_party_id", "created_at DESC", "proposal_id DESC")
+                }
             }
         }
     }

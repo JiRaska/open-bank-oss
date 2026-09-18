@@ -2889,6 +2889,34 @@ class CustomerEdgeResource(
         humanPartyId().toString(),
     )
 
+    /** The owner's review inbox uses the selected profile, so company mandate checks remain fail-closed. */
+    @GET
+    @Path("/domestic-payment-proposals/inbox")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun listDomesticPaymentProposalInbox(
+        @QueryParam("before") before: UUID?,
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+    ): Response {
+        if (limit !in 1..MAX_PROPOSAL_PAGE_SIZE) {
+            return badRequest("limit must be between 1 and $MAX_PROPOSAL_PAGE_SIZE")
+        }
+        val query = "?limit=$limit" + (before?.let { "&before=$it" } ?: "")
+        return upstream.get(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/inbox$query",
+            customer().partyId.toString(),
+        )
+    }
+
+    @GET
+    @Path("/domestic-payment-proposals/inbox/{draftId}")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun getDomesticPaymentProposalInboxItem(@PathParam("draftId") draftId: UUID): Response = upstream.get(
+        "$domesticPaymentServiceUrl/api/v1/domestic-payment-proposals/inbox/$draftId",
+        customer().partyId.toString(),
+    )
+
     /**
      * A person prepares a company/FOP owner's payment for a later, separate approval. The
      * account-service decision is only a maker permission, never debit authority. The payment

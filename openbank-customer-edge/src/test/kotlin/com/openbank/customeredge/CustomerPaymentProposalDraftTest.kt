@@ -14,6 +14,7 @@ import io.mockk.verify
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.util.UUID
@@ -124,6 +125,37 @@ class CustomerPaymentProposalDraftTest {
         assertThat(resource.listDomesticPaymentProposalDrafts(null, 20).status).isEqualTo(200)
         assertThat(resource.getDomesticPaymentProposalDraft(draftId).status).isEqualTo(404)
         verify(exactly = 0) { resource.actingForResolver.resolve(any(), any()) }
+    }
+
+    @Test
+    fun `company proposal inbox forwards the verified company owner not the human signer`() {
+        val client = mockk<UpstreamClient>()
+        val draftId = UUID.randomUUID()
+        every {
+            client.get("http://domestic/api/v1/domestic-payment-proposals/inbox?limit=20", owner.toString())
+        } returns Response.ok("""{"items":[]}""").build()
+        every {
+            client.get("http://domestic/api/v1/domestic-payment-proposals/inbox/$draftId", owner.toString())
+        } returns Response.status(404).build()
+
+        val resource = edge(client, actingForOwner = true)
+        assertThat(resource.listDomesticPaymentProposalInbox(null, 20).status).isEqualTo(200)
+        assertThat(resource.getDomesticPaymentProposalInboxItem(draftId).status).isEqualTo(404)
+        verify(exactly = 0) { client.get(any(), maker.toString()) }
+    }
+
+    @Test
+    fun `revoked company mandate refuses owner inbox before any upstream read`() {
+        val client = mockk<UpstreamClient>()
+        val resource = edge(client, actingForOwner = true)
+        resource.actingForResolver = mockk {
+            every { resolve(maker, owner.toString()) } throws jakarta.ws.rs.ForbiddenException("mandate revoked")
+        }
+
+        assertThatThrownBy {
+            resource.listDomesticPaymentProposalInbox(null, 20)
+        }.isInstanceOf(jakarta.ws.rs.ForbiddenException::class.java)
+        verify(exactly = 0) { client.get(any(), any()) }
     }
 
     @Test

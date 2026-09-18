@@ -20,4 +20,11 @@ interface DomesticPaymentProposalDraftRepository {
         before: DomesticPaymentProposalDraft?,
         limit: Int,
     ): List<DomesticPaymentProposalDraft>
+
+    /** Stable newest-first page; [ownerPartyId] must come from the effective owner identity. */
+    suspend fun listByOwner(
+        ownerPartyId: UUID,
+        before: DomesticPaymentProposalDraft?,
+        limit: Int,
+    ): List<DomesticPaymentProposalDraft>
 }

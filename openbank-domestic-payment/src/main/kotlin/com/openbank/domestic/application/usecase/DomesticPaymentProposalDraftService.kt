@@ -36,14 +36,26 @@ class DomesticPaymentProposalDraftService(
     suspend fun findForMaker(makerPartyId: UUID, draftId: UUID): DomesticPaymentProposalDraft? =
         drafts.findById(draftId)?.takeIf { it.makerPartyId == makerPartyId }
 
-    suspend fun listForMaker(makerPartyId: UUID, beforeId: UUID?, limit: Int): MakerDraftPage {
+    suspend fun findForOwner(ownerPartyId: UUID, draftId: UUID): DomesticPaymentProposalDraft? =
+        drafts.findById(draftId)?.takeIf { it.ownerPartyId == ownerPartyId }
+
+    suspend fun listForMaker(makerPartyId: UUID, beforeId: UUID?, limit: Int): ProposalDraftPage {
         require(limit in 1..MAX_PAGE_SIZE) { "limit must be between 1 and $MAX_PAGE_SIZE" }
         val before = beforeId?.let { findForMaker(makerPartyId, it) }
         // An invalid or foreign cursor cannot become a first-page request.
-        if (beforeId != null && before == null) return MakerDraftPage(emptyList(), null)
+        if (beforeId != null && before == null) return ProposalDraftPage(emptyList(), null)
         val rows = drafts.listByMaker(makerPartyId, before, limit + 1)
         val items = rows.take(limit)
-        return MakerDraftPage(items, items.lastOrNull()?.id?.takeIf { rows.size > limit })
+        return ProposalDraftPage(items, items.lastOrNull()?.id?.takeIf { rows.size > limit })
+    }
+
+    suspend fun listForOwner(ownerPartyId: UUID, beforeId: UUID?, limit: Int): ProposalDraftPage {
+        require(limit in 1..MAX_PAGE_SIZE) { "limit must be between 1 and $MAX_PAGE_SIZE" }
+        val before = beforeId?.let { findForOwner(ownerPartyId, it) }
+        if (beforeId != null && before == null) return ProposalDraftPage(emptyList(), null)
+        val rows = drafts.listByOwner(ownerPartyId, before, limit + 1)
+        val items = rows.take(limit)
+        return ProposalDraftPage(items, items.lastOrNull()?.id?.takeIf { rows.size > limit })
     }
 
     suspend fun create(makerPartyId: UUID, raw: CreateDomesticPaymentCommand): CreatePaymentProposalDraftOutcome {
@@ -162,4 +174,4 @@ class DomesticPaymentProposalDraftService(
     }
 }
 
-data class MakerDraftPage(val items: List<DomesticPaymentProposalDraft>, val nextCursor: UUID?)
+data class ProposalDraftPage(val items: List<DomesticPaymentProposalDraft>, val nextCursor: UUID?)

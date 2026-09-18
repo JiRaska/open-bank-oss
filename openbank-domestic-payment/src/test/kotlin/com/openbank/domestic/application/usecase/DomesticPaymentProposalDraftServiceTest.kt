@@ -127,8 +127,30 @@ class DomesticPaymentProposalDraftServiceTest {
         coEvery { drafts.findById(foreign.id) } returns foreign
 
         assertThat(service.listForMaker(OWNER, foreign.id, 20))
-            .isEqualTo(MakerDraftPage(emptyList(), null))
+            .isEqualTo(ProposalDraftPage(emptyList(), null))
         coVerify(exactly = 0) { drafts.listByMaker(any(), any(), any()) }
+    }
+
+    @Test
+    fun `owner inbox sees only its own immutable proposals after maker grant is revoked`(): Unit = runBlocking {
+        val own = (service.create(MAKER, command()) as CreatePaymentProposalDraftOutcome.Saved).draft
+        coEvery { drafts.findById(own.id) } returns own
+        coEvery { authority.authorize(any(), any(), any(), any()) } returns null
+        coEvery { drafts.listByOwner(OWNER, null, 21) } returns listOf(own)
+
+        assertThat(service.findForOwner(OWNER, own.id)).isEqualTo(own)
+        assertThat(service.findForOwner(MAKER, own.id)).isNull()
+        assertThat(service.listForOwner(OWNER, null, 20).items).containsExactly(own)
+    }
+
+    @Test
+    fun `foreign owner cursor cannot restart inbox at first page`(): Unit = runBlocking {
+        val foreign = (service.create(MAKER, command()) as CreatePaymentProposalDraftOutcome.Saved).draft
+        coEvery { drafts.findById(foreign.id) } returns foreign
+
+        assertThat(service.listForOwner(MAKER, foreign.id, 20))
+            .isEqualTo(ProposalDraftPage(emptyList(), null))
+        coVerify(exactly = 0) { drafts.listByOwner(any(), any(), any()) }
     }
 
     private fun command() = CreateDomesticPaymentCommand(

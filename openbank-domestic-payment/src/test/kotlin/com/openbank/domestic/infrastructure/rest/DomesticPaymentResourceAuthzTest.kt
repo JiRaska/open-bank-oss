@@ -108,4 +108,16 @@ class DomesticPaymentResourceAuthzTest {
             statusCode(403)
         }
     }
+
+    @Test
+    @TestSecurity(user = "service-account-untrusted", roles = ["ROLE_OPERATOR"])
+    fun `owner proposal inbox is served but rejects an untrusted workload`() {
+        Given {
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+        } When {
+            get("/api/v1/domestic-payment-proposals/inbox")
+        } Then {
+            statusCode(403)
+        }
+    }
 }

@@ -92,7 +92,7 @@ class DomesticPaymentProposalResource(private val drafts: DomesticPaymentProposa
         @QueryParam("before") before: UUID?,
         @QueryParam("limit") @DefaultValue("20") limit: Int,
     ): Response {
-        val maker = trustedMaker(makerHeader) ?: return forbidden()
+        val maker = trustedEdgeParty(makerHeader) ?: return forbidden()
         val page = drafts.listForMaker(maker, before, limit)
         return Response.ok(
             MakerProposalDraftPageResponse(
@@ -111,12 +111,46 @@ class DomesticPaymentProposalResource(private val drafts: DomesticPaymentProposa
         @HeaderParam("X-Customer-Party-Id") makerHeader: String?,
         @PathParam("draftId") draftId: UUID,
     ): Response {
-        val maker = trustedMaker(makerHeader) ?: return forbidden()
+        val maker = trustedEdgeParty(makerHeader) ?: return forbidden()
         val draft = drafts.findForMaker(maker, draftId) ?: return Response.status(Response.Status.NOT_FOUND).build()
         return Response.ok(draft.toMakerResponse()).build()
     }
 
-    private fun trustedMaker(header: String?): UUID? {
+    @GET
+    @Path("/inbox")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.read")
+    @Operation(summary = "List immutable payment proposals addressed to the authenticated account owner")
+    suspend fun listOwnerInbox(
+        @HeaderParam("X-Customer-Party-Id") ownerHeader: String?,
+        @QueryParam("before") before: UUID?,
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+    ): Response {
+        val owner = trustedEdgeParty(ownerHeader) ?: return forbidden()
+        val page = drafts.listForOwner(owner, before, limit)
+        return Response.ok(
+            OwnerProposalDraftPageResponse(
+                page.items.map { it.toOwnerResponse() },
+                page.nextCursor,
+            ),
+        ).build()
+    }
+
+    @GET
+    @Path("/inbox/{draftId}")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.read")
+    @Operation(summary = "Read one immutable payment proposal addressed to the authenticated account owner")
+    suspend fun getOwnerInboxItem(
+        @HeaderParam("X-Customer-Party-Id") ownerHeader: String?,
+        @PathParam("draftId") draftId: UUID,
+    ): Response {
+        val owner = trustedEdgeParty(ownerHeader) ?: return forbidden()
+        val draft = drafts.findForOwner(owner, draftId) ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(draft.toOwnerResponse()).build()
+    }
+
+    private fun trustedEdgeParty(header: String?): UUID? {
         if (!isCustomerEdge(identity.principal as? JsonWebToken)) return null
         return header?.let { runCatching { UUID.fromString(it) }.getOrNull() }
     }
@@ -163,6 +197,45 @@ data class MakerProposalDraftResponse(
 )
 
 data class MakerProposalDraftPageResponse(val items: List<MakerProposalDraftResponse>, val nextCursor: UUID?)
+
+/** Full submitted instruction for review, scoped to the current account owner. Not a decision. */
+data class OwnerProposalDraftResponse(
+    val id: UUID,
+    val status: String,
+    val makerPartyId: UUID,
+    val debtorAccountId: UUID,
+    val amount: String,
+    val currency: String,
+    val creditorAccountNumber: String,
+    val creditorBankCode: String,
+    val creditorName: String,
+    val variableSymbol: String?,
+    val specificSymbol: String?,
+    val constantSymbol: String?,
+    val messageForPayee: String?,
+    val createdAt: Instant,
+    val expiresAt: Instant,
+)
+
+data class OwnerProposalDraftPageResponse(val items: List<OwnerProposalDraftResponse>, val nextCursor: UUID?)
+
+private fun DomesticPaymentProposalDraft.toOwnerResponse() = OwnerProposalDraftResponse(
+    id = id,
+    status = "DRAFT",
+    makerPartyId = makerPartyId,
+    debtorAccountId = instruction.debtorAccountId,
+    amount = instruction.amount.toPlainString(),
+    currency = instruction.currency,
+    creditorAccountNumber = instruction.creditorAccountNumber,
+    creditorBankCode = instruction.creditorBankCode,
+    creditorName = instruction.creditorName,
+    variableSymbol = instruction.variableSymbol,
+    specificSymbol = instruction.specificSymbol,
+    constantSymbol = instruction.constantSymbol,
+    messageForPayee = instruction.messageForPayee,
+    createdAt = createdAt,
+    expiresAt = expiresAt,
+)
 
 private fun DomesticPaymentProposalDraft.toMakerResponse() = MakerProposalDraftResponse(
     id = id,

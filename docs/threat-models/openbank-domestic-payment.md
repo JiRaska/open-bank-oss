@@ -525,3 +525,14 @@ not change any existing request's outcome until explicitly flipped.
   `DROP INDEX idx_domestic_payment_proposal_maker_history` after old readers are drained.
   Existing V18 drafts are preserved; mixed writer/read versions remain compatible. New
   proposals and every future approval/execution transition still require fresh authority.
+
+- **2026-09-18** — **Read-only owner proposal inbox.** The effective account owner, conveyed
+  only by the pinned edge workload identity, can read drafts addressed to that owner. The
+  owner path is separate from maker history: it reveals the submitted instruction and human
+  maker ID for review, but never accepts a decision, SCA token, or execution request. The
+  repository binds `owner_party_id` in every query; a foreign ID is 404 and a foreign cursor
+  yields an empty page. Pages are capped at 50 and ordered by `(created_at, proposal_id)`;
+  V20 adds the matching index without changing V18 rows. Rollback removes the readers first,
+  then may drop only `idx_domestic_payment_proposal_owner_inbox` after they drain. The old V18
+  owner index and all drafts remain, so mixed-version deployments are safe. A future decision
+  must resolve and freeze an approval requirement before any draft becomes approvable.

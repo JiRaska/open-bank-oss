@@ -299,3 +299,10 @@ Trust boundaries:
   These personal-history GETs resolve the human JWT/party-merge identity without resolving
   `X-Acting-For`: a stale or revoked company mandate cannot mask the human's own record.
   All other company operations, including a new proposal, retain fail-closed mandate checks.
+
+- **2026-09-18** — **Selected-owner proposal inbox.** Unlike maker history, the read-only
+  `/domestic-payment-proposals/inbox` routes use `customer().partyId`: a company profile must
+  have a current ACTIVE mandate before the edge forwards the company's identity. A revoked or
+  unavailable mandate fails closed, and the workload independently scopes every row to that
+  owner. The response contains submitted instruction data and maker identity but grants no
+  approval or debit authority. Rollback removes these additive routes; stored drafts remain.

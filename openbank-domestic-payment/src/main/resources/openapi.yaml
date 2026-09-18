@@ -5,7 +5,7 @@ info:
   title: Domestic Payment Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -98,6 +98,45 @@ paths:
               schema: {$ref: '#/components/schemas/MakerProposalDraftResponse'}
         '403': {description: Untrusted workload identity or absent maker identity}
         '404': {description: Draft absent or authored by another maker}
+
+  /api/v1/domestic-payment-proposals/inbox:
+    get:
+      tags: [Domestic Payments]
+      summary: List immutable drafts addressed to the authenticated account owner
+      description: >-
+        Workload-only route. The trusted edge supplies the effective owner party id after
+        validating any company mandate. The response is review data only; it cannot approve
+        or execute a payment. Unknown or foreign cursors yield an empty page.
+      operationId: listDomesticPaymentProposalInbox
+      parameters:
+        - {name: X-Customer-Party-Id, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: before, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Owner-scoped newest-first page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OwnerProposalDraftPageResponse'}
+        '400': {description: Invalid pagination input}
+        '403': {description: Untrusted workload identity or missing owner identity}
+
+  /api/v1/domestic-payment-proposals/inbox/{draftId}:
+    get:
+      tags: [Domestic Payments]
+      summary: Read one immutable draft addressed to the authenticated account owner
+      operationId: getDomesticPaymentProposalInboxItem
+      parameters:
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Customer-Party-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Owner-scoped submitted instruction
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OwnerProposalDraftResponse'}
+        '403': {description: Untrusted workload identity or missing owner identity}
+        '404': {description: Draft absent or addressed to another owner}
 
   /api/v1/domestic-payments:
     post:
@@ -361,6 +400,36 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    OwnerProposalDraftPageResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/OwnerProposalDraftResponse'}
+        nextCursor: {type: string, format: uuid, nullable: true}
+
+    OwnerProposalDraftResponse:
+      type: object
+      required: [id, status, makerPartyId, debtorAccountId, amount, currency,
+                 creditorAccountNumber, creditorBankCode, creditorName, createdAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [DRAFT]}
+        makerPartyId: {type: string, format: uuid}
+        debtorAccountId: {type: string, format: uuid}
+        amount: {type: string, description: Exact decimal CZK amount}
+        currency: {type: string, enum: [CZK]}
+        creditorAccountNumber: {type: string}
+        creditorBankCode: {type: string}
+        creditorName: {type: string}
+        variableSymbol: {type: string, nullable: true}
+        specificSymbol: {type: string, nullable: true}
+        constantSymbol: {type: string, nullable: true}
+        messageForPayee: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+
     MakerProposalDraftPageResponse:
       type: object
       required: [items]

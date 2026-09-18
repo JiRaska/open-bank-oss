@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.71.0
+  version: 1.72.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1964,6 +1964,48 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MakerProposalDraftResponse'}
         '404': {description: Proposal absent or authored by another person}
+
+  /domestic-payment-proposals/inbox:
+    get:
+      tags: [Payments]
+      summary: List proposed payments addressed to the selected account owner
+      description: >-
+        The selected personal or company profile is the account owner. Company profile
+        selection requires a live statutory mandate; an unknown or revoked mandate fails
+        closed. This inbox is read-only until a separate immutable approval requirement
+        and SCA-bound decision flow is deployed.
+      operationId: listDomesticPaymentProposalInbox
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: before, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Owner-scoped newest-first page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OwnerProposalDraftPageResponse'}
+        '400': {description: Invalid pagination input}
+        '403': {description: No authority to act for the selected owner}
+
+  /domestic-payment-proposals/inbox/{draftId}:
+    get:
+      tags: [Payments]
+      summary: Read one proposed payment addressed to the selected account owner
+      operationId: getDomesticPaymentProposalInboxItem
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Owner-scoped submitted instruction
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OwnerProposalDraftResponse'}
+        '403': {description: No authority to act for the selected owner}
+        '404': {description: Proposal absent or addressed to another owner}
 
   /domestic-payments:
     post:
@@ -4593,6 +4635,36 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    OwnerProposalDraftPageResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/OwnerProposalDraftResponse'}
+        nextCursor: {type: string, format: uuid, nullable: true}
+
+    OwnerProposalDraftResponse:
+      type: object
+      required: [id, status, makerPartyId, debtorAccountId, amount, currency,
+                 creditorAccountNumber, creditorBankCode, creditorName, createdAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [DRAFT]}
+        makerPartyId: {type: string, format: uuid}
+        debtorAccountId: {type: string, format: uuid}
+        amount: {type: string, description: Exact decimal CZK amount}
+        currency: {type: string, enum: [CZK]}
+        creditorAccountNumber: {type: string}
+        creditorBankCode: {type: string}
+        creditorName: {type: string}
+        variableSymbol: {type: string, nullable: true}
+        specificSymbol: {type: string, nullable: true}
+        constantSymbol: {type: string, nullable: true}
+        messageForPayee: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+
     MakerProposalDraftPageResponse:
       type: object
       required: [items]

@@ -58,6 +58,25 @@ class DomesticPaymentProposalDraftRepositoryImpl(private val mapper: ObjectMappe
         query.range(0, limit - 1).list()
     }.awaitSuspending().map { it.toDomain(mapper) }
 
+    override suspend fun listByOwner(
+        ownerPartyId: UUID,
+        before: DomesticPaymentProposalDraft?,
+        limit: Int,
+    ): List<DomesticPaymentProposalDraft> = Panache.withSession {
+        val query = if (before == null) {
+            find("ownerPartyId = ?1 order by createdAt desc, proposalId desc", ownerPartyId)
+        } else {
+            find(
+                "ownerPartyId = ?1 and (createdAt < ?2 or (createdAt = ?2 and proposalId < ?3)) " +
+                    "order by createdAt desc, proposalId desc",
+                ownerPartyId,
+                before.createdAt,
+                before.id,
+            )
+        }
+        query.range(0, limit - 1).list()
+    }.awaitSuspending().map { it.toDomain(mapper) }
+
     private fun Throwable.isMakerKeyViolation(): Boolean =
         generateSequence(this) { cause -> cause.cause.takeIf { it !== cause } }.any { cause ->
             val constraint = (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName
