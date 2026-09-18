@@ -125,6 +125,13 @@ recheck at allocation approval. A proposal whose collateral was released can
 be rejected but cannot be approved. There is no
 application writer, source read contract, Context projector, UI or measured
 workload yet, so V18 alone does not deliver the P3 lens.
+Separately, the existing Customer 360 credit-application overlay uses an optional
+database-bounded `limit` on the party application list. Omitting the parameter
+retains the existing full-list contract. A `(party_id, created_at DESC, id DESC)`
+index supports the newest-first bounded query; on a large live table it must
+be prebuilt concurrently before the Flyway migration so startup does not build
+it under write load. The graph requests one extra row to mark truncation.
+This overlay is not the case-scoped Lending exposure read contract in step 4.
 The database checks proposal/decision separation and local referential lineage;
 it cannot establish that a guarantor party is verified, an asset identity is
 unique across documents, or a document hash matches the authoritative file.
