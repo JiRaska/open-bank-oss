@@ -74,6 +74,9 @@ spec:
           env:
             - name: QUARKUS_MANAGEMENT_HOST
               value: "0.0.0.0"
+            # Must equal Context's deployment bank identifier before guarantee proofs are enabled.
+            - name: DOCUMENT_BANK_SCOPE
+              value: openbank-cz
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: QUARKUS_OIDC_CLIENT_ID
