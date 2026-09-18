@@ -8,6 +8,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -35,6 +36,12 @@ data class FraudCaseSourceSnapshot(
     val closedAt: Instant? = null,
 )
 
+data class FraudAssignedMatchResponse(
+    val candidateIds: List<UUID>,
+    val inspectedCandidates: Int,
+    val truncated: Boolean,
+)
+
 @RegisterRestClient(configKey = "fraud-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/fraud/cases")
@@ -47,11 +54,23 @@ interface FraudCaseSourceClient {
         @HeaderParam("Authorization") bearer: String,
         @HeaderParam("X-Investigation-Purpose") purpose: String,
     ): Uni<FraudCaseSourceSnapshot>
+
+    @POST
+    @Path("/{caseId}/match-assigned")
+    fun matchAssigned(
+        @PathParam("caseId") caseId: UUID,
+        @HeaderParam("Authorization") serviceBearer: String,
+        @HeaderParam("X-Investigator-Authorization") investigatorBearer: String,
+        @HeaderParam("X-Investigation-Purpose") purpose: String,
+    ): Uni<FraudAssignedMatchResponse>
 }
 
 /** Bounded, uncached source read. Source and Context both authorize the human caller. */
 @ApplicationScoped
-class FraudCaseSourceEvidence(@param:RestClient private val client: FraudCaseSourceClient) {
+class FraudCaseSourceEvidence(
+    @param:RestClient private val client: FraudCaseSourceClient,
+    private val serviceTokens: FraudCaseServiceToken,
+) {
     private val inFlight = Semaphore(MAX_INFLIGHT)
 
     @Suppress("TooGenericExceptionCaught", "ThrowsCount")
@@ -83,9 +102,45 @@ class FraudCaseSourceEvidence(@param:RestClient private val client: FraudCaseSou
         }
     }
 
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount")
+    suspend fun matchAssigned(caseId: UUID, bearer: String): FraudAssignedMatchResponse {
+        if (!inFlight.tryAcquire()) throw FraudCaseSourceUnavailable()
+        try {
+            val serviceBearer = serviceTokens.bearer()
+            val response = try {
+                client.matchAssigned(
+                    caseId,
+                    serviceBearer,
+                    bearer,
+                    "FRAUD_INVESTIGATION",
+                )
+                    .ifNoItem().after(Duration.ofMillis(TIMEOUT_MS)).fail().awaitSuspending()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: WebApplicationException) {
+                if (exception.response.status in DENIED_STATUSES) throw FraudCaseSourceDenied()
+                throw FraudCaseSourceUnavailable(exception)
+            } catch (exception: Exception) {
+                throw FraudCaseSourceUnavailable(exception)
+            }
+            val matched = response?.candidateIds ?: throw FraudCaseSourceUnavailable()
+            val validCount = matched.size <= MAX_MATCHES && matched.distinct().size == matched.size
+            val validMembership =
+                matched.all { it != caseId } && response.inspectedCandidates in matched.size..MAX_ASSIGNED_CANDIDATES
+            if (!validCount || !validMembership) {
+                throw FraudCaseSourceUnavailable()
+            }
+            return response
+        } finally {
+            inFlight.release()
+        }
+    }
+
     private companion object {
-        const val TIMEOUT_MS = 1500L
+        const val TIMEOUT_MS = 4000L
         const val MAX_INFLIGHT = 8
+        const val MAX_ASSIGNED_CANDIDATES = 256
+        const val MAX_MATCHES = 4
         val DENIED_STATUSES = setOf(401, 403, 404)
     }
 }

@@ -108,6 +108,21 @@ class FraudCaseReferenceIT {
         assertThat(candidates.truncated).isFalse()
     }
 
+    @Test
+    fun `assignment discovery passes more than four eligible cases to source matching`() {
+        val root = UUID.randomUUID()
+        val now = Instant.now()
+        val ids = List(6) { UUID.randomUUID() }
+        for (id in ids) {
+            onVertx { repository.append(decoder.decode(body(id), UUID.randomUUID().toString(), OPENED)) }
+            seedAssignment(id, "fraud-case:$id", "many-cases-investigator", now.plusSeconds(3600))
+        }
+
+        val candidates = onVertx { repository.assignedCandidates(root, "many-cases-investigator", now) }
+        assertThat(candidates.ids).containsExactlyInAnyOrderElementsOf(ids)
+        assertThat(candidates.truncated).isFalse()
+    }
+
     private fun seedAssignment(caseId: UUID, rootRef: String, principal: String, validTo: Instant) {
         val config = ConfigProvider.getConfig()
         DriverManager.getConnection(

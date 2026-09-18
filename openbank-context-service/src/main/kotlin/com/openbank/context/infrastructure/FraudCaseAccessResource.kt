@@ -21,9 +21,39 @@ import java.util.UUID
 @RolesAllowed("ROLE_ADMIN")
 class FraudCaseAccessResource(
     private val queries: ContextQueryService,
+    private val references: FraudCaseReferenceRepository,
     private val identity: SecurityIdentity,
     private val clock: Clock,
 ) {
+    @GET
+    @Path("/{caseId}/assigned-candidates")
+    suspend fun assignedCandidates(
+        @PathParam("caseId") caseId: UUID,
+        @HeaderParam("X-Investigation-Case-Id") investigationCaseId: String?,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+    ): Response {
+        require(investigationCaseId == caseId.toString()) { "caseId must identify the assigned Fraud case" }
+        require(purpose == "FRAUD_INVESTIGATION") { "FRAUD_INVESTIGATION is required" }
+        val actor = Investigator(identity.principal.name, identity.roles.sorted())
+        val at = clock.instant()
+        return try {
+            queries.fraudCaseEvidence(
+                caseId.toString(),
+                actor,
+                InvestigationContext(investigationCaseId, purpose, at),
+            ) {
+                Response.ok(references.assignedCandidates(caseId, actor.id, at))
+                    .header("Cache-Control", "no-store").build()
+            }
+        } catch (_: ContextAccessDenied) {
+            Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        } catch (_: ContextAuthorizationUnavailable) {
+            Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        } catch (_: FraudReferenceUnavailable) {
+            Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        }
+    }
+
     @GET
     @Path("/{caseId}/access")
     suspend fun access(

@@ -21,6 +21,11 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  oidc-client:
+    auth-server-url: ${CONTEXT_INVESTIGATION_OIDC_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-context-investigation
+    credentials:
+      secret: ${CONTEXT_INVESTIGATION_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
   rest-client:
     aml-service:
       url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
@@ -29,7 +34,7 @@ quarkus:
     fraud-service:
       url: ${FRAUD_CASE_SOURCE_URL:http://localhost:8133}
       connect-timeout: 250
-      read-timeout: 1250
+      read-timeout: 4500
   smallrye-openapi:
     store-schema-directory: target/openapi
   management:
@@ -55,6 +60,8 @@ quarkus:
 "%test":
   quarkus:
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
   openbank:
     context:

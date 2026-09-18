@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.context.infrastructure
 
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
@@ -14,7 +15,8 @@ import java.util.UUID
 
 class FraudCaseSourceEvidenceTest {
     private val client = mockk<FraudCaseSourceClient>()
-    private val source = FraudCaseSourceEvidence(client)
+    private val serviceTokens = mockk<FraudCaseServiceToken>()
+    private val source = FraudCaseSourceEvidence(client, serviceTokens)
     private val id = UUID.randomUUID()
     private val bearer = "Bearer investigator-token"
 
@@ -49,6 +51,24 @@ class FraudCaseSourceEvidenceTest {
             Uni.createFrom().failure(IllegalStateException("offline"))
         assertThatThrownBy { runBlocking { source.read(id, bearer) } }
             .isInstanceOf(FraudCaseSourceUnavailable::class.java)
+    }
+
+    @Test
+    fun `source match response is bounded and cannot include the root`(): Unit = runBlocking {
+        val assigned = UUID.randomUUID()
+        coEvery { serviceTokens.bearer() } returns "Bearer context-service-token"
+        every {
+            client.matchAssigned(id, "Bearer context-service-token", bearer, "FRAUD_INVESTIGATION")
+        } returns
+            Uni.createFrom().item(FraudAssignedMatchResponse(listOf(id), 1, false))
+        assertThatThrownBy { runBlocking { source.matchAssigned(id, bearer) } }
+            .isInstanceOf(FraudCaseSourceUnavailable::class.java)
+
+        every {
+            client.matchAssigned(id, "Bearer context-service-token", bearer, "FRAUD_INVESTIGATION")
+        } returns
+            Uni.createFrom().item(FraudAssignedMatchResponse(listOf(assigned), 1, false))
+        assertThat(source.matchAssigned(id, bearer).candidateIds).containsExactly(assigned)
     }
 
     private fun snapshot(caseId: UUID) = FraudCaseSourceSnapshot(

@@ -94,7 +94,7 @@ class FraudCaseReferenceRepository(
                     String::class.java,
                 ).setParameter("bank", bankScope).setParameter("root", root)
                     .setParameter("principal", principalId).setParameter("now", at)
-                    .setMaxResults(MAX_RELATED_CANDIDATES + 1).resultList
+                    .setMaxResults(MAX_ASSIGNED_CANDIDATES + 1).resultList
             }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
         } catch (exception: CancellationException) {
             throw exception
@@ -102,8 +102,8 @@ class FraudCaseReferenceRepository(
             throw FraudReferenceUnavailable(exception)
         }
         return FraudAssignedCandidates(
-            refs.take(MAX_RELATED_CANDIDATES).map(UUID::fromString),
-            refs.size > MAX_RELATED_CANDIDATES,
+            refs.take(MAX_ASSIGNED_CANDIDATES).map(UUID::fromString),
+            refs.size > MAX_ASSIGNED_CANDIDATES,
         )
     }
 
@@ -144,6 +144,6 @@ class FraudCaseReferenceRepository(
     }
 
     private companion object {
-        const val MAX_RELATED_CANDIDATES = 4
+        const val MAX_ASSIGNED_CANDIDATES = 256
     }
 }

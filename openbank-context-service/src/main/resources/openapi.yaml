@@ -2,14 +2,18 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.7.0
+  version: 1.8.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/fraud-cases/{caseId}/network:
     get:
       operationId: getAssignedFraudCaseNetwork
       summary: Explore explicit shared source references among independently authorized open Fraud cases
-      description: The candidate cap makes this an incomplete one-hop view, never a fraud finding or identity inference.
+      description: >-
+        Fraud obtains the first 256 assigned case references directly from Context, then matches
+        source-owned identifiers within that set.
+        Each returned match is independently authorized and read-audited. A limit or source gap
+        makes this a partial one-hop view, never a fraud finding or identity inference.
       parameters:
         - name: caseId
           in: path
@@ -43,6 +47,28 @@ paths:
         '400': { description: Case or purpose mismatch }
         '403': { description: Role, assignment or policy denied }
         '503': { description: Authorization unavailable }
+  /api/v1/context/fraud-cases/{caseId}/assigned-candidates:
+    get:
+      operationId: getAssignedFraudCandidates
+      summary: Return a bounded assigned case set after human root authorization
+      description: >-
+        Used by Fraud's source matcher. The caller cannot supply case IDs for comparison;
+        Context selects the human investigator's live assigned open-case references.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most 256 case IDs and a truncation flag; no source identifiers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudAssignedCandidates' }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization or reference store unavailable }
   /api/v1/context/kyb-cases/{id}/ownership-observations:
     get:
       operationId: getKybOwnershipObservationReferences
@@ -254,13 +280,29 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    FraudAssignedCandidates:
+      type: object
+      required: [ids, truncated]
+      properties:
+        ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        truncated: { type: boolean }
     FraudCaseNetwork:
       type: object
       required: [root, related, inspectedCandidates, candidateTruncated]
       properties:
         root: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
-        inspectedCandidates: { type: integer, minimum: 0, maximum: 4 }
-        candidateTruncated: { type: boolean }
+        inspectedCandidates:
+          type: integer
+          minimum: 0
+          maximum: 256
+          description: Assigned candidates compared by Fraud before each returned match is independently checked by Context.
+        candidateTruncated:
+          type: boolean
+          description: Assignment scan or source match limit was reached; no exhaustive negative conclusion is possible.
         related:
           type: array
           maxItems: 4

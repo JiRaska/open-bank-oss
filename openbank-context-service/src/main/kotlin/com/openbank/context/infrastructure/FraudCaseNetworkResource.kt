@@ -40,7 +40,6 @@ data class FraudCaseNetwork(
 @RolesAllowed("ROLE_ADMIN")
 class FraudCaseNetworkResource(
     private val queries: ContextQueryService,
-    private val references: FraudCaseReferenceRepository,
     private val source: FraudCaseSourceEvidence,
     private val identity: SecurityIdentity,
     private val clock: Clock,
@@ -65,13 +64,20 @@ class FraudCaseNetworkResource(
                 InvestigationContext(investigationCaseId, purpose, at),
             ) {
                 val root = source.read(caseId, bearer)
-                val candidates = references.assignedCandidates(caseId, actor.id, at)
+                val matches = source.matchAssigned(caseId, bearer)
                 val related = coroutineScope {
-                    candidates.ids.map { candidate ->
+                    matches.candidateIds.map { candidate ->
                         async { relatedCase(candidate, actor, bearer, at, root) }
                     }.awaitAll().filterNotNull()
                 }
-                Response.ok(FraudCaseNetwork(root, related, candidates.ids.size, candidates.truncated))
+                Response.ok(
+                    FraudCaseNetwork(
+                        root,
+                        related,
+                        matches.inspectedCandidates,
+                        matches.truncated,
+                    ),
+                )
                     .header("Cache-Control", "no-store").build()
             }
         } catch (_: ContextAccessDenied) {
@@ -81,8 +87,6 @@ class FraudCaseNetworkResource(
         } catch (_: ContextAuthorizationUnavailable) {
             Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
         } catch (_: FraudCaseSourceUnavailable) {
-            Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
-        } catch (_: FraudReferenceUnavailable) {
             Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
         }
     }
