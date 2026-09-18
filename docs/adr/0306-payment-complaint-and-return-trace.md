@@ -95,6 +95,12 @@ conflict can confirm a prior reversal without returning its ID; that event remai
 confirmation, and the graph does not invent the missing transaction reference. This link still needs
 the transaction/ledger event and reconciliation evidence before the reversal outcome can be described
 as a fully traced booking.
+Transaction-service now includes its persisted `reversalOf` identity on the optional
+`TransactionInitiated` wire field. Context projects only a `REVERSAL` initiation with a valid
+original transaction ID, then follows the explicit original-booking-to-reversal-booking edge
+within the complaint's bounded trace. A separate `JournalPosted` record can show the reversal's
+ledger booking. Initiation alone never asserts that the reversal completed or reconciled; old
+events without `reversalOf` remain unlinked rather than guessed from timing or description.
 
 The investigation UI invalidates displayed and in-flight evidence whenever the
 complaint reference, assignment case or purpose changes. A late response for the

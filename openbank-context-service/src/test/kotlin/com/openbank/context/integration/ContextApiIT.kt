@@ -79,6 +79,7 @@ class ContextApiIT {
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    @Suppress("LongMethod")
     fun `complaint event is projected idempotently and becomes authorized graph evidence`() {
         val complaintId = UUID.randomUUID()
         val reference = "CMP-E2E-${UUID.randomUUID()}"
@@ -103,8 +104,11 @@ class ContextApiIT {
         sendPaymentLifecycle(payments, transactionId)
         val bookingTransactionId = UUID.randomUUID()
         val journalId = UUID.randomUUID()
+        val reversalJournalId = UUID.randomUUID()
         ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
+        ledger.send(ledgerPostedEvent(reversalJournalId, reversalId))
         transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
+        transactions.send(transactionReversalEvent(reversalId, bookingTransactionId))
         assertProjectionState(
             reference,
             transactionId,
@@ -114,6 +118,8 @@ class ContextApiIT {
             reversalId,
             complaintId,
         )
+        awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$reversalId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$reversalJournalId", 1)
         val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
 
         seedAssignment(CASE, PURPOSE)
@@ -122,9 +128,10 @@ class ContextApiIT {
             .header("X-Investigation-Purpose", PURPOSE)
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
-            .body("nodes.size()", equalTo(13))
+            .body("nodes.size()", equalTo(15))
             .body("nodes.key", org.hamcrest.Matchers.hasItem("reversal-transaction:$reversalId"))
-            .body("edges.size()", equalTo(12))
+            .body("nodes.key", org.hamcrest.Matchers.hasItem("booking-transaction:$reversalId"))
+            .body("edges.size()", equalTo(14))
             .body(
                 "edges.relation",
                 org.hamcrest.Matchers.hasItems(
@@ -614,6 +621,11 @@ class ContextApiIT {
         """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
             """"aggregateId":"$transactionId","version":0,"originatingPaymentId":"$paymentId",""" +
             """"occurredAt":"${NOW.minusSeconds(2)}"}"""
+
+    private fun transactionReversalEvent(reversalId: UUID, originalId: UUID): String =
+        """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+            """"aggregateId":"$reversalId","version":0,"type":"REVERSAL","reversalOf":"$originalId",""" +
+            """"occurredAt":"${NOW.minusSeconds(1)}"}"""
 
     private fun ledgerPostedEvent(journalId: UUID, transactionId: UUID): String =
         """{"eventType":"JournalPosted","sourceService":"ledger-service","aggregateId":"$journalId",""" +
