@@ -132,6 +132,8 @@ quarkus:
     signature:
       allow-ephemeral-seals: true
 openbank:
+  document:
+    bank-scope: ${DOCUMENT_BANK_SCOPE:openbank-cz}
   rate-limit:
     enabled: true
     max-concurrent-requests: 200

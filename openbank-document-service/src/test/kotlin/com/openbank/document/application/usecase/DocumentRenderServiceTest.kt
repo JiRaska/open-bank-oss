@@ -56,6 +56,7 @@ class DocumentRenderServiceTest {
         objectStore = objectStore,
         clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC),
         objectMapper = mapper,
+        bankScope = "test-bank-a",
     )
 
     @Test
@@ -69,11 +70,12 @@ class DocumentRenderServiceTest {
         val savedMsg = slot<OutboxMessage>()
         coEvery { documentRepo.saveWithOutbox(capture(savedDoc), capture(savedMsg)) } answers { savedDoc.captured }
 
-        val result = service.render(command())
+        val result = service.render(command().copy(metadata = mapOf("bankScope" to "other-bank")))
 
         assertThat(result.status).isEqualTo(DocumentStatus.GENERATED)
         assertThat(result.sha256).isEqualTo(Document.sha256(pdf))
         assertThat(result.sizeBytes).isEqualTo(pdf.size.toLong())
+        assertThat(result.metadata["bankScope"]).isEqualTo("test-bank-a")
         assertThat(savedMsg.captured.eventType).isEqualTo(DocumentRenderService.EVENT_DOCUMENT_GENERATED)
         // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
         // (EVENT-sourced) attribution.
