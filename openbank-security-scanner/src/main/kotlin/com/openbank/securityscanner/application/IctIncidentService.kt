@@ -91,6 +91,19 @@ class IctIncidentService(
             updatedAt = Instant.now(clock),
             aggregateRevision = existing.aggregateRevision + 1,
         )
+        require(updated.containedAt == null || !updated.containedAt.isBefore(updated.detectedAt)) {
+            "containedAt must not precede detectedAt"
+        }
+        require(updated.resolvedAt == null || !updated.resolvedAt.isBefore(updated.detectedAt)) {
+            "resolvedAt must not precede detectedAt"
+        }
+        require(
+            updated.containedAt == null ||
+                updated.resolvedAt == null ||
+                !updated.resolvedAt.isBefore(updated.containedAt),
+        ) {
+            "resolvedAt must not precede containedAt"
+        }
         return repository.save(updated, eventFor("ICT_INCIDENT_STATUS_CHANGED", updated))
     }
 

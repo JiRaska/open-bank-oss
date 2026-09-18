@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.ResultSet
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -155,11 +156,12 @@ class IctIncidentDurabilityIT {
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `a status transition updates the same row rather than re-inserting it`() {
         val id = reportIncident("contained incident ${UUID.randomUUID()}")
+        val containedAt = Instant.now().plusSeconds(5)
 
         Given {
             contentType("application/json")
             body(
-                """{"status":"CONTAINED","containedAt":"2026-08-15T10:00:00Z","resolvedAt":null,"rtoMinutes":45,"rpoMinutes":5}""",
+                """{"status":"CONTAINED","containedAt":"$containedAt","resolvedAt":null,"rtoMinutes":45,"rpoMinutes":5}""",
             )
         } When {
             patch("/api/v1/ict-incidents/$id/status")
@@ -176,6 +178,32 @@ class IctIncidentDurabilityIT {
         assertThat(row["containedAt"]).isNotNull
         assertThat(row["aggregateRevision"]).isEqualTo(2L)
         assertThat(selectOutbox(id)!!["aggregateRevision"]).isEqualTo(2L)
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `invalid incident chronology returns 400 without changing register or outbox`() {
+        val id = reportIncident("invalid window ${UUID.randomUUID()}")
+        val future = Instant.now().plusSeconds(30)
+        val earlier = future.minusSeconds(10)
+        val invalidUpdates = listOf(
+            """{"status":"CONTAINED","containedAt":"2000-01-01T00:00:00Z","resolvedAt":null}""",
+            """{"status":"RESOLVED","containedAt":"$future","resolvedAt":"$earlier"}""",
+        )
+        invalidUpdates.forEach { request ->
+            Given {
+                contentType("application/json")
+                body(request)
+            } When {
+                patch("/api/v1/ict-incidents/$id/status")
+            } Then {
+                statusCode(400)
+            }
+        }
+
+        assertThat(selectIncident(id)!!["status"]).isEqualTo("OPEN")
+        assertThat(selectIncident(id)!!["aggregateRevision"]).isEqualTo(1L)
+        assertThat(selectOutbox(id)!!["aggregateRevision"]).isEqualTo(1L)
     }
 
     @Test
