@@ -159,6 +159,7 @@ def main():
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
         print(f"customer-capability-activation: undetermined: {exc}", file=sys.stderr)
         return 2
+    print(f"SUBJECTS={len(CAPABILITIES)}  # known capability switches (absent means disabled)")
     for finding in findings:
         print(f"customer-capability-activation: {finding}", file=sys.stderr)
     if findings:
