@@ -79,7 +79,7 @@ class RegistryLookupDemoCacheTest {
     @Test
     fun `cached read never fetches or writes a missing extract`(): Unit = runBlocking {
         val cache = mockk<RegistryExtractCache>(relaxed = true)
-        coEvery { cache.find(any(), any()) } returns null
+        coEvery { cache.latest(any()) } returns null
         val real = extract("ares", "45274649")
         val service = service(real, cache)
 
@@ -89,10 +89,10 @@ class RegistryLookupDemoCacheTest {
     }
 
     @Test
-    fun `cached read returns only a fresh cache entry without contacting the register`(): Unit = runBlocking {
+    fun `cached read returns last observed extract including one older than the refresh TTL`(): Unit = runBlocking {
         val cache = mockk<RegistryExtractCache>(relaxed = true)
-        val real = extract("ares", "45274649")
-        coEvery { cache.find(real.identifier, now.minus(Duration.ofHours(24))) } returns real
+        val real = extract("ares", "45274649").copy(fetchedAt = now.minus(Duration.ofDays(2)))
+        coEvery { cache.latest(real.identifier) } returns real
         val service = service(real, cache)
 
         assertThat(service.cached(LookupCommand(IdentifierScheme.CZ_ICO, "45274649"))).isEqualTo(real)

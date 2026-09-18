@@ -84,17 +84,19 @@ paths:
   /api/v1/kyb/lookup/cached:
     get:
       tags: [KYB]
-      summary: Read a fresh cached register extract without contacting the register
+      summary: Read the last recorded register extract without contacting the register
       description: >-
-        Returns 404 when no fresh extract exists. It never performs an external lookup or
-        refreshes the cache; a customer profile can therefore use it without a hidden write.
+        Returns 404 when no extract was ever recorded. The response carries fetchedAt, which can
+        be older than the normal 24-hour lookup refresh TTL; it must be presented as last-observed
+        evidence, not a current legal certification. This GET never performs an external lookup
+        or refreshes the cache.
       operationId: cachedLookup
       parameters:
         - {name: scheme, in: query, required: true, schema: {type: string}}
         - {name: identifier, in: query, required: true, schema: {type: string}}
       responses:
         '200':
-          description: Fresh cached register extract
+          description: Last recorded register extract with its original fetchedAt
           content:
             application/json:
               schema:

@@ -131,7 +131,7 @@ interface RegistryLookupUseCase {
      */
     suspend fun lookup(cmd: LookupCommand): RegistryExtract?
 
-    /** Fresh cached extract only; never calls an external register or refreshes the cache. */
+    /** Last recorded extract with its original fetchedAt; never calls or refreshes a register. */
     suspend fun cached(cmd: LookupCommand): RegistryExtract?
 }
 

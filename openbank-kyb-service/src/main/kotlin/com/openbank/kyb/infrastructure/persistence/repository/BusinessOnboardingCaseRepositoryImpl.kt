@@ -149,6 +149,14 @@ class RegistryExtractCacheImpl :
             ).firstResult()
         }.awaitSuspending()?.let { KybJson.readExtract(it.extractJson) }
 
+    override suspend fun latest(identifier: LegalEntityIdentifier): RegistryExtract? = Panache.withSession {
+        find(
+            "identifierScheme = ?1 and identifierValue = ?2",
+            identifier.scheme.name,
+            identifier.value,
+        ).firstResult()
+    }.awaitSuspending()?.let { KybJson.readExtract(it.extractJson) }
+
     override suspend fun put(extract: RegistryExtract) {
         Panache.withTransaction {
             find(

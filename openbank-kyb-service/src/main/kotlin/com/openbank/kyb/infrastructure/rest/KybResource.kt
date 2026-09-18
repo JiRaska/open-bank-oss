@@ -194,7 +194,7 @@ class KybResource {
     @GET
     @Path("/lookup/cached")
     @Authorize(action = "kyb.lookup")
-    @Operation(summary = "Read a fresh cached register extract without contacting the register")
+    @Operation(summary = "Read the last recorded register extract without contacting the register")
     suspend fun cachedLookup(
         @QueryParam("scheme") scheme: String?,
         @QueryParam("identifier") identifier: String?,

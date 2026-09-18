@@ -57,6 +57,9 @@ interface BusinessRegistryPort {
 /** Short-lived cache of extracts so a lookup on the entry screen and the case start share one register call. */
 interface RegistryExtractCache {
     suspend fun find(identifier: LegalEntityIdentifier, notOlderThan: Instant): RegistryExtract?
+
+    /** Last persisted extract, including one older than the refresh TTL. Read-only evidence. */
+    suspend fun latest(identifier: LegalEntityIdentifier): RegistryExtract?
     suspend fun put(extract: RegistryExtract)
 }
 
