@@ -37,7 +37,41 @@ class DisclosureRedemptionServiceTest {
         otpSender,
         contentReader,
         Clock.fixed(now, ZoneOffset.UTC),
+        true,
     )
+
+    @Test
+    fun `disabled rollout cannot issue or redeem public credentials`(): Unit = runBlocking {
+        val disabled = DisclosureRedemptionService(
+            disclosures,
+            redemptions,
+            secrets,
+            otpSender,
+            contentReader,
+            Clock.fixed(now, ZoneOffset.UTC),
+            false,
+        )
+        assertThatThrownBy {
+            runBlocking {
+                disabled.issue(
+                    IssueDisclosureRedemptionCommand(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        "recipient@example.test",
+                        now.plusSeconds(600),
+                        1,
+                        "disabled-issue",
+                    ),
+                )
+            }
+        }.isInstanceOf(DisclosureRedemptionUnavailableException::class.java)
+        assertThatThrownBy { runBlocking { disabled.verify("token", "123456", "disabled-verify") } }
+            .isInstanceOf(DisclosureRedemptionInvalidException::class.java)
+        assertThatThrownBy { runBlocking { disabled.download("ticket", "disabled-content") } }
+            .isInstanceOf(DisclosureRedemptionInvalidException::class.java)
+        coVerify(exactly = 0) { redemptions.issue(any()) }
+        coVerify(exactly = 0) { otpSender.send(any(), any(), any(), any()) }
+    }
 
     @Test
     fun `source-identical snapshot cannot mint public redemption credentials`(): Unit = runBlocking {

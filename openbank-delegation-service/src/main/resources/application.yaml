@@ -228,6 +228,11 @@ mp:
         tls-configuration-name: party-authority
 
 "%test":
+  openbank:
+    delegation:
+      # Exercises the protocol behind the production rollout gate; tests still assert
+      # that unchanged source bytes cannot be issued to a recipient.
+      disclosure-redemption-enabled: true
   mp:
     messaging:
       outgoing:
@@ -255,6 +260,9 @@ mp:
 
 openbank:
   delegation:
+    # Public OTP/content must remain unreachable until a recipient-bound redacted,
+    # watermarked and newly sealed derivative is evidenced end to end.
+    disclosure-redemption-enabled: ${DELEGATION_DISCLOSURE_REDEMPTION_ENABLED:false}
     # Expand/contract rollout: enable only after account-service has replayed approval-group
     # revisions and its operation-snapshot/decision-ledger health checks are green.
     n-of-m-enabled: ${DELEGATION_N_OF_M_ENABLED:false}

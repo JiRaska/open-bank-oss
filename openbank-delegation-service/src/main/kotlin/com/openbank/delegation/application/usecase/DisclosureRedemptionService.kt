@@ -16,6 +16,7 @@ import com.openbank.delegation.domain.model.DisclosureStatus
 import com.openbank.delegation.domain.model.RedemptionStatus
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
@@ -33,9 +34,12 @@ class DisclosureRedemptionService(
     private val otpSender: DisclosureOtpSender,
     private val snapshotContent: DisclosureSnapshotContentReader,
     private val clock: Clock,
+    @ConfigProperty(name = "openbank.delegation.disclosure-redemption-enabled", defaultValue = "false")
+    private val redemptionEnabled: Boolean,
 ) : IssueDisclosureRedemptionUseCase,
     PublicDisclosureRedemptionUseCase {
     override suspend fun issue(command: IssueDisclosureRedemptionCommand): IssuedDisclosureRedemption {
+        if (!redemptionEnabled) throw DisclosureRedemptionUnavailableException()
         val now = Instant.now(clock)
         require(command.expiresAt.isAfter(now)) { "expiresAt must be in the future" }
         require(!command.expiresAt.isAfter(now.plus(MAX_VALIDITY))) { "validity must not exceed seven days" }
@@ -83,6 +87,7 @@ class DisclosureRedemptionService(
     }
 
     override suspend fun verify(magicToken: String, otp: String, idempotencyKey: String): String {
+        if (!redemptionEnabled) throw DisclosureRedemptionInvalidException()
         validateIdempotencyKey(idempotencyKey)
         val now = Instant.now(clock)
         val idempotencyKeyHash = hashIdempotencyKey(idempotencyKey)
@@ -106,6 +111,7 @@ class DisclosureRedemptionService(
     }
 
     override suspend fun download(accessTicket: String, idempotencyKey: String): RedeemedDisclosureContent {
+        if (!redemptionEnabled) throw DisclosureRedemptionInvalidException()
         validateIdempotencyKey(idempotencyKey)
         val ticketHash = secrets.hashOpaqueToken(accessTicket)
         val candidate = redemptions.peek(ticketHash, Instant.now(clock))

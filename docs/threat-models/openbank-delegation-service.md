@@ -130,6 +130,12 @@ gap closes only with a consumer pact or a run against a deployed stack.
   **not** evidence that a different-digest artifact has the required redaction, recipient watermark,
   or new institutional seal. Public rollout remains blocked until those properties are bound to
   immutable artifact evidence and verified before credential issuance.
+- Production defaults `openbank.delegation.disclosure-redemption-enabled` to false at the use-case
+  boundary for issue, OTP verification and content release; revocation stays available. The test
+  profile enables the protocol for negative and race tests. A deployment must not enable public
+  redemption merely because a snapshot digest differs: generic PDF overlays can retain hidden
+  content, and recipient-specific redaction must be rendered from authoritative structured data
+  before a separate institutional seal is applied.
 - Every issue, verification and content POST requires an effect-scoped `Idempotency-Key`. Only its
   domain-separated SHA-256 digest is stored: append-only issuance generations, verification-attempt
   entries and view-consumption entries make repeated effects no-ops without caching a recoverable
