@@ -491,7 +491,10 @@ class ContextReadAuditRepository(
             effectiveAt = entry.effectiveAt
             knownAt = entry.knownAt
         }
-        sessions.withTransaction { session, _ -> session.persist(entity) }
+        sessions.withTransaction { session, _ ->
+            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                .setParameter("bank", bankScope).singleResult.flatMap { session.persist(entity) }
+        }
             .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
     }
 }

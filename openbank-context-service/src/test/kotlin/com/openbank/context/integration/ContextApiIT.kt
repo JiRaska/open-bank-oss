@@ -25,6 +25,7 @@ import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasEntry
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
 import java.time.ZoneOffset
@@ -173,8 +174,15 @@ class ContextApiIT {
             .body("edges.size()", equalTo(1))
 
         assertThat(auditDecisions(root)).containsExactly("ALLOWED")
+        assertThat(auditDecisions(root, null)).isEmpty()
+        assertThat(auditDecisions(root, "another-bank")).isEmpty()
         assertThatThrownBy {
-            execute("DELETE FROM context_read_audit WHERE root_ref = ?", root)
+            withAuditScope("openbank-cz") { connection ->
+                connection.prepareStatement("DELETE FROM context_read_audit WHERE root_ref = ?").use {
+                    it.setString(1, root)
+                    it.executeUpdate()
+                }
+            }
         }.hasMessageContaining("context audit records are append-only")
     }
 
@@ -348,14 +356,38 @@ class ContextApiIT {
         UUID.randomUUID(), namespace, from, to, relation, "evidence:${UUID.randomUUID()}", NOW.minusSeconds(60), NOW,
     )
 
-    private fun auditDecisions(root: String): List<String> = connection().use { connection ->
-        connection.prepareStatement(
-            "SELECT decision FROM context_read_audit WHERE principal_id = ? AND root_ref = ? ORDER BY occurred_at",
-        ).use { statement ->
-            statement.setString(1, ACTOR)
-            statement.setString(2, root)
-            statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.getString(1)) } }
+    private fun auditDecisions(root: String, bankScope: String? = "openbank-cz"): List<String> =
+        withAuditScope(bankScope) { connection ->
+            connection.prepareStatement(
+                "SELECT decision FROM context_read_audit WHERE principal_id = ? AND root_ref = ? ORDER BY occurred_at",
+            ).use { statement ->
+                statement.setString(1, ACTOR)
+                statement.setString(2, root)
+                statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.getString(1)) } }
+            }
         }
+
+    private fun <T> withAuditScope(scope: String?, action: (Connection) -> T): T = connection().use { connection ->
+        connection.createStatement().use { statement ->
+            statement.execute(
+                """DO $$ BEGIN
+                   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'context_read_audit_test') THEN
+                     CREATE ROLE context_read_audit_test NOLOGIN;
+                   END IF;
+                   END $$
+                """.trimIndent(),
+            )
+            statement.execute("GRANT SELECT, DELETE ON context_read_audit TO context_read_audit_test")
+        }
+        connection.autoCommit = false
+        connection.createStatement().use { it.execute("SET LOCAL ROLE context_read_audit_test") }
+        if (scope != null) {
+            connection.prepareStatement("SELECT set_config('openbank.bank_scope', ?, true)").use {
+                it.setString(1, scope)
+                it.executeQuery().close()
+            }
+        }
+        action(connection)
     }
 
     private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {

@@ -87,6 +87,10 @@ independent checker approval and immediate revocation; append-only assignment-ch
 assignment verification; mandatory OPA; and durable allow/deny/unavailable read audit before graph
 disclosure. The admin UI exposes the controlled lifecycle and hides it from non-admin users. OPA
 denies service accounts from assignment administration even if a broad operational role is present.
+The read-audit table now forces bank-scope row-level security, including for its table owner, and
+the audit writer sets that scope transaction-locally before persisting a decision. A missing or
+different scope cannot read the row. This protects the local evidence; it does not replace export
+to the fleet tamper-evident audit chain.
 Export to the fleet tamper-evident audit store and historical authorization evidence ingestion remain,
 so this ADR stays `partial`.
 
