@@ -80,11 +80,12 @@ class ContextQueryService(
             ContextReadResult(
                 view,
                 view?.let {
+                    val references = it.nodes.map { node ->
+                        "node:${node.sourceSystem}:${node.sourceRef}:${node.sourceVersion}"
+                    } + it.edges.map { edge -> edge.evidenceRef }
                     ContextDisclosure(
-                        it.edges.map { edge ->
-                            edge.evidenceRef
-                        },
-                        it.edges.size,
+                        references,
+                        references.size,
                         it.truncated,
                         projectionGeneration,
                     )
