@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Fail if Context and Document disagree on the one bank served by this deployment.
+"""Fail if Context, Document, and Lending disagree on the deployment bank.
 
 ADR-0311: these labels are operator-set provenance, not caller-selected tenancy.
-The Lending publisher is not enabled yet; add its manifest here before activation.
+The Lending publisher is not enabled yet; this guards its deployment prerequisite.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = (
     ("context", "context-service.yaml", "context-service", "CONTEXT_BANK_SCOPE"),
     ("document-service", "document-service-service.yaml", "document-service", "DOCUMENT_BANK_SCOPE"),
+    ("lending", "lending-service.yaml", "lending-service", "LENDING_GRAPH_BANK_SCOPE"),
 )
 SCOPE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
 
@@ -53,9 +54,9 @@ def self_test() -> None:
         except ValueError:
             continue
         raise AssertionError(f"invalid environment accepted: {env}")
-    require_same({"CONTEXT_BANK_SCOPE": "bank-a", "DOCUMENT_BANK_SCOPE": "bank-a"})
+    require_same({"CONTEXT_BANK_SCOPE": "bank-a", "DOCUMENT_BANK_SCOPE": "bank-a", "LENDING_GRAPH_BANK_SCOPE": "bank-a"})
     try:
-        require_same({"CONTEXT_BANK_SCOPE": "bank-a", "DOCUMENT_BANK_SCOPE": "bank-b"})
+        require_same({"CONTEXT_BANK_SCOPE": "bank-a", "DOCUMENT_BANK_SCOPE": "bank-a", "LENDING_GRAPH_BANK_SCOPE": "bank-b"})
     except ValueError:
         pass
     else:
@@ -81,7 +82,7 @@ def main() -> int:
         print(f"::error::deployment bank provenance parity: {exc}", file=sys.stderr)
         return 1
     print(f"SUBJECTS={len(values)}  # deployment manifests")
-    print("deployment bank provenance parity: PASS — Context and Document agree")
+    print("deployment bank provenance parity: PASS — Context, Document, and Lending agree")
     return 0
 
 
