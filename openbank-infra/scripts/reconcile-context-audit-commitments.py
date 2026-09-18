@@ -41,6 +41,7 @@ def fetch(service: str, sql: str, variables: dict[str, str] | None = None) -> di
 
 CONTEXT_SQL = """
 BEGIN READ ONLY;
+SET LOCAL statement_timeout TO '5s';
 SET LOCAL openbank.bank_scope TO :'bank';
 SELECT audit_id, commitment, 'READ'
 FROM context_audit_commitment_outbox
@@ -57,6 +58,7 @@ COMMIT;
 
 AUDIT_SQL = """
 BEGIN READ ONLY;
+SET LOCAL statement_timeout TO '5s';
 SELECT entry_id, payload::jsonb ->> 'commitment',
        CASE event_type WHEN 'CONTEXT_READ_AUDIT_COMMITTED' THEN 'READ' ELSE 'DISCLOSURE' END
 FROM audit_entries
