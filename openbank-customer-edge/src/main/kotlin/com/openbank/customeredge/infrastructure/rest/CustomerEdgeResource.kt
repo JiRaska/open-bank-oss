@@ -3644,17 +3644,21 @@ class CustomerEdgeResource(
     @Blocking
     fun enrollDevice(@PathParam("partyId") partyId: UUID, body: String): Response {
         val customer = customer()
-        if (customer.partyId != partyId) return forbidden("Cannot enrol device for another party")
+        // A device authenticates a PERSON: it is enrolled to the human even under X-Acting-For
+        // (whose mandate check still ran in customer(), fail-closed). Enrolling a key to a company
+        // would let any mandate holder's phone approve every company challenge, unattributably.
+        if (customer.human != partyId) return forbidden("Cannot enrol device for another party")
         val resp = upstream.post(
             "$scaServiceUrl/api/v1/sca/parties/$partyId/devices",
-            customer.partyId.toString(),
+            customer.human.toString(),
             body,
         )
         audit.emit(
             eventType = "SCA_DEVICE_ENROLLED",
-            partyId = customer.partyId.toString(),
+            partyId = customer.human.toString(),
             operation = "sca.enrollDevice",
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
+            details = scaContext(customer),
         )
         return resp
     }
@@ -3677,10 +3681,12 @@ class CustomerEdgeResource(
         // triggers a Quarkus REST body-reader resolution bug that produces an empty-body 400 before
         // the method is invoked.  JsonNode is unambiguous to Jackson and avoids the conflict.
         val node = (body as? ObjectNode) ?: return forbidden("Malformed challenge body")
-        node.put("partyId", customer.partyId.toString())
+        // SCA binds to the HUMAN, never the acting-for entity (see CustomerIdentity.human): the
+        // challenge must be decided by the person who asked for it, on their own device.
+        node.put("partyId", customer.human.toString())
         return upstream.post(
             "$scaServiceUrl/api/v1/sca/challenges",
-            customer.partyId.toString(),
+            customer.human.toString(),
             objectMapper.writeValueAsString(node),
             idempotencyKey,
         )
@@ -3692,7 +3698,7 @@ class CustomerEdgeResource(
     @Blocking
     fun getChallenge(@PathParam("id") id: UUID): Response {
         val customer = customer()
-        return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.partyId.toString())
+        return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.human.toString())
     }
 
     /**
@@ -3706,9 +3712,11 @@ class CustomerEdgeResource(
     @Blocking
     fun listPendingSca(): Response {
         val customer = customer()
+        // The HUMAN's approvals only — under X-Acting-For too. Listing the entity's challenges
+        // would show every mandate holder the approvals raised by every other one.
         return upstream.get(
-            "$scaServiceUrl/api/v1/sca/parties/${customer.partyId}/challenges/pending",
-            customer.partyId.toString(),
+            "$scaServiceUrl/api/v1/sca/parties/${customer.human}/challenges/pending",
+            customer.human.toString(),
         )
     }
 
@@ -3718,14 +3726,15 @@ class CustomerEdgeResource(
     @Blocking
     fun recordDecision(@PathParam("id") id: UUID, body: String): Response {
         val customer = customer()
-        val resp = upstream.post("$scaServiceUrl/api/v1/sca/challenges/$id/decision", customer.partyId.toString(), body)
+        // Decided and audited as the HUMAN; the entity (if any) is recorded as context only.
+        val resp = upstream.post("$scaServiceUrl/api/v1/sca/challenges/$id/decision", customer.human.toString(), body)
         audit.emit(
             eventType = "SCA_DECISION_RECORDED",
-            partyId = customer.partyId.toString(),
+            partyId = customer.human.toString(),
             operation = "sca.decision",
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
             resourceId = id.toString(),
-            details = mapOf("decision" to extractTextField(objectMapper, body, "decision")),
+            details = mapOf("decision" to extractTextField(objectMapper, body, "decision")) + scaContext(customer),
         )
         return resp
     }
@@ -4759,7 +4768,8 @@ class CustomerEdgeResource(
                 .build()
         }
         val consumeBody = objectMapper.createObjectNode().apply {
-            put("partyId", customer.partyId.toString())
+            // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
+            put("partyId", customer.human.toString())
             put("cardId", cardId)
             put("cardAction", cardAction)
         }
@@ -5079,7 +5089,8 @@ class CustomerEdgeResource(
                 .build()
         }
         val consumeBody = objectMapper.createObjectNode().apply {
-            put("partyId", customer.partyId.toString())
+            // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
+            put("partyId", customer.human.toString())
             put("amount", amount)
             put("currency", currency)
             creditor?.let { put("creditor", it) }
@@ -5157,8 +5168,12 @@ class CustomerEdgeResource(
         } else {
             human
         }
-        return CustomerIdentity(effective)
+        return CustomerIdentity(effective, human)
     }
+
+    /** Audit context for an SCA action: the entity acted for, when there is one. */
+    private fun scaContext(customer: CustomerIdentity): Map<String, String?> =
+        customer.actingFor?.let { mapOf("actingForPartyId" to it.toString()) }.orEmpty()
 
     private sealed interface ActivePartyResult {
         data class Approved(val legalName: String) : ActivePartyResult

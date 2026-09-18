@@ -19,7 +19,10 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.69.0
+  # 1.69.0 -> 1.70.0: additive — GET /business/company (the acting-for company's register facts,
+  # representatives, signing rule and accounts). SCA routes documented as the HUMAN's under
+  # X-Acting-For (no shape change).
+  version: 1.70.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2515,6 +2518,9 @@ paths:
     post:
       tags: [SCA]
       summary: Enrol a device for SCA (ADR-0021)
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: enrollDevice
       security:
         - customerOidc: [sca:enroll-device]
@@ -2536,6 +2542,9 @@ paths:
     post:
       tags: [SCA]
       summary: Initiate an SCA challenge (partyId injected from the JWT)
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: initiateChallenge
       security:
         - customerOidc: [sca:decide]
@@ -2566,6 +2575,9 @@ paths:
     post:
       tags: [SCA]
       summary: Record an out-of-band device decision (ADR-0021)
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: recordDecision
       security:
         - customerOidc: [sca:decide]
@@ -2585,6 +2597,9 @@ paths:
     get:
       tags: [SCA]
       summary: List the caller's own pending (unanswered) SCA challenges
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: listPendingSca
       security:
         - customerOidc: [sca:decide]
@@ -3653,6 +3668,34 @@ paths:
                         role: { type: string, nullable: true }
                         authority: { type: string, nullable: true }
 
+  /business/company:
+    get:
+      tags: [Business]
+      summary: The company the customer is acting for — register facts, representatives, signing rule, accounts
+      description: >-
+        Requires `X-Acting-For: <business partyId>` naming an entity the signed-in human holds an ACTIVE
+        mandate for; without the header, naming the human themselves, or without a mandate it is a 403.
+        Only system-of-record data: party-service (entity, mandates), kyb-service's register extract
+        (signing rule, register-only representatives) and account-service. A value no source holds is
+        null, never a placeholder.
+      operationId: getBusinessCompany
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The company profile
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessCompany'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+        '404': {description: The company party does not exist}
+
   /business/schemes:
     get:
       tags: [Business]
@@ -4514,6 +4557,43 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    BusinessCompany:
+      type: object
+      required: [partyId, representatives, accounts]
+      properties:
+        partyId: { type: string, format: uuid }
+        legalName: { type: string, nullable: true }
+        registrationNumber: { type: string, nullable: true, description: 'Register identifier (IČO for a Czech entity)' }
+        legalForm: { type: string, nullable: true, description: 'Legal form code as held by party-service' }
+        seat:
+          type: object
+          nullable: true
+          properties:
+            street: { type: string, nullable: true }
+            city: { type: string, nullable: true }
+            postalCode: { type: string, nullable: true }
+            country: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        representatives:
+          type: array
+          items:
+            type: object
+            required: [isYou]
+            properties:
+              name: { type: string, nullable: true }
+              role: { type: string, nullable: true }
+              partyId: { type: string, format: uuid, nullable: true, description: 'null for a register-listed member with no party here' }
+              isYou: { type: boolean }
+        signingRule: { type: string, nullable: true, description: 'The register text of how the company is represented' }
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              iban: { type: string, nullable: true }
+              currency: { type: string, nullable: true }
+              product: { type: string, nullable: true }
     AmlPep:
       type: object
       required: [isPep]
