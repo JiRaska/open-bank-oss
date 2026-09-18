@@ -2,9 +2,23 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/kyb-cases/{id}/access:
+    get:
+      operationId: checkAssignedKybCaseAccess
+      summary: Check current KYB case assignment without returning ownership history
+      description: Uses the human investigator's bearer, exact case and purpose; the decision is read-audited.
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '204': { description: Current KYB case access allowed; no case data returned }
+        '400': { description: Case and purpose mismatch }
+        '403': { description: Role, root assignment or policy denied }
+        '503': { description: Authorization unavailable }
   /api/v1/context/kyb-cases/{id}/ownership-observations:
     get:
       operationId: getKybOwnershipObservationReferences
