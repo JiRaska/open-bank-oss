@@ -69,7 +69,9 @@ the card fields needed for the graph. Omitting `limit` still returns the complet
 for subject-access export. A forged or excessive limit receives 400. This change neither reads
 secure PAN/CVV details nor grants customer-facing access. Rollback of the source endpoint before
 the admin UI would make its graph request unbounded again, so deploy and roll back the source and
-UI in that order and verify source-query latency at representative party cardinalities.
+UI in that order. The `(party_id, created_at DESC, id DESC)` index bounds work for a heavy party;
+prebuild it concurrently before the Flyway migration on a large live table, and verify source-query
+latency at representative party cardinalities.
 
 ## 4a. Card authorization decision point (D3) — STRIDE supplement
 
