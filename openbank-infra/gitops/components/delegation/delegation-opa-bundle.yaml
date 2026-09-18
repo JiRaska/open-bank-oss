@@ -686,11 +686,13 @@ data:
             "delegation.statutory.intent",
             "delegation.statutory.decide",
             "delegation.statutory.execute",
+            "delegation.statutory.cancel",
             "delegation.statutory.accept.propose",
             "delegation.statutory.accept.read",
             "delegation.statutory.accept.intent",
             "delegation.statutory.accept.decide",
             "delegation.statutory.accept.execute",
+            "delegation.statutory.accept.cancel",
     		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
     		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
     		# any handler whose claimed party differs from it, so these carry no more authority than

@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive JOINT grantee acceptance routes after immutable statutory evidence.
-  version: 1.28.0
+  version: 1.29.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -352,6 +352,28 @@ paths:
         '403': { description: No current joint mandate }
         '409': { description: Stale proposal, conflicting decision or mismatched SCA binding }
         '503': { description: Current legal rule or SCA consumption cannot be verified }
+  /api/v1/delegations/statutory-operations/{id}/cancel:
+    post:
+      tags: [Statutory delegation proposals]
+      summary: Initiator cancels a pending company grant proposal
+      description: >-
+        A current representative who initiated this exact proposal may cancel it even after
+        signing. Cancellation serializes with decisions and execution; it never revokes an
+        issued grant. Exact retries return the same CANCELLED evidence.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Cancelled proposal or exact cancellation replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryProposalResponse' }
+        '403': { description: Caller is not the current representative and proposal initiator }
+        '404': { description: Proposal not found under this company }
+        '409': { description: Proposal expired or already executed }
+        '503': { description: Current statutory authority cannot be verified }
   /api/v1/delegations/statutory-operations/{id}/execute:
     post:
       tags: [Statutory delegation proposals]
@@ -552,6 +574,28 @@ paths:
               schema: { $ref: '#/components/schemas/StatutorySigningProgress' }
         '403': { description: No current joint mandate }
         '409': { description: Acceptance no longer pending or exact offer changed }
+  /api/v1/delegations/statutory-acceptances/{id}/cancel:
+    post:
+      tags: [Statutory delegation proposals]
+      summary: Initiator cancels a pending company acceptance proposal
+      description: >-
+        A current representative who initiated this exact acceptance may cancel it. The
+        offered grant remains unchanged; cancellation does not decline or renounce it.
+        Exact retries return the same CANCELLED evidence.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Cancelled acceptance proposal or exact cancellation replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryAcceptanceResponse' }
+        '403': { description: Caller is not the current representative and proposal initiator }
+        '404': { description: Acceptance not found under this company }
+        '409': { description: Acceptance expired or already executed }
+        '503': { description: Current statutory authority cannot be verified }
   /api/v1/delegations/statutory-acceptances/{id}/execute:
     post:
       tags: [Statutory delegation acceptances]
@@ -1197,6 +1241,7 @@ components:
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         grantId: { type: [string, 'null'], format: uuid }
+        canCancel: { type: boolean, description: Advisory; initiator still revalidated on cancellation }
     StatutoryAcceptanceResponse:
       type: object
       required: [id, principalPartyId, initiatorPartyId, targetGrantId, expectedLifecycleRevision, requestHash, offer, ruleHash, rule, state, createdAt, expiresAt]
@@ -1217,6 +1262,7 @@ components:
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         grantId: { type: [string, 'null'], format: uuid }
+        canCancel: { type: boolean, description: Advisory; initiator still revalidated on cancellation }
     StatutoryAcceptancePageResponse:
       type: object
       required: [items, nextCursor]

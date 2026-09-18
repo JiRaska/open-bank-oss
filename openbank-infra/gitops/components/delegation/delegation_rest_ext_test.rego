@@ -144,6 +144,13 @@ test_only_edge_may_execute_joint_grant if {
     }
 }
 
+test_only_edge_may_cancel_joint_grant if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.statutory.cancel"}
+    every principal in [operator, admin, viewer, services_m2m] {
+        allow == false with input as {"principal": principal, "action": "delegation.statutory.cancel"}
+    }
+}
+
 test_only_edge_may_manage_joint_acceptance if {
     every action in {
         "delegation.statutory.accept.propose",
@@ -151,6 +158,7 @@ test_only_edge_may_manage_joint_acceptance if {
         "delegation.statutory.accept.intent",
         "delegation.statutory.accept.decide",
         "delegation.statutory.accept.execute",
+        "delegation.statutory.accept.cancel",
     } {
         allow.allow == true with input as {"principal": edge, "action": action}
         every principal in [operator, admin, viewer, services_m2m] {

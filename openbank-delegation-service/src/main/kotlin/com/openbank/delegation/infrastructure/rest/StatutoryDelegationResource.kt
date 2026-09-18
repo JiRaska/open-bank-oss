@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
+import com.openbank.delegation.application.usecase.StatutoryDelegationCancellationService
 import com.openbank.delegation.application.usecase.StatutoryDelegationDecisionService
 import com.openbank.delegation.application.usecase.StatutoryDelegationExecutionService
 import com.openbank.delegation.application.usecase.StatutoryDelegationProgressService
@@ -15,6 +16,8 @@ import com.openbank.delegation.application.usecase.StatutorySigningProgress
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
+import com.openbank.delegation.domain.model.StatutoryOperationState
 import com.openbank.delegation.infrastructure.rest.dto.DelegationResponse
 import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.toCommand
@@ -47,21 +50,24 @@ data class StatutoryProposalResponse(
     val createdAt: Instant,
     val expiresAt: Instant,
     val grantId: UUID?,
+    val canCancel: Boolean,
 ) {
     companion object {
-        fun from(operation: StatutoryDelegationOperation, mapper: ObjectMapper) = StatutoryProposalResponse(
-            id = operation.id,
-            principalPartyId = operation.principalPartyId,
-            initiatorPartyId = operation.initiatorPartyId,
-            requestHash = operation.requestHash,
-            payload = mapper.readTree(operation.payloadJson),
-            ruleHash = operation.ruleHash,
-            rule = mapper.readTree(operation.ruleSnapshotJson),
-            state = operation.state.name,
-            createdAt = operation.createdAt,
-            expiresAt = operation.expiresAt,
-            grantId = operation.grantId,
-        )
+        fun from(operation: StatutoryDelegationOperation, mapper: ObjectMapper, actor: UUID?) =
+            StatutoryProposalResponse(
+                id = operation.id,
+                principalPartyId = operation.principalPartyId,
+                initiatorPartyId = operation.initiatorPartyId,
+                requestHash = operation.requestHash,
+                payload = mapper.readTree(operation.payloadJson),
+                ruleHash = operation.ruleHash,
+                rule = mapper.readTree(operation.ruleSnapshotJson),
+                state = operation.state.name,
+                createdAt = operation.createdAt,
+                expiresAt = operation.expiresAt,
+                grantId = operation.grantId,
+                canCancel = operation.state == StatutoryOperationState.PENDING && operation.initiatorPartyId == actor,
+            )
     }
 }
 
@@ -102,12 +108,30 @@ data class StatutoryDecisionSummaryResponse(
 @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
 class StatutoryDelegationResource(
     private val service: StatutoryDelegationProposalService,
+    private val cancellation: StatutoryDelegationCancellationService,
     private val decisions: StatutoryDelegationDecisionService,
     private val execution: StatutoryDelegationExecutionService,
     private val progress: StatutoryDelegationProgressService,
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
+    @POST
+    @Path("/{id}/cancel")
+    @Authorize(action = "delegation.statutory.cancel", resource = "#id")
+    suspend fun cancel(
+        @PathParam("id") id: UUID,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutoryProposalResponse {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        return StatutoryProposalResponse.from(
+            cancellation.cancel(id, principal, customerPartyId, actorPartyId, StatutoryOperationKind.ISSUE),
+            mapper,
+            actorPartyId,
+        )
+    }
+
     @GET
     @Authorize(action = "delegation.statutory.read", resource = "#customerPartyId")
     suspend fun pending(
@@ -117,7 +141,7 @@ class StatutoryDelegationResource(
         requireEdge()
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         return service.pending(principal, customerPartyId, actorPartyId)
-            .map { StatutoryProposalResponse.from(it, mapper) }
+            .map { StatutoryProposalResponse.from(it, mapper, actorPartyId) }
     }
 
     @GET
@@ -133,7 +157,7 @@ class StatutoryDelegationResource(
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         val result = service.page(principal, customerPartyId, actorPartyId, cursor, limit)
         return StatutoryProposalPageResponse(
-            result.operations.map { StatutoryProposalResponse.from(it, mapper) },
+            result.operations.map { StatutoryProposalResponse.from(it, mapper, actorPartyId) },
             result.nextCursor,
         )
     }
@@ -150,7 +174,7 @@ class StatutoryDelegationResource(
         requireNotNull(request) { "request body is required" }
         require(!requestKey.isNullOrBlank()) { "Idempotency-Key header is required" }
         val result = service.propose(request.toCommand(customerPartyId, actorPartyId), requestKey)
-        val response = StatutoryProposalResponse.from(result.operation, mapper)
+        val response = StatutoryProposalResponse.from(result.operation, mapper, actorPartyId)
         val status = when (result) {
             is StatutoryOperationCreateOutcome.Created -> Response.Status.CREATED
             is StatutoryOperationCreateOutcome.Replayed -> Response.Status.OK
@@ -171,7 +195,11 @@ class StatutoryDelegationResource(
     ): StatutoryProposalResponse {
         requireEdge()
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
-        return StatutoryProposalResponse.from(service.get(id, principal, customerPartyId, actorPartyId), mapper)
+        return StatutoryProposalResponse.from(
+            service.get(id, principal, customerPartyId, actorPartyId),
+            mapper,
+            actorPartyId,
+        )
     }
 
     @GET

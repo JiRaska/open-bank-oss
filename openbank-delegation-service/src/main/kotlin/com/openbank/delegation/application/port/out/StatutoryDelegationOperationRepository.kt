@@ -53,6 +53,15 @@ interface StatutoryDelegationOperationRepository {
 
     suspend fun findDecision(operationId: UUID, actorPartyId: UUID): StatutoryDelegationDecision?
 
+    /** Initiator-only cancellation serializes with decisions and execution on the operation row. */
+    suspend fun cancel(
+        operationId: UUID,
+        principalPartyId: UUID,
+        initiatorPartyId: UUID,
+        kind: StatutoryOperationKind,
+        at: Instant,
+    ): StatutoryDelegationOperation
+
     /** Lock operation, check signed quorum, then commit grant + outbox + EXECUTED as one SQL transaction. */
     suspend fun execute(
         operationId: UUID,

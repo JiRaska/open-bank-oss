@@ -186,6 +186,40 @@ class StatutoryDelegationOperationRepositoryImpl(
             }
         }.awaitSuspending()
 
+    override suspend fun cancel(
+        operationId: UUID,
+        principalPartyId: UUID,
+        initiatorPartyId: UUID,
+        kind: StatutoryOperationKind,
+        at: Instant,
+    ): StatutoryDelegationOperation = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery(LOCK_OPERATION_SQL, StatutoryDelegationOperationEntity::class.java)
+                .setParameter("operation", operationId)
+                .setParameter("principal", principalPartyId)
+                .singleResultOrNull
+                .flatMap { operation ->
+                    when {
+                        operation == null ||
+                            operation.operationKind != kind ||
+                            operation.initiatorPartyId != initiatorPartyId ->
+                            Uni.createFrom().failure(StatutoryDecisionClosed())
+                        operation.state == StatutoryOperationState.CANCELLED ->
+                            Uni.createFrom().item(operation.toDomain())
+                        operation.state != StatutoryOperationState.PENDING || !operation.expiresAt.isAfter(at) ->
+                            Uni.createFrom().failure(StatutoryDecisionClosed())
+                        else -> session.createNativeQuery<Any>(MARK_CANCELLED_SQL)
+                            .setParameter("operation", operationId)
+                            .executeUpdate()
+                            .map { changed ->
+                                check(changed == 1) { "statutory cancellation lost its row lock" }
+                                operation.toDomain().copy(state = StatutoryOperationState.CANCELLED)
+                            }
+                    }
+                }
+        }
+    }.awaitSuspending()
+
     override suspend fun execute(
         operationId: UUID,
         principalPartyId: UUID,
@@ -432,6 +466,11 @@ class StatutoryDelegationOperationRepositoryImpl(
         const val MARK_EXECUTED_SQL = """
             UPDATE delegation_statutory_operations
             SET state = 'EXECUTED', grant_id = :grant, executed_at = :at
+            WHERE operation_id = :operation AND state = 'PENDING'
+        """
+        const val MARK_CANCELLED_SQL = """
+            UPDATE delegation_statutory_operations
+            SET state = 'CANCELLED'
             WHERE operation_id = :operation AND state = 'PENDING'
         """
         const val INSERT_DECISION_SQL = """

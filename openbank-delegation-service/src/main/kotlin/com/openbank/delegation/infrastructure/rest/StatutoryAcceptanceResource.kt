@@ -11,8 +11,11 @@ import com.openbank.delegation.application.usecase.StatutoryDelegationAcceptance
 import com.openbank.delegation.application.usecase.StatutoryDelegationAcceptanceExecutionService
 import com.openbank.delegation.application.usecase.StatutoryDelegationAcceptanceProgressService
 import com.openbank.delegation.application.usecase.StatutoryDelegationAcceptanceProposalService
+import com.openbank.delegation.application.usecase.StatutoryDelegationCancellationService
 import com.openbank.delegation.application.usecase.StatutorySigningProgress
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
+import com.openbank.delegation.domain.model.StatutoryOperationState
 import com.openbank.delegation.infrastructure.rest.dto.DelegationResponse
 import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
@@ -45,23 +48,26 @@ data class StatutoryAcceptanceResponse(
     val createdAt: Instant,
     val expiresAt: Instant,
     val grantId: UUID?,
+    val canCancel: Boolean,
 ) {
     companion object {
-        fun from(operation: StatutoryDelegationOperation, mapper: ObjectMapper) = StatutoryAcceptanceResponse(
-            id = operation.id,
-            principalPartyId = operation.principalPartyId,
-            initiatorPartyId = operation.initiatorPartyId,
-            targetGrantId = requireNotNull(operation.targetGrantId),
-            expectedLifecycleRevision = requireNotNull(operation.expectedLifecycleRevision),
-            requestHash = operation.requestHash,
-            offer = mapper.readTree(operation.payloadJson),
-            ruleHash = operation.ruleHash,
-            rule = mapper.readTree(operation.ruleSnapshotJson),
-            state = operation.state.name,
-            createdAt = operation.createdAt,
-            expiresAt = operation.expiresAt,
-            grantId = operation.grantId,
-        )
+        fun from(operation: StatutoryDelegationOperation, mapper: ObjectMapper, actor: UUID?) =
+            StatutoryAcceptanceResponse(
+                id = operation.id,
+                principalPartyId = operation.principalPartyId,
+                initiatorPartyId = operation.initiatorPartyId,
+                targetGrantId = requireNotNull(operation.targetGrantId),
+                expectedLifecycleRevision = requireNotNull(operation.expectedLifecycleRevision),
+                requestHash = operation.requestHash,
+                offer = mapper.readTree(operation.payloadJson),
+                ruleHash = operation.ruleHash,
+                rule = mapper.readTree(operation.ruleSnapshotJson),
+                state = operation.state.name,
+                createdAt = operation.createdAt,
+                expiresAt = operation.expiresAt,
+                grantId = operation.grantId,
+                canCancel = operation.state == StatutoryOperationState.PENDING && operation.initiatorPartyId == actor,
+            )
     }
 }
 
@@ -74,12 +80,30 @@ data class StatutoryAcceptancePageResponse(val items: List<StatutoryAcceptanceRe
 @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
 class StatutoryAcceptanceResource(
     private val proposals: StatutoryDelegationAcceptanceProposalService,
+    private val cancellation: StatutoryDelegationCancellationService,
     private val decisions: StatutoryDelegationAcceptanceDecisionService,
     private val progress: StatutoryDelegationAcceptanceProgressService,
     private val execution: StatutoryDelegationAcceptanceExecutionService,
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
+    @POST
+    @Path("/{id}/cancel")
+    @Authorize(action = "delegation.statutory.accept.cancel", resource = "#id")
+    suspend fun cancel(
+        @PathParam("id") id: UUID,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutoryAcceptanceResponse {
+        requireEdge()
+        val company = requireNotNull(customerPartyId) { "customer profile is required" }
+        return StatutoryAcceptanceResponse.from(
+            cancellation.cancel(id, company, customerPartyId, actorPartyId, StatutoryOperationKind.ACCEPT),
+            mapper,
+            actorPartyId,
+        )
+    }
+
     @GET
     @Path("/pages")
     @Authorize(action = "delegation.statutory.accept.read", resource = "#customerPartyId")
@@ -93,7 +117,7 @@ class StatutoryAcceptanceResource(
         val company = requireNotNull(customerPartyId) { "customer profile is required" }
         val result = proposals.page(company, customerPartyId, actorPartyId, cursor, limit)
         return StatutoryAcceptancePageResponse(
-            result.operations.map { StatutoryAcceptanceResponse.from(it, mapper) },
+            result.operations.map { StatutoryAcceptanceResponse.from(it, mapper, actorPartyId) },
             result.nextCursor,
         )
     }
@@ -116,7 +140,7 @@ class StatutoryAcceptanceResource(
             is StatutoryOperationCreateOutcome.Replayed -> Response.Status.OK
         }
         return Response.status(status)
-            .entity(StatutoryAcceptanceResponse.from(result.operation, mapper))
+            .entity(StatutoryAcceptanceResponse.from(result.operation, mapper, actorPartyId))
             .header("X-Idempotency-Replayed", result is StatutoryOperationCreateOutcome.Replayed)
             .build()
     }
@@ -131,7 +155,11 @@ class StatutoryAcceptanceResource(
     ): StatutoryAcceptanceResponse {
         requireEdge()
         val company = requireNotNull(customerPartyId) { "customer profile is required" }
-        return StatutoryAcceptanceResponse.from(proposals.get(id, company, customerPartyId, actorPartyId), mapper)
+        return StatutoryAcceptanceResponse.from(
+            proposals.get(id, company, customerPartyId, actorPartyId),
+            mapper,
+            actorPartyId,
+        )
     }
 
     @GET

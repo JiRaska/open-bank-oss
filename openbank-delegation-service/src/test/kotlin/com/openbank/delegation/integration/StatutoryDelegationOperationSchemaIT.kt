@@ -5,6 +5,7 @@
 package com.openbank.delegation.integration
 
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.StatutoryDecisionClosed
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.domain.event.DelegationActivated
@@ -17,6 +18,7 @@ import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationKind
+import com.openbank.delegation.domain.model.StatutoryOperationState
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import com.openbank.delegation.domain.model.StatutoryRepresentative
 import com.openbank.delegation.domain.model.StatutoryRuleMode
@@ -106,6 +108,75 @@ class StatutoryDelegationOperationSchemaIT {
                     }
                 }
         }
+    }
+
+    @Test
+    fun `only the initiator cancels an inert proposal and exact retry preserves decisions`() {
+        val proposed = operation()
+        onVertxContext { operations.create(proposed) }
+        val at = proposed.createdAt.plusSeconds(2)
+        assertThatThrownBy {
+            onVertxContext {
+                operations.cancel(
+                    proposed.id,
+                    proposed.principalPartyId,
+                    UUID.randomUUID(),
+                    StatutoryOperationKind.ISSUE,
+                    at,
+                )
+            }
+        }.isInstanceOf(StatutoryDecisionClosed::class.java)
+        assertThatThrownBy {
+            onVertxContext {
+                operations.cancel(
+                    proposed.id,
+                    UUID.randomUUID(),
+                    proposed.initiatorPartyId,
+                    StatutoryOperationKind.ISSUE,
+                    at,
+                )
+            }
+        }.isInstanceOf(StatutoryDecisionClosed::class.java)
+        val cancelled = onVertxContext {
+            operations.cancel(
+                proposed.id,
+                proposed.principalPartyId,
+                proposed.initiatorPartyId,
+                StatutoryOperationKind.ISSUE,
+                at,
+            )
+        }
+        assertThat(cancelled.state).isEqualTo(StatutoryOperationState.CANCELLED)
+        assertThat(
+            onVertxContext {
+                operations.cancel(
+                    proposed.id,
+                    proposed.principalPartyId,
+                    proposed.initiatorPartyId,
+                    StatutoryOperationKind.ISSUE,
+                    at,
+                )
+            },
+        ).isEqualTo(cancelled)
+        assertThat(onVertxContext { operations.decisions(proposed.id) }).isEmpty()
+        assertThat(
+            onVertxContext {
+                operations.pending(proposed.principalPartyId, proposed.ruleHash, at, 50)
+            },
+        ).isEmpty()
+        assertThatThrownBy {
+            onVertxContext {
+                operations.recordDecision(
+                    StatutoryDelegationDecision(
+                        proposed.id,
+                        proposed.initiatorPartyId,
+                        StatutoryDecisionVerdict.REJECT,
+                        null,
+                        at,
+                    ),
+                )
+            }
+        }.isInstanceOf(StatutoryDecisionClosed::class.java)
     }
 
     @Test
