@@ -3713,7 +3713,7 @@ paths:
           description: One account page and its next cursor
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/AccountList'}
+              schema: {$ref: '#/components/schemas/BusinessCompanyAccountPage'}
         '403': {description: No active mandate for the named company}
         '502': {description: An upstream account page was unavailable or malformed}
 
@@ -4609,13 +4609,25 @@ components:
         accounts:
           type: array
           items:
-            type: object
-            properties:
-              id: { type: string, format: uuid }
-              iban: { type: string, nullable: true }
-              currency: { type: string, nullable: true }
-              product: { type: string, nullable: true }
+            $ref: '#/components/schemas/BusinessCompanyAccount'
         accountsPagination:
+          $ref: '#/components/schemas/Pagination'
+    BusinessCompanyAccount:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        iban: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        product: { type: string, nullable: true }
+    BusinessCompanyAccountPage:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessCompanyAccount'
+        pagination:
           $ref: '#/components/schemas/Pagination'
     AmlPep:
       type: object
