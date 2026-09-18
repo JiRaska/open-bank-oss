@@ -108,16 +108,19 @@ class FraudInvestigationCaseResource(
     @Path("/{caseId}/close-without-finding")
     @RolesAllowed("ROLE_ADMIN")
     @Authorize(action = "fraud.case.close", resource = "#caseId")
-    @Operation(summary = "Close an investigation without asserting a fraud finding")
+    @Operation(summary = "Close an assigned investigation without asserting a fraud finding")
     suspend fun closeWithoutFinding(
         @PathParam("caseId") caseId: UUID,
         @HeaderParam("X-Investigation-Purpose") purpose: String?,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("Authorization") authorization: String?,
     ): Response {
         require(purpose == PURPOSE) { "FRAUD_INVESTIGATION is required" }
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key is required" }
+        val accessFailure = checkCaseAccess(caseId, authorization)
+        if (accessFailure != null) return accessFailure
         val result = cases.closeWithoutFinding(caseId, identity.principal.name)
-            ?: return Response.status(Response.Status.NOT_FOUND).build()
+            ?: return Response.status(Response.Status.NOT_FOUND).header("Cache-Control", "no-store").build()
         return Response.ok(result.toResponse()).header("Cache-Control", "no-store").build()
     }
 

@@ -96,7 +96,7 @@ paths:
     post:
       tags: [Fraud]
       operationId: closeFraudInvestigationCaseWithoutFinding
-      summary: Close a case without declaring fraud
+      summary: Close an assigned case without declaring fraud
       security:
         - bearerAuth: []
       parameters:
@@ -113,7 +113,8 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { description: Case not found }
+        '404': { description: Case not found after authorization }
+        '503': { description: Context assignment or policy check unavailable }
   /api/v1/fraud/review-queue:
     get:
       tags: [Fraud]
