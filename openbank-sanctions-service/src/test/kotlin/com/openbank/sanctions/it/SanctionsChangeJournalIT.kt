@@ -457,6 +457,26 @@ class SanctionsChangeJournalIT {
     }
 
     @Test
+    fun `deleting an unpublishable source releases its retained journal`() {
+        execute(
+            "INSERT INTO sanctions_entries (list_type, primary_name) " +
+                "VALUES ('PEP_GLOBAL', 'Invalid deleted source')",
+        )
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.WITHHELD)
+        execute("DELETE FROM sanctions_entries WHERE primary_name = 'Invalid deleted source'")
+
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.NO_CHANGES)
+        assertThat(unresolvedJournalCount()).isZero()
+        assertThat(journalCount()).isEqualTo(2)
+        val reasons = onEventLoop {
+            pool.query("SELECT resolution_reason FROM sanctions_change_journal ORDER BY id")
+                .execute().awaitSuspending().map { it.getString("resolution_reason") }
+        }
+        assertThat(reasons).containsExactly("SOURCE_REMOVED", "SOURCE_REMOVED")
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isZero()
+    }
+
+    @Test
     fun `oversized encoded source identity retains evidence instead of creating an oversized event`() {
         execute(
             "INSERT INTO sanctions_entries (list_type, external_id, primary_name) " +

@@ -14,6 +14,7 @@ CREATE TABLE sanctions_change_journal (
     existed_before BOOLEAN NOT NULL,
     changed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     resolved_at TIMESTAMPTZ,
+    resolution_reason VARCHAR(32),
     resolved_by_list_type VARCHAR(30),
     resolved_by_external_id TEXT
 );

@@ -11,7 +11,8 @@ internal object SanctionsPublicationSql {
     """
     const val RESOLVE_REPAIRED_IDENTITIES = """
         UPDATE sanctions_change_journal j
-        SET resolved_at = clock_timestamp(), resolved_by_list_type = e.list_type,
+        SET resolved_at = clock_timestamp(), resolution_reason = 'IDENTITY_REPAIRED',
+            resolved_by_list_type = e.list_type,
             resolved_by_external_id = e.external_id
         FROM sanctions_entries e
         WHERE j.list_type = :type AND j.resolved_at IS NULL
@@ -20,6 +21,13 @@ internal object SanctionsPublicationSql {
           AND e.external_id IS NOT NULL
           AND octet_length(to_json(e.external_id)::text) <= :maxBytes
           AND j.external_id IS DISTINCT FROM e.external_id
+    """
+    const val RESOLVE_REMOVED_IDENTITIES = """
+        UPDATE sanctions_change_journal j
+        SET resolved_at = clock_timestamp(), resolution_reason = 'SOURCE_REMOVED'
+        WHERE j.list_type = :type AND j.resolved_at IS NULL
+          AND (j.external_id IS NULL OR octet_length(to_json(j.external_id)::text) > :maxBytes)
+          AND NOT EXISTS (SELECT 1 FROM sanctions_entries e WHERE e.id = j.entry_id)
     """
     const val SELECT_PENDING = """
         INSERT INTO sanctions_publication_selection (id)

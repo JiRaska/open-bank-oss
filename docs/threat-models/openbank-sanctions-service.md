@@ -162,10 +162,10 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 - **2026-09-13** — Add durable list-change publication (ADR-0256 D1). Flyway V14 installs an
   append-only journal trigger; publication atomically transfers an exact committed selection to
-  the existing outbox. When an invalid source identity is repaired, publication marks only its
-  unpublishable historical rows as resolved while retaining them for audit, including the target
-  list and source key if the entry moved between lists. That resolution shares the outbox
-  transaction: a failed write restores the rows for retry. Resolution is not evidence that a
+  the existing outbox. When an invalid source identity is repaired or its entry is removed,
+  publication marks only its unpublishable historical rows as resolved while retaining them for
+  audit. A repair records the target list/key across lists; a removal records its reason. Resolution
+  shares the outbox transaction: a failed write restores the rows for retry. It is not evidence that a
   downstream re-screen completed. Retry survives failed imports and process interruption.
   Equivalent alias/program/nationality ordering does not trigger a new change; malformed legacy
   text remains repairable. SQL working sets and bounded pages prevent fleet-sized journals from
