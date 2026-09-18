@@ -165,18 +165,19 @@ later document change does not retroactively alter what the checker saw.
 For a guarantee, the dedicated boolean proof endpoint checks a `SIGNED`
 document's post-seal SHA-256, the loan `caseRef`, guarantor `partyRef` and bank
 scope. Old documents with a null bank scope fail closed; JSON metadata is never
-used as bank authority. The endpoint remains unusable in a deployment until
-the separate `openbank-lending-graph` client is provisioned and its secret is
-available to Lending. Neither that client nor a Lending writer exists in the
-schema-only stage.
+used as bank authority. The realm template declares a separate
+`openbank-lending-graph` client with only `ROLE_LENDING_GRAPH_PROOF`; the endpoint
+checks both that role and its exact principal. It remains unusable in a
+deployment until the credential is provisioned and available to Lending. No
+Lending writer exists in the schema-and-proof stage.
 
 Approval then rechecks current source state in the same logical decision flow
 and emits the versioned, reference-only event through Lending's transactional
 outbox. Context consumes it idempotently, preserves effective and recorded time,
 and reads detail through the source's case-scoped API under a separate OPA
-decision. Until the dedicated identity, source check, writer and outbox exist,
+decision. Until the dedicated credential, source check, writer and outbox exist,
 the V18 rows must not be projected or presented as verified links. This
-deliberately leaves the schema-only stage dark rather than inventing evidence.
+deliberately leaves the schema-and-proof stage dark rather than inventing evidence.
 
 ## Alternatives considered
 
