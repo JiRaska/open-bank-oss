@@ -323,6 +323,7 @@ class CardService(
     override suspend fun listAll() = repo.listAllCards()
     override suspend fun listByAccount(accountId: UUID) = repo.findByAccountId(accountId)
     override suspend fun listByParty(partyId: UUID) = repo.findByPartyId(partyId)
+    override suspend fun listRecentByParty(partyId: UUID, limit: Int) = repo.findRecentByPartyId(partyId, limit)
 
     /**
      * Audit trail for a secure-details *access*. This module has no audit publisher wired, so the

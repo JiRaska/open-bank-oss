@@ -109,6 +109,7 @@ interface CardUseCase {
     suspend fun listAll(): List<Card>
     suspend fun listByAccount(accountId: UUID): List<Card>
     suspend fun listByParty(partyId: UUID): List<Card>
+    suspend fun listRecentByParty(partyId: UUID, limit: Int): List<Card>
 
     /**
      * ADR-0249 D2 — "revocation must bite". Ends every card issued under [grantId], returning the

@@ -32,6 +32,9 @@ interface CardRepository {
 
     suspend fun findByPartyId(partyId: UUID): List<Card>
 
+    /** Database-bounded newest slice for Customer 360; full list remains for subject access. */
+    suspend fun findRecentByPartyId(partyId: UUID, limit: Int): List<Card>
+
     /**
      * Cards issued under a delegation grant (ADR-0249 D1). Drives D2's "revocation must bite":
      * when the grant ends, every card it authorised is blocked, so this must return the card
