@@ -12,6 +12,8 @@ CREATE TABLE lending_graph_asset (
     asset_id UUID PRIMARY KEY,
     asset_type VARCHAR(32) NOT NULL CHECK (asset_type IN
         ('REAL_ESTATE', 'VEHICLE', 'SECURITIES', 'CASH_DEPOSIT', 'OTHER')),
+    identity_jurisdiction CHAR(2) NOT NULL
+        CHECK (identity_jurisdiction ~ '^[A-Z]{2}$'),
     source_document_id UUID NOT NULL,
     source_sha256 CHAR(64) NOT NULL CHECK (source_sha256 ~ '^[0-9a-f]{64}$'),
     supersedes_asset_id UUID UNIQUE REFERENCES lending_graph_asset(asset_id),

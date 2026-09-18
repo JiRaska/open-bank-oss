@@ -77,7 +77,9 @@ calculation and risk double counting.
 The source transition is expand-first and source-owned:
 
 1. Add an immutable, server-assigned asset identity backed by a reviewed source
-   reference, with jurisdiction and a versioned identity-evidence hash. A new
+   reference, with the source register's two-letter jurisdiction and a versioned
+   identity-evidence hash. This jurisdiction identifies the evidence source, not
+   the physical asset's location. A new
    allocation references both that asset and an existing approved collateral row
    for one loan. Its secured amount, currency, priority and effective interval
    are explicit; an asset is shared only when two independently approved

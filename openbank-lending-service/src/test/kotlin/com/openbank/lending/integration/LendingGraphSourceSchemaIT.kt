@@ -28,9 +28,9 @@ class LendingGraphSourceSchemaIT {
         val hash = "a".repeat(64)
         val attemptedApprovals = listOf(
             """INSERT INTO lending_graph_asset
-               (asset_id, asset_type, source_document_id, source_sha256,
+               (asset_id, asset_type, identity_jurisdiction, source_document_id, source_sha256,
                 proposed_by, proposed_at, status, decided_by, decided_at)
-               VALUES ('$id', 'REAL_ESTATE', '$documentId', '$hash',
+               VALUES ('$id', 'REAL_ESTATE', 'GB', '$documentId', '$hash',
                        'maker', now(), 'APPROVED', 'checker', now())""",
             """INSERT INTO lending_graph_allocation
                (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
@@ -101,6 +101,25 @@ class LendingGraphSourceSchemaIT {
                     statement.executeUpdate()
                 }
             }.hasMessageContaining("cannot be deleted")
+        }
+    }
+
+    @Test
+    fun `asset identity rejects an invalid register jurisdiction`() {
+        dataSource.connection.use { connection ->
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """INSERT INTO lending_graph_asset
+                       (asset_id, asset_type, identity_jurisdiction, source_document_id,
+                        source_sha256, proposed_by, proposed_at)
+                       VALUES (?, 'REAL_ESTATE', 'g1', ?, ?, 'maker', now())""",
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setObject(2, UUID.randomUUID())
+                    statement.setString(3, "a".repeat(64))
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("lending_graph_asset_identity_jurisdiction_check")
         }
     }
 
@@ -205,9 +224,9 @@ class LendingGraphSourceSchemaIT {
             assertThatThrownBy {
                 connection.prepareStatement(
                     """INSERT INTO lending_graph_asset
-                       (asset_id, asset_type, source_document_id, source_sha256,
+                       (asset_id, asset_type, identity_jurisdiction, source_document_id, source_sha256,
                         supersedes_asset_id, proposed_by, proposed_at)
-                       VALUES (?, 'REAL_ESTATE', ?, ?, ?, 'second-maker', now())""",
+                       VALUES (?, 'REAL_ESTATE', 'GB', ?, ?, ?, 'second-maker', now())""",
                 ).use { statement ->
                     statement.setObject(1, UUID.randomUUID())
                     statement.setObject(2, UUID.randomUUID())
@@ -224,8 +243,9 @@ class LendingGraphSourceSchemaIT {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """INSERT INTO lending_graph_asset
-                   (asset_id, asset_type, source_document_id, source_sha256, proposed_by, proposed_at)
-                   VALUES (?, 'REAL_ESTATE', ?, ?, 'maker', now())""",
+                   (asset_id, asset_type, identity_jurisdiction, source_document_id,
+                    source_sha256, proposed_by, proposed_at)
+                   VALUES (?, 'REAL_ESTATE', 'GB', ?, ?, 'maker', now())""",
             ).use { statement ->
                 statement.setObject(1, id)
                 statement.setObject(2, UUID.randomUUID())
