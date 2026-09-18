@@ -105,6 +105,7 @@ class DelegationNotificationConsumerTest {
             assertThat(it.correlationId).isEqualTo(grantId)
             assertThat(it.deepLink).isEqualTo("openbank://delegations/joint-issuance")
             assertThat(it.deduplicationKey).isNotNull()
+            assertThat(it.deliveryNotAfter).isEqualTo(Instant.parse("2026-09-19T12:00:00Z"))
         }
         assertThat(requests.map { it.deduplicationKey }.distinct()).hasSize(2)
     }

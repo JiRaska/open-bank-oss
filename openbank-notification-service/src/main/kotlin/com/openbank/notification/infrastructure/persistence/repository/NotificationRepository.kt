@@ -17,6 +17,19 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // query methods per read/write path; grows with notification features
 class NotificationRepository : PanacheRepository<NotificationEntity> {
 
+    /** Atomically claim stale JOINT PENDING rows across pods; the network send runs after commit. */
+    fun claimStaleJointPending(now: Instant, olderThan: Instant, staleClaim: Instant, limit: Int): Uni<List<UUID>> =
+        Panache.withTransaction {
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(CLAIM_JOINT_PENDING_SQL, UUID::class.java)
+                    .setParameter("now", now)
+                    .setParameter("olderThan", olderThan)
+                    .setParameter("staleClaim", staleClaim)
+                    .setParameter("claimLimit", limit.coerceIn(1, MAX_JOINT_RETRY_BATCH))
+                    .resultList
+            }
+        }
+
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending()
 
@@ -107,4 +120,27 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
             update("status = ?1 where notificationId = ?2", status, id)
         }
     }.replaceWithVoid()
+
+    private companion object {
+        const val MAX_JOINT_RETRY_BATCH = 50
+        const val CLAIM_JOINT_PENDING_SQL = """
+            WITH candidates AS (
+                SELECT id FROM notifications
+                WHERE status = 'PENDING'
+                  AND template IN ('JOINT_ISSUANCE_SIGNATURE_REQUESTED', 'JOINT_ACCEPTANCE_SIGNATURE_REQUESTED')
+                  AND delivery_not_after IS NOT NULL
+                  AND created_at <= :olderThan
+                  AND (delivery_retry_claimed_at IS NULL OR delivery_retry_claimed_at <= :staleClaim)
+                ORDER BY created_at, id
+                LIMIT :claimLimit
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE notifications n
+            SET delivery_retry_claimed_at = :now,
+                delivery_retry_count = n.delivery_retry_count + 1
+            FROM candidates c
+            WHERE n.id = c.id
+            RETURNING n.notification_id
+        """
+    }
 }

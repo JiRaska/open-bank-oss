@@ -48,6 +48,15 @@ class NotificationEntity : PanacheEntity() {
     @Column(name = "deduplication_key")
     var deduplicationKey: UUID? = null
 
+    @Column(name = "delivery_not_after")
+    var deliveryNotAfter: Instant? = null
+
+    @Column(name = "delivery_retry_claimed_at")
+    var deliveryRetryClaimedAt: Instant? = null
+
+    @Column(name = "delivery_retry_count", nullable = false)
+    var deliveryRetryCount: Int = 0
+
     @Column(name = "sent_at")
     var sentAt: Instant? = null
 

@@ -55,8 +55,10 @@ import java.util.UUID
  *
  * **Idempotency**: joint proposal fan-out uses a stable per-operation/person notification key, so
  * a Kafka replay cannot create another notification row for the same representative. This does NOT
- * guarantee eventual dispatch: if sending fails after that row commits, [NotificationConsumer]
- * skips the duplicate request. Recovery of such PENDING/FAILED rows is separate work. Legacy
+ * guarantee exactly-once dispatch: if sending fails after that row commits, [NotificationConsumer]
+ * skips the duplicate request. Stale PENDING joint prompts are reclaimed by
+ * [com.openbank.notification.infrastructure.JointNotificationRetryJob] with a bounded retry budget;
+ * terminal FAILED rows are not replayed as a second delivery. Legacy
  * lifecycle types retain their delivery semantics; first-use and recertification also have keys.
  *
  * **Failure handling**, two kinds, and only the first is handled here. A malformed/unparseable
@@ -193,11 +195,8 @@ class DelegationNotificationConsumer(
         val operationId = canonicalUuid(node.path("aggregateId")) ?: return emptyList()
         val principal = canonicalUuid(node.path("principalPartyId")) ?: return emptyList()
         val initiator = canonicalUuid(node.path("actorId")) ?: return emptyList()
-        if (runCatching { Instant.parse(node.path("expiresAt").asText()) }.getOrNull()
-                ?.isAfter(clock.instant()) != true
-        ) {
-            return emptyList()
-        }
+        val expiresAt = runCatching { Instant.parse(node.path("expiresAt").asText()) }.getOrNull()
+            ?.takeIf { it.isAfter(clock.instant()) } ?: return emptyList()
         val roster = node.path("representativePartyIds")
         if (!roster.isArray || roster.size() < 2) return emptyList()
         val recipients = roster.map { canonicalUuid(it) ?: return emptyList() }
@@ -220,6 +219,7 @@ class DelegationNotificationConsumer(
                 variables = emptyMap(),
                 deepLink = link,
                 correlationId = operationId,
+                deliveryNotAfter = expiresAt,
                 // Global notification dedup is on one UUID, so use one stable key per human.
                 deduplicationKey = UUID.nameUUIDFromBytes(
                     "statutory-proposal:$operationId:$recipient".toByteArray(Charsets.UTF_8),

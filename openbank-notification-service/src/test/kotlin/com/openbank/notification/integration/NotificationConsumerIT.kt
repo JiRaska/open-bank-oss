@@ -4,6 +4,7 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.notification.application.NotificationConsumer
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_FALLBACK_EMAIL_BODY
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_PUSH_BODY
 import com.openbank.notification.application.port.out.PushMessage
@@ -15,6 +16,7 @@ import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
+import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationOutboxEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
@@ -67,6 +69,83 @@ import java.util.function.Supplier
 @QuarkusTestResource(NotificationConsumerIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
 class NotificationConsumerIT {
+
+    @Inject
+    lateinit var notificationConsumer: NotificationConsumer
+
+    private fun seedStaleJointNotification(partyId: UUID, expiry: Instant, retryCount: Int = 0): NotificationEntity =
+        VertxContextSupport.subscribeAndAwait {
+            Panache.withTransaction {
+                repository.persist(
+                    NotificationEntity().also {
+                        it.notificationId = UUID.randomUUID()
+                        it.partyId = partyId
+                        it.channel = NotificationChannel.PUSH.name
+                        it.template = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED.name
+                        it.recipient = partyId.toString()
+                        it.subject = "Joint signing request"
+                        it.body = GENERIC_PUSH_BODY
+                        it.status = "PENDING"
+                        it.correlationId = UUID.randomUUID()
+                        it.deduplicationKey = UUID.randomUUID()
+                        it.deliveryNotAfter = expiry
+                        it.deliveryRetryCount = retryCount
+                        it.createdAt = Instant.now().minusSeconds(600)
+                    },
+                )
+            }
+        }
+
+    private fun claimStaleJoint(now: Instant): List<UUID> = VertxContextSupport.subscribeAndAwait {
+        repository.claimStaleJointPending(now, now.minusSeconds(120), now.minusSeconds(300), 50)
+    }
+
+    private fun retryJoint(id: UUID) {
+        VertxContextSupport.subscribeAndAwait { notificationConsumer.retryJointPending(id) }
+    }
+
+    @Test
+    fun `stale joint prompt is claimed once and retried on its original row`() {
+        val partyId = UUID.randomUUID()
+        seedActiveDevice(partyId, "${OffContextPushSender.GOOD_TOKEN}-${UUID.randomUUID()}")
+        val row = seedStaleJointNotification(partyId, Instant.now().plusSeconds(3600))
+
+        val claimed = claimStaleJoint(Instant.now())
+        assertThat(claimed).contains(row.notificationId)
+        assertThat(claimStaleJoint(Instant.now())).doesNotContain(row.notificationId)
+        retryJoint(row.notificationId)
+
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        assertThat(outcomeRowsFor(row.notificationId)).hasSize(1)
+    }
+
+    @Test
+    fun `expired joint prompt closes without sending`() {
+        val partyId = UUID.randomUUID()
+        val row = seedStaleJointNotification(partyId, Instant.now().minusSeconds(1))
+
+        assertThat(claimStaleJoint(Instant.now())).contains(row.notificationId)
+        retryJoint(row.notificationId)
+
+        assertThat(statusFor(partyId)).isEqualTo("FAILED")
+        assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
+        assertThat(outcomeRowsFor(row.notificationId)).hasSize(1)
+    }
+
+    @Test
+    fun `retry budget exhaustion closes pending joint prompt`() {
+        val partyId = UUID.randomUUID()
+        val row = seedStaleJointNotification(partyId, Instant.now().plusSeconds(3600), retryCount = 3)
+
+        assertThat(claimStaleJoint(Instant.now())).contains(row.notificationId)
+        assertThat(notificationsFor(partyId).single().deliveryRetryCount).isEqualTo(4)
+        retryJoint(row.notificationId)
+
+        assertThat(statusFor(partyId)).isEqualTo("FAILED")
+        assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_RETRY_EXHAUSTED)
+        assertThat(outcomeRowsFor(row.notificationId)).hasSize(1)
+    }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -824,10 +903,10 @@ class OffContextPushSender : PushSender {
                 ),
             )
         }
-        val result = when (message.token) {
-            GOOD_TOKEN -> PushResult.ok("apns-id-it")
+        val result = when {
+            message.token.startsWith(GOOD_TOKEN) -> PushResult.ok("apns-id-it")
             // ADR-0252 phase 0: what a DISABLED adapter returns — a successful no-op.
-            DISABLED_TOKEN -> PushResult.skipped("adapter disabled")
+            message.token == DISABLED_TOKEN -> PushResult.skipped("adapter disabled")
             else -> PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
         }
         return Uni.createFrom().completionStage(CompletableFuture.supplyAsync({ result }, EXECUTOR))

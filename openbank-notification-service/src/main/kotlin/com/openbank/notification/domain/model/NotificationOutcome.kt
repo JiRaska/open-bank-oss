@@ -58,6 +58,8 @@ data class NotificationOutcomeEvent(
         const val REASON_NO_RECIPIENT: String = "no_deliverable_recipient"
         const val REASON_MAILER_REFUSED: String = "mailer_refused"
         const val REASON_NO_DEVICE: String = "no_active_device"
+        const val REASON_JOINT_PROPOSAL_EXPIRED: String = "joint_proposal_expired"
+        const val REASON_JOINT_RETRY_EXHAUSTED: String = "joint_retry_exhausted"
 
         /** The original PUSH had no device; a separately persisted safe-channel request was created. */
         const val REASON_REROUTED_NO_DEVICE: String = "rerouted_no_active_device"

@@ -227,6 +227,8 @@ data class NotificationRequest(
      * delivery outcome. campaign-service currently supplies its send-log id (issue #4480).
      */
     val interactionRef: UUID? = null,
+    /** Last instant at which a delayed security prompt is actionable; only JOINT proposals set it. */
+    val deliveryNotAfter: Instant? = null,
 )
 
 /** Closed allow-list for navigation metadata sent through FCM/APNs. */

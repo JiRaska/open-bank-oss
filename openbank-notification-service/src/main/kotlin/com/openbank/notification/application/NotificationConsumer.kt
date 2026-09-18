@@ -67,7 +67,7 @@ import java.util.function.Function
 import java.util.function.Supplier
 
 @ApplicationScoped
-@Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
+@Suppress("TooManyFunctions", "LargeClass") // keep retry on the same persisted delivery/outcome path
 class NotificationConsumer @Inject constructor(
     /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
     @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
@@ -82,6 +82,12 @@ class NotificationConsumer @Inject constructor(
 ) {
 
     companion object {
+        const val MAX_JOINT_RETRY_ATTEMPTS = 3
+        val JOINT_SIGNATURE_TEMPLATES = setOf(
+            NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED,
+            NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
+        )
+
         /** Name of the notifications deduplication partial unique index, a stable duplicate discriminator. */
         const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = NotificationDeduplication.CONSTRAINT
 
@@ -302,6 +308,10 @@ class NotificationConsumer @Inject constructor(
             log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
+        if (req.template in JOINT_SIGNATURE_TEMPLATES && req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true) {
+            log.warnf("Dropping expired or undated JOINT signing notification template=%s", req.template)
+            return Uni.createFrom().voidItem()
+        }
         return dispatch(req)
             .onFailure().invoke { e ->
                 // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
@@ -349,6 +359,7 @@ class NotificationConsumer @Inject constructor(
             it.body = TemplateSensitivity.bodyForStorage(req.template, body)
             it.correlationId = req.correlationId
             it.deduplicationKey = req.deduplicationKey
+            it.deliveryNotAfter = req.deliveryNotAfter
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }
@@ -375,6 +386,62 @@ class NotificationConsumer @Inject constructor(
             // this can neither leak customer data nor break notification dispatch.
             .call { _ -> publishOversight(req) }
     }
+
+    /** Reuses the persisted row after a stale JOINT PENDING claim; never inserts a second fact. */
+    fun retryJointPending(notificationId: UUID): Uni<Void> = Panache.withSession {
+        notificationRepo.find("notificationId", notificationId).firstResult()
+    }.chain { entity ->
+        if (entity == null || entity.status != NotificationStatus.PENDING.name) {
+            return@chain Uni.createFrom().voidItem()
+        }
+        val template = when (entity.template) {
+            NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED.name ->
+                NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED
+            NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED.name ->
+                NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED
+            else -> return@chain Uni.createFrom().voidItem()
+        }
+        val link = if (template == NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED) {
+            "openbank://delegations/joint-issuance"
+        } else {
+            "openbank://delegations/joint-acceptance"
+        }
+        val req = NotificationRequest(
+            partyId = entity.partyId,
+            channel = NotificationChannel.PUSH,
+            template = template,
+            recipient = entity.recipient,
+            variables = emptyMap(),
+            correlationId = entity.correlationId,
+            deduplicationKey = entity.deduplicationKey,
+            deepLink = link,
+            deliveryNotAfter = entity.deliveryNotAfter,
+        )
+        val notAfter = entity.deliveryNotAfter
+        when {
+            notAfter == null || !notAfter.isAfter(Instant.now(clock)) ->
+                markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
+            entity.deliveryRetryCount > MAX_JOINT_RETRY_ATTEMPTS ->
+                markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_RETRY_EXHAUSTED)
+            else -> sendPush(req, entity.subject ?: renderTemplate(template, emptyMap()).first, entity)
+        }
+    }
+
+    private fun markJointRetryTerminal(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        reason: String,
+    ): Uni<Void> = Panache.withTransaction {
+        notificationRepo.find("notificationId", entity.notificationId).firstResult().chain { current ->
+            if (current == null || current.status != NotificationStatus.PENDING.name) {
+                Uni.createFrom().voidItem()
+            } else {
+                current.status = NotificationStatus.FAILED.name
+                current.failureReason = reason
+                outboxRepo.persistInTransaction(outcomeMessage(req, current, NotificationOutcome.FAILED, reason))
+            }
+        }
+    }.replaceWithVoid()
 
     /**
      * A security event may be redelivered indefinitely. A database uniqueness fact, rather than
