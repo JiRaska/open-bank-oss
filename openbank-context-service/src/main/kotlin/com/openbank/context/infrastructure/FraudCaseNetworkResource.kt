@@ -3,7 +3,9 @@ package com.openbank.context.infrastructure
 
 import com.openbank.context.application.ContextAccessDenied
 import com.openbank.context.application.ContextAuthorizationUnavailable
+import com.openbank.context.application.ContextDisclosure
 import com.openbank.context.application.ContextQueryService
+import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
@@ -71,16 +73,19 @@ class FraudCaseNetworkResource(
                         async { relatedCase(candidate, actor, bearer, at, root) }
                     }.awaitAll().filterNotNull()
                 }
-                Response.ok(
-                    FraudCaseNetwork(
-                        root,
-                        related,
-                        matches.candidateIds.size,
-                        matches.truncated,
-                        matches.inspectedCandidates,
-                    ),
+                val evidenceRefs = listOf("fraud-case:$caseId") + related.map { "fraud-case:${it.evidence.caseId}" }
+                ContextReadResult(
+                    Response.ok(
+                        FraudCaseNetwork(
+                            root,
+                            related,
+                            matches.candidateIds.size,
+                            matches.truncated,
+                            matches.inspectedCandidates,
+                        ),
+                    ).header("Cache-Control", "no-store").build(),
+                    ContextDisclosure(evidenceRefs, evidenceRefs.size, matches.truncated),
                 )
-                    .header("Cache-Control", "no-store").build()
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
@@ -102,7 +107,12 @@ class FraudCaseNetworkResource(
     ): FraudRelatedCase? = try {
         queries.fraudCaseEvidence(id.toString(), actor, InvestigationContext(id.toString(), PURPOSE, at)) {
             val evidence = source.read(id, bearer)
-            sharedFraudReferences(root, evidence).takeIf(List<*>::isNotEmpty)?.let { FraudRelatedCase(evidence, it) }
+            val related = sharedFraudReferences(root, evidence)
+                .takeIf(List<*>::isNotEmpty)?.let { FraudRelatedCase(evidence, it) }
+            ContextReadResult(
+                related,
+                related?.let { ContextDisclosure(listOf("fraud-case:$id"), 1, false) },
+            )
         }
     } catch (exception: CancellationException) {
         throw exception

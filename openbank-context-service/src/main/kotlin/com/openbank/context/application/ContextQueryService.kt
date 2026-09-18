@@ -65,7 +65,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T = authorized(
         "context.kyb-case.read",
         "KYB_OWNERSHIP_REVIEW",
@@ -73,14 +73,14 @@ class ContextQueryService(
         "kyb-case:$ref",
         actor,
         context,
-        { ContextReadResult(block(), ContextDisclosure(listOf("kyb-case:$ref"), 1, false, projectionGeneration)) },
+        block,
     )
 
     internal suspend fun <T> fraudCaseEvidence(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T = authorized(
         "context.fraud-case.read",
         "FRAUD_INVESTIGATION",
@@ -88,7 +88,7 @@ class ContextQueryService(
         "fraud-case:$ref",
         actor,
         context,
-        { ContextReadResult(block(), ContextDisclosure(listOf("fraud-case:$ref"), 1, false, projectionGeneration)) },
+        block,
     )
 
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =

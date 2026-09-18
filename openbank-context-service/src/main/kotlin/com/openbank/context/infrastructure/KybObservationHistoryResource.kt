@@ -6,7 +6,9 @@ package com.openbank.context.infrastructure
 
 import com.openbank.context.application.ContextAccessDenied
 import com.openbank.context.application.ContextAuthorizationUnavailable
+import com.openbank.context.application.ContextDisclosure
 import com.openbank.context.application.ContextQueryService
+import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
@@ -49,7 +51,7 @@ class KybObservationHistoryResource(
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(caseId, purpose, clock.instant()),
             ) {
-                Response.noContent().header("Cache-Control", "no-store").build()
+                ContextReadResult(Response.noContent().header("Cache-Control", "no-store").build(), null)
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
@@ -81,7 +83,12 @@ class KybObservationHistoryResource(
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(caseId, purpose, now, known),
             ) {
-                Response.ok(references.history(id, known)).header("Cache-Control", "no-store").build()
+                val history = references.history(id, known)
+                val evidenceRefs = history.observations.map { "kyb-observation:${it.observationId}:${it.revision}" }
+                ContextReadResult(
+                    Response.ok(history).header("Cache-Control", "no-store").build(),
+                    ContextDisclosure(evidenceRefs, evidenceRefs.size, history.truncated),
+                )
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()

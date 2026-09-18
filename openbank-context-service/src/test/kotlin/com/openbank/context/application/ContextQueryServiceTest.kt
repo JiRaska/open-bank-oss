@@ -188,7 +188,11 @@ class ContextQueryServiceTest {
         } returns false
 
         assertThatThrownBy {
-            runBlocking { service.fraudCaseEvidence("case-42", admin, investigation) { "secret" } }
+            runBlocking {
+                service.fraudCaseEvidence("case-42", admin, investigation) {
+                    ContextReadResult(Unit, null)
+                }
+            }
         }.isInstanceOf(ContextAccessDenied::class.java)
         coVerify(exactly = 0) { pdp.allow(any()) }
         coVerify {
@@ -203,7 +207,13 @@ class ContextQueryServiceTest {
         coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "fraud-policy-1")
 
-        assertThat(service.fraudCaseEvidence("case-42", admin, investigation) { "allowed" }).isEqualTo("allowed")
+        assertThat(
+            service.fraudCaseEvidence("case-42", admin, investigation) {
+                ContextReadResult("allowed", ContextDisclosure(listOf("fraud-case:case-42"), 1, false))
+            },
+        )
+            .isEqualTo("allowed")
+        coVerify { audit.recordDisclosure(match { it.disclosure.evidenceRefs == listOf("fraud-case:case-42") }) }
         coVerify {
             pdp.allow(
                 match {
