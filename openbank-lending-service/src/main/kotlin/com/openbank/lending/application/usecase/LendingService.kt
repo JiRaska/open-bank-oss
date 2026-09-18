@@ -544,6 +544,9 @@ class LendingService @Inject constructor(
 
     override fun listApplications(partyId: UUID): Uni<List<LoanApplication>> = applications.findByParty(partyId)
 
+    override fun listRecentApplicationsForParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+        applications.findRecentByParty(partyId, limit)
+
     override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
         applications.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
 

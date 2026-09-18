@@ -739,3 +739,19 @@ in the admin UI. The capped detail endpoint is diagnostic only. API errors and i
 contracts render an error rather than a zero exposure. Override rates require a recorded human
 actor and decision time. Stage 3 uses conditional default probability one; this correction does
 not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).
+
+### Planned Context Graph source boundary (ADR-0307; no new route yet)
+
+The existing approved `collateral` record belongs to one loan and contributes to
+IFRS 9 LGD. It cannot establish that two loans share the same physical asset,
+and `type=GUARANTEE` does not identify a guarantor or enforceable guarantee.
+V18 adds separate source tables for these facts but no application writer or read
+route; no historical row is inferred or backfilled. Deriving links from equal
+descriptions, values or names would
+create a false cross-borrower disclosure. The planned source model therefore
+requires verified IDs, independent maker/checker decisions, effective intervals,
+source hashes and immutable correction lineage before Context receives any P3
+reference. The present collateral/provisioning calculation must remain unchanged
+during an additive migration. Cross-borrower expansion and any financial total
+require separate authorization and reconciliation to authoritative snapshots;
+missing data must produce `UNKNOWN` or `TOTAL_UNAVAILABLE`, never a reassuring zero.
