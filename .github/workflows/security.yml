@@ -224,23 +224,14 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended,security-and-quality
 
-      # java-kotlin uses an explicit build step (build-mode: manual), not autobuild.
-      # This repo has `org.gradle.caching=true` + a remote HTTP build cache
-      # (settings.gradle.kts) fleet-wide; autobuild's Gradle compilation was
-      # intermittently satisfied entirely from the build cache, so javac/kotlinc
-      # Cache the Gradle build between runs (same setup-gradle as the service CI). The
-      # cold --no-build-cache leg took ~25-30 min of wall time and was the single most
-      # preemption-exposed job in the fleet (killed mid-analysis twice in a row,
-      # run 30666238087, attempt 2 also cancelled). A warm cache cuts the leg to a few
-      # minutes; the two-phase step below keeps the empty-analysis guard that the cold
-      # flag was protecting (a run where every compile resolves FROM-CACHE would trace
-      # zero compilations and record an empty CodeQL analysis).
+      # Restore Gradle home for dependency downloads, but force production compilation
+      # below: a cached class is invisible to CodeQL's manual-build extractor.
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         if: matrix.language == 'java-kotlin'
 
-      # Two-phase: try the cached production build; if NO compile task actually executed (all
-      # FROM-CACHE/UP-TO-DATE — grep anchors on the line end so FROM-CACHE rows don't
-      # count), fall back to the cold compile so the CodeQL trace stays non-empty.
+      # A cached build can compile only one changed module and upload an apparently
+      # successful partial analysis. On main that marked 11 log-injection alerts fixed
+      # while 71 of 72 Kotlin compilations came FROM-CACHE (run 35254748774).
       - name: Build production classes (java-kotlin) for CodeQL tracing
         if: matrix.language == 'java-kotlin'
         run: |
@@ -249,27 +240,12 @@ jobs:
           # fleet test source, but that is not shipped code and repeatedly received SIGTERM
           # before analysis could start. `classes` retains generated and
           # production compilation for every module while keeping the trace bounded.
-          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew classes --no-daemon 2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
-          executed=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build.log" || true; } )
-          if [ "$executed" -eq 0 ]; then
-            echo "::warning::every compile resolved from cache — cold re-run so the CodeQL trace is non-empty"
-            # --rerun-tasks, not just --no-build-cache: the latter bypasses the build CACHE but
-            # not Gradle's UP-TO-DATE checks, and after the first run every compileKotlin output
-            # is already in build/. Measured on run 30692843630, where the fallback still produced
-            # `60 UP-TO-DATE, 60 FROM-CACHE, 0 executed` and CodeQL then failed with
-            # "could not process any code written in Java/Kotlin".
-            .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
-              ./gradlew classes --no-build-cache --rerun-tasks --no-daemon \
-              2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log"
-            cold=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log" || true; } )
-            if [ "$cold" -eq 0 ]; then
-              echo "::error::cold re-run still compiled nothing — CodeQL would report no source code"
-              exit 1
-            fi
-            echo "cold re-run compiled: $cold"
-          else
-            echo "compile tasks executed: $executed"
-          fi
+          python3 .github/scripts/tests/test_codeql_compile_coverage.py
+          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
+            ./gradlew classes --no-build-cache --rerun-tasks --no-daemon \
+            2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
+          python3 .github/scripts/check-codeql-compile-coverage.py \
+            --root . --log "${RUNNER_TEMP:-/tmp}/codeql-build.log"
 
       - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
