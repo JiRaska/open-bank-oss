@@ -51,23 +51,23 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   await expect(register.getByText('P1 · Critical')).toBeVisible()
   await expect(page.getByText('No report ID').first()).toBeVisible()
 
-  const impactForm = page.getByRole('button', { name: 'Evaluate impact' }).locator('xpath=ancestor::form')
+  const impactForm = page.getByRole('button', { name: 'View reported scope' }).locator('xpath=ancestor::form')
   await expect.poll(async () => impactForm.evaluate(element => {
     const bounds = element.getBoundingClientRect()
     return bounds.left >= 0 && bounds.right <= document.documentElement.clientWidth
   })).toBe(true)
   await impactForm.getByLabel('Incident', { exact: true }).selectOption(incidents[0].id)
   await impactForm.getByLabel('Case ID', { exact: true }).fill('case-7')
-  await page.getByRole('button', { name: 'Evaluate impact' }).click()
-  await expect(page.getByText('Observed 4')).toBeVisible()
+  await page.getByRole('button', { name: 'View reported scope' }).click()
+  await expect(page.getByText('Projected links: 4')).toBeVisible()
   await expect(page.getByText('PAYMENT: 3')).toBeVisible()
   await expect(page.getByText('Partial result: counts cover only the retrieved slice.')).toBeVisible()
-  await expect(page.getByRole('img', { name: 'Aggregate incident impact map' })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Aggregate reported incident scope map' })).toBeVisible()
 
   impactMalformed = true
-  await page.getByRole('button', { name: 'Evaluate impact' }).click()
+  await page.getByRole('button', { name: 'View reported scope' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Impact could not be verified safely.' })).toBeVisible()
-  await expect(page.getByText('Observed 4')).toHaveCount(0)
+  await expect(page.getByText('Projected links: 4')).toHaveCount(0)
 
   await page.getByLabel('Filter by severity').selectOption('P3_MEDIUM')
   await expect(page.getByRole('status')).toContainText('1 of 3 incidents')
