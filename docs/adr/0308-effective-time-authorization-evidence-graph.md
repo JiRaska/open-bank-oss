@@ -120,6 +120,15 @@ release gates; local and in-memory tests are not fleet anchoring. Historical dec
 evidence from the source enforcement point remains a distinct record, not an inference from either
 read-audit row.
 
+A [read-only reconciliation utility](../../openbank-infra/scripts/reconcile-context-audit-commitments.py)
+compares mature, bank-scoped local read and disclosure
+commitments with the central Audit rows by random event ID and digest, using indexed exact-ID
+lookups. It caps each hourly sample at 10,000 commitments, reports counts rather than customer
+or case details, and fails on missing or differing commitments; an empty or oversized sample is
+inconclusive. This is an operator check, not a deployed
+periodic control or proof that the central chain was anchored. The central chain/anchor
+verification and a measured sandbox run remain separate release gates.
+
 Context will write each read-audit row and its export outbox entry in one database transaction.
 The outbox carries only a schema version, random audit event ID, occurrence time and SHA-256
 commitment over a canonical, length-delimited representation of the complete local row, including
