@@ -212,6 +212,12 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.identity-resume-enabled", defaultValue = "false")
     var identityResumeEnabled: Boolean = false
 
+    // Safe rollout/rollback for the new company money path. A disabled path refuses, rather than
+    // falling back to the former owner==profile bypass. Enable only after both authority sources
+    // and the account-service endpoint are live and reconciled.
+    @ConfigProperty(name = "openbank.edge.business-direct-payments-enabled", defaultValue = "false")
+    var businessDirectPaymentsEnabled: Boolean = false
+
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
@@ -2515,9 +2521,12 @@ class CustomerEdgeResource(
         amount: String,
         currency: String,
     ): DebitAuthorityResult {
-        // Direct path first and unchanged: the owner's own payment costs exactly one call, as before.
+        // Personal owners remain direct. A business profile also needs the HUMAN's sole mandate.
         val ownJson = fetchAccount(debtorAccountId, customer.partyId)
         if (ownJson != null && extractOwnerPartyId(ownJson) == customer.partyId.toString()) {
+            businessPaymentAuthorityRefusal(customer, debtorAccountId, "payments.domestic")?.let {
+                return DebitAuthorityResult.Refused(it)
+            }
             return DebitAuthorityResult.Allowed(DebitAuthority(ownJson, customer.partyId))
         }
         val decision = fetchDelegatedPaymentDecision(debtorAccountId, customer.partyId, amount, currency)
@@ -2557,6 +2566,71 @@ class CustomerEdgeResource(
                 delegationId = decision.delegationId,
             ),
         )
+    }
+
+    /** A profile switch grants visibility, not unilateral payment authority. Fail closed on any
+     * unavailable, malformed or owner-mismatched account-service decision. */
+    internal fun hasSoleBusinessPaymentAuthority(accountId: UUID, customer: CustomerIdentity): Boolean {
+        // The profile-switch cache is allowed to be one minute stale for reading a company. A
+        // money-moving decision is not: read the party-service source of truth on every attempt,
+        // then require the account-service projection to agree. A delayed revocation event cannot
+        // leave a stale SOLE projection alone authorising a debit.
+        if (!hasLiveSoleBusinessMandate(customer)) return false
+        val url = "$accountServiceUrl/api/v1/accounts/$accountId/business-payment-authorization" +
+            "?actorPartyId=${customer.actorPartyId}"
+        val response = runCatching { upstream.get(url, customer.partyId.toString()) }.getOrNull()
+            ?: return false
+        if (response.status != 200) return false
+        val node = runCatching { objectMapper.readTree(response.entity?.toString() ?: return false) }.getOrNull()
+            ?: return false
+        return node.path("authorized").asBoolean(false) &&
+            node.path("outcome").asText() == "SOLE" &&
+            node.path("ownerPartyId").asText() == customer.partyId.toString()
+    }
+
+    private fun hasLiveSoleBusinessMandate(customer: CustomerIdentity): Boolean {
+        val url = "$partyServiceUrl/api/v1/parties/${customer.actorPartyId}/acting-for"
+        val response = runCatching { upstream.get(url, customer.actorPartyId.toString()) }.getOrNull()
+            ?: return false
+        if (response.status != 200) return false
+        val node = runCatching { objectMapper.readTree(response.entity?.toString() ?: return false) }.getOrNull()
+            ?: return false
+        if (!node.isArray) return false
+        val matches = node.filter { it.path("partyId").asText() == customer.partyId.toString() }
+        if (matches.isEmpty()) return false
+        return matches.all { profile ->
+            val mandate = profile.path("mandate")
+            mandate.path("principalPartyId").asText() == customer.partyId.toString() &&
+                mandate.path("agentPartyId").asText() == customer.actorPartyId.toString() &&
+                mandate.path("status").asText() == "ACTIVE" &&
+                mandate.path("authority").asText() == "SOLE" &&
+                mandate.path("requiredSignatures").asInt(-1) == 1
+        }
+    }
+
+    private fun businessPaymentAuthorityRefusal(
+        customer: CustomerIdentity,
+        accountId: UUID,
+        operation: String,
+    ): Response? {
+        if (customer.actorPartyId == customer.partyId ||
+            (businessDirectPaymentsEnabled && hasSoleBusinessPaymentAuthority(accountId, customer))
+        ) {
+            return null
+        }
+        audit.emit(
+            eventType = "CUSTOMER_PAYMENT_REFUSED",
+            partyId = customer.partyId.toString(),
+            operation = operation,
+            result = "DENIED",
+            resourceId = accountId.toString(),
+            details = mapOf(
+                "reason" to "BUSINESS_DIRECT_PAYMENT_NOT_AUTHORIZED",
+                "actorPartyId" to customer.actorPartyId.toString(),
+                "rolloutEnabled" to businessDirectPaymentsEnabled.toString(),
+            ),
+        )
+        return forbidden("Debtor account does not belong to caller")
     }
 
     /**
@@ -2859,9 +2933,8 @@ class CustomerEdgeResource(
         }
         // Settlement gate (ADR-0021): no money path without a device-signed, amount+payee-bound,
         // single-use SCA approval. The compare-and-consume happens in sca-service, atomically.
-        // The challenge belongs to the INITIATOR (the delegate's own device), not to the account
-        // holder — a delegate authenticates as themselves; the grant is what makes it their debit
-        // to make. So `customer` here stays the delegate on the delegated path, deliberately.
+        // The challenge belongs to the HUMAN actor's own device, never to a company profile.
+        // On a delegated personal payment the actor is likewise the delegate, not the grantor.
         scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let {
             settleDelegatedSpend(reservation, customer, confirmed = false)
             return it
@@ -2950,6 +3023,7 @@ class CustomerEdgeResource(
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
             return forbidden("Debtor account does not belong to caller")
         }
+        businessPaymentAuthorityRefusal(customer, debtor, "payments.sepa")?.let { return it }
         val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
             ?: return badRequest("Cannot resolve debtor IBAN")
         val debtorName = fetchPartyLegalName(customer.partyId)
@@ -2993,6 +3067,7 @@ class CustomerEdgeResource(
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
             return forbidden("Debtor account does not belong to caller")
         }
+        businessPaymentAuthorityRefusal(customer, debtor, "payments.sepaInstant")?.let { return it }
         val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
             ?: return badRequest("Cannot resolve debtor IBAN")
         val debtorName = fetchPartyLegalName(customer.partyId)
@@ -3127,6 +3202,7 @@ class CustomerEdgeResource(
     @Path("/swift")
     @Authorize(action = "customer.payments.initiate")
     @Blocking
+    @Suppress("CyclomaticComplexMethod") // includes the mandatory human mandate guard before SCA
     fun createSwift(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -3140,6 +3216,7 @@ class CustomerEdgeResource(
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
             return forbidden("Debtor account does not belong to caller")
         }
+        businessPaymentAuthorityRefusal(customer, debtor, "payments.swift")?.let { return it }
         val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
             ?: return badRequest("Cannot resolve debtor IBAN")
         val debtorName = fetchPartyLegalName(customer.partyId) ?: return badRequest("Cannot resolve debtor name")
@@ -3635,15 +3712,15 @@ class CustomerEdgeResource(
     @Blocking
     fun enrollDevice(@PathParam("partyId") partyId: UUID, body: String): Response {
         val customer = customer()
-        if (customer.partyId != partyId) return forbidden("Cannot enrol device for another party")
+        if (customer.actorPartyId != partyId) return forbidden("Cannot enrol device for another party")
         val resp = upstream.post(
             "$scaServiceUrl/api/v1/sca/parties/$partyId/devices",
-            customer.partyId.toString(),
+            customer.actorPartyId.toString(),
             body,
         )
         audit.emit(
             eventType = "SCA_DEVICE_ENROLLED",
-            partyId = customer.partyId.toString(),
+            partyId = customer.actorPartyId.toString(),
             operation = "sca.enrollDevice",
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
         )
@@ -3668,10 +3745,10 @@ class CustomerEdgeResource(
         // triggers a Quarkus REST body-reader resolution bug that produces an empty-body 400 before
         // the method is invoked.  JsonNode is unambiguous to Jackson and avoids the conflict.
         val node = (body as? ObjectNode) ?: return forbidden("Malformed challenge body")
-        node.put("partyId", customer.partyId.toString())
+        node.put("partyId", customer.actorPartyId.toString())
         return upstream.post(
             "$scaServiceUrl/api/v1/sca/challenges",
-            customer.partyId.toString(),
+            customer.actorPartyId.toString(),
             objectMapper.writeValueAsString(node),
             idempotencyKey,
         )
@@ -3683,7 +3760,7 @@ class CustomerEdgeResource(
     @Blocking
     fun getChallenge(@PathParam("id") id: UUID): Response {
         val customer = customer()
-        return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.partyId.toString())
+        return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.actorPartyId.toString())
     }
 
     /**
@@ -3698,8 +3775,8 @@ class CustomerEdgeResource(
     fun listPendingSca(): Response {
         val customer = customer()
         return upstream.get(
-            "$scaServiceUrl/api/v1/sca/parties/${customer.partyId}/challenges/pending",
-            customer.partyId.toString(),
+            "$scaServiceUrl/api/v1/sca/parties/${customer.actorPartyId}/challenges/pending",
+            customer.actorPartyId.toString(),
         )
     }
 
@@ -3709,10 +3786,14 @@ class CustomerEdgeResource(
     @Blocking
     fun recordDecision(@PathParam("id") id: UUID, body: String): Response {
         val customer = customer()
-        val resp = upstream.post("$scaServiceUrl/api/v1/sca/challenges/$id/decision", customer.partyId.toString(), body)
+        val resp = upstream.post(
+            "$scaServiceUrl/api/v1/sca/challenges/$id/decision",
+            customer.actorPartyId.toString(),
+            body,
+        )
         audit.emit(
             eventType = "SCA_DECISION_RECORDED",
-            partyId = customer.partyId.toString(),
+            partyId = customer.actorPartyId.toString(),
             operation = "sca.decision",
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
             resourceId = id.toString(),
@@ -3738,9 +3819,9 @@ class CustomerEdgeResource(
         val customer = customer()
         // Inject partyId via Jackson (overwriting any client value) — string surgery on the closing
         // brace would corrupt a body with nested objects into invalid JSON.
-        val enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
+        val enriched = injectField(objectMapper, body, "partyId", customer.actorPartyId.toString())
             ?: return forbidden("Malformed device registration body")
-        return upstream.post("$notificationServiceUrl/api/v1/devices", customer.partyId.toString(), enriched)
+        return upstream.post("$notificationServiceUrl/api/v1/devices", customer.actorPartyId.toString(), enriched)
     }
 
     /** List the calling customer's registered push devices (no tokens returned). */
@@ -3751,8 +3832,8 @@ class CustomerEdgeResource(
     fun listDevices(): Response {
         val customer = customer()
         return upstream.get(
-            "$notificationServiceUrl/api/v1/devices?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/devices?partyId=${customer.actorPartyId}",
+            customer.actorPartyId.toString(),
         )
     }
 
@@ -3769,8 +3850,8 @@ class CustomerEdgeResource(
     fun revokeDevice(@PathParam("id") id: UUID): Response {
         val customer = customer()
         return upstream.delete(
-            "$notificationServiceUrl/api/v1/devices/$id?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/devices/$id?partyId=${customer.actorPartyId}",
+            customer.actorPartyId.toString(),
         )
     }
 
@@ -4750,13 +4831,13 @@ class CustomerEdgeResource(
                 .build()
         }
         val consumeBody = objectMapper.createObjectNode().apply {
-            put("partyId", customer.partyId.toString())
+            put("partyId", customer.actorPartyId.toString())
             put("cardId", cardId)
             put("cardAction", cardAction)
         }
         val consume = upstream.post(
             "$scaServiceUrl/api/v1/sca/challenges/$challengeId/consume",
-            customer.partyId.toString(),
+            customer.actorPartyId.toString(),
             objectMapper.writeValueAsString(consumeBody),
         )
         if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
@@ -5001,8 +5082,8 @@ class CustomerEdgeResource(
     /**
      * The tamper-evident record of a customer payment (ADR-0086/0133).
      *
-     * `partyId` is the INITIATOR and stays the initiator on a delegated payment: who moved the
-     * money does not change because they were permitted to. What a delegated payment adds is
+     * `partyId` is the selected profile. For a company, `actorPartyId` records the human whose
+     * device approved the payment; for a personal profile they coincide. A delegated payment adds
      * [debit] — `onBehalfOf` (the account holder whose money moved) and `delegationId` (the grant
      * that permitted it). Both are omitted entirely for a direct payment rather than written as
      * empty strings, so `on_behalf_of IS NOT NULL` is a true predicate for "this was delegated"
@@ -5034,6 +5115,7 @@ class CustomerEdgeResource(
             "currency" to currency,
             "creditor" to creditor,
             "scaChallengeId" to scaChallengeId,
+            "actorPartyId" to customer.actorPartyId.takeIf { it != customer.partyId }?.toString(),
             // EdgeAuditPublisher drops null-valued details, so a direct payment emits neither key.
             "onBehalfOf" to debit?.onBehalfOf?.toString(),
             "delegationId" to debit?.delegationId,
@@ -5070,14 +5152,14 @@ class CustomerEdgeResource(
                 .build()
         }
         val consumeBody = objectMapper.createObjectNode().apply {
-            put("partyId", customer.partyId.toString())
+            put("partyId", customer.actorPartyId.toString())
             put("amount", amount)
             put("currency", currency)
             creditor?.let { put("creditor", it) }
         }
         val consume = upstream.post(
             "$scaServiceUrl/api/v1/sca/challenges/$challengeId/consume",
-            customer.partyId.toString(),
+            customer.actorPartyId.toString(),
             objectMapper.writeValueAsString(consumeBody),
         )
         if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
@@ -5148,7 +5230,7 @@ class CustomerEdgeResource(
         } else {
             human
         }
-        return CustomerIdentity(effective)
+        return CustomerIdentity(effective, human)
     }
 
     private sealed interface ActivePartyResult {

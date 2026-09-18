@@ -154,6 +154,9 @@ openbank:
     # Onboarding auto-resume (ADR-0072): when on, a four-eyes case decision replays the paused
     # onboarding (OnboardingResumeService consumes party.events). Off until verified end-to-end.
     identity-resume-enabled: ${IDENTITY_RESUME_ENABLED:false}
+    # Direct company payments require a live SOLE mandate plus account projection agreement.
+    # Keep off until both providers are deployed and their mandates reconciled.
+    business-direct-payments-enabled: ${BUSINESS_DIRECT_PAYMENTS_ENABLED:false}
     # Keycloak Admin API for setting the party_id user attribute after MATCH_EXISTING re-link
     # (issue #1270 PR3). client-secret supplied via OPENBANK_EDGE_KEYCLOAK_ADMIN_CLIENT_SECRET.
     keycloak-admin-url: ${KEYCLOAK_ADMIN_URL:http://keycloak.iam.svc:8080}

@@ -4,6 +4,62 @@
   },
   "interactions": [
     {
+      "description": "GET a direct business-payment decision for its joint human representative",
+      "providerStates": [
+        {
+          "name": "a company account with an ACTIVE JOINT mandate for a human exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/22222222-3333-4444-8555-666666666666/business-payment-authorization",
+        "query": {
+          "actorPartyId": [
+            "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "authorized": false,
+          "outcome": "APPROVAL_REQUIRED",
+          "ownerPartyId": "33333333-4444-4555-8666-777777777777"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a direct business-payment decision for its sole human representative",
+      "providerStates": [
+        {
+          "name": "a company account with an ACTIVE SOLE mandate for a human exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/22222222-3333-4444-8555-666666666666/business-payment-authorization",
+        "query": {
+          "actorPartyId": [
+            "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "authorized": true,
+          "outcome": "SOLE",
+          "ownerPartyId": "33333333-4444-4555-8666-777777777777"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET a direct-debit decision for a grant requiring operation approval",
       "providerStates": [
         {

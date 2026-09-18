@@ -243,3 +243,20 @@ Trust boundaries:
   chain; the grantor is the token party, and the optional filters can only narrow a set already
   scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
   to owner-only.
+
+- **2026-09-18** — **Company profile payment/SCA identity split.** `X-Acting-For` changes the
+  account-owning party, not the human who holds a device and signs an SCA challenge. The edge
+  now carries both ids from its authenticated identity chokepoint. Challenge creation, pending
+  list, decision and consumption use the human; push/SCA device registration also remains bound
+  to that human. Payment debtor and downstream instruction stay with the company. A direct debit
+  on any customer rail (domestic, SEPA, SEPA Instant, SWIFT)
+  requires a current SOLE/one-signature mandate from party-service and an agreeing account-service
+  authority decision before SCA is consumed. Missing, malformed or mismatched responses refuse
+  with the same opaque 403 as other account-ownership failures. The audit record names both the
+  company profile and the human actor. **Risk:** an entity SCA challenge that no human device
+  can approve, or a JOINT representative spending alone through the owner's direct path.
+  Rollout: account decision endpoint and projection first, then edge with
+  `openbank.edge.business-direct-payments-enabled=false` (the default); enable only after
+  reconciliation. During overlap an older provider fails closed for company payments; personal
+  payments remain unchanged. Roll back by setting that switch false, not by restoring the prior
+  bypass.

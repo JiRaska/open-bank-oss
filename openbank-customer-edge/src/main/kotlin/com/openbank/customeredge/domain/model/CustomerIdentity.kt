@@ -7,7 +7,7 @@ package com.openbank.customeredge.domain.model
 import java.util.UUID
 
 /**
- * The authenticated customer principal extracted from the customer-realm JWT (ADR-0065).
- * The `sub` claim carries the party ID issued by the `openbank-customers` Keycloak realm.
+ * The effective profile may be a company, but the authenticated SCA actor is always the human
+ * from the customer-realm JWT. They coincide on a personal profile.
  */
-data class CustomerIdentity(val partyId: UUID)
+data class CustomerIdentity(val partyId: UUID, val actorPartyId: UUID = partyId)

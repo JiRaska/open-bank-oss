@@ -13,6 +13,7 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
@@ -72,6 +73,7 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         const val GRANTOR_PARTY_ID = "33333333-4444-4555-8666-777777777777"
         const val DELEGATE_PARTY_ID = "44444444-5555-4666-8777-888888888888"
         const val GRANT_ID = "55555555-6666-4777-8888-999999999999"
+        const val BUSINESS_ACTOR_PARTY_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
 
         // Under the seeded grant's 5000.00 CZK per-transaction ceiling, so the decision is DELEGATED.
         const val AMOUNT = "1500.00"
@@ -92,6 +94,16 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         tokenServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
             createContext("/protocol/openid-connect/token") { exchange ->
                 val body = """{"access_token":"pact-token","expires_in":300}""".toByteArray()
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(200, body.size.toLong())
+                exchange.responseBody.use { it.write(body) }
+            }
+            createContext("/api/v1/parties/$BUSINESS_ACTOR_PARTY_ID/acting-for") { exchange ->
+                val body = """
+                    [{"partyId":"$GRANTOR_PARTY_ID","mandate":{"principalPartyId":"$GRANTOR_PARTY_ID",
+                    "agentPartyId":"$BUSINESS_ACTOR_PARTY_ID","status":"ACTIVE","authority":"SOLE",
+                    "requiredSignatures":1}}]
+                """.trimIndent().toByteArray()
                 exchange.responseHeaders.add("Content-Type", "application/json")
                 exchange.sendResponseHeaders(200, body.size.toLong())
                 exchange.responseBody.use { it.write(body) }
@@ -123,6 +135,7 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         ).apply {
             objectMapper = ObjectMapper()
             accountServiceUrl = accountServiceBaseUrl
+            partyServiceUrl = "http://127.0.0.1:${tokenServer.address.port}"
         }
     }
 
@@ -169,6 +182,64 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-account-service")
+    fun soleBusinessPaymentAuthorizationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a company account with an ACTIVE SOLE mandate for a human exists")
+        .uponReceiving("GET a direct business-payment decision for its sole human representative")
+        .path("/api/v1/accounts/$ACCOUNT_ID/business-payment-authorization")
+        .query("actorPartyId=$BUSINESS_ACTOR_PARTY_ID")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.booleanValue("authorized", true)
+                o.stringValue("outcome", "SOLE")
+                o.stringValue("ownerPartyId", GRANTOR_PARTY_ID)
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-account-service")
+    fun jointBusinessPaymentAuthorizationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a company account with an ACTIVE JOINT mandate for a human exists")
+        .uponReceiving("GET a direct business-payment decision for its joint human representative")
+        .path("/api/v1/accounts/$ACCOUNT_ID/business-payment-authorization")
+        .query("actorPartyId=$BUSINESS_ACTOR_PARTY_ID")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.booleanValue("authorized", false)
+                o.stringValue("outcome", "APPROVAL_REQUIRED")
+                o.stringValue("ownerPartyId", GRANTOR_PARTY_ID)
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "soleBusinessPaymentAuthorizationPact")
+    fun `the edge requests business authority for the human and accepts exact sole`(mockServer: MockServer) {
+        val customer = CustomerIdentity(UUID.fromString(GRANTOR_PARTY_ID), UUID.fromString(BUSINESS_ACTOR_PARTY_ID))
+        assertThat(
+            edgeResource(mockServer.getUrl()).hasSoleBusinessPaymentAuthority(UUID.fromString(ACCOUNT_ID), customer),
+        )
+            .isTrue()
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "jointBusinessPaymentAuthorizationPact")
+    fun `the edge refuses direct payment under a joint mandate`(mockServer: MockServer) {
+        val customer = CustomerIdentity(UUID.fromString(GRANTOR_PARTY_ID), UUID.fromString(BUSINESS_ACTOR_PARTY_ID))
+        assertThat(
+            edgeResource(mockServer.getUrl()).hasSoleBusinessPaymentAuthority(UUID.fromString(ACCOUNT_ID), customer),
+        )
+            .isFalse()
+    }
 
     @Test
     @PactTestFor(pactMethod = "delegatedPaymentAuthorizationPact")
