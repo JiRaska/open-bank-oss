@@ -91,6 +91,16 @@ class AllowancePostingDispatchTest {
     }
 
     @Test
+    fun `graph reference cannot leak to the shared lending topic`(): Unit = runBlocking {
+        val result = runCatching {
+            publisher.publish(command().copy(eventType = "lending.graph.guarantee.approved", payload = "{}"))
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("graph reference topic is not configured")
+        verify(exactly = 0) { emitter.sendMessage(any()) }
+    }
+
+    @Test
     fun `provisioned evidence waits for the ledger acknowledgement`(): Unit = runBlocking {
         val order = mutableListOf<String>()
         every { ledger.post(any()) } answers {

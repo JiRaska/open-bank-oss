@@ -745,7 +745,7 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
 The existing approved `collateral` record belongs to one loan and contributes to
 IFRS 9 LGD. It cannot establish that two loans share the same physical asset,
 and `type=GUARANTEE` does not identify a guarantor or enforceable guarantee.
-V18 adds separate source tables for these facts but no application writer or read
+V18 adds separate source tables for these facts, with no enabled writer or read
 route; no historical row is inferred or backfilled. Deriving links from equal
 descriptions, values or names would
 create a false cross-borrower disclosure. The planned source model therefore
@@ -764,3 +764,16 @@ prospective guarantor's current ACTIVE/KYC-approved/AML-cleared identity state.
 The shared backend account and staff are denied before Party lookup, even while
 OPA is advisory. This bit is not a guarantee contract or consent; a signed,
 loan-bound Document proof and an independent checker are still required.
+
+The internal guarantee-registration use case now implements those source checks
+before both proposal and approval and defaults to `writer-enabled=false`. Its
+repository locks the pending fact, repeats the maker/checker check and inserts
+the minimized approval pointer into Lending's outbox in the same transaction.
+There is **no HTTP route** or client credential for this use case yet. The shared
+Lending Kafka publisher explicitly rejects `lending.graph.*` messages, so an
+accidental internal call cannot disclose graph references on the broad existing
+topic. Before enabling a writer, add a dedicated topic and ACL, a case-scoped
+authorization decision, route and real-DB atomicity tests. Source proof failure
+must propagate; a prior positive result cannot substitute for the approval-time
+check. A post-approval source change still requires revalidation at publication
+and source read time, so no Context edge is currently authorized from these rows.

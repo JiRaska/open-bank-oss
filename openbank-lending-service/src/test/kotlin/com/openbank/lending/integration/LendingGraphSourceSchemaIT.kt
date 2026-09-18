@@ -417,55 +417,11 @@ class LendingGraphSourceSchemaIT {
     @Test
     fun `guarantee requires a different checker and an approved prior revision for correction`() {
         dataSource.connection.use { connection ->
-            val applicationId = UUID.randomUUID()
-            val loanId = UUID.randomUUID()
-            val partyId = UUID.randomUUID()
+            val loanId = createLoanForGuarantee(connection)
             val contractId = UUID.randomUUID()
             val firstId = UUID.randomUUID()
             val correctionId = UUID.randomUUID()
-            connection.prepareStatement(
-                """INSERT INTO loan_application
-                   (id, party_id, requested_amount, currency, nominal_annual_rate,
-                    term_periods, first_due_date, proposed_by)
-                   VALUES (?, ?, 1000, 'EUR', 0.05, 12, current_date + 30, 'loan-maker')""",
-            ).use { statement ->
-                statement.setObject(1, applicationId)
-                statement.setObject(2, partyId)
-                assertThat(statement.executeUpdate()).isEqualTo(1)
-            }
-            connection.prepareStatement(
-                """INSERT INTO loan
-                   (id, application_id, party_id, principal, currency, nominal_annual_rate,
-                    term_periods, method, first_due_date)
-                   VALUES (?, ?, ?, 1000, 'EUR', 0.05, 12, 'ANNUITY', current_date + 30)""",
-            ).use { statement ->
-                statement.setObject(1, loanId)
-                statement.setObject(2, applicationId)
-                statement.setObject(3, partyId)
-                assertThat(statement.executeUpdate()).isEqualTo(1)
-            }
-
-            fun insert(id: UUID, revision: Int, supersedes: UUID?) {
-                connection.prepareStatement(
-                    """INSERT INTO lending_graph_guarantee
-                       (guarantee_id, contract_id, revision, supersedes_guarantee_id,
-                        loan_id, guarantor_party_id, cap_amount, currency, coverage_fraction,
-                        seniority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
-                       VALUES (?, ?, ?, ?, ?, ?, 500, 'EUR', 0.5, 1, now(), ?, ?, 'maker', now())""",
-                ).use { statement ->
-                    statement.setObject(1, id)
-                    statement.setObject(2, contractId)
-                    statement.setInt(3, revision)
-                    statement.setObject(4, supersedes)
-                    statement.setObject(5, loanId)
-                    statement.setObject(6, UUID.randomUUID())
-                    statement.setObject(7, UUID.randomUUID())
-                    statement.setString(8, "a".repeat(64))
-                    assertThat(statement.executeUpdate()).isEqualTo(1)
-                }
-            }
-
-            insert(firstId, 1, null)
+            insertPendingGuarantee(connection, firstId, contractId, loanId, 1, null)
             assertThatThrownBy {
                 connection.prepareStatement(
                     """UPDATE lending_graph_guarantee SET status = 'APPROVED',
@@ -475,7 +431,7 @@ class LendingGraphSourceSchemaIT {
                     statement.executeUpdate()
                 }
             }.hasMessageContaining("lending_graph_guarantee_decision")
-            assertThatThrownBy { insert(correctionId, 2, firstId) }
+            assertThatThrownBy { insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId) }
                 .hasMessageContaining("guarantee correction must supersede the approved prior revision")
 
             connection.prepareStatement(
@@ -494,7 +450,7 @@ class LendingGraphSourceSchemaIT {
                         statement.executeUpdate()
                     }
             }.hasMessageContaining("immutable")
-            insert(correctionId, 2, firstId)
+            insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId)
             connection.prepareStatement(
                 "SELECT status, revision, supersedes_guarantee_id FROM lending_graph_guarantee WHERE guarantee_id = ?",
             ).use { statement ->
@@ -506,6 +462,61 @@ class LendingGraphSourceSchemaIT {
                     assertThat(rows.getObject("supersedes_guarantee_id", UUID::class.java)).isEqualTo(firstId)
                 }
             }
+        }
+    }
+
+    private fun createLoanForGuarantee(connection: Connection): UUID {
+        val applicationId = UUID.randomUUID()
+        val loanId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        connection.prepareStatement(
+            """INSERT INTO loan_application
+               (id, party_id, requested_amount, currency, nominal_annual_rate,
+                term_periods, first_due_date, proposed_by)
+               VALUES (?, ?, 1000, 'EUR', 0.05, 12, current_date + 30, 'loan-maker')""",
+        ).use { statement ->
+            statement.setObject(1, applicationId)
+            statement.setObject(2, partyId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        connection.prepareStatement(
+            """INSERT INTO loan
+               (id, application_id, party_id, principal, currency, nominal_annual_rate,
+                term_periods, method, first_due_date)
+               VALUES (?, ?, ?, 1000, 'EUR', 0.05, 12, 'ANNUITY', current_date + 30)""",
+        ).use { statement ->
+            statement.setObject(1, loanId)
+            statement.setObject(2, applicationId)
+            statement.setObject(3, partyId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        return loanId
+    }
+
+    private fun insertPendingGuarantee(
+        connection: Connection,
+        id: UUID,
+        contractId: UUID,
+        loanId: UUID,
+        revision: Int,
+        supersedes: UUID?,
+    ) {
+        connection.prepareStatement(
+            """INSERT INTO lending_graph_guarantee
+               (guarantee_id, contract_id, revision, supersedes_guarantee_id,
+                loan_id, guarantor_party_id, cap_amount, currency, coverage_fraction,
+                seniority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
+               VALUES (?, ?, ?, ?, ?, ?, 500, 'EUR', 0.5, 1, now(), ?, ?, 'maker', now())""",
+        ).use { statement ->
+            statement.setObject(1, id)
+            statement.setObject(2, contractId)
+            statement.setInt(3, revision)
+            statement.setObject(4, supersedes)
+            statement.setObject(5, loanId)
+            statement.setObject(6, UUID.randomUUID())
+            statement.setObject(7, UUID.randomUUID())
+            statement.setString(8, "a".repeat(64))
+            assertThat(statement.executeUpdate()).isEqualTo(1)
         }
     }
 }

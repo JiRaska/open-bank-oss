@@ -2,7 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
-followup: "#10234 — Lending writer, audited case-scoped read, outbox, Context projection, UI and load qualification remain unbuilt"
+followup: "#10234 — activate an authorized Lending writer and dedicated reference publisher, audited case-scoped read, Context projection, UI and load qualification"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -123,9 +123,13 @@ the P3 pilot. Flyway V18 is the **schema-only expand stage** for the four fact
 types; it enforces separate proposal/decision actors, immutable decided facts,
 approved matching legacy collateral on an allocation insert, and a locked
 recheck at allocation approval. A proposal whose collateral was released can
-be rejected but cannot be approved. There is no
-application writer, source read contract, Context projector, UI or measured
-workload yet, so V18 alone does not deliver the P3 lens.
+be rejected but cannot be approved. V18 alone does not deliver the P3 lens.
+An internal guarantee writer now validates loan, Party and signed Document
+evidence on proposal and approval, and persists an approval pointer atomically
+with the decision. It is disabled by default and has no HTTP route, dedicated
+Kafka publisher or credential; the existing broad Lending publisher refuses its
+event type. There is still no case-scoped source read contract, Context projector,
+UI or measured portfolio workload.
 Separately, the existing Customer 360 credit-application overlay uses an optional
 database-bounded `limit` on the party application list. Omitting the parameter
 retains the existing full-list contract. A `(party_id, created_at DESC, id DESC)`
@@ -171,8 +175,9 @@ scope. Old documents with a null bank scope fail closed; JSON metadata is never
 used as bank authority. The realm template declares a separate
 `openbank-lending-graph` client with only `ROLE_LENDING_GRAPH_PROOF`; the endpoint
 checks both that role and its exact principal. It remains unusable in a
-deployment until the credential is provisioned and available to Lending. No
-Lending writer exists in the schema-and-proof stage.
+deployment until the credential is provisioned and available to Lending. The
+internal writer stays disabled until that credential, a case-scoped route and
+dedicated reference channel are reviewed and deployed.
 Party also offers a boolean-only, purpose-limited guarantor identity check to
 that exact client. It returns true only for a real active customer with approved
 KYC and cleared AML; absence or ineligibility returns false. It proves neither

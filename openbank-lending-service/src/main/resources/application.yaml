@@ -186,6 +186,9 @@ openbank:
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-lending}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-lending-origination}
   lending:
+    graph:
+      bank-scope: ${LENDING_GRAPH_BANK_SCOPE:openbank-cz}
+      writer-enabled: ${LENDING_GRAPH_WRITER_ENABLED:false}
     # Temporal timers-worker switch (temporal-worker-switch-naming convention,
     # rules.yaml: temporal_worker_switch_naming). Env var name unchanged.
     worker:
