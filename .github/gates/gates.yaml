@@ -367,6 +367,20 @@ gates:
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
   # ==== gitops =========================================================
+  # ADR-0310 D5: a URL may be configured while its backend is deliberately scaled to zero.
+  # The customer capability switch must not turn that desired state into a `live` claim.
+  # Run on every PR so a later GitOps-only scale-down is checked too.
+  - id: customer-capability-activation
+    name: "a live customer capability has a declared, nonzero backend workload"
+    group: gitops
+    mode: enforced
+    budget_seconds: 5
+    selftest: python3 .github/scripts/check-customer-capability-activation.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-customer-capability-activation.py"]
+    run: |
+      python3 .github/scripts/check-customer-capability-activation.py --root .
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a
