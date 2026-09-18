@@ -31,7 +31,10 @@ data class AuthorityPartyResponse(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ActingForResponse(val partyId: UUID)
+data class ActingForResponse(val partyId: UUID, val mandate: RepresentationMandateResponse? = null)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class RepresentationMandateResponse(val authority: String? = null, val requiredSignatures: Int? = null)
 
 @Path("/api/v1/parties")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
@@ -49,9 +52,10 @@ interface PartyAuthorityRestClient {
 
 /**
  * Resolves the principal type and re-checks an organisation mandate at the authority boundary.
- * `acting-for` returns only active, in-window mandates over live entities, so matching the
- * principal is the complete ADR-0284 representation decision. Every transport or parse failure
- * remains distinguishable from a real denial and fails closed in the use case.
+ * `acting-for` returns only active, in-window mandates over live entities. An individual can
+ * create a delegation alone only with SOLE authority and a one-signature rule. JOINT mandates
+ * require a separate co-signing ceremony; their presence in the profile switcher is not authority
+ * to issue a grant. Missing/unknown mandate metadata fails closed during rolling upgrades.
  */
 @ApplicationScoped
 class RestGrantorAuthorityClient @Inject constructor(@RestClient private val client: PartyAuthorityRestClient) :
@@ -64,7 +68,13 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         val authorized = when (principal.partyType) {
             "INDIVIDUAL" -> actorPartyId == principalPartyId && principal.status == "ACTIVE"
             "SOLE_TRADER", "COMPANY", "TRUST" ->
-                principal.status == "ACTIVE" && client.actingFor(actorPartyId).any { it.partyId == principalPartyId }
+                principal.status == "ACTIVE" &&
+                    client.actingFor(actorPartyId).any {
+                        it.partyId == principalPartyId &&
+                            it.mandate?.let { mandate ->
+                                mandate.authority == "SOLE" && mandate.requiredSignatures == 1
+                            } == true
+                    }
             else -> false
         }
         GrantorAuthority(

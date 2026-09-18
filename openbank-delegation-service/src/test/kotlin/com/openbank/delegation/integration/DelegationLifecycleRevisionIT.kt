@@ -52,6 +52,7 @@ class DelegationLifecycleRevisionIT {
         override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
             "delegation-events-out",
             "spend-reservation-state-out",
+            "approval-group-revisions-out",
         )
 
         override fun stop() = InMemoryConnector.clear()

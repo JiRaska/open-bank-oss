@@ -367,6 +367,23 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** DELETE with the selected principal plus authenticated human actor for business-profile writes. */
+    fun deleteWithHeaders(url: String, partyId: String, extraHeaders: Map<String, String>): Response = try {
+        val builder = HttpRequest.newBuilder()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header(PARTY_HEADER, partyId)
+            .header("Accept", "application/json")
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+        extraHeaders.forEach { (k, v) -> builder.header(k, v) }
+        val r = http.send(builder.DELETE().build(), HttpResponse.BodyHandlers.ofString())
+        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+    } catch (e: Exception) {
+        Log.error("upstream DELETE to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** DELETE carrying a JSON body (e.g. consent revoke, which requires a { reason }). */
     fun delete(url: String, partyId: String, body: String): Response = try {
         val request = HttpRequest.newBuilder()

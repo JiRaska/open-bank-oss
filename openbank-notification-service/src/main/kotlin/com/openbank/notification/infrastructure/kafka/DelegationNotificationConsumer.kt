@@ -20,11 +20,11 @@ import java.util.UUID
 /**
  * Wires ADR-0232 delegated-access lifecycle events into customer notifications.
  *
- * `openbank-delegation-service` already publishes the full lifecycle onto
- * `openbank.delegation.events` (DelegationEvents.kt) via its transactional outbox; today
- * `openbank-account-service` (its enforcement projection, ADR-0232 D3) and `openbank-audit-service`
- * (its `onBehalfOf` audit trail) are the only consumers. Neither party is told anything — this is
- * a SECOND consumer of the same, already-live topic, not a new event contract.
+ * `openbank-delegation-service` publishes lifecycle and spend events onto
+ * `openbank.delegation.events` via its transactional outbox. This consumer independently turns
+ * selected events into customer notifications; account-service also projects enforcement state,
+ * and audit-service records the evidence. It does not require a synchronous call from the
+ * delegation producer or change that producer's event contract.
  *
  * **Which party, per event** — the party who has something to act on, or who is affected:
  *  - `DelegationOffered` -> the **grantee**: they have an offer to accept or decline.

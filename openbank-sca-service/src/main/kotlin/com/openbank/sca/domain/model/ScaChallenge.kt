@@ -44,6 +44,9 @@ enum class ScaPurpose {
      * spendable as the grantee's acceptance, and purpose equality is what enforces that. */
     DELEGATION_ACCEPT,
 
+    /** Owner step-up for creating or revising a future-operation approver roster. */
+    DELEGATION_APPROVAL_GROUP,
+
     /** The account owner approving a delegate's propose-only savings withdrawal (ADR-0232 D8).
      * The delegate holds SAVINGS_PROPOSE_WITHDRAW and can never execute; this challenge IS the
      * owner's half of that maker-checker split, so it must be its own purpose — a challenge
@@ -154,10 +157,15 @@ data class DynamicLinkingData(
         ceremonyId: String? = null,
         cardId: String? = null,
         cardAction: String? = null,
+        reference: String? = null,
     ): Boolean {
         if (!amountEq(this.amount, amount)) return false
         if (!normEq(this.currency, currency)) return false
         if (this.creditorIban != null && !normEq(this.creditorIban, creditor)) return false
+        // `reference` historically carries an informational payment remittance reference and
+        // existing payment consumers do not restate it. New operation-bound consumers opt into
+        // exact comparison by supplying it; approval-group management always does.
+        if (reference != null && this.reference != reference) return false
         if (!normEq(this.documentSha256, documentSha256)) return false
         if (this.ceremonyId != ceremonyId) return false
         if (!normEq(this.cardId, cardId)) return false

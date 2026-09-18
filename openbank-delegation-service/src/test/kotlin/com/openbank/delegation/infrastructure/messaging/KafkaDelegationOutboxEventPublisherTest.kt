@@ -97,7 +97,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry(realEventPayload()))
+            KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper).publish(entry(realEventPayload()))
         }
 
         assertThat(mapper.readTree(captured.captured.payload).get("sourceService").asText())
@@ -111,7 +111,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
         val payload = realEventPayload()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry(payload)) }
+        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper).publish(entry(payload)) }
 
         val before = mapper.readTree(payload)
         val after = mapper.readTree(captured.captured.payload)
@@ -131,7 +131,9 @@ class KafkaDelegationOutboxEventPublisherTest {
         val captured = slot<Message<String>>()
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry("not json at all")) }
+        runBlocking {
+            KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper).publish(entry("not json at all"))
+        }
 
         // This is the money path: an unattributed row is a strictly better outcome than a publish
         // that throws and wedges the outbox dispatcher.
@@ -146,7 +148,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         val reservationId = UUID.randomUUID()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper).publish(
+            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, lifecycleEmitter, mapper).publish(
                 entry(
                     statePayload(reservationId, 1L),
                     DelegationSpendReservationStateChanged.EVENT_TYPE,
@@ -164,7 +166,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         val lifecycleEmitter = mockk<MutinyEmitter<String>>()
         val stateEmitter = mockk<MutinyEmitter<String>>()
         val reservationId = UUID.randomUUID()
-        val publisher = KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper)
+        val publisher = KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, lifecycleEmitter, mapper)
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
             runBlocking {
@@ -179,5 +181,38 @@ class KafkaDelegationOutboxEventPublisherTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
         verify(exactly = 0) { stateEmitter.sendMessage(any()) }
         verify(exactly = 0) { lifecycleEmitter.sendMessage(any()) }
+    }
+
+    @Test
+    fun `approval group revisions route to their compacted channel with a revision key`() {
+        val lifecycleEmitter = mockk<MutinyEmitter<String>>()
+        val reservationEmitter = mockk<MutinyEmitter<String>>()
+        val approvalEmitter = mockk<MutinyEmitter<String>>()
+        val captured = slot<Message<String>>()
+        every { approvalEmitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
+        val groupId = UUID.randomUUID()
+
+        runBlocking {
+            KafkaDelegationOutboxEventPublisher(
+                lifecycleEmitter,
+                reservationEmitter,
+                approvalEmitter,
+                mapper,
+            ).publish(
+                entry(
+                    payload = """{"aggregateId":"$groupId","revision":7}""",
+                    eventType = "ApprovalGroupRevised",
+                    aggregateId = groupId,
+                ),
+            )
+        }
+
+        val metadata = captured.captured
+            .getMetadata(io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata::class.java)
+            .orElseThrow()
+        assertThat(metadata.key).isEqualTo("$groupId:7")
+        verify(exactly = 1) { approvalEmitter.sendMessage(any()) }
+        verify(exactly = 0) { lifecycleEmitter.sendMessage(any()) }
+        verify(exactly = 0) { reservationEmitter.sendMessage(any()) }
     }
 }

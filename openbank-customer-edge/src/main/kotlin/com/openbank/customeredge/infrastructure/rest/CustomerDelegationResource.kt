@@ -6,6 +6,7 @@ package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.libs.authz.Authorize
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -15,6 +16,7 @@ import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -92,6 +94,69 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     fun sharedWithMe(): Response {
         val partyId = partyId()
         return upstream.get("$delegationServiceUrl$UPSTREAM/grantee/$partyId", partyId)
+    }
+
+    /** Client-managed approver rosters for the currently selected personal/business profile. */
+    @GET
+    @Path("/approval-groups")
+    @Blocking
+    fun approvalGroups(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$UPSTREAM/approval-groups", partyId)
+    }
+
+    @POST
+    @Path("/approval-groups/sca-reference")
+    @Authorize(action = "customer.delegation.approval-group.manage", resource = "")
+    suspend fun approvalGroupScaReference(body: String?): Response =
+        upstream.post("$delegationServiceUrl$UPSTREAM/approval-groups/sca-reference", partyId(), body ?: "{}")
+
+    @POST
+    @Path("/approval-groups")
+    @Blocking
+    fun createApprovalGroup(body: String?): Response {
+        val context = partyContext()
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/approval-groups",
+            context.principal.toString(),
+            body ?: "{}",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @GET
+    @Path("/approval-groups/{id}")
+    @Blocking
+    fun approvalGroup(@PathParam("id") id: UUID): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$UPSTREAM/approval-groups/$id", partyId)
+    }
+
+    @PUT
+    @Path("/approval-groups/{id}")
+    @Blocking
+    fun reviseApprovalGroup(@PathParam("id") id: UUID, body: String?): Response {
+        val context = partyContext()
+        return upstream.put(
+            "$delegationServiceUrl$UPSTREAM/approval-groups/$id",
+            context.principal.toString(),
+            body ?: "{}",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @DELETE
+    @Path("/approval-groups/{id}")
+    @Blocking
+    fun deactivateApprovalGroup(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        return upstream.deleteWithHeaders(
+            "$delegationServiceUrl$UPSTREAM/approval-groups/$id",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -307,20 +372,23 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
-     * Accept an offered grant. `granteePartyId` is the token's party, so the caller can only ever
-     * accept an offer addressed to themselves; `scaSessionId` is the grantee's OWN challenge
-     * (purpose `DELEGATION_ACCEPT`) and is the one thing the client supplies.
+     * Accept an offered grant. The principal is the selected profile; the human actor comes only
+     * from the token. Their personal SCA challenge is verified against a live SOLE mandate when
+     * the offer is addressed to a business. The client supplies only the SCA session id.
      */
     @POST
     @Path("/{id}/accept")
     @Blocking
     fun accept(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         if (scaSessionId == null) return refuse(Response.Status.BAD_REQUEST, "scaSessionId is required")
         return upstream.post(
             "$delegationServiceUrl$UPSTREAM/$id/accept?granteePartyId=$partyId&scaSessionId=$scaSessionId",
             partyId,
             "",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
         )
     }
 

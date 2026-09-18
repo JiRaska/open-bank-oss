@@ -171,6 +171,8 @@ data class ConsumeScaRequest(
     val amount: String? = null,
     val currency: String? = null,
     val creditor: String? = null,
+    /** Opaque operation fingerprint displayed and signed by the approving device. */
+    val reference: String? = null,
     /** Document content address (SHA-256), for a DOCUMENT_SIGNING challenge (ADR-0169 D2). */
     val documentSha256: String? = null,
     /** The signature ceremony this consume is scoped to, for a DOCUMENT_SIGNING challenge. */
@@ -371,6 +373,7 @@ class ScaResource(
                 amount = request.amount,
                 currency = request.currency,
                 creditor = request.creditor,
+                reference = request.reference,
                 documentSha256 = request.documentSha256,
                 ceremonyId = request.ceremonyId,
                 cardId = request.cardId,
