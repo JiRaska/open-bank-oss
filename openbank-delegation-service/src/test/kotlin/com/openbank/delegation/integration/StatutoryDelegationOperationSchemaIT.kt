@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.StatutoryDelegationOperation
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
@@ -115,6 +116,16 @@ class StatutoryDelegationOperationSchemaIT {
         val proposed = operation()
         onVertxContext { operations.create(proposed) }
         val at = proposed.createdAt.plusSeconds(2)
+        val event = StatutoryDelegationProposalCancelled(
+            aggregateId = proposed.id,
+            principalPartyId = proposed.principalPartyId,
+            actorId = proposed.initiatorPartyId,
+            operationKind = StatutoryOperationKind.ISSUE,
+            requestHash = proposed.requestHash,
+            ruleHash = proposed.ruleHash,
+            targetGrantId = null,
+            occurredAt = at,
+        )
         assertThatThrownBy {
             onVertxContext {
                 operations.cancel(
@@ -123,6 +134,7 @@ class StatutoryDelegationOperationSchemaIT {
                     UUID.randomUUID(),
                     StatutoryOperationKind.ISSUE,
                     at,
+                    event,
                 )
             }
         }.isInstanceOf(StatutoryDecisionClosed::class.java)
@@ -134,6 +146,7 @@ class StatutoryDelegationOperationSchemaIT {
                     proposed.initiatorPartyId,
                     StatutoryOperationKind.ISSUE,
                     at,
+                    event,
                 )
             }
         }.isInstanceOf(StatutoryDecisionClosed::class.java)
@@ -144,6 +157,7 @@ class StatutoryDelegationOperationSchemaIT {
                 proposed.initiatorPartyId,
                 StatutoryOperationKind.ISSUE,
                 at,
+                event,
             )
         }
         assertThat(cancelled.state).isEqualTo(StatutoryOperationState.CANCELLED)
@@ -155,9 +169,25 @@ class StatutoryDelegationOperationSchemaIT {
                     proposed.initiatorPartyId,
                     StatutoryOperationKind.ISSUE,
                     at,
+                    event,
                 )
             },
         ).isEqualTo(cancelled)
+        assertThat(rowCount("delegation_outbox", "aggregate_id", proposed.id)).isEqualTo(1)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT event_type, payload FROM delegation_outbox WHERE aggregate_id = ?",
+            ).use { statement ->
+                statement.setObject(1, proposed.id)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString("event_type")).isEqualTo("StatutoryDelegationProposalCancelled")
+                    assertThat(rows.getString("payload")).contains(proposed.initiatorPartyId.toString())
+                    assertThat(rows.getString("payload")).contains(proposed.requestHash)
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
         assertThat(onVertxContext { operations.decisions(proposed.id) }).isEmpty()
         assertThat(
             onVertxContext {

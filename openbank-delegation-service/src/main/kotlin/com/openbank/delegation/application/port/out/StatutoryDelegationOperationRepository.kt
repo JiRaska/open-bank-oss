@@ -6,6 +6,7 @@ package com.openbank.delegation.application.port.out
 
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
@@ -60,6 +61,7 @@ interface StatutoryDelegationOperationRepository {
         initiatorPartyId: UUID,
         kind: StatutoryOperationKind,
         at: Instant,
+        event: StatutoryDelegationProposalCancelled,
     ): StatutoryDelegationOperation
 
     /** Lock operation, check signed quorum, then commit grant + outbox + EXECUTED as one SQL transaction. */

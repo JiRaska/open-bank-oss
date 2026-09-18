@@ -7,6 +7,7 @@ package com.openbank.delegation.application.usecase
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
@@ -16,6 +17,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -32,8 +34,12 @@ class StatutoryDelegationCancellationServiceTest {
     private val operationId = UUID.randomUUID()
     private val now = Instant.parse("2026-09-18T12:00:00Z")
     private val operation = mockk<StatutoryDelegationOperation> {
+        every { id } returns operationId
         every { operationKind } returns StatutoryOperationKind.ISSUE
         every { initiatorPartyId } returns actor
+        every { requestHash } returns "b".repeat(64)
+        every { ruleHash } returns "c".repeat(64)
+        every { targetGrantId } returns null
     }
     private val rule = StatutoryRepresentationRule(
         policyId = UUID.randomUUID(),
@@ -63,11 +69,19 @@ class StatutoryDelegationCancellationServiceTest {
     fun `current initiator cancels only the selected company's exact kind`(): Unit = runBlocking {
         coEvery { repository.find(operationId, company) } returns operation
         coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
-        coEvery { repository.cancel(operationId, company, actor, StatutoryOperationKind.ISSUE, now) } returns operation
+        val event = slot<StatutoryDelegationProposalCancelled>()
+        coEvery {
+            repository.cancel(operationId, company, actor, StatutoryOperationKind.ISSUE, now, capture(event))
+        } returns operation
 
         assertThat(service.cancel(operationId, company, company, actor, StatutoryOperationKind.ISSUE))
             .isSameAs(operation)
-        coVerify(exactly = 1) { repository.cancel(operationId, company, actor, StatutoryOperationKind.ISSUE, now) }
+        coVerify(exactly = 1) {
+            repository.cancel(operationId, company, actor, StatutoryOperationKind.ISSUE, now, any())
+        }
+        assertThat(event.captured.aggregateId).isEqualTo(operationId)
+        assertThat(event.captured.actorId).isEqualTo(actor)
+        assertThat(event.captured.operationKind).isEqualTo(StatutoryOperationKind.ISSUE)
     }
 
     @Test
@@ -76,7 +90,7 @@ class StatutoryDelegationCancellationServiceTest {
         assertThatThrownBy {
             runBlocking { service.cancel(operationId, company, company, other, StatutoryOperationKind.ISSUE) }
         }.isInstanceOf(StatutoryProposalDenied::class.java)
-        coVerify(exactly = 0) { repository.cancel(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.cancel(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -86,6 +100,6 @@ class StatutoryDelegationCancellationServiceTest {
         assertThatThrownBy {
             runBlocking { service.cancel(operationId, company, company, actor, StatutoryOperationKind.ISSUE) }
         }.isInstanceOf(StatutoryProposalUnavailable::class.java)
-        coVerify(exactly = 0) { repository.cancel(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.cancel(any(), any(), any(), any(), any(), any()) }
     }
 }

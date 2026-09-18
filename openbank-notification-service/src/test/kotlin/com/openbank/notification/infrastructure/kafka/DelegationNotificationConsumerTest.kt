@@ -207,6 +207,9 @@ class DelegationNotificationConsumerTest {
     @Test
     fun `unknown lifecycle types are not notified`() {
         consumer.consume(eventPayload("SomethingElse")).subscribe().with({}, {})
+        consumer.consume(
+            """{"eventType":"StatutoryDelegationProposalCancelled","aggregateId":"${UUID.randomUUID()}","actorId":"${UUID.randomUUID()}"}""",
+        ).subscribe().with({}, {})
 
         verify(exactly = 0) { notificationConsumer.consume(any()) }
     }

@@ -7,6 +7,7 @@ package com.openbank.delegation.application.usecase
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationKind
 import jakarta.enterprise.context.ApplicationScoped
@@ -53,6 +54,23 @@ class StatutoryDelegationCancellationService(
                 throw StatutoryProposalDenied("actor has no current joint representation")
             StatutoryRuleResolution.Unverifiable -> throw StatutoryProposalUnavailable()
         }
-        return operations.cancel(id, company, actor, kind, clock.instant())
+        val at = clock.instant()
+        return operations.cancel(
+            id,
+            company,
+            actor,
+            kind,
+            at,
+            StatutoryDelegationProposalCancelled(
+                aggregateId = operation.id,
+                principalPartyId = company,
+                actorId = actor,
+                operationKind = kind,
+                requestHash = operation.requestHash,
+                ruleHash = operation.ruleHash,
+                targetGrantId = operation.targetGrantId,
+                occurredAt = at,
+            ),
+        )
     }
 }

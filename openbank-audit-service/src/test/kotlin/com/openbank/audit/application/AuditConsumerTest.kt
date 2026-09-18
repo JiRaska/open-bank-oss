@@ -39,6 +39,39 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `statutory cancellation records the exact operation and human actor`(): Unit = runBlocking {
+        val operationId = UUID.randomUUID()
+        val eventId = UUID.randomUUID()
+        val actorId = UUID.randomUUID()
+        val occurredAt = Instant.parse("2026-09-18T12:00:00Z")
+        val payload = """
+            {"eventId":"$eventId","eventType":"StatutoryDelegationProposalCancelled",
+             "aggregateType":"StatutoryDelegationOperation","aggregateId":"$operationId",
+             "principalPartyId":"${UUID.randomUUID()}","actorId":"$actorId",
+             "operationKind":"ISSUE","requestHash":"${"a".repeat(64)}",
+             "ruleHash":"${"b".repeat(64)}","occurredAt":"$occurredAt",
+             "sourceService":"delegation-service"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify(exactly = 1) {
+            repo.save(
+                match {
+                    it.id == eventId &&
+                        it.eventType == "StatutoryDelegationProposalCancelled" &&
+                        it.aggregateType == "STATUTORYDELEGATIONOPERATION" &&
+                        it.aggregateId == operationId.toString() &&
+                        it.actorId == actorId.toString() &&
+                        it.occurredAt == occurredAt &&
+                        it.occurredAtSource == OccurredAtSource.EVENT
+                },
+            )
+        }
+    }
+
+    @Test
     fun `consume records audit entry with inferred aggregate type and fallback actor fields`(): Unit = runBlocking {
         val transactionId = UUID.randomUUID()
         val occurredAt = Instant.parse("2026-05-27T12:00:00Z")

@@ -14,6 +14,7 @@ import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutc
 import com.openbank.delegation.application.port.out.StatutoryQuorumIncomplete
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
+import com.openbank.delegation.domain.event.StatutoryDelegationProposalCancelled
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
@@ -192,6 +193,7 @@ class StatutoryDelegationOperationRepositoryImpl(
         initiatorPartyId: UUID,
         kind: StatutoryOperationKind,
         at: Instant,
+        event: StatutoryDelegationProposalCancelled,
     ): StatutoryDelegationOperation = Panache.withTransaction {
         Panache.getSession().flatMap { session ->
             session.createNativeQuery(LOCK_OPERATION_SQL, StatutoryDelegationOperationEntity::class.java)
@@ -208,13 +210,32 @@ class StatutoryDelegationOperationRepositoryImpl(
                             Uni.createFrom().item(operation.toDomain())
                         operation.state != StatutoryOperationState.PENDING || !operation.expiresAt.isAfter(at) ->
                             Uni.createFrom().failure(StatutoryDecisionClosed())
-                        else -> session.createNativeQuery<Any>(MARK_CANCELLED_SQL)
-                            .setParameter("operation", operationId)
-                            .executeUpdate()
-                            .map { changed ->
-                                check(changed == 1) { "statutory cancellation lost its row lock" }
-                                operation.toDomain().copy(state = StatutoryOperationState.CANCELLED)
-                            }
+                        else -> {
+                            require(
+                                event.aggregateId == operation.id &&
+                                    event.principalPartyId == operation.principalPartyId &&
+                                    event.actorId == operation.initiatorPartyId &&
+                                    event.operationKind == operation.operationKind &&
+                                    event.requestHash == operation.requestHash.trim() &&
+                                    event.ruleHash == operation.ruleHash.trim() &&
+                                    event.targetGrantId == operation.targetGrantId &&
+                                    event.occurredAt == at,
+                            ) { "cancellation event must match locked proposal evidence" }
+                            session.createNativeQuery<Any>(MARK_CANCELLED_SQL)
+                                .setParameter("operation", operationId)
+                                .executeUpdate()
+                                .flatMap { changed ->
+                                    check(changed == 1) { "statutory cancellation lost its row lock" }
+                                    outboxRepository.persistInTransaction(
+                                        OutboxMessage(
+                                            aggregateId = operationId,
+                                            eventType = event.eventType,
+                                            payload = mapper.writeValueAsString(event),
+                                            createdAt = at,
+                                        ),
+                                    ).replaceWith(operation.toDomain().copy(state = StatutoryOperationState.CANCELLED))
+                                }
+                        }
                     }
                 }
         }
