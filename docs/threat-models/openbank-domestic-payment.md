@@ -488,3 +488,15 @@ not change any existing request's outcome until explicitly flipped.
   Rollout is migration and repository first with no callers. Rollback may drop this table
   and its Panache sequence only while empty; once populated, retain and export records
   before any destructive contraction.
+
+- **2026-09-18** — **Maker authority preflight (not exposed).** The draft application service
+  derives the account from canonical Czech IBAN, resolves its current owner independently and
+  requires account-service's live `ACCOUNT_PROPOSE_PAYMENT` decision for the human maker, exact
+  account, amount and currency. Missing, malformed, old-provider or unavailable authority fails
+  closed. A maker cannot propose against their own account. Caller-supplied actor, route,
+  technical account and debit-reservation context cannot turn the draft into a payment; the
+  trusted synthetic taint is retained. The maker/key uniqueness check and fingerprint bind
+  retry to the same normalized instruction, owner and delegation. Amount precision is checked
+  before insert. There is still no HTTP writer or approver/execution transition: the next
+  rollout must authenticate the human maker at the edge and independently verify it at the
+  workload boundary before enabling creation. Rollback is code-only; V18 stays inert.

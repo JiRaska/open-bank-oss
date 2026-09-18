@@ -5,6 +5,8 @@
 package com.openbank.domestic.infrastructure.client
 
 import com.openbank.domestic.application.port.out.AccountLookupPort
+import com.openbank.domestic.application.port.out.PaymentProposalAuthority
+import com.openbank.domestic.application.port.out.PaymentProposalAuthorityPort
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -14,6 +16,7 @@ import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -35,9 +38,25 @@ interface AccountServiceRestClient {
         @HeaderParam("Authorization") authorization: String,
         @PathParam("accountId") accountId: String,
     ): io.smallrye.mutiny.Uni<AccountDto>
+
+    @GET
+    @Path("/{accountId}/delegation/payment-proposal-authorization")
+    fun getPaymentProposalAuthority(
+        @HeaderParam("Authorization") authorization: String,
+        @PathParam("accountId") accountId: String,
+        @QueryParam("partyId") partyId: String,
+        @QueryParam("amount") amount: String,
+        @QueryParam("currency") currency: String,
+    ): io.smallrye.mutiny.Uni<PaymentProposalAuthorityDto>
 }
 
 data class AccountDto(val id: String, val partyId: String)
+data class PaymentProposalAuthorityDto(
+    val authorized: Boolean = false,
+    val outcome: String = "",
+    val delegationId: String? = null,
+    val grantorPartyId: String? = null,
+)
 
 private const val HTTP_NOT_FOUND = 404
 
@@ -49,7 +68,8 @@ class AccountServiceClient(
         defaultValue = "http://account-service.accounts.svc:8100",
     )
     private val baseUrl: String,
-) : AccountLookupPort {
+) : AccountLookupPort,
+    PaymentProposalAuthorityPort {
 
     private val log = Logger.getLogger(AccountServiceClient::class.java)
 
@@ -108,6 +128,35 @@ class AccountServiceClient(
         null
     } catch (ex: Exception) {
         log.warnf(ex, "Account id lookup for IBAN %s failed", iban)
+        null
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun authorize(
+        accountId: UUID,
+        makerPartyId: UUID,
+        amount: java.math.BigDecimal,
+        currency: String,
+    ): PaymentProposalAuthority? = try {
+        val token = oidcClient.get().tokens.awaitSuspending().accessToken
+        val decision = httpClient.getPaymentProposalAuthority(
+            "Bearer $token",
+            accountId.toString(),
+            makerPartyId.toString(),
+            amount.toPlainString(),
+            currency,
+        ).awaitSuspending()
+        val completeEvidence = decision.delegationId != null && decision.grantorPartyId != null
+        if (!decision.authorized || decision.outcome != "ALLOWED" || !completeEvidence) {
+            null
+        } else {
+            PaymentProposalAuthority(
+                UUID.fromString(requireNotNull(decision.delegationId)),
+                UUID.fromString(requireNotNull(decision.grantorPartyId)),
+            )
+        }
+    } catch (ex: Exception) {
+        log.warnf(ex, "Payment proposal authority unavailable for account %s", accountId)
         null
     }
 }

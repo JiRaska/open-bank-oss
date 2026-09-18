@@ -25,6 +25,8 @@ data class PaymentProposalInstruction(
     val priority: DomesticPaymentPriority,
     val statementLabel: String?,
     val endToEndId: String?,
+    /** Preserve canary taint through a future approval and execution boundary. */
+    val synthetic: Boolean = false,
 ) {
     init {
         require(amount.signum() > 0) { "A proposed payment amount must be positive" }
