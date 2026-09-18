@@ -85,6 +85,7 @@ class NotificationConsumerIT {
         retryCount: Int = 0,
         channel: NotificationChannel = NotificationChannel.PUSH,
         operationId: UUID = UUID.randomUUID(),
+        template: NotificationTemplate = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED,
     ): NotificationEntity = VertxContextSupport.subscribeAndAwait {
         Panache.withTransaction {
             repository.persist(
@@ -92,7 +93,7 @@ class NotificationConsumerIT {
                     it.notificationId = UUID.randomUUID()
                     it.partyId = partyId
                     it.channel = channel.name
-                    it.template = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED.name
+                    it.template = template.name
                     it.recipient = partyId.toString()
                     it.subject = "Joint signing request"
                     it.body = GENERIC_PUSH_BODY
@@ -180,13 +181,14 @@ class NotificationConsumerIT {
         principal: UUID = UUID.randomUUID(),
         actor: UUID = UUID.randomUUID(),
         cancelledAt: Instant = Instant.now(),
+        kind: String = "ISSUE",
     ) {
         VertxContextSupport.subscribeAndAwait {
             notificationConsumer.recordJointCancellation(
                 operationId,
                 principal,
                 actor,
-                "ISSUE",
+                kind,
                 cancelledAt,
             )
         }
@@ -279,12 +281,110 @@ class NotificationConsumerIT {
         retryJoint(push.notificationId)
         retryJoint(email.notificationId)
 
-        assertThat(statusFor(pushParty)).isEqualTo("FAILED")
-        assertThat(statusFor(emailParty)).isEqualTo("FAILED")
-        assertThat(failureReasonFor(pushParty)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED)
-        assertThat(failureReasonFor(emailParty)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED)
+        assertThat(notificationFor(push.notificationId)?.status).isEqualTo("FAILED")
+        assertThat(notificationFor(email.notificationId)?.status).isEqualTo("FAILED")
+        assertThat(notificationFor(push.notificationId)?.failureReason)
+            .isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED)
+        assertThat(notificationFor(email.notificationId)?.failureReason)
+            .isEqualTo(NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED)
         assertThat(outcomeRowsFor(push.notificationId)).hasSize(1)
         assertThat(outcomeRowsFor(email.notificationId)).hasSize(1)
+        assertThat(notificationsFor(pushParty).map { it.template })
+            .contains(NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED.name)
+        assertThat(notificationsFor(emailParty).map { it.template })
+            .contains(NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED.name)
+    }
+
+    @Test
+    fun `joint cancellation alerts other prompted representatives once but not its initiator`() {
+        val operationId = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val colleague = UUID.randomUUID()
+        val principal = UUID.randomUUID()
+        val cancelledAt = Instant.now()
+        val expiry = cancelledAt.plusSeconds(3600)
+        seedStaleJointNotification(actor, expiry, operationId = operationId)
+        seedStaleJointNotification(colleague, expiry, operationId = operationId)
+
+        cancelJoint(operationId, principal, actor, cancelledAt)
+        cancelJoint(operationId, principal, actor, cancelledAt)
+
+        assertThat(countFor(actor)).isEqualTo(1)
+        assertThat(countFor(colleague)).isEqualTo(2)
+        val alert = notificationsFor(colleague).single {
+            it.template == NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED.name
+        }
+        assertThat(alert.correlationId).isEqualTo(operationId)
+        assertThat(alert.deduplicationKey).isNotNull()
+        assertThat(alert.body).contains("has been cancelled").doesNotContain(principal.toString())
+    }
+
+    @Test
+    fun `joint acceptance cancellation has its own safe app route`() {
+        val operationId = UUID.randomUUID()
+        val colleague = UUID.randomUUID()
+        val token = "${OffContextPushSender.GOOD_TOKEN}-${UUID.randomUUID()}"
+        seedActiveDevice(colleague, token)
+        seedStaleJointNotification(
+            colleague,
+            Instant.now().plusSeconds(3600),
+            operationId = operationId,
+            template = NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
+        )
+
+        cancelJoint(operationId, kind = "ACCEPT")
+
+        val alert = notificationsFor(colleague).single {
+            it.template == NotificationTemplate.JOINT_ACCEPTANCE_PROPOSAL_CANCELLED.name
+        }
+        assertThat(alert.status).isEqualTo("SENT")
+        assertThat(OffContextPushSender.SENT.single { it.token == token }.data["deepLink"])
+            .isEqualTo("openbank://delegations/joint-acceptance")
+        assertThat(OffContextPushSender.SENT.single { it.token == token }.body).isEqualTo(GENERIC_PUSH_BODY)
+    }
+
+    @Test
+    fun `stranded cancellation alert retries on the same row`() {
+        val operationId = UUID.randomUUID()
+        val colleague = UUID.randomUUID()
+        val token = "${OffContextPushSender.GOOD_TOKEN}-${UUID.randomUUID()}"
+        seedActiveDevice(colleague, token)
+        cancelJoint(operationId)
+        val alert = seedStaleJointNotification(
+            colleague,
+            Instant.now().plusSeconds(3600),
+            operationId = operationId,
+            template = NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED,
+        )
+
+        assertThat(claimStaleJoint(Instant.now())).contains(alert.notificationId)
+        retryJoint(alert.notificationId)
+
+        assertThat(countFor(colleague)).isEqualTo(1)
+        assertThat(notificationFor(alert.notificationId)?.status).isEqualTo("SENT")
+        assertThat(OffContextPushSender.SENT.single { it.token == token }.data["deepLink"])
+            .isEqualTo("openbank://delegations/joint-issuance")
+    }
+
+    @Test
+    fun `expired cancellation alert closes instead of delivering stale news`() {
+        val operationId = UUID.randomUUID()
+        val colleague = UUID.randomUUID()
+        cancelJoint(operationId)
+        val alert = seedStaleJointNotification(
+            colleague,
+            Instant.now().minusSeconds(1),
+            operationId = operationId,
+            template = NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED,
+        )
+
+        assertThat(claimStaleJoint(Instant.now())).contains(alert.notificationId)
+        retryJoint(alert.notificationId)
+
+        assertThat(notificationFor(alert.notificationId)?.status).isEqualTo("FAILED")
+        assertThat(notificationFor(alert.notificationId)?.failureReason)
+            .isEqualTo(NotificationOutcomeEvent.REASON_JOINT_NOTICE_EXPIRED)
+        assertThat(outcomeRowsFor(alert.notificationId)).hasSize(1)
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -319,6 +419,10 @@ class NotificationConsumerIT {
     // so every DB read is driven through VertxContextSupport.subscribeAndAwait.
     private fun countFor(partyId: UUID): Long = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).count() }
+    }
+
+    private fun notificationFor(id: UUID): NotificationEntity? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("notificationId", id).firstResult() }
     }
 
     private fun statusFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {

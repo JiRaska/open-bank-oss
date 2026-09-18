@@ -36,7 +36,8 @@ import java.util.UUID
  *  - `DelegationExpired` -> **both**: the grant is gone either way.
  *  - `StatutoryDelegationProposalOpened` -> each human on the frozen JOINT roster, once per
  *    operation/person. It is only an inbox hint; the signing API rechecks live authority.
- *  - `StatutoryDelegationProposalCancelled` -> a durable operation tombstone, not a new push.
+ *  - `StatutoryDelegationProposalCancelled` -> a durable operation tombstone and one generic,
+ *    replay-safe cancellation alert to each co-signer with a persisted original hint, except the initiator.
  *    A late opened event or retry must not solicit a signature after cancellation.
  *  - Any future/unknown type is deliberately not notified until its recipient semantics are reviewed.
  *

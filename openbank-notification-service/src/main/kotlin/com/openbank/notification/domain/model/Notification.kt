@@ -109,6 +109,12 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A current company representative must personally sign a pending joint acceptance proposal. */
     JOINT_ACCEPTANCE_SIGNATURE_REQUESTED(emptySet()),
+
+    /** A previously notified representative learns that a joint issuance proposal was cancelled. */
+    JOINT_ISSUANCE_PROPOSAL_CANCELLED(emptySet()),
+
+    /** A previously notified representative learns that a joint acceptance proposal was cancelled. */
+    JOINT_ACCEPTANCE_PROPOSAL_CANCELLED(emptySet()),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -155,6 +161,8 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_RENOUNCED,
             DELEGATION_EXPIRED,
             DELEGATION_RECERTIFICATION_DUE,
+            JOINT_ISSUANCE_PROPOSAL_CANCELLED,
+            JOINT_ACCEPTANCE_PROPOSAL_CANCELLED,
             -> null
         }
 
@@ -173,6 +181,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             DELEGATION_RECERTIFICATION_DUE,
             JOINT_ISSUANCE_SIGNATURE_REQUESTED, JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
+            JOINT_ISSUANCE_PROPOSAL_CANCELLED, JOINT_ACCEPTANCE_PROPOSAL_CANCELLED,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
@@ -227,7 +236,7 @@ data class NotificationRequest(
      * delivery outcome. campaign-service currently supplies its send-log id (issue #4480).
      */
     val interactionRef: UUID? = null,
-    /** Last instant at which a delayed security prompt is actionable; only JOINT proposals set it. */
+    /** Last instant at which a JOINT signing prompt or cancellation notice should be sent. */
     val deliveryNotAfter: Instant? = null,
 )
 

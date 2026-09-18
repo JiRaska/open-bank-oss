@@ -17,6 +17,11 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // query methods per read/write path; grows with notification features
 class NotificationRepository : PanacheRepository<NotificationEntity> {
 
+    /** Only people with a persisted original hint are cancellation-alert recipients. */
+    fun jointPromptRecipients(operationId: UUID, template: String): Uni<List<UUID>> = Panache.withSession {
+        find("correlationId = ?1 and template = ?2", operationId, template).list()
+    }.map { rows -> rows.map { it.partyId }.distinct() }
+
     /** Atomically claim stale JOINT PENDING rows across pods; the network send runs after commit. */
     fun claimStaleJointPending(now: Instant, olderThan: Instant, staleClaim: Instant, limit: Int): Uni<List<UUID>> =
         Panache.withTransaction {
@@ -127,7 +132,10 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
             WITH candidates AS (
                 SELECT id FROM notifications
                 WHERE status = 'PENDING'
-                  AND template IN ('JOINT_ISSUANCE_SIGNATURE_REQUESTED', 'JOINT_ACCEPTANCE_SIGNATURE_REQUESTED')
+                  AND template IN (
+                    'JOINT_ISSUANCE_SIGNATURE_REQUESTED', 'JOINT_ACCEPTANCE_SIGNATURE_REQUESTED',
+                    'JOINT_ISSUANCE_PROPOSAL_CANCELLED', 'JOINT_ACCEPTANCE_PROPOSAL_CANCELLED'
+                  )
                   AND (
                     (channel = 'PUSH' AND delivery_not_after IS NOT NULL)
                     OR EXISTS (

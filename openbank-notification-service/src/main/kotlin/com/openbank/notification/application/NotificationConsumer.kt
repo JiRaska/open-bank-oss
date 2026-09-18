@@ -62,6 +62,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.Executor
 import java.util.function.Function
@@ -84,10 +85,16 @@ class NotificationConsumer @Inject constructor(
 
     companion object {
         const val MAX_JOINT_RETRY_ATTEMPTS = 3
+        private const val JOINT_CANCELLATION_NOTICE_DAYS = 7L
         val JOINT_SIGNATURE_TEMPLATES = setOf(
             NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED,
             NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
         )
+        val JOINT_CANCELLATION_TEMPLATES = setOf(
+            NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED,
+            NotificationTemplate.JOINT_ACCEPTANCE_PROPOSAL_CANCELLED,
+        )
+        val JOINT_TIME_BOUND_TEMPLATES = JOINT_SIGNATURE_TEMPLATES + JOINT_CANCELLATION_TEMPLATES
 
         /** Name of the notifications deduplication partial unique index, a stable duplicate discriminator. */
         const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = NotificationDeduplication.CONSTRAINT
@@ -311,13 +318,15 @@ class NotificationConsumer @Inject constructor(
             log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
+        if (req.template in JOINT_TIME_BOUND_TEMPLATES &&
+            (req.correlationId == null || req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true)
+        ) {
+            log.warnf("Dropping expired or uncorrelated JOINT notification template=%s", req.template)
+            return Uni.createFrom().voidItem()
+        }
         val delivery = if (req.template in JOINT_SIGNATURE_TEMPLATES) {
             val operationId = req.correlationId
-            if (operationId == null || req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true) {
-                log.warnf("Dropping expired or undated JOINT signing notification template=%s", req.template)
-                return Uni.createFrom().voidItem()
-            }
-            jointCancellationRepo.isCancelled(operationId).chain { cancelled ->
+            jointCancellationRepo.isCancelled(requireNotNull(operationId)).chain { cancelled ->
                 if (cancelled) Uni.createFrom().voidItem() else dispatch(req)
             }
         } else {
@@ -389,7 +398,7 @@ class NotificationConsumer @Inject constructor(
                             entity,
                             NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED,
                         )
-                        req.template in JOINT_SIGNATURE_TEMPLATES &&
+                        req.template in JOINT_TIME_BOUND_TEMPLATES &&
                             req.deliveryNotAfter?.isAfter(Instant.now(clock)) != true ->
                             markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
                         // Consent gate BEFORE channel dispatch (ADR-0198 D4, issue #2369).
@@ -422,9 +431,15 @@ class NotificationConsumer @Inject constructor(
                 NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED
             NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED.name ->
                 NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED
+            NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED.name ->
+                NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED
+            NotificationTemplate.JOINT_ACCEPTANCE_PROPOSAL_CANCELLED.name ->
+                NotificationTemplate.JOINT_ACCEPTANCE_PROPOSAL_CANCELLED
             else -> return@chain Uni.createFrom().voidItem()
         }
-        val link = if (template == NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED) {
+        val link = if (template == NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED ||
+            template == NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED
+        ) {
             "openbank://delegations/joint-issuance"
         } else {
             "openbank://delegations/joint-acceptance"
@@ -447,14 +462,14 @@ class NotificationConsumer @Inject constructor(
         } else {
             jointCancellationRepo.isCancelled(operationId).chain { cancelled ->
                 when {
-                    cancelled -> markJointRetryTerminal(
+                    cancelled && template in JOINT_SIGNATURE_TEMPLATES -> markJointRetryTerminal(
                         req,
                         entity,
                         NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_CANCELLED,
                     )
                     entity.channel != NotificationChannel.PUSH.name -> Uni.createFrom().voidItem()
                     notAfter == null || !notAfter.isAfter(Instant.now(clock)) ->
-                        markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED)
+                        markJointRetryTerminal(req, entity, jointExpiryReason(template))
                     entity.deliveryRetryCount > MAX_JOINT_RETRY_ATTEMPTS ->
                         markJointRetryTerminal(req, entity, NotificationOutcomeEvent.REASON_JOINT_RETRY_EXHAUSTED)
                     else -> sendPush(req, entity.subject ?: renderTemplate(template, emptyMap()).first, entity)
@@ -463,14 +478,55 @@ class NotificationConsumer @Inject constructor(
         }
     }
 
-    /** Persists the cancellation before acking its event; stale pending rows close on the retry sweep. */
+    private fun jointExpiryReason(template: NotificationTemplate): String =
+        if (template in JOINT_CANCELLATION_TEMPLATES) {
+            NotificationOutcomeEvent.REASON_JOINT_NOTICE_EXPIRED
+        } else {
+            NotificationOutcomeEvent.REASON_JOINT_PROPOSAL_EXPIRED
+        }
+
+    /** Tombstone first, then alert only the original hint's other recipients; exact replay is deduplicated. */
     fun recordJointCancellation(
         operationId: UUID,
         principalPartyId: UUID,
         actorId: UUID,
         operationKind: String,
         cancelledAt: Instant,
-    ): Uni<Void> = jointCancellationRepo.record(operationId, principalPartyId, actorId, operationKind, cancelledAt)
+    ): Uni<Void> {
+        val (prompt, cancelled, link) = when (operationKind) {
+            "ISSUE" -> Triple(
+                NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED,
+                NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED,
+                "openbank://delegations/joint-issuance",
+            )
+            "ACCEPT" -> Triple(
+                NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED,
+                NotificationTemplate.JOINT_ACCEPTANCE_PROPOSAL_CANCELLED,
+                "openbank://delegations/joint-acceptance",
+            )
+            else -> return Uni.createFrom().failure(IllegalArgumentException("invalid joint operation kind"))
+        }
+        return jointCancellationRepo.record(operationId, principalPartyId, actorId, operationKind, cancelledAt)
+            .chain(Supplier { notificationRepo.jointPromptRecipients(operationId, prompt.name) })
+            .chain { recipients: List<UUID> ->
+                recipients.filter { it != actorId }.fold(Uni.createFrom().voidItem()) { prior, recipient ->
+                    val request = NotificationRequest(
+                        partyId = recipient,
+                        channel = NotificationChannel.PUSH,
+                        template = cancelled,
+                        recipient = recipient.toString(),
+                        variables = emptyMap(),
+                        correlationId = operationId,
+                        deduplicationKey = UUID.nameUUIDFromBytes(
+                            "statutory-cancelled:$operationId:$recipient".toByteArray(Charsets.UTF_8),
+                        ),
+                        deepLink = link,
+                        deliveryNotAfter = cancelledAt.plus(JOINT_CANCELLATION_NOTICE_DAYS, ChronoUnit.DAYS),
+                    )
+                    prior.chain(Supplier { consume(objectMapper.writeValueAsString(request)) })
+                }
+            }
+    }
 
     private fun markJointRetryTerminal(
         req: NotificationRequest,
@@ -1295,6 +1351,10 @@ class NotificationConsumer @Inject constructor(
                 jointIssuanceCopy()
             NotificationTemplate.JOINT_ACCEPTANCE_SIGNATURE_REQUESTED ->
                 jointAcceptanceCopy()
+            NotificationTemplate.JOINT_ISSUANCE_PROPOSAL_CANCELLED ->
+                jointIssuanceCancellationCopy()
+            NotificationTemplate.JOINT_ACCEPTANCE_PROPOSAL_CANCELLED ->
+                jointAcceptanceCancellationCopy()
         }
 }
 
@@ -1307,6 +1367,14 @@ private fun jointAcceptanceCopy(): Pair<String, String> = "Your signature is req
     "<h2>Company access acceptance</h2><p>A company you represent has a pending " +
     "proposal to accept delegated access. Review the exact terms and sign personally " +
     "in the OpenBank app. No access is activated by this notification.</p>"
+
+private fun jointIssuanceCancellationCopy(): Pair<String, String> = "A company access grant proposal was cancelled" to
+    "<h2>Proposal cancelled</h2><p>A pending company access grant proposal you were asked to review " +
+    "has been cancelled. No access was granted by that proposal. Open the OpenBank app to review current access.</p>"
+
+private fun jointAcceptanceCancellationCopy(): Pair<String, String> = "A company access acceptance was cancelled" to
+    "<h2>Proposal cancelled</h2><p>A pending company access acceptance you were asked to review " +
+    "has been cancelled. No access was activated by that proposal. Open the OpenBank app to review current access.</p>"
 
 /**
  * Reads a declared template variable, HTML-escaped, or "" when the caller omitted it.
