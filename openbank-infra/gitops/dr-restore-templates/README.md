@@ -18,14 +18,14 @@ The template creates a Deployment, with no Service. The workflow forwards direct
 to that Deployment. It reads the image from the existing ledger Rollout and waits for
 both the restored database and check workload before requesting the trial balance.
 
-The Deployment disables all Quarkus scheduled jobs, outbox dispatch, OIDC and Flyway
-startup migration. These settings do not remove Kafka connectors, Redis health checks,
-endpoint role checks or outbound clients from the image. Disabling the OIDC tenant
-does not make the trial-balance endpoint anonymous: isolated authentication remains
-a prerequisite. Scheduler shutdown prevents scheduled mutations, but is not a
-database read-only permission boundary. Before a
-live drill, verify the actual image's startup requirements and enforce network and
-write isolation. Do not add live credentials just to turn a failed probe green.
+The Deployment disables all Quarkus scheduled jobs, outbox dispatch and Flyway
+startup migration. It verifies a drill-specific viewer JWT locally, without OIDC
+discovery or outbound token acquisition. These settings do not remove Kafka
+connectors, Redis health checks or other outbound clients from the image.
+Scheduler shutdown prevents scheduled mutations but is not a database read-only
+permission boundary. Before a live drill, verify the actual image's startup
+requirements and enforce network and write isolation. Do not add live credentials
+just to turn a failed probe green.
 The workflow's `balanced` assertion and elapsed time do not measure RPO or prove
 cross-service consistency; see the design document's remaining acceptance conditions.
 
@@ -79,3 +79,19 @@ that configuration omits it. Recovery also declares the original application
 database and owner so CNPG does not default them to `app`. The regression test
 compares these values with the source ledger manifest. This does not establish
 cloud credentials, archive availability or a successful restore.
+
+## Temporary viewer authentication
+
+Each attempt generates its own RSA key and a one-hour JWT restricted to `ROLE_VIEWER`,
+issuer `urn:openbank:dr-check` and audience `openbank-dr-check`. The signing private
+key is deleted immediately after signing. Only the public verification key enters
+the namespace in `ledger-dr-check-auth`; the token remains in a mode-0600 header
+file in a mode-0700 temporary runner directory. Curl reads that file rather than
+putting the bearer value into command arguments. Cleanup removes it on success
+and failure. No live issuer, client secret or operator role is used.
+
+`DrOfflineAuthenticationIT` exercises the real bearer verifier against temporary
+infrastructure: viewer read, anonymous/expired rejection and mutation rejection.
+It does not establish image startup without Kafka/Redis, CNI isolation or database
+write permissions. The Python workflow suite verifies signing, tamper rejection,
+credential permissions and teardown through the workflow shell.

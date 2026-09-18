@@ -70,7 +70,11 @@ jobs:
           FY="${FISCAL_YEAR:-$(date -u +%Y)}"
           NS_CREATED=false
           PF=""
+          AUTH_DIR=""
           cleanup() {
+            if [ -n "$AUTH_DIR" ]; then
+              rm -rf -- "$AUTH_DIR"
+            fi
             if [ -n "$PF" ]; then
               kill "$PF" 2>/dev/null || true
               wait "$PF" 2>/dev/null || true
@@ -105,6 +109,11 @@ jobs:
             sleep 2
           done
           [ "$POLICY_READY" = true ] || { echo "::error::DR isolation policy was not provisioned; no workload started."; exit 1; }
+          AUTH_DIR="$(mktemp -d)"
+          python3 .github/scripts/dr-check-credentials.py "$AUTH_DIR"
+          # Kubernetes receives the public verification key only, never a token or private key.
+          kubectl -n "$NS" create configmap ledger-dr-check-auth \
+            --from-file=public-key="$AUTH_DIR/public-key"
           sed "s#\${NS}#${NS}#g" "$TEMPLATES/cnpg-recovery-cluster.yaml.tmpl" | kubectl apply -f -
           sed "s#\${NS}#${NS}#g; s#\${IMAGE}#${IMAGE}#g" "$TEMPLATES/ledger-service-dr-check.yaml.tmpl" | kubectl apply -f -
 
@@ -113,7 +122,7 @@ jobs:
           # The template creates a Deployment, not a Service. Forward directly to its pod.
           kubectl -n "$NS" port-forward deployment/ledger-service-dr-check 18101:8101 &
           PF=$!
-          BODY="$(curl -sf --retry 20 --retry-connrefused --retry-delay 1 --max-time 10 \
+          BODY="$(curl -sf --header @"$AUTH_DIR/authorization-header" --retry 20 --retry-connrefused --retry-delay 1 --max-time 10 \
             "http://localhost:18101/api/v1/ledger/close/trial-balance?fiscalYear=${FY}")"
           RESTORE_END=$(date -u +%s); RTO=$(( RESTORE_END - RESTORE_START ))
           BALANCED="$(printf '%s' "$BODY" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("balanced") is True)')"

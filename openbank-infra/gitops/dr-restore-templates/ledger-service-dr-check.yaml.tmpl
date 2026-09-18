@@ -56,10 +56,26 @@ spec:
             # disabling outbox dispatch alone does not prevent scheduled writes.
             - name: QUARKUS_SCHEDULER_ENABLED
               value: "false"
-            # No live Keycloak in a throwaway namespace. Disabling this tenant does
-            # not bypass endpoint roles: an isolated authentication path is still
-            # required before the trial-balance request can succeed.
+            # Verify only this drill's short-lived viewer JWT, with no live issuer.
             - name: QUARKUS_OIDC_TENANT_ENABLED
+              value: "true"
+            - name: QUARKUS_OIDC_PUBLIC_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: ledger-dr-check-auth
+                  key: public-key
+            # Clear the image default; a server URL takes precedence over public-key mode.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: ""
+            - name: QUARKUS_OIDC_DISCOVERY_ENABLED
+              value: "false"
+            - name: QUARKUS_OIDC_TOKEN_ISSUER
+              value: "urn:openbank:dr-check"
+            - name: QUARKUS_OIDC_TOKEN_AUDIENCE
+              value: "openbank-dr-check"
+            - name: QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH
+              value: "groups"
+            - name: QUARKUS_OIDC_CLIENT_CLIENT_ENABLED
               value: "false"
             # Flyway must NOT run here: this is already-migrated restored data, and a
             # restore drill exists to prove the backup, not to re-migrate it.

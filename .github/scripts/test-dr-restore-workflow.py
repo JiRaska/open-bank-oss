@@ -5,12 +5,15 @@
 
 This verifies orchestration and cleanup only; it is not evidence of a database restore.
 """
+import base64
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import yaml
@@ -23,6 +26,12 @@ root = pathlib.Path(os.environ['DR_TEST_STATE'])
 args = sys.argv[1:]
 with (root / 'calls').open('a') as log:
     log.write(json.dumps(args) + '\n')
+if len(args) > 4 and args[2:5] == ['create', 'configmap', 'ledger-dr-check-auth']:
+    public_file = pathlib.Path(next(a.split('=', 2)[2] for a in args if a.startswith('--from-file=public-key=')))
+    assert public_file.name == 'public-key'
+    assert 'PRIVATE' not in public_file.read_text() and 'Bearer' not in public_file.read_text()
+    (root / 'auth-directory').write_text(str(public_file.parent))
+    sys.exit(0)
 if args[:2] == ['create', 'namespace']:
     if os.environ['DR_TEST_CASE'] == 'collision':
         sys.exit(1)
@@ -70,6 +79,8 @@ for _ in range(tries):
     time.sleep(0.01)
 else:
     sys.exit(7)
+header_file = pathlib.Path(sys.argv[sys.argv.index('--header') + 1].removeprefix('@'))
+assert header_file.read_text().startswith('Authorization: Bearer ')
 case = os.environ['DR_TEST_CASE']
 if case == 'http-failure':
     sys.exit(22)
@@ -97,6 +108,9 @@ class DrRestoreWorkflowTest(unittest.TestCase):
             result = subprocess.run(['bash', '-c', step['run']], cwd=ROOT, env=env,
                                     capture_output=True, text=True, timeout=30)
             calls = [json.loads(s) for s in (root / 'calls').read_text().splitlines()]
+            if (root / 'auth-directory').exists():
+                self.assertFalse(Path((root / 'auth-directory').read_text()).exists(),
+                                 'temporary bearer credentials must be removed on success and failure')
             return result, calls, (root / 'forward-stopped').exists()
 
     def test_restore_check_reaches_the_workload_created_by_templates(self):
@@ -131,6 +145,54 @@ class DrRestoreWorkflowTest(unittest.TestCase):
         self.assertIs(pod['spec']['automountServiceAccountToken'], False)
         grants = [r for r in roles[0]['rules'] if 'networkpolicies' in r['resources']]
         self.assertEqual(grants, [{'apiGroups': ['networking.k8s.io'], 'resources': ['networkpolicies'], 'resourceNames': ['ledger-dr-check-isolation'], 'verbs': ['get']}])
+
+    def test_ephemeral_credentials_are_viewer_only_signed_and_private(self):
+        spec = importlib.util.spec_from_file_location('dr_credentials', ROOT / '.github/scripts/dr-check-credentials.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            before = int(time.time())
+            module.generate(directory)
+            after = int(time.time())
+            self.assertEqual({p.name for p in directory.iterdir()}, {'public-key', 'authorization-header'})
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((directory / 'authorization-header').stat().st_mode & 0o777, 0o600)
+            token = (directory / 'authorization-header').read_text().strip().removeprefix('Authorization: Bearer ')
+            header, body, signature = token.split('.')
+            decode = lambda value: base64.urlsafe_b64decode(value + '=' * (-len(value) % 4))
+            claims = json.loads(decode(body))
+            self.assertEqual(claims['groups'], ['ROLE_VIEWER'])
+            self.assertGreaterEqual(claims['iat'], before)
+            self.assertLessEqual(claims['iat'], after)
+            self.assertEqual(claims['exp'] - claims['iat'], 3600)
+            self.assertEqual(claims['iss'], 'urn:openbank:dr-check')
+            self.assertEqual(claims['aud'], 'openbank-dr-check')
+            key = directory / 'key.der'
+            key.write_bytes(base64.b64decode((directory / 'public-key').read_text()))
+            sig = directory / 'signature'
+            sig.write_bytes(decode(signature))
+            command = ['openssl', 'dgst', '-sha256', '-verify', str(key), '-keyform', 'DER', '-signature', str(sig)]
+            self.assertEqual(subprocess.run(command, input=f'{header}.{body}'.encode(), capture_output=True).returncode, 0)
+            self.assertNotEqual(subprocess.run(command, input=f'{header}.{body}x'.encode(), capture_output=True).returncode, 0)
+
+    def test_check_workload_uses_only_local_viewer_verification(self):
+        template = ROOT / 'openbank-infra/gitops/dr-restore-templates/ledger-service-dr-check.yaml.tmpl'
+        pod = yaml.safe_load(template.read_text())['spec']['template']['spec']
+        env = {item['name']: item for item in pod['containers'][0]['env']}
+        for name, expected in {
+            'QUARKUS_OIDC_TENANT_ENABLED': 'true',
+            'QUARKUS_OIDC_AUTH_SERVER_URL': '',
+            'QUARKUS_OIDC_DISCOVERY_ENABLED': 'false',
+            'QUARKUS_OIDC_TOKEN_ISSUER': 'urn:openbank:dr-check',
+            'QUARKUS_OIDC_TOKEN_AUDIENCE': 'openbank-dr-check',
+            'QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH': 'groups',
+            'QUARKUS_OIDC_CLIENT_CLIENT_ENABLED': 'false',
+        }.items():
+            with self.subTest(setting=name):
+                self.assertEqual(env[name]['value'], expected)
+        self.assertEqual(env['QUARKUS_OIDC_PUBLIC_KEY']['valueFrom'],
+                         {'configMapKeyRef': {'name': 'ledger-dr-check-auth', 'key': 'public-key'}})
 
     def test_check_workload_disables_background_database_mutations(self):
         template = ROOT / 'openbank-infra/gitops/dr-restore-templates/ledger-service-dr-check.yaml.tmpl'
