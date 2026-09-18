@@ -1,7 +1,8 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
+followup: "#10234 — Lending writer, audited case-scoped read, outbox, Context projection, UI and load qualification remain unbuilt"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -159,7 +160,8 @@ disclose more than the decision needs, and the current shared backend client
 does not identify Lending uniquely. Provision a dedicated Lending service
 identity and allow only this action in the Document policy. Document compares
 its server-assigned `documents.bank_scope` (nullable for pre-migration rows),
-while Lending independently verifies the loan's bank. Keep the document bytes
+while Lending resolves the loan in its deployment-local book and stamps the
+configured bank identifier. Keep the document bytes
 and free text out of the graph event. The fact's
 `source_sha256` pins the exact document version the checker verified, so a
 later document change does not retroactively alter what the checker saw.
@@ -171,6 +173,12 @@ used as bank authority. The realm template declares a separate
 checks both that role and its exact principal. It remains unusable in a
 deployment until the credential is provisioned and available to Lending. No
 Lending writer exists in the schema-and-proof stage.
+Party also offers a boolean-only, purpose-limited guarantor identity check to
+that exact client. It returns true only for a real active customer with approved
+KYC and cleared AML; absence or ineligibility returns false. It proves neither
+consent nor the loan-specific guarantee, which still needs the signed Document
+check and separate maker/checker decision. A source outage propagates as failure,
+never as a verified identity.
 
 Approval then rechecks current source state in the same logical decision flow
 and emits the versioned, reference-only event through Lending's transactional

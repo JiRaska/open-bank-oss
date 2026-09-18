@@ -759,3 +759,8 @@ It must compare that identifier with Document's server-stamped provenance; a
 request-supplied bank identifier cannot establish ownership. Cross-borrower expansion and any financial total
 require separate authorization and reconciliation to authoritative snapshots;
 missing data must produce `UNKNOWN` or `TOTAL_UNAVAILABLE`, never a reassuring zero.
+The dedicated Lending graph client has a boolean-only Party endpoint for a
+prospective guarantor's current ACTIVE/KYC-approved/AML-cleared identity state.
+The shared backend account and staff are denied before Party lookup, even while
+OPA is advisory. This bit is not a guarantee contract or consent; a signed,
+loan-bound Document proof and an independent checker are still required.
