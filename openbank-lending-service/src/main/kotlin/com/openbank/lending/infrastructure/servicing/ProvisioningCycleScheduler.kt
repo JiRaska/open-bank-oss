@@ -116,31 +116,31 @@ class ProvisioningCycleScheduler(
      * about to clear. A non-zero shortfall here means either the batch cap truncated the drain, or
      * loans were activated during the pass — both worth seeing, neither self-announcing today.
      *
-     * Failure to count is NOT a failure of the pass: the provisioning is already committed, and a
-     * gauge that could fail the job would make a diagnostic more dangerous than the thing it
-     * diagnoses. The previous values stay in place, exactly as OrphanedPartyGauge does.
+     * Failure to count cannot undo already-committed provisioning. It preserves the previous gauge
+     * values, but cannot certify the period as complete, so workflow liveness records no success.
      */
-    private fun publishCoverage(period: String): Uni<Void> = coverage.countEligibleForProvisioning().flatMap { active ->
-        coverage.countForPeriod(period).flatMap { covered ->
-            coverage.countUnprovisioned(period).invoke { missing ->
-                eligibleLoans.set(active)
-                provisionedThisPeriod.set(covered)
-                unprovisioned.set(missing)
-                if (missing > 0) {
-                    log.warnf(
-                        "IFRS 9 provisioning coverage for %s: %d of %d eligible exposures have no " +
-                            "provisioning row after this pass — the period is NOT fully provisioned",
-                        period,
-                        missing,
-                        active,
-                    )
+    private fun publishCoverage(period: String): Uni<Boolean> =
+        coverage.countEligibleForProvisioning().flatMap { active ->
+            coverage.countForPeriod(period).flatMap { covered ->
+                coverage.countUnprovisioned(period).map { missing ->
+                    eligibleLoans.set(active)
+                    provisionedThisPeriod.set(covered)
+                    unprovisioned.set(missing)
+                    if (missing > 0) {
+                        log.warnf(
+                            "IFRS 9 provisioning coverage for %s: %d of %d eligible exposures have no " +
+                                "provisioning row after this pass — the period is NOT fully provisioned",
+                            period,
+                            missing,
+                            active,
+                        )
+                    }
+                    missing == 0L
                 }
             }
-        }
-    }.replaceWithVoid()
-        .onFailure().recoverWithItem { e ->
+        }.onFailure().recoverWithItem { e ->
             log.warnf(e, "IFRS 9 provisioning coverage could not be counted; leaving the previous gauge values")
-            null
+            false
         }
 
     @Scheduled(
@@ -165,9 +165,9 @@ class ProvisioningCycleScheduler(
                         period,
                     )
                 }
-                liveness?.recordSuccess()
             }
             .flatMap { publishCoverage(period) }
+            .invoke { complete -> if (complete) liveness?.recordSuccess() }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }
             .replaceWithVoid()
     }
