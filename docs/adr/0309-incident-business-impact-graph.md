@@ -97,6 +97,20 @@ precedes containment; it does not retroactively repair older source rows. Correl
 must still check ordering and treat inconsistent legacy windows as unknown. No case
 edge or confirmed impact may be inferred from time overlap alone.
 
+The transaction source has a durable `openbank.transactions.transaction.failed` event,
+but its `TransactionFailedEvent` carries transaction ID, version, reference number,
+free-text reason and time, **not** the `originatingPaymentId` held by the source
+`Transaction` and its `TransactionInitiatedEvent`. Ingesting that failure event or
+joining it to this window by time would not establish the affected payment, the
+investigation case or incident causality. Case-level impact therefore requires a
+source-owned, case-scoped failure-evidence contract (or an equally verifiable
+source event) that links the outcome to the original payment, supplies a bounded
+machine-readable failure category and evidence reference, and excludes the raw
+reason from the shared graph. A case-to-incident edge additionally needs observed
+incident attribution or a separately audited human-reviewed assertion; time overlap
+alone remains a candidate lead. Each source fetch and graph expansion needs its
+own purpose-bound policy decision and disclosure audit.
+
 The aggregate API now distinguishes a missing root (`MISSING`), a bounded slice
 (`PARTIAL`) and an available projection (`AVAILABLE`). Availability describes the
 projection, not completeness of telemetry or confirmed customer impact. The admin
