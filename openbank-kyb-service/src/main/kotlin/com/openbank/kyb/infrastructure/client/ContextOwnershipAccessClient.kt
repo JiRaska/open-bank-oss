@@ -8,13 +8,13 @@ import com.openbank.kyb.application.port.out.UboObservationAccess
 import com.openbank.kyb.application.port.out.UboObservationAccessDecision
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.inject.Inject
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -23,6 +23,7 @@ import java.util.UUID
 
 private const val ASSIGNMENT_TIMEOUT_MS = 3000L
 private const val HTTP_OK = 200
+private const val HTTP_NO_CONTENT = 204
 private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
 private const val HTTP_NOT_FOUND = 404
@@ -32,6 +33,15 @@ private const val HTTP_NOT_FOUND = 404
 @RegisterRestClient(configKey = "context-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface ContextOwnershipAccessRestClient {
+    @GET
+    @Path("/{caseId}/access")
+    suspend fun access(
+        @PathParam("caseId") caseId: UUID,
+        @HeaderParam("Authorization") bearer: String,
+        @HeaderParam("X-Investigation-Case-Id") investigationCaseId: String,
+        @HeaderParam("X-Investigation-Purpose") purpose: String,
+    ): Response
+
     @GET
     @Path("/{caseId}/ownership-observations")
     suspend fun history(
@@ -43,16 +53,23 @@ interface ContextOwnershipAccessRestClient {
 }
 
 @ApplicationScoped
-class ContextOwnershipAccessAdapter : UboObservationAccess {
-    @Inject
-    @RestClient
-    lateinit var client: ContextOwnershipAccessRestClient
+class ContextOwnershipAccessAdapter(
+    @RestClient private val client: ContextOwnershipAccessRestClient,
+    @ConfigProperty(name = "openbank.kyb.data-free-context-access-enabled", defaultValue = "false")
+    private val dataFreeAccessEnabled: Boolean,
+) : UboObservationAccess {
 
     @Timeout(ASSIGNMENT_TIMEOUT_MS)
     override suspend fun check(caseId: UUID, bearer: String): UboObservationAccessDecision = try {
-        client.history(caseId, bearer, caseId.toString(), "KYB_OWNERSHIP_REVIEW").use { response ->
+        val response = if (dataFreeAccessEnabled) {
+            client.access(caseId, bearer, caseId.toString(), "KYB_OWNERSHIP_REVIEW")
+        } else {
+            client.history(caseId, bearer, caseId.toString(), "KYB_OWNERSHIP_REVIEW")
+        }
+        val allowedStatus = if (dataFreeAccessEnabled) HTTP_NO_CONTENT else HTTP_OK
+        response.use {
             when (response.status) {
-                HTTP_OK -> UboObservationAccessDecision.ALLOWED
+                allowedStatus -> UboObservationAccessDecision.ALLOWED
                 HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, HTTP_NOT_FOUND -> UboObservationAccessDecision.DENIED
                 else -> UboObservationAccessDecision.UNAVAILABLE
             }

@@ -103,10 +103,13 @@ audit row before returning detail. A missing or cross-case observation returns n
 Context independently repeats its assignment decision before resolving a reference
 on an analyst's behalf.
 The same live case check precedes a permanent restriction or correction decision.
-Context will provide a data-free `204` access operation so KYB can check assignment
-without materializing the bounded history. Rollout installs and verifies that Context
-operation first, then switches KYB's client in a later release. No fallback from an
-unavailable new operation to a full-history read is permitted after that switch.
+Context provides a data-free `204` access operation so KYB can check assignment
+without materializing the bounded history. The KYB client stages this transition
+behind `openbank.kyb.data-free-context-access-enabled`, defaulting to `false` while
+the Context operation is deployed and verified. Enabling it switches every live
+assignment check to the `204` operation; denial or unavailability fails closed,
+without falling back to a full-history read. Rollout must install and verify the
+Context operation first, then enable the KYB switch in a later release.
 
 The UI supports an `effectiveAt` snapshot and identifies late-recorded evidence. It must
 not render a current representative as authorized at a past date or a revoked power as
