@@ -151,6 +151,25 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-account-service")
+    fun approvalRequiredPaymentAuthorizationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an account with an ACTIVE N_OF_M payment delegation to a known party exists")
+        .uponReceiving("GET a direct-debit decision for a grant requiring operation approval")
+        .path("/api/v1/accounts/$ACCOUNT_ID/delegation/payment-authorization")
+        .query("partyId=$DELEGATE_PARTY_ID&amount=$AMOUNT&currency=$CURRENCY")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.booleanValue("authorized", false)
+                o.stringValue("outcome", "NO_GRANT")
+                o.booleanValue("approvalRequired", true)
+            }.build(),
+        )
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "delegatedPaymentAuthorizationPact")
     fun `the edge's own request wins an authorising decision naming the grant and the grantor`(
@@ -172,5 +191,23 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         assertThat(decision.outcome).isEqualTo("DELEGATED")
         assertThat(decision.delegationId).isEqualTo(GRANT_ID)
         assertThat(decision.grantorPartyId).isEqualTo(UUID.fromString(GRANTOR_PARTY_ID))
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "approvalRequiredPaymentAuthorizationPact")
+    fun `the edge refuses a grant that needs operation approval while retaining the audit reason`(
+        mockServer: MockServer,
+    ) {
+        val decision = edgeResource(mockServer.getUrl()).fetchDelegatedPaymentDecision(
+            accountId = UUID.fromString(ACCOUNT_ID),
+            partyId = UUID.fromString(DELEGATE_PARTY_ID),
+            amount = AMOUNT,
+            currency = CURRENCY,
+        )
+        assertThat(decision).isNotNull()
+        assertThat(decision!!.authorized).isFalse()
+        assertThat(decision.outcome).isEqualTo("APPROVAL_REQUIRED")
+        assertThat(decision.delegationId).isNull()
+        assertThat(decision.grantorPartyId).isNull()
     }
 }

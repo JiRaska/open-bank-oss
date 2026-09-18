@@ -4,6 +4,40 @@
   },
   "interactions": [
     {
+      "description": "GET a direct-debit decision for a grant requiring operation approval",
+      "providerStates": [
+        {
+          "name": "an account with an ACTIVE N_OF_M payment delegation to a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/22222222-3333-4444-8555-666666666666/delegation/payment-authorization",
+        "query": {
+          "amount": [
+            "1500.00"
+          ],
+          "currency": [
+            "CZK"
+          ],
+          "partyId": [
+            "44444444-5555-4666-8777-888888888888"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "approvalRequired": true,
+          "authorized": false,
+          "outcome": "NO_GRANT"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the delegated-payment authorization decision for an amount within the ceiling",
       "providerStates": [
         {

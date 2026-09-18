@@ -2584,16 +2584,7 @@ class CustomerEdgeResource(
         if (resp.status != 200) return null
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull()
             ?: return null
-
-        // `.takeIf { it.isTextual }` and not `asText(null)`: Jackson answers the STRING "null" for
-        // an explicit JSON null, which would turn an absent grant id into a stored literal "null".
-        fun text(field: String) = node.path(field).takeIf { it.isTextual }?.asText()
-        return DelegatedPaymentDecision(
-            authorized = node.path("authorized").asBoolean(false),
-            outcome = text("outcome"),
-            delegationId = text("delegationId"),
-            grantorPartyId = text("grantorPartyId")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
-        )
+        return parseDelegatedPaymentDecision(node)
     }
 
     /**
@@ -6284,3 +6275,15 @@ internal data class DelegatedPaymentDecision(
     val delegationId: String?,
     val grantorPartyId: UUID?,
 )
+
+internal fun parseDelegatedPaymentDecision(node: JsonNode): DelegatedPaymentDecision {
+    // Jackson's asText(null) yields the literal "null" for JSON null; only textual ids count.
+    fun text(field: String) = node.path(field).takeIf { it.isTextual }?.asText()
+    val approvalRequired = node.path("approvalRequired").asBoolean(false)
+    return DelegatedPaymentDecision(
+        authorized = node.path("authorized").asBoolean(false) && !approvalRequired,
+        outcome = if (approvalRequired) "APPROVAL_REQUIRED" else text("outcome"),
+        delegationId = text("delegationId"),
+        grantorPartyId = text("grantorPartyId")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+    )
+}
