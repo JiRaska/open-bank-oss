@@ -8,7 +8,8 @@ info:
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
   # 1.7.0 -> 1.8.0: additive — case-scoped historical UBO observation read for authorised staff.
   # 1.8.0 -> 1.9.0: additive — administrative restriction of a historical observation.
-  version: 1.9.0
+  # 1.9.0 -> 1.10.0: additive — reviewed, case-scoped UBO correction workflow.
+  version: 1.10.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -280,6 +281,85 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/ubo-observations/{observationId}/corrections:
+    post:
+      tags: [KYB]
+      summary: Propose a corrected mapped finding from a fresh register read
+      operationId: proposeUboCorrection
+      description: >-
+        Human KYC/admin only, with exact investigation purpose and live case assignment.
+        The service obtains the candidate from the register; clients cannot submit owner data.
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: observationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/ownershipReviewPurpose'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reasonCode]
+              properties:
+                reasonCode:
+                  type: string
+                  enum: [REGISTER_CORRECTION, MAPPING_ERROR, SOURCE_RECORD_AMENDED]
+      responses:
+        '201':
+          description: Pending proposal metadata, without candidate personal data
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/kyb/cases/{id}/ubo-corrections/{correctionId}:
+    get:
+      tags: [KYB]
+      summary: Read and audit a case-scoped UBO correction candidate
+      operationId: readUboCorrection
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/correctionId'
+        - $ref: '#/components/parameters/ownershipReviewPurpose'
+      responses:
+        '200':
+          description: Candidate and review metadata; read audit committed before release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UboCorrection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/kyb/cases/{id}/ubo-corrections/{correctionId}/decision:
+    post:
+      tags: [KYB]
+      summary: Approve or reject another reviewer's UBO correction
+      operationId: decideUboCorrection
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/correctionId'
+        - $ref: '#/components/parameters/ownershipReviewPurpose'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+      responses:
+        '204':
+          description: Decision committed; approval also wrote successor and reference event
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/kyb/cases/{id}/initiator:
     post:
       tags: [KYB]
@@ -750,6 +830,16 @@ components:
       schema:
         type: string
         format: uuid
+    correctionId:
+      name: correctionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ownershipReviewPurpose:
+      name: X-Investigation-Purpose
+      in: header
+      required: true
+      schema: { type: string, enum: [KYB_OWNERSHIP_REVIEW] }
     customerPartyId:
       name: X-Customer-Party-Id
       in: header
@@ -891,9 +981,37 @@ components:
         id: { type: string, format: uuid }
         caseId: { type: string, format: uuid }
         revision: { type: integer, format: int64, minimum: 1 }
-        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        sourceSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of KYB's serialized mapped finding; not a digest of the original register response or legal source document.
         recordedAt: { type: string, format: date-time }
+        supersedesObservationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Explicit predecessor only for a reviewed correction; ordinary later observations do not imply supersession.
         finding: { $ref: '#/components/schemas/UboFinding' }
+    UboCorrection:
+      type: object
+      required: [id, caseId, priorObservationId, candidateSha256, reasonCode, proposedBy, proposedAt, status, candidate]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        priorObservationId: { type: string, format: uuid }
+        candidateSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Digest of the serialized mapped finding, not of the upstream register artifact.
+        reasonCode:
+          type: string
+          enum: [REGISTER_CORRECTION, MAPPING_ERROR, SOURCE_RECORD_AMENDED]
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        candidate: { $ref: '#/components/schemas/UboFinding' }
     UboFinding:
       type: object
       properties:

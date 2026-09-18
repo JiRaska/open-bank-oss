@@ -23,6 +23,17 @@ test_observation_restriction_requires_human_admin if {
     }
 }
 
+test_ubo_corrections_require_human_kyc_or_admin if {
+    every action in {"kyb.ubo.correction.propose", "kyb.ubo.correction.read", "kyb.ubo.correction.decide"} {
+        every principal in [staff, admin] {
+            not rest.prohibited with input as {"principal": principal, "action": action}
+        }
+        every principal in [operator, shared, edge] {
+            rest.prohibited with input as {"principal": principal, "action": action}
+        }
+    }
+}
+
 test_edge_may_start_a_case if {
 	"edge-service-kyb" in rest.allowed_reasons with input as {"principal": edge, "action": "kyb.case.start"}
 }

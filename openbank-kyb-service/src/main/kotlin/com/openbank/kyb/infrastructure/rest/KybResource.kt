@@ -23,6 +23,7 @@ import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
+import com.openbank.kyb.application.port.out.UboCorrectionRepository
 import com.openbank.kyb.application.port.out.UboObservationAccess
 import com.openbank.kyb.application.port.out.UboObservationAccessDecision
 import com.openbank.kyb.application.port.out.UboObservationRepository
@@ -99,6 +100,8 @@ class KybResource {
     @Inject lateinit var ubo: BeneficialOwnershipPort
 
     @Inject lateinit var observations: UboObservationRepository
+
+    @Inject lateinit var corrections: UboCorrectionRepository
 
     @Inject lateinit var observationAccess: UboObservationAccess
 
@@ -258,9 +261,110 @@ class KybResource {
                 "revision" to observation.revision,
                 "sourceSha256" to observation.sourceSha256,
                 "recordedAt" to observation.recordedAt,
+                "supersedesObservationId" to observation.supersedesObservationId,
                 "finding" to UboResponse.from(observation.finding),
             ),
         ).header("Cache-Control", "no-store").build()
+    }
+
+    @POST
+    @Path("/cases/{id}/ubo-observations/{observationId}/corrections")
+    @RolesAllowed(Roles.KYC, Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.correction.propose", resource = "#caseId")
+    @Operation(summary = "Propose a corrected mapped finding from a fresh register read")
+    suspend fun proposeUboCorrection(
+        @PathParam("id") caseId: UUID,
+        @PathParam("observationId") observationId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Authorization") authorization: String?,
+        request: ProposeUboCorrectionRequest?,
+    ): Response {
+        val denied = checkCorrectionAccess(caseId, purpose, authorization)
+        if (denied != null) return denied
+        val reason = requireNotNull(request?.reasonCode) { "reasonCode is required" }
+        require(reason in CORRECTION_REASONS) { "unsupported correction reasonCode" }
+        val case = onboarding.get(caseId)
+        val freshFinding = ubo.lookup(case.identifier)
+        if (freshFinding.source != com.openbank.kyb.domain.model.UboSource.REGISTER) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        }
+        val proposal = corrections.propose(
+            caseId,
+            observationId,
+            freshFinding,
+            reason,
+            identity.principal.name,
+            clock.instant(),
+        ) ?: return Response.status(Response.Status.CONFLICT).header("Cache-Control", "no-store").build()
+        return Response.status(Response.Status.CREATED)
+            .entity(mapOf("id" to proposal.id, "caseId" to caseId, "status" to proposal.status.name))
+            .header("Cache-Control", "no-store").build()
+    }
+
+    @GET
+    @Path("/cases/{id}/ubo-corrections/{correctionId}")
+    @RolesAllowed(Roles.KYC, Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.correction.read", resource = "#caseId")
+    @Operation(summary = "Read and audit a case-scoped UBO correction candidate")
+    suspend fun readUboCorrection(
+        @PathParam("id") caseId: UUID,
+        @PathParam("correctionId") correctionId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Authorization") authorization: String?,
+    ): Response {
+        val denied = checkCorrectionAccess(caseId, purpose, authorization)
+        if (denied != null) return denied
+        val proposal = corrections.readAndAudit(caseId, correctionId, identity.principal.name, clock.instant())
+            ?: return notFound()
+        return Response.ok(
+            mapOf(
+                "id" to proposal.id,
+                "caseId" to proposal.caseId,
+                "priorObservationId" to proposal.priorObservationId,
+                "candidateSha256" to proposal.candidateSha256,
+                "reasonCode" to proposal.reasonCode,
+                "proposedBy" to proposal.proposedBy,
+                "proposedAt" to proposal.proposedAt,
+                "status" to proposal.status.name,
+                "decidedBy" to proposal.decidedBy,
+                "decidedAt" to proposal.decidedAt,
+                "candidate" to UboResponse.from(proposal.candidate),
+            ),
+        ).header("Cache-Control", "no-store").build()
+    }
+
+    @POST
+    @Path("/cases/{id}/ubo-corrections/{correctionId}/decision")
+    @RolesAllowed(Roles.KYC, Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.correction.decide", resource = "#caseId")
+    @Operation(summary = "Approve or reject another reviewer's UBO correction")
+    suspend fun decideUboCorrection(
+        @PathParam("id") caseId: UUID,
+        @PathParam("correctionId") correctionId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Authorization") authorization: String?,
+        request: DecideUboCorrectionRequest?,
+    ): Response {
+        val denied = checkCorrectionAccess(caseId, purpose, authorization)
+        if (denied != null) return denied
+        val approve = requireNotNull(request?.approve) { "approve is required" }
+        return when (corrections.decide(caseId, correctionId, identity.principal.name, approve, clock.instant())) {
+            null -> Response.status(Response.Status.CONFLICT).header("Cache-Control", "no-store").build()
+            else -> Response.noContent().header("Cache-Control", "no-store").build()
+        }
+    }
+
+    private suspend fun checkCorrectionAccess(caseId: UUID, purpose: String?, authorization: String?): Response? {
+        require(purpose == "KYB_OWNERSHIP_REVIEW") { "KYB_OWNERSHIP_REVIEW is required" }
+        val bearer = authorization?.takeIf { it.startsWith("Bearer ") && it.length > "Bearer ".length }
+            ?: return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        return when (observationAccess.check(caseId, bearer)) {
+            UboObservationAccessDecision.ALLOWED -> null
+            UboObservationAccessDecision.DENIED ->
+                Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+            UboObservationAccessDecision.UNAVAILABLE ->
+                Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        }
     }
 
     @POST
@@ -650,6 +754,7 @@ class KybResource {
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
         private val RESTRICTION_REASONS = setOf("SOURCE_WITHDRAWN", "EVIDENCE_CHALLENGED", "PRIVACY_RESTRICTION")
+        private val CORRECTION_REASONS = setOf("REGISTER_CORRECTION", "MAPPING_ERROR", "SOURCE_RECORD_AMENDED")
         private const val MAX_PAGE = 100
         private const val MIN_REASON = 10
         private const val DEFAULT_LANG = "cs"
@@ -657,3 +762,7 @@ class KybResource {
 }
 
 data class RestrictUboObservationRequest(val reasonCode: String?)
+
+data class ProposeUboCorrectionRequest(val reasonCode: String?)
+
+data class DecideUboCorrectionRequest(val approve: Boolean?)
