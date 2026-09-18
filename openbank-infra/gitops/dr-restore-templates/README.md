@@ -66,3 +66,13 @@ The seven cases verify generated resources for DR namespaces and no generation i
 live/system namespaces or with an empty suffix. This is separate from the ordinary
 CI orchestration tests and must be run explicitly. It does not contact a cluster
 or prove that its controller is installed and healthy.
+
+## Recovery identity
+
+The external-cluster alias identifies the recovery source inside the manifest.
+`barmanObjectStore.serverName` explicitly selects the original CNPG archive name;
+it must match the source backup configuration, or the source cluster name when
+that configuration omits it. Recovery also declares the original application
+database and owner so CNPG does not default them to `app`. The regression test
+compares these values with the source ledger manifest. This does not establish
+cloud credentials, archive availability or a successful restore.

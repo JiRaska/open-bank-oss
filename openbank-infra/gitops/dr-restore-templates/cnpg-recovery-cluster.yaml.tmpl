@@ -30,9 +30,13 @@ spec:
   bootstrap:
     recovery:
       source: ledger-db-source
+      database: openbank_ledger
+      owner: openbank
   externalClusters:
     - name: ledger-db-source
       barmanObjectStore:
+        # Select the original archive, not the external-cluster alias.
+        serverName: ledger-db
         destinationPath: s3://openbank-sandbox-db-backups/ledger-db
         s3Credentials:
           inheritFromIAMRole: true

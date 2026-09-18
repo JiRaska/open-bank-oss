@@ -132,6 +132,24 @@ class DrRestoreWorkflowTest(unittest.TestCase):
         grants = [r for r in roles[0]['rules'] if 'networkpolicies' in r['resources']]
         self.assertEqual(grants, [{'apiGroups': ['networking.k8s.io'], 'resources': ['networkpolicies'], 'resourceNames': ['ledger-dr-check-isolation'], 'verbs': ['get']}])
 
+    def test_recovery_uses_source_archive_and_application_identity(self):
+        templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
+        source = next(d for d in yaml.safe_load_all(
+            (ROOT / 'openbank-infra/gitops/components/ledger/postgres.yaml').read_text())
+            if d and d.get('kind') == 'Cluster')
+        restored = yaml.safe_load((templates / 'cnpg-recovery-cluster.yaml.tmpl').read_text())
+        recovery = restored['spec']['bootstrap']['recovery']
+        external = next(c for c in restored['spec']['externalClusters']
+                        if c['name'] == recovery['source'])
+        source_store = source['spec']['backup']['barmanObjectStore']
+        store = external['barmanObjectStore']
+        self.assertEqual(store['destinationPath'], source_store['destinationPath'])
+        self.assertEqual(store.get('serverName'),
+                         source_store.get('serverName', source['metadata']['name']))
+        identity = source['spec']['bootstrap']['initdb']
+        self.assertEqual(recovery.get('database'), identity['database'])
+        self.assertEqual(recovery.get('owner'), identity['owner'])
+
     def test_cleanup_failure_is_not_a_successful_drill(self):
         result, _, stopped = self.run_step('delete-failure')
         self.assertNotEqual(result.returncode, 0)
