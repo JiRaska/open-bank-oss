@@ -31,6 +31,7 @@ def select(runs: list[dict], now: dt.datetime, lookback_minutes: int) -> dict[st
             "conclusion": run.get("conclusion") or "",
             "run_attempt": int(run.get("run_attempt") or 1),
             "workflow_name": run["name"],
+            "event": run.get("event") or "",
             "head_sha": run.get("head_sha") or "",
             "head_branch": run.get("head_branch") or "",
         }
@@ -44,7 +45,7 @@ def select(runs: list[dict], now: dt.datetime, lookback_minutes: int) -> dict[st
 
 def self_test() -> int:
     now = parse_time("2026-09-11T00:30:00Z")
-    base = {"status": "completed", "updated_at": "2026-09-11T00:29:00Z", "html_url": "u", "head_sha": "s", "head_branch": "b"}
+    base = {"status": "completed", "updated_at": "2026-09-11T00:29:00Z", "html_url": "u", "head_sha": "s", "head_branch": "b", "event": "pull_request"}
     runs = [
         base | {"id": 1, "name": "Services CI", "conclusion": "cancelled", "run_attempt": 1},
         base | {"id": 2, "name": "Security scan", "conclusion": "failure", "run_attempt": 1},
@@ -57,6 +58,7 @@ def self_test() -> int:
     got = select(runs, now, 90)
     assert [x["run_id"] for x in got["retry"]] == [1, 2]
     assert [x["run_id"] for x in got["flakes"]] == [3]
+    assert all(x["event"] == "pull_request" for x in got["retry"])
     print("SUBJECTS=3")
     print("select-ci-reconcile-candidates self-test: 3 passed, 0 failed")
     return 0

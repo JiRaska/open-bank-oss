@@ -55,9 +55,10 @@
 # LOOP SAFETY
 # GitHub's run_attempt is 1 for the original run and 2 for the first rerun,
 # so gating on run_attempt == 1 gives exactly one automatic retry per run — a cancelled retry
-# (run_attempt 2) never re-triggers, and a run cancelled for a real reason (superseded by a
-# newer push to the same PR — the concurrency group's normal operation) is only retried once,
-# where it fails fast if the branch has moved. Deliberately NOT retried: `action_required`
+# (run_attempt 2) never re-triggers. A superseded PR run must NOT be retried even once:
+# its old SHA shares the PR's concurrency group and can cancel the newer head's valid jobs
+# (#9971, 2026-09-18). `spot-kill-retry.sh` checks the live PR head immediately before rerun.
+# Deliberately NOT retried: `action_required`
 # (approval gates are a human's job).
 #
 # This paragraph used to end "and runs cancelled by anything other than the runner dying —
@@ -99,8 +100,9 @@
 # checkout — cloning the repo to make one API call is pure waste.
 #
 # WATCH LIST
-# Only the lanes that run on the spot pool and hurt when killed mid-flight: the PR services CI
-# and the two slow security lanes. Do NOT add auto-deploy here — it has its own reconcile tick.
+# The expensive services, security and dependency-submission lanes. A cancelled PR attempt is
+# retried only while it remains the live PR head; an old retry can cancel a newer attempt.
+# Do NOT add auto-deploy here — it has its own reconcile tick.
 name: Auto-retry spot-killed CI runs
 
 on:
@@ -268,14 +270,14 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          while IFS=$'\t' read -r run_id run_url conclusion; do
+          while IFS=$'\t' read -r run_id run_url conclusion run_event; do
             echo "::group::Classify ${run_url}"
-            if ! RUN_ID="${run_id}" RUN_URL="${run_url}" CONCLUSION="${conclusion}" \
+            if ! RUN_ID="${run_id}" RUN_URL="${run_url}" CONCLUSION="${conclusion}" RUN_EVENT="${run_event}" \
                  bash .github/scripts/spot-kill-retry.sh; then
               failed=1
             fi
             echo "::endgroup::"
-          done < <(jq -r '.[] | [.run_id, .run_url, .conclusion] | @tsv' <<< "${RETRY_CANDIDATES}")
+          done < <(jq -r '.[] | [.run_id, .run_url, .conclusion, .event] | @tsv' <<< "${RETRY_CANDIDATES}")
           exit "${failed}"
 
   # ── The alarm (issue #2901) ───────────────────────────────────────────────────

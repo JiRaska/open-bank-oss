@@ -53,11 +53,10 @@
 # puts a named human in the loop. Non-transient (a real permission answer) exits 1 immediately.
 #
 # WHAT THIS CANNOT DO
-# A human who cancels a run WHILE its jobs are running is indistinguishable from a spot reclaim
-# with the data GitHub exposes — both leave `cancelled` jobs carrying recorded steps — and is
-# still re-run once. That is the accepted waste #2330 priced, not an oversight. The only human
-# cancel this can rule out is the queue drain, where no cancelled job ever started a step
-# (#3208); the self-test proves that one is declined.
+# A human who cancels a CURRENT run WHILE its jobs are running is indistinguishable from a spot
+# reclaim with the data GitHub exposes — both leave `cancelled` jobs carrying recorded steps —
+# and is still re-run once. A superseded PR head is distinguishable using the live PR endpoint;
+# a queue drain is distinguishable because no cancelled job started a step (#3208).
 #
 # EXIT CODES
 #   0  a decision was reached and acted on (re-run issued, or correctly declined)
@@ -67,6 +66,7 @@
 #   GITHUB_REPOSITORY  owner/repo
 #   RUN_ID             the triggering run id
 #   CONCLUSION         its conclusion: `cancelled` or `failure`
+#   RUN_EVENT          event from the discovery API (`pull_request`, `push`, ...)
 #   RUN_URL            its html_url (for the human-readable notices)
 #   GITHUB_STEP_SUMMARY  optional; the `decide` table is appended here when set
 #   GH_BIN             optional; the `gh` executable (the self-test points it at a stub)
@@ -164,6 +164,52 @@ jobs_query() { # jobs_query <jq>
   gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" --jq "$1"
 }
 
+# A cancelled PR run can have executed steps because a newer push cancelled it, not because
+# spot capacity vanished. Re-running that OLD SHA uses the PR's concurrency group and can
+# cancel the NEW head's valid jobs. This happened on #9971: run 35296255139 (88cbf0b58) was
+# auto-rerun by 35297029298 and cancelled head a01b680e0's graph producer. Check the live PR
+# head immediately before issuing any rerun, not when candidates are discovered minutes earlier.
+# Return 10 for a stale/previously rerun PR (a completed decision), 1 for unreadable evidence.
+guarded_rerun() { # guarded_rerun [--failed]
+  local detail event run_sha current_sha pr_count pr_number pr_detail pr_state attempt
+  case "${RUN_EVENT:-}" in
+    pull_request|pull_request_target)
+      detail="$(with_retry "run metadata API" gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")" || return 1
+      event="$(jq -r '.event // ""' <<< "${detail}")" || return 1
+      run_sha="$(jq -r '.head_sha // ""' <<< "${detail}")" || return 1
+      pr_count="$(jq -r '(.pull_requests // []) | length' <<< "${detail}")" || return 1
+      pr_number="$(jq -r '(.pull_requests // [])[0].number // 0' <<< "${detail}")" || return 1
+      attempt="$(jq -r '.run_attempt // 0' <<< "${detail}")" || return 1
+      if [ "${event}" != "${RUN_EVENT}" ] || [ "${pr_count}" -ne 1 ] ||
+         [[ ! "${run_sha}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${pr_number}" =~ ^[1-9][0-9]*$ ]] ||
+         [[ ! "${attempt}" =~ ^[0-9]+$ ]]; then
+        echo "::error title=spot-kill auto-retry::Cannot establish the current PR head for ${RUN_URL:-${RUN_ID}}; refusing to rerun." >&2
+        decide pr-head-undetermined "the live run metadata did not establish exactly one current PR head"
+        return 1
+      fi
+      pr_detail="$(with_retry "PR head API" gh_ api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}")" || return 1
+      pr_state="$(jq -r '.state // ""' <<< "${pr_detail}")" || return 1
+      current_sha="$(jq -r '.head.sha // ""' <<< "${pr_detail}")" || return 1
+      if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ ]] || [ -z "${pr_state}" ]; then
+        echo "::error title=spot-kill auto-retry::Cannot read current head of PR #${pr_number}; refusing to rerun." >&2
+        decide pr-head-undetermined "the current PR endpoint had no valid head SHA"
+        return 1
+      fi
+      if [ "${pr_state}" != "open" ] || [ "${attempt}" -ne 1 ] || [ "${run_sha}" != "${current_sha}" ]; then
+        echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — run head ${run_sha} is not the current PR head ${current_sha}, or it was already retried."
+        decide skipped-stale-pr-head "the PR advanced or this run already has another attempt; an old rerun could cancel current CI"
+        return 10
+      fi
+      ;;
+    push|workflow_dispatch) ;;
+    *)
+      echo "::error title=spot-kill auto-retry::Unknown run event ${RUN_EVENT:-<empty>} for ${RUN_URL:-${RUN_ID}}; refusing to rerun." >&2
+      decide run-event-undetermined "the discovery API did not identify a supported run event"
+      return 1 ;;
+  esac
+  with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" "$@"
+}
+
 # ── THE TEXTUAL SIGNATURE (#9787) ────────────────────────────────────────────────────────────
 # The structural rule above models a reclaim as "the runner agent marked the step cancelled". That
 # is not what happens when the step's OWN process takes the SIGTERM and exits first: GitHub then
@@ -206,7 +252,7 @@ reclaimed_job_from_logs() {
 }
 
 main() {
-  : "${GITHUB_REPOSITORY:?}" "${RUN_ID:?}" "${CONCLUSION:?}"
+  : "${GITHUB_REPOSITORY:?}" "${RUN_ID:?}" "${CONCLUSION:?}" "${RUN_EVENT:?}"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     printf '%s\n' '| triggering conclusion | run | decision | detail |' '|---|---|---|---|' \
       >> "${GITHUB_STEP_SUMMARY}"
@@ -251,7 +297,10 @@ main() {
     fi
     echo "Re-running cancelled run ${RUN_URL:-${RUN_ID}} (${count} job(s) interrupted mid-flight; issue #2330)"
     # `--failed` is a no-op against `cancelled`, so this is always the full re-run.
-    with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" || return 1
+    local rerun_rc=0
+    guarded_rerun || rerun_rc=$?
+    [ "${rerun_rc}" -eq 10 ] && return 0
+    [ "${rerun_rc}" -eq 0 ] || return 1
     echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL:-${RUN_ID}} (attempt 2 of max 2; a second kill stays for a human)"
     decide rerun-cancelled "${count} job(s) interrupted mid-flight — full re-run issued (attempt 2 of max 2)"
     return 0
@@ -266,7 +315,10 @@ main() {
     reclaimed_id="$(reclaimed_job_from_logs || true)"
     if [ -n "${reclaimed_id}" ]; then
       echo "Re-running ${RUN_URL:-${RUN_ID}}: job ${reclaimed_id} has no cancelled step, but its log carries the reclaim signature and exit 143 (issue #9787)"
-      with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed || return 1
+      local rerun_rc=0
+      guarded_rerun --failed || rerun_rc=$?
+      [ "${rerun_rc}" -eq 10 ] && return 0
+      [ "${rerun_rc}" -eq 0 ] || return 1
       echo "::notice title=spot-kill auto-retry::Re-ran ${RUN_URL:-${RUN_ID}} — job ${reclaimed_id}'s own process took the SIGTERM and exited 143, so no step was marked cancelled (attempt 2 of max 2)."
       decide rerun-log-signature "job ${reclaimed_id} exited 143 after a runner shutdown signal — failed jobs re-run (attempt 2 of max 2)"
       return 0
@@ -276,7 +328,10 @@ main() {
     return 0
   fi
   echo "Re-running ${RUN_URL:-${RUN_ID}}: ${count} job(s) killed mid-step by a runner reclaim (issue #2841)"
-  with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed || return 1
+  local rerun_rc=0
+  guarded_rerun --failed || rerun_rc=$?
+  [ "${rerun_rc}" -eq 10 ] && return 0
+  [ "${rerun_rc}" -eq 0 ] || return 1
   echo "::notice title=spot-kill auto-retry::Re-ran ${count} spot-killed job(s) in ${RUN_URL:-${RUN_ID}} (attempt 2 of max 2; a second kill stays for a human)"
   decide rerun-partial "${count} job(s) carry the spot-kill signature — failed jobs re-run (attempt 2 of max 2)"
 }
@@ -306,6 +361,7 @@ line="$(sed -n "${n}p" "${STUB_SCRIPT}")"
 [ -n "${line}" ] || { echo "stub: no scripted answer for call ${n}: $*" >&2; exit 99; }
 out="${line#*|}"
 case "${out}" in
+  @raw:*) cat "${FIXTURE_DIR}/${out#@raw:}.json"; exit "${line%%|*}" ;;
   @*) prog="${!#}"          # the jq program is the last argument of `api ... --jq <prog>`
       jq -r "${prog}" "${FIXTURE_DIR}/${out#@}.json" || exit 1
       exit "${line%%|*}" ;;
@@ -333,6 +389,25 @@ FIX
  {"name":"build (a)","conclusion":"cancelled","steps":[]},
  {"name":"build (b)","conclusion":"cancelled","steps":[]},
  {"name":"build (c)","conclusion":"cancelled","steps":[]}]}
+FIX
+  # GitHub's run detail for an old PR run reports its original head_sha alongside the
+  # currently associated PR's head.sha. This is the exact #9971 shape from 2026-09-18.
+  cat > "${tmp}/stale-pr.json" <<'FIX'
+{"event":"pull_request","head_sha":"88cbf0b58930f4bce63b813d6093c8d0aa4f2085","run_attempt":1,
+ "pull_requests":[{"number":9971,"head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}]}
+FIX
+  cat > "${tmp}/current-pr.json" <<'FIX'
+{"event":"pull_request","head_sha":"a01b680e0be85051435023b0adc2cce8830d23e8","run_attempt":1,
+ "pull_requests":[{"number":9971,"head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}]}
+FIX
+  cat > "${tmp}/unknown-pr.json" <<'FIX'
+{"event":"pull_request","head_sha":"a01b680e0be85051435023b0adc2cce8830d23e8","run_attempt":1,"pull_requests":[]}
+FIX
+  cat > "${tmp}/stale-pr-head.json" <<'FIX'
+{"state":"open","head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}
+FIX
+  cat > "${tmp}/closed-pr-head.json" <<'FIX'
+{"state":"closed","head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}
 FIX
   # A PARTIAL reclaim: the run is `failure` because one job died mid-step while a sibling passed.
   cat > "${tmp}/partial-kill.json" <<'FIX'
@@ -369,7 +444,7 @@ FIX
   GH_RETRY_GH_BIN="${tmp}/gh"; export GH_RETRY_GH_BIN
   RETRY_ERROR_FILE="${tmp}/last-error"; GH_RETRY_LAST_ERROR_FILE="${RETRY_ERROR_FILE}"
   export GH_RETRY_LAST_ERROR_FILE
-  export GITHUB_REPOSITORY="owner/repo" RUN_ID=1 RUN_URL="http://x/1"
+  export GITHUB_REPOSITORY="owner/repo" RUN_ID=1 RUN_URL="http://x/1" RUN_EVENT=push
   unset GITHUB_STEP_SUMMARY || true
 
   local pass=0 fail=0 subjects=0
@@ -409,6 +484,15 @@ FIX
   # PROVE-NO-RETRY: a deliberate cancel of a QUEUE (no cancelled job ever started a step) is NOT
   # re-run. This is the only human cancel GitHub's data can distinguish; see the header.
   case_ "deliberate queue cancel is NOT re-run" cancelled 0 0 "0|@queue-cancel"
+
+  # An old PR run with a real cancelled step is NOT a spot retry candidate once its branch
+  # advances: the full rerun would cancel the newer run through the same concurrency group.
+  RUN_EVENT=pull_request
+  case_ "stale PR head cannot cancel current CI" cancelled 0 0 "0|@reclaim" "0|@raw:stale-pr" "0|@raw:stale-pr-head"
+  case_ "current PR head may retry a genuine reclaim" cancelled 0 1 "0|@reclaim" "0|@raw:current-pr" "0|@raw:stale-pr-head" "0|ok"
+  case_ "missing PR association never authorizes a rerun" cancelled 1 0 "0|@reclaim" "0|@raw:unknown-pr"
+  case_ "closed PR cannot be reanimated by a spot retry" cancelled 0 0 "0|@reclaim" "0|@raw:current-pr" "0|@raw:closed-pr-head"
+  RUN_EVENT=push
 
   # ── the #6255 regression, in both directions ───────────────────────────────────────────────
   case_ "rate-limited jobs query recovers and still re-runs" cancelled 0 1 "1|${RL}" "1|${RL}" "0|@reclaim" "0|ok"
