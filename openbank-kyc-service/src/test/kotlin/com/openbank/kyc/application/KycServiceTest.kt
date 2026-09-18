@@ -65,6 +65,7 @@ class KycServiceTest {
             CheckType.SANCTIONS_SCREENING,
         )
         assertThat(result.checks).allMatch { it.status == CheckStatus.PENDING }
+        assertThat(result.checks).allMatch { it.caseId == result.id }
         assertThat(result.expiresAt).isAfter(result.createdAt)
 
         coVerify { repo.save(match<KycCase> { it.partyId == partyId && it.checks.size == 4 }, any()) }

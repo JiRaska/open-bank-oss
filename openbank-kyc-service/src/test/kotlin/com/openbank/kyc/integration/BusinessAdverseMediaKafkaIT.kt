@@ -96,6 +96,7 @@ class BusinessAdverseMediaKafkaIT {
                     assertThat(rows.getLong("events")).isEqualTo(1)
                     val check = objectMapper.readTree(rows.getString("checks_json"))
                         .single { it.path("checkType").asText() == "ADVERSE_MEDIA" }
+                    assertThat(check.path("caseId").asText()).isEqualTo(caseId.toString())
                     assertThat(check.path("status").asText()).isEqualTo("MANUAL_REVIEW")
                     assertThat(check.path("result").asText()).isEqualTo("SOURCE_NOT_CONFIGURED")
                     assertThat(check.path("provider").isNull).isTrue()

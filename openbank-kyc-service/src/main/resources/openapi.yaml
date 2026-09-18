@@ -5,7 +5,7 @@ info:
   title: KYC Service API
   # 1.9.0 -> 1.10.0 (#9038): additive — the list operation declares the 400 it already answers
   # for an unparseable ?status= filter.
-  version: 1.11.0
+  version: 1.11.1
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
