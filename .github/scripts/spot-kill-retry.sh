@@ -266,7 +266,18 @@ main() {
     #
     # ONE-DIRECTIONAL on purpose: this rules a reclaim OUT, it never claims one happened. See
     # the WHAT THIS CANNOT DO note in the header.
-    q='[.jobs[] | select(.conclusion == "cancelled") | select((.steps | length) > 0)] | length'
+    # Dependency submission has a 30-minute job limit. Its cancelled resolver at
+    # that limit is a timeout, not a spot reclaim; retrying it repeats the same
+    # work. A shorter cancellation (or any other job) still takes the ordinary
+    # reclaim path. Missing timestamps make this query fail closed instead of
+    # authorizing an unclassified rerun.
+    q='{running: ([.jobs[] | select(.conclusion == "cancelled")
+                    | select((.steps | length) > 0)] | length),
+        timed_out: ([.jobs[] | select(.conclusion == "cancelled")
+                    | select(.name == "Submit fleet dependency graph")
+                    | select((.steps | length) > 0)
+                    | select((.completed_at | fromdateiso8601) -
+                             (.started_at | fromdateiso8601) >= 1800)] | length)}'
   else
     # conclusion == failure: retry ONLY on the partial-spot-kill signature — a failed job with a
     # cancelled step and no failed step (issue #2841).
@@ -290,6 +301,22 @@ main() {
   fi
 
   if [ "${CONCLUSION}" = "cancelled" ]; then
+    local timed_out
+    timed_out="$(jq -er '.timed_out | numbers' <<< "${count}")" || {
+      echo "::error title=spot-kill auto-retry::Malformed cancelled-job classification; refusing to rerun."
+      decide jobs-unreadable "the jobs API returned an invalid cancelled-job classification"
+      return 1
+    }
+    count="$(jq -er '.running | numbers' <<< "${count}")" || {
+      echo "::error title=spot-kill auto-retry::Malformed cancelled-job count; refusing to rerun."
+      decide jobs-unreadable "the jobs API returned an invalid cancelled-job count"
+      return 1
+    }
+    if [ "${timed_out}" -gt 0 ]; then
+      echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — dependency graph resolver reached its 30-minute job limit; a full rerun would repeat the timeout."
+      decide skipped-job-timeout "dependency-submission resolver reached its configured job limit"
+      return 0
+    fi
     if [ "${count}" -eq 0 ]; then
       echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — no cancelled job had started a step, so no runner was reclaimed. Treating it as a deliberate cancel (#3208)."
       decide skipped-queue-cancel "0 cancelled jobs had started a step — deliberate cancel, not a reclaim (#3208)"
@@ -390,6 +417,20 @@ FIX
  {"name":"build (b)","conclusion":"cancelled","steps":[]},
  {"name":"build (c)","conclusion":"cancelled","steps":[]}]}
 FIX
+  # A cancelled step after the configured job limit is not evidence of a spot
+  # reclaim. A short cancellation still may be a reclaim.
+  cat > "${tmp}/dependency-timeout.json" <<'FIX'
+{"jobs":[{"name":"Submit fleet dependency graph","conclusion":"cancelled",
+ "started_at":"2026-09-18T10:40:18Z","completed_at":"2026-09-18T11:10:35Z",
+ "steps":[{"name":"Set up job","conclusion":"success"},
+          {"name":"Resolve fleet dependency graph","conclusion":"cancelled"}]}]}
+FIX
+  cat > "${tmp}/dependency-reclaim.json" <<'FIX'
+{"jobs":[{"name":"Submit fleet dependency graph","conclusion":"cancelled",
+ "started_at":"2026-09-18T10:40:18Z","completed_at":"2026-09-18T10:48:35Z",
+ "steps":[{"name":"Set up job","conclusion":"success"},
+          {"name":"Resolve fleet dependency graph","conclusion":"cancelled"}]}]}
+FIX
   # GitHub's run detail for an old PR run reports its original head_sha alongside the
   # currently associated PR's head.sha. This is the exact #9971 shape from 2026-09-18.
   cat > "${tmp}/stale-pr.json" <<'FIX'
@@ -484,6 +525,8 @@ FIX
   # PROVE-NO-RETRY: a deliberate cancel of a QUEUE (no cancelled job ever started a step) is NOT
   # re-run. This is the only human cancel GitHub's data can distinguish; see the header.
   case_ "deliberate queue cancel is NOT re-run" cancelled 0 0 "0|@queue-cancel"
+  case_ "dependency-submission job timeout is NOT a spot reclaim" cancelled 0 0 "0|@dependency-timeout"
+  case_ "short dependency-submission reclaim remains retryable" cancelled 0 1 "0|@dependency-reclaim" "0|ok"
 
   # An old PR run with a real cancelled step is NOT a spot retry candidate once its branch
   # advances: the full rerun would cancel the newer run through the same concurrency group.
