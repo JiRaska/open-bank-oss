@@ -13,10 +13,13 @@
 # conclusions, so the rerun is always the full one.
 #
 # WHAT THIS DOES
-# One five-minute reconciliation run reads completed runs from each watched workflow with one
-# paginated query per workflow, then re-runs qualifying spot kills automatically. The 30-minute
-# lookback tolerates delayed schedules and overlaps intentionally; `run_attempt == 1` and the
-# flake ledger marker make repeated scans idempotent. Before #9645, `workflow_run: completed`
+# One five-minute reconciliation run reads a fixed creation window from each watched workflow
+# with one paginated query per workflow, selects recent completions locally, then re-runs
+# qualifying spot kills automatically. An hourly deep
+# scan also reads runs CREATED up to 24 hours ago, because GitHub's `created` query cannot filter
+# by completion time: a long matrix run can finish now after starting hours ago (#10262). The
+# deep scan retains a three-hour completion overlap; `run_attempt == 1` and the flake ledger marker
+# make repeated scans idempotent. Before #9645, `workflow_run: completed`
 # created a new Actions run for every watched completion, including ordinary successes whose
 # jobs were all skipped. A PR burst exhausted the installation's 5,000-call API quota and made
 # unrelated security gates fail with rate-limit 403s.
@@ -108,7 +111,14 @@ name: Auto-retry spot-killed CI runs
 on:
   schedule:
     - cron: "*/5 * * * *"
+    - cron: "7 * * * *" # bounded catch-up for long-running workflows
   workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: "Reconciliation query window"
+        type: choice
+        options: [short, deep]
+        default: short
 
 concurrency:
   group: ci-reconcile
@@ -140,29 +150,74 @@ jobs:
       # the #6255 lesson never reached: 8 of the last 13 failures of this workflow (2026-09-12/13)
       # were `API rate limit exceeded for installation` (HTTP 403) on its first request, so the
       # tick found no candidates and raised the retry-failure issue with nothing to retry.
-      # The wait is capped short on purpose: the 30-minute lookback spans six ticks, so a tick that
-      # still loses to the limit is re-covered by the next one rather than waited out here.
+      # The wait is capped short on purpose: the frequent 30-minute scan overlaps six ticks,
+      # and the hourly deep scan overlaps three hours of completions. A quota-limited tick can
+      # be re-covered without leaving a runner asleep for the whole installation reset window.
       - name: Read recent completions from the three watched workflows
+        id: read-runs
         env:
           GH_TOKEN: ${{ github.token }}
           GH_RETRY_MAX_WAIT_SECONDS: "120"
+          RECONCILE_SCHEDULE: ${{ github.event.schedule }}
+          RECONCILE_DISPATCH_MODE: ${{ inputs.scan_mode }}
         run: |
           set -euo pipefail
           source .github/scripts/gh-retry.sh
-          cutoff=$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          started_at=$(date +%s)
+          mode=short
+          if [[ "$RECONCILE_SCHEDULE" == '7 * * * *' || "$RECONCILE_DISPATCH_MODE" == deep ]]; then
+            mode=deep
+          fi
+          plan=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
+            --query-mode "$mode" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+          created_query=$(jq -r '.created_query' <<< "$plan")
+          lookback=$(jq -r '.updated_lookback_minutes' <<< "$plan")
+          echo "mode=$mode created_range=$created_query updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
+          fetch_pages() {
+            local workflow="$1" created_query="$2" output="$3"
+            local page=1 total expected dir
+            local -a page_files=()
+            dir=$(mktemp -d)
+            # Fixed creation bounds make pagination stable; completion is filtered locally.
+            # The API's 1,000-result search ceiling permits at most 10 pages of 100. Refuse
+            # the ceiling before fetching page 2, rather than trusting --paginate to stop.
+            gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+              -f per_page=100 -f page=1 -f "created=${created_query}" > "$dir/1.json"
+            total=$(jq -er '.total_count | select(type == "number" and . >= 0)' "$dir/1.json")
+            if (( total >= 1000 )); then
+              echo "::error::${workflow} created-range search reached the 1,000-result ceiling" >&2
+              return 2
+            fi
+            expected=$(( (total + 99) / 100 ))
+            (( expected >= 1 )) || expected=1
+            page_files+=("$dir/1.json")
+            for (( page=2; page<=expected; page++ )); do
+              gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+                -f per_page=100 -f "page=${page}" -f "created=${created_query}" > "$dir/${page}.json"
+              page_files+=("$dir/${page}.json")
+            done
+            jq -s '.' "${page_files[@]}" > "$output"
+            echo "workflow=$workflow runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"
+            rm -rf "$dir"
+          }
           for workflow in services-ci.yml security.yml dependency-submission.yml; do
-            gh_retry 3 -- gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
-              -f status=completed -f per_page=100 -f "created=>=${cutoff}" --paginate --slurp \
-              | jq 'map(.workflow_runs) | add' > "${RUNNER_TEMP}/${workflow}.json"
+            gh_retry 3 -- fetch_pages "$workflow" "$created_query" "${RUNNER_TEMP}/${workflow}.pages.json"
+            # The API caps a filtered search at 1,000 runs. An incomplete page set cannot be
+            # treated as "no spot kills"; fail visibly rather than silently drop candidates.
+            python3 .github/scripts/select-ci-reconcile-candidates.py \
+              --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
+              > "${RUNNER_TEMP}/${workflow}.json"
           done
           jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
+          echo "query_elapsed_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_STEP_SUMMARY"
+          echo "lookback=$lookback" >> "$GITHUB_OUTPUT"
       - name: Select bounded, deduplicated candidates
         id: select
         run: |
           set -euo pipefail
           candidates=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
             --runs-file "${RUNNER_TEMP}/runs.json" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --lookback-minutes 30)
+            --lookback-minutes "${{ steps.read-runs.outputs.lookback }}")
           echo "retry=$(jq -c '.retry' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
           echo "flakes=$(jq -c '.flakes' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
 

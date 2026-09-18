@@ -2338,7 +2338,7 @@ gates:
       bash .github/scripts/spot-kill-retry.sh --self-test
 
   - id: ci-reconcile-selector-selftest
-    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    name: "CI reconciler verifies bounded queries and recent retry/flake candidates (issues #9645, #10262, enforced)"
     group: registry
     mode: enforced
     selftest_exempt: >-
@@ -2347,7 +2347,7 @@ gates:
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
-    min_subjects: 3
+    min_subjects: 16
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
 
