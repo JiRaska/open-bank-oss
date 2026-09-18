@@ -92,6 +92,39 @@ class FraudInvestigationCaseResource(
         return Response.ok(result.toEvidence()).header("Cache-Control", "no-store").build()
     }
 
+    @POST
+    @Path("/{caseId}/match-assigned")
+    @RolesAllowed("ROLE_CONTEXT_INVESTIGATION")
+    @Operation(summary = "Find source-equal open cases within an already assigned candidate set")
+    suspend fun matchAssigned(
+        @PathParam("caseId") caseId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("X-Investigator-Authorization") investigatorAuthorization: String?,
+    ): Response {
+        require(purpose == PURPOSE) { "FRAUD_INVESTIGATION is required" }
+        if (identity.principal.name != CONTEXT_SERVICE_PRINCIPAL) {
+            return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        }
+        val accessFailure = checkCaseAccess(caseId, investigatorAuthorization)
+        if (accessFailure != null) return accessFailure
+        val root = cases.find(caseId) ?: return Response.status(Response.Status.NOT_FOUND)
+            .header("Cache-Control", "no-store").build()
+        if (root.status != FraudInvestigationStatus.OPEN) {
+            return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        }
+        val candidates = contextAccess.assignedCandidates(caseId, requireNotNull(investigatorAuthorization))
+            ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        val matches = cases.matchingAssigned(caseId, candidates.ids)
+        return Response.ok(
+            FraudAssignedMatchResponse(
+                matches.take(MAX_MATCHES),
+                candidates.ids.size,
+                candidates.truncated || matches.size > MAX_MATCHES,
+            ),
+        )
+            .header("Cache-Control", "no-store").build()
+    }
+
     private suspend fun checkCaseAccess(caseId: UUID, authorization: String?): Response? {
         val bearer = authorization?.takeIf { it.startsWith("Bearer ") && it.length > "Bearer ".length }
             ?: return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
@@ -126,10 +159,18 @@ class FraudInvestigationCaseResource(
 
     private companion object {
         const val PURPOSE = "FRAUD_INVESTIGATION"
+        const val CONTEXT_SERVICE_PRINCIPAL = "service-account-openbank-context-investigation"
+        const val MAX_MATCHES = 4
     }
 }
 
 data class OpenFraudInvestigationRequest(val scoreId: UUID?)
+
+data class FraudAssignedMatchResponse(
+    val candidateIds: List<UUID>,
+    val inspectedCandidates: Int,
+    val truncated: Boolean,
+)
 
 /** No account, counterparty, score amount, rule reasons or analyst identity leaves this endpoint. */
 data class FraudInvestigationCaseResponse(

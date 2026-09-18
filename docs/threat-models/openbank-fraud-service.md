@@ -332,3 +332,18 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   are leads only. The Context URL is a required secret-backed HTTPS endpoint with
   managed certificate trust; missing URL or trust material blocks readiness rather
   than falling back to HTTP.
+
+- **2026-09-18** — The candidate matcher is a separate source read restricted to a
+  dedicated Context service principal and the human investigator's bearer. A human
+  administrator or the shared machine principal cannot invoke it. Fraud checks the
+  root's current Context assignment, then obtains the candidate set directly from
+  Context's root-scoped endpoint under the human bearer before running equality;
+  the caller cannot submit case IDs. That Context endpoint exposes only case IDs
+  already assigned to the same investigator and purpose; evidence remains separately
+  policy-gated. Context independently authorizes and audits
+  each returned match before exposing source evidence. The source query is bounded
+  to 256 assigned case IDs and five results (four displayed plus truncation), with
+  no account, counterparty, score or reason in its response. Missing credential,
+  denied assignment, malformed candidate set or Context outage fails closed.
+  Rollback: leave the four-case pilot active and disable the dedicated matcher;
+  retain source cases and their minimal reference history.

@@ -37,7 +37,7 @@ class FraudEvidenceApiContractTest {
     fun `restricted evidence route declares source associations and fail closed responses`() {
         val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
         val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/evidence:")
-            .substringBefore("/api/v1/fraud/cases/{caseId}/close-without-finding:")
+            .substringBefore("/api/v1/fraud/cases/{caseId}/match-assigned:")
         assertThat(operation).contains(
             "getFraudInvestigationEvidence",
             "InvestigationPurpose",
@@ -46,5 +46,26 @@ class FraudEvidenceApiContractTest {
             "'503'",
         )
         assertThat(contract).contains("accountId:", "counterpartyId:")
+    }
+
+    @Test
+    fun `source matching fetches assigned IDs independently and returns IDs only`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+        val operation = contract.substringAfter("/api/v1/fraud/cases/{caseId}/match-assigned:")
+            .substringBefore("/api/v1/fraud/cases/{caseId}/close-without-finding:")
+        assertThat(operation).contains(
+            "matchAssignedFraudCases",
+            "the caller cannot choose candidate IDs",
+            "FraudAssignedMatchResponse",
+            "InvestigationPurpose",
+            "InvestigatorAuthorization",
+            "'403'",
+            "'503'",
+        )
+        assertThat(operation).doesNotContain("requestBody:")
+        val response = contract.substringAfter("    FraudAssignedMatchResponse:")
+            .substringBefore("    FraudInvestigationCase:")
+        assertThat(response).contains("candidateIds", "maxItems: 4", "inspectedCandidates", "truncated")
+            .doesNotContain("accountId", "counterpartyId", "scoreId")
     }
 }

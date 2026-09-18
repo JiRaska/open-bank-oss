@@ -4,6 +4,7 @@
 
 package com.openbank.fraud.integration
 
+import com.openbank.fraud.application.port.out.FraudAssignedCandidates
 import com.openbank.fraud.application.port.out.FraudCaseAccessDecision
 import com.openbank.fraud.infrastructure.client.FraudCaseContextAccessAdapter
 import com.openbank.fraud.it.PostgresRedisTestResource
@@ -28,10 +29,13 @@ import java.util.concurrent.TimeUnit
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class FraudInvestigationCaseIT {
+    private lateinit var access: FraudCaseContextAccessAdapter
+
     @BeforeEach
     fun contextCaseAccess() {
-        val access = mockk<FraudCaseContextAccessAdapter>()
+        access = mockk()
         coEvery { access.check(any(), BEARER) } returns FraudCaseAccessDecision.ALLOWED
+        coEvery { access.assignedCandidates(any(), BEARER) } returns FraudAssignedCandidates(emptyList(), false)
         QuarkusMock.installMockForType(access, FraudCaseContextAccessAdapter::class.java)
     }
 
@@ -87,6 +91,61 @@ class FraudInvestigationCaseIT {
             .get("/api/v1/fraud/cases/$caseId").then().statusCode(200)
             .header("Cache-Control", "no-store")
             .body("status", equalTo("CLOSED_NO_FINDING"))
+    }
+
+    @Test
+    @TestSecurity(user = "fraud-admin", roles = ["ROLE_ADMIN"])
+    fun `human administrator cannot invoke service-only matching even with guessed case IDs`() {
+        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+            .header("X-Investigator-Authorization", BEARER)
+            .body(mapOf("candidateIds" to listOf(UUID.randomUUID())))
+            .post("/api/v1/fraud/cases/${UUID.randomUUID()}/match-assigned").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_CONTEXT_INVESTIGATION"])
+    fun `a shared service principal cannot masquerade as Context`() {
+        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+            .header("X-Investigator-Authorization", BEARER)
+            .body(mapOf("candidateIds" to listOf(UUID.randomUUID())))
+            .post("/api/v1/fraud/cases/${UUID.randomUUID()}/match-assigned").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "service-account-openbank-context-investigation",
+        roles = ["ROLE_CONTEXT_INVESTIGATION"],
+    )
+    fun `dedicated Context identity matches only supplied open same-role cases`() {
+        val account = UUID.randomUUID()
+        val counterparty = UUID.randomUUID()
+        val root = seedCase(account, counterparty)
+        val accountMatch = seedCase(account, UUID.randomUUID())
+        val counterpartyMatch = seedCase(UUID.randomUUID(), counterparty)
+        val crossed = seedCase(counterparty, account)
+        val notSupplied = seedCase(account, null)
+        val candidates = listOf(crossed, counterpartyMatch, accountMatch)
+        coEvery { access.assignedCandidates(root, BEARER) } returns FraudAssignedCandidates(candidates, false)
+
+        val response = given().contentType("application/json")
+            .header("X-Investigation-Purpose", PURPOSE)
+            .header("X-Investigator-Authorization", BEARER)
+            .post("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(200)
+            .header("Cache-Control", "no-store").extract().response()
+        assertThat(response.jsonPath().getList<String>("candidateIds"))
+            .containsExactlyInAnyOrder(accountMatch.toString(), counterpartyMatch.toString())
+        assertThat(response.jsonPath().getBoolean("truncated")).isFalse()
+        assertThat(response.body.asString())
+            .doesNotContain(account.toString(), counterparty.toString(), crossed.toString(), notSupplied.toString())
+
+        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+            .header("X-Investigator-Authorization", BEARER)
+            .body(mapOf("candidateIds" to listOf(notSupplied)))
+            .post("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(200)
+            .body("candidateIds.size()", equalTo(2))
+
+        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+            .post("/api/v1/fraud/cases/$root/match-assigned").then().statusCode(403)
     }
 
     @Test
@@ -239,6 +298,26 @@ class FraudInvestigationCaseIT {
                 stmt.executeUpdate()
             }
         }
+    }
+
+    private fun seedCase(accountId: UUID, counterpartyId: UUID?): UUID {
+        val scoreId = UUID.randomUUID()
+        val caseId = UUID.randomUUID()
+        seedScore(scoreId, "REVIEW", accountId, counterpartyId)
+        connection().use { connection ->
+            connection.prepareStatement(
+                """INSERT INTO fraud_investigation_cases
+                   (case_id, score_id, account_id, counterparty_id, status, revision, opened_by, opened_at)
+                   VALUES (?, ?, ?, ?, 'OPEN', 1, 'case-seed', now())""",
+            ).use { statement ->
+                statement.setObject(1, caseId)
+                statement.setObject(2, scoreId)
+                statement.setObject(3, accountId)
+                statement.setObject(4, counterpartyId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        return caseId
     }
 
     private fun caseCount(scoreId: UUID): Int = connection().use { connection ->

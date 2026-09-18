@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.fraud.infrastructure.client
 
+import com.openbank.fraud.application.port.out.FraudAssignedCandidates
 import com.openbank.fraud.application.port.out.FraudCaseAccessDecision
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -37,5 +38,22 @@ class FraudCaseContextAccessAdapterTest {
 
         coEvery { client.check(any(), any(), any(), any()) } throws IllegalStateException("Context unavailable")
         assertThat(adapter.check(id, bearer)).isEqualTo(FraudCaseAccessDecision.UNAVAILABLE)
+    }
+
+    @Test
+    fun `candidate set is fetched from Context under human bearer and invalid sets fail closed`(): Unit = runBlocking {
+        val assigned = UUID.randomUUID()
+        coEvery { client.assignedCandidates(any(), any(), any(), any()) } returns
+            FraudAssignedCandidates(listOf(assigned), false)
+        assertThat(adapter.assignedCandidates(id, bearer)?.ids).containsExactly(assigned)
+        coVerify(exactly = 1) { client.assignedCandidates(id, bearer, id.toString(), "FRAUD_INVESTIGATION") }
+
+        coEvery { client.assignedCandidates(any(), any(), any(), any()) } returns
+            FraudAssignedCandidates(listOf(id), false)
+        assertThat(adapter.assignedCandidates(id, bearer)).isNull()
+
+        coEvery { client.assignedCandidates(any(), any(), any(), any()) } throws
+            IllegalStateException("Context unavailable")
+        assertThat(adapter.assignedCandidates(id, bearer)).isNull()
     }
 }

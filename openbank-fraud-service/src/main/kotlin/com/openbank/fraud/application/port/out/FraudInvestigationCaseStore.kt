@@ -10,6 +10,9 @@ import java.util.UUID
 interface FraudInvestigationCaseStore {
     suspend fun find(caseId: UUID): FraudInvestigationCase?
 
+    /** Source-side equality search restricted to case IDs already assigned by Context. */
+    suspend fun matchingAssigned(caseId: UUID, candidateIds: List<UUID>): List<UUID>
+
     suspend fun open(scoreId: UUID, actorId: String): FraudInvestigationCase?
 
     suspend fun closeWithoutFinding(caseId: UUID, actorId: String): FraudInvestigationCase?

@@ -81,6 +81,36 @@ class FraudInvestigationCaseRepository(
         Panache.getSession().flatMap { it.find(FraudInvestigationCaseEntity::class.java, caseId) }
     }.awaitSuspending()?.toDomain()
 
+    override suspend fun matchingAssigned(caseId: UUID, candidateIds: List<UUID>): List<UUID> {
+        if (candidateIds.isEmpty()) return emptyList()
+        return Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.find(FraudInvestigationCaseEntity::class.java, caseId).flatMap { root ->
+                    if (root == null || root.status != FraudInvestigationStatus.OPEN.name) {
+                        Uni.createFrom().item(emptyList())
+                    } else {
+                        val query = if (root.counterpartyId == null) {
+                            """select c.caseId from FraudInvestigationCaseEntity c
+                               where c.caseId in :candidates and c.status = :open
+                                 and c.accountId = :account order by c.caseId"""
+                        } else {
+                            """select c.caseId from FraudInvestigationCaseEntity c
+                               where c.caseId in :candidates and c.status = :open
+                                 and (c.accountId = :account or c.counterpartyId = :counterparty)
+                               order by c.caseId"""
+                        }
+                        val matches = session.createQuery(query, UUID::class.java)
+                            .setParameter("candidates", candidateIds)
+                            .setParameter("open", FraudInvestigationStatus.OPEN.name)
+                            .setParameter("account", root.accountId)
+                        if (root.counterpartyId != null) matches.setParameter("counterparty", root.counterpartyId)
+                        matches.setMaxResults(MAX_MATCHES + 1).resultList
+                    }
+                }
+            }
+        }.awaitSuspending()
+    }
+
     override suspend fun open(scoreId: UUID, actorId: String): FraudInvestigationCase? {
         require(actorId.isNotBlank()) { "opening actor is required" }
         val now = Instant.now(clock)
@@ -186,6 +216,10 @@ class FraudInvestigationCaseRepository(
             payload = payload,
             createdAt = occurredAt,
         )
+    }
+
+    private companion object {
+        const val MAX_MATCHES = 4
     }
 }
 

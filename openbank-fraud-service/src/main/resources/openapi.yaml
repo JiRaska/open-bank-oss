@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -92,6 +92,35 @@ paths:
         '403': { description: Role, policy, assignment or current open-case check denied }
         '404': { description: Case not found after authorization }
         '503': { description: Context assignment or policy check unavailable }
+  /api/v1/fraud/cases/{caseId}/match-assigned:
+    post:
+      tags: [Fraud]
+      operationId: matchAssignedFraudCases
+      summary: Match only already assigned open cases by source-owned account or counterparty equality
+      description: >-
+        Requires the dedicated Context service-account token in Authorization and the human
+        investigator bearer in X-Investigator-Authorization. The root requires live case-scoped
+        authorization. Fraud fetches the bounded assigned candidate set directly from Context;
+        the caller cannot choose candidate IDs. Each returned candidate must be independently
+        authorized before disclosure. The response
+        contains no account or counterparty identifiers.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/InvestigationPurpose'
+        - $ref: '#/components/parameters/InvestigatorAuthorization'
+      responses:
+        '200':
+          description: At most four matching case IDs, with a source-side truncation flag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudAssignedMatchResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role, policy, root assignment or current open-case check denied }
+        '404': { description: Root case not found after authorization }
+        '503': { description: Context assignment or policy check unavailable }
   /api/v1/fraud/cases/{caseId}/close-without-finding:
     post:
       tags: [Fraud]
@@ -169,6 +198,12 @@ components:
       in: header
       required: true
       schema: { type: string, enum: [FRAUD_INVESTIGATION] }
+    InvestigatorAuthorization:
+      name: X-Investigator-Authorization
+      in: header
+      required: true
+      description: Human bearer independently checked against the assigned root case.
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -211,6 +246,17 @@ components:
       required: [scoreId]
       properties:
         scoreId: { type: string, format: uuid }
+    FraudAssignedMatchResponse:
+      type: object
+      required: [candidateIds, inspectedCandidates, truncated]
+      properties:
+        candidateIds:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        inspectedCandidates: { type: integer, minimum: 0, maximum: 256 }
+        truncated: { type: boolean }
     FraudInvestigationCase:
       type: object
       required: [caseId, scoreId, status, revision, openedAt]
