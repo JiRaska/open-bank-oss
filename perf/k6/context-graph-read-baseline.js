@@ -6,6 +6,8 @@
 // stack with a synthetic assigned investigation and a populated projection. The response includes
 // policy and audit work; a rejected request or empty fixture is not a graph performance sample.
 // Never put tokens or case/root identifiers in k6 tags, output or a committed report.
+// For a reversal fixture, set CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID to require both
+// the source-backed reversal edge and a posted reversal journal in every successful sample.
 import http from "k6/http";
 import { check, fail } from "k6";
 import { Trend } from "k6/metrics";
@@ -67,6 +69,10 @@ export function setup() {
       fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
     }
   }
+  if (lens === "complaint" && __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID &&
+      !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID)) {
+    fail("Complaint reversal fixture requires a synthetic reversal booking UUID");
+  }
 }
 
 export default function () {
@@ -111,9 +117,16 @@ export default function () {
     "graph fixture contains source evidence": () => {
       if (body === null) return false;
       if (lens === "complaint") {
-        return Array.isArray(body.nodes) && body.nodes.length > 0 && body.nodes.length <= 100 &&
-          Array.isArray(body.edges) && body.edges.length > 0 && body.edges.length <= 200 &&
-          typeof body.truncated === "boolean";
+        const reversal = __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID;
+        const reversalKey = `booking-transaction:${reversal}`;
+        const nodesBounded = Array.isArray(body.nodes) && body.nodes.length > 0 && body.nodes.length <= 100;
+        const edgesBounded = Array.isArray(body.edges) && body.edges.length > 0 && body.edges.length <= 200;
+        const reversalEvidence = !reversal || (nodesBounded && edgesBounded &&
+          body.nodes.some((node) => node.key === reversalKey) &&
+          body.edges.some((edge) => edge.to === reversalKey && edge.relation === "REVERSED_BY") &&
+          body.edges.some((edge) => edge.from === reversalKey && edge.relation === "BOOKED_AS")
+        );
+        return nodesBounded && edgesBounded && typeof body.truncated === "boolean" && reversalEvidence;
       }
       if (lens === "incident") {
         return body.projectionStatus === "AVAILABLE" && Number.isInteger(body.total) && body.total > 0;

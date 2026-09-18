@@ -297,6 +297,7 @@ class ContextGraphRepository(
     @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextGraphPort {
+    @Suppress("LongMethod") // Every evidence hop has its own remaining-edge bound.
     override suspend fun neighborhood(
         namespace: ContextNamespace,
         root: String,
@@ -314,31 +315,48 @@ class ContextGraphRepository(
         } else {
             emptyList()
         }
-        val ledgerEvidence = if (firstHop.size + paymentEvidence.size <= maxEdges) {
-            val bookingTransactionKeys = paymentEvidence.filter {
-                it.relationType == BOOKING_REQUESTED
-            }.map(ContextEdgeEntity::toKey)
-            findComplaintLedgerEvidenceEdges(
+        val bookingTransactionKeys = paymentEvidence.filter {
+            it.relationType == BOOKING_REQUESTED
+        }.map(ContextEdgeEntity::toKey)
+        val reversalEvidence = if (firstHop.size + paymentEvidence.size <= maxEdges) {
+            findComplaintBookingEvidenceEdges(
                 bookingTransactionKeys,
+                TRANSACTION_SOURCE,
+                BOOKING_TRANSACTION_PREFIX,
+                REVERSED_BY,
                 asOf,
                 maxEdges - firstHop.size - paymentEvidence.size + 1,
             )
         } else {
             emptyList()
         }
-        val clearingEvidence = if (firstHop.size + paymentEvidence.size + ledgerEvidence.size <= maxEdges) {
+        val ledgerEvidence = if (firstHop.size + paymentEvidence.size + reversalEvidence.size <= maxEdges) {
+            findComplaintBookingEvidenceEdges(
+                bookingTransactionKeys + reversalEvidence.map(ContextEdgeEntity::toKey),
+                LEDGER_SOURCE,
+                LEDGER_BOOKING_PREFIX,
+                BOOKED_AS,
+                asOf,
+                maxEdges - firstHop.size - paymentEvidence.size - reversalEvidence.size + 1,
+            )
+        } else {
+            emptyList()
+        }
+        val clearingEvidence = if (
+            firstHop.size + paymentEvidence.size + reversalEvidence.size + ledgerEvidence.size <= maxEdges
+        ) {
             val clearingItemKeys = paymentEvidence.filter {
                 it.relationType == SUBMITTED_TO && it.sourceSystem == CLEARING_SOURCE
             }.map(ContextEdgeEntity::toKey)
             findComplaintClearingEvidenceEdges(
                 clearingItemKeys,
                 asOf,
-                maxEdges - firstHop.size - paymentEvidence.size - ledgerEvidence.size + 1,
+                maxEdges - firstHop.size - paymentEvidence.size - reversalEvidence.size - ledgerEvidence.size + 1,
             )
         } else {
             emptyList()
         }
-        val edges = firstHop + paymentEvidence + ledgerEvidence + clearingEvidence
+        val edges = firstHop + paymentEvidence + reversalEvidence + ledgerEvidence + clearingEvidence
         val boundedEdges = edges.take(maxEdges)
         val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
         val nodes = findNodes(namespace, keys, asOf)
@@ -420,8 +438,11 @@ class ContextGraphRepository(
         }.bounded().awaitSuspending()
     }
 
-    private suspend fun findComplaintLedgerEvidenceEdges(
+    private suspend fun findComplaintBookingEvidenceEdges(
         bookingTransactionKeys: List<String>,
+        source: String,
+        toPrefix: String,
+        relation: String,
         asOf: Instant,
         limit: Int,
     ): List<ContextEdgeEntity> {
@@ -434,8 +455,8 @@ class ContextGraphRepository(
                     "(validTo is null or validTo > :asOf) order by validFrom asc",
                 ContextEdgeEntity::class.java,
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("source", LEDGER_SOURCE).setParameter("keys", bookingTransactionKeys)
-                .setParameter("bookingPrefix", LEDGER_BOOKING_PREFIX).setParameter("relation", BOOKED_AS)
+                .setParameter("source", source).setParameter("keys", bookingTransactionKeys)
+                .setParameter("bookingPrefix", toPrefix).setParameter("relation", relation)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
         }.bounded().awaitSuspending()
     }
