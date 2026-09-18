@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+name: Solo review admission
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR whose completed review evidence should be verified
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: solo-admission-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOLO_REVIEW_POLICY_SHA: ${{ vars.SOLO_REVIEW_POLICY_SHA }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+      # Never select fetch_event_pr's checked-out candidate diff fast path.
+      PR_DIFF_BASE: ''
+    steps:
+      - name: Require trusted workflow and immutable controller
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          test "$DEFAULT_BRANCH" = main
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$SOLO_REVIEW_POLICY_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ vars.SOLO_REVIEW_POLICY_SHA }}
+          persist-credentials: false
+      - name: Verify checked-out controller
+        run: test "$(git rev-parse HEAD)" = "$SOLO_REVIEW_POLICY_SHA"
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+      - name: Independently verify and publish the subject result
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          state=failure
+          if python3 .github/scripts/check-agent-pr-guard.py --trusted-controller --pr "$PR_NUMBER"; then
+            state=success
+          fi
+          current=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
+          test "$current" = "$head" || state=failure
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$head" \
+            -f state="$state" -f context=solo-review/admission \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            -f description='Owner-anchored protected-change review verification' >/dev/null
+          test "$state" = success

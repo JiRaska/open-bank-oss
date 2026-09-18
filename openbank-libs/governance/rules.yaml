@@ -1094,6 +1094,12 @@ alerting:
   helm_values_checked_manifests: "openbank-infra/gitops/apps/*.yaml"
 
 review:
+  # Solo-maintainer development review; runtime four-eyes is a separate control.
+  # The numeric human-review targets below remain the future multi-maintainer mode.
+  development_mode: solo_ai_owner
+  solo_policy: openbank-libs/governance/SOLO_REVIEW.md
+  solo_model_reviews: 2
+  solo_protected_owner_acceptance: true
   default_approvals: 1
   money_path_approvals: 2
   self_merge_forbidden_on: [CODEOWNERS_protected]
@@ -3599,7 +3605,7 @@ autonomous_agent_prs:
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:
-    - an agent-authored PR that touches a protected path fails the check and waits for a human
+    - a protected agent PR requires two verified AI reviews and owner acceptance of its exact head; absent evidence fails
     - a machine account in neither agent_accounts nor automation_accounts fails the check — it must be classified first
     - an unreadable author, branch or file list is exit 2 (undetermined), never a pass
   gate: agent-pr-guard

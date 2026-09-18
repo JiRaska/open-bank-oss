@@ -3,7 +3,6 @@ _service-ci.yml|job:contract|id-token
 admin-ui-deploy.yml|job:build-push|contents
 admin-ui-deploy.yml|job:build-push|id-token
 admin-ui-deploy.yml|job:build-push|pull-requests
-agent-review.yml|top|pull-requests
 alert-rca-weekly.yml|top|contents
 alert-rca-weekly.yml|top|issues
 alert-rca-weekly.yml|top|pull-requests
@@ -84,3 +83,6 @@ vex-hotfix.yml|job:vex-hotfix|contents
 vex-hotfix.yml|job:vex-hotfix|issues
 vex-hotfix.yml|job:vex-hotfix|pull-requests
 vex-triage.yml|job:vex-triage|issues
+# Dedicated reviewed publishers: evidence locator and independently checked subject verdict.
+agent-review.yml|job:solo-evidence-locator|statuses
+solo-review-admission.yml|job:admission|statuses
