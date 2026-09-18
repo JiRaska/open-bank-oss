@@ -73,28 +73,32 @@ class NotificationConsumerIT {
     @Inject
     lateinit var notificationConsumer: NotificationConsumer
 
-    private fun seedStaleJointNotification(partyId: UUID, expiry: Instant, retryCount: Int = 0): NotificationEntity =
-        VertxContextSupport.subscribeAndAwait {
-            Panache.withTransaction {
-                repository.persist(
-                    NotificationEntity().also {
-                        it.notificationId = UUID.randomUUID()
-                        it.partyId = partyId
-                        it.channel = NotificationChannel.PUSH.name
-                        it.template = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED.name
-                        it.recipient = partyId.toString()
-                        it.subject = "Joint signing request"
-                        it.body = GENERIC_PUSH_BODY
-                        it.status = "PENDING"
-                        it.correlationId = UUID.randomUUID()
-                        it.deduplicationKey = UUID.randomUUID()
-                        it.deliveryNotAfter = expiry
-                        it.deliveryRetryCount = retryCount
-                        it.createdAt = Instant.now().minusSeconds(600)
-                    },
-                )
-            }
+    private fun seedStaleJointNotification(
+        partyId: UUID,
+        expiry: Instant,
+        retryCount: Int = 0,
+        channel: NotificationChannel = NotificationChannel.PUSH,
+    ): NotificationEntity = VertxContextSupport.subscribeAndAwait {
+        Panache.withTransaction {
+            repository.persist(
+                NotificationEntity().also {
+                    it.notificationId = UUID.randomUUID()
+                    it.partyId = partyId
+                    it.channel = channel.name
+                    it.template = NotificationTemplate.JOINT_ISSUANCE_SIGNATURE_REQUESTED.name
+                    it.recipient = partyId.toString()
+                    it.subject = "Joint signing request"
+                    it.body = GENERIC_PUSH_BODY
+                    it.status = "PENDING"
+                    it.correlationId = UUID.randomUUID()
+                    it.deduplicationKey = UUID.randomUUID()
+                    it.deliveryNotAfter = expiry
+                    it.deliveryRetryCount = retryCount
+                    it.createdAt = Instant.now().minusSeconds(600)
+                },
+            )
         }
+    }
 
     private fun claimStaleJoint(now: Instant): List<UUID> = VertxContextSupport.subscribeAndAwait {
         repository.claimStaleJointPending(now, now.minusSeconds(120), now.minusSeconds(300), 50)
@@ -145,6 +149,23 @@ class NotificationConsumerIT {
         assertThat(statusFor(partyId)).isEqualTo("FAILED")
         assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_JOINT_RETRY_EXHAUSTED)
         assertThat(outcomeRowsFor(row.notificationId)).hasSize(1)
+    }
+
+    @Test
+    fun `joint fallback email is never claimed or resent as push`() {
+        val partyId = UUID.randomUUID()
+        val email = seedStaleJointNotification(
+            partyId,
+            Instant.now().plusSeconds(3600),
+            channel = NotificationChannel.EMAIL,
+        )
+
+        assertThat(claimStaleJoint(Instant.now())).doesNotContain(email.notificationId)
+        retryJoint(email.notificationId)
+
+        assertThat(statusFor(partyId)).isEqualTo("PENDING")
+        assertThat(notificationsFor(partyId).single().deliveryRetryCount).isZero()
+        assertThat(outcomeRowsFor(email.notificationId)).isEmpty()
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

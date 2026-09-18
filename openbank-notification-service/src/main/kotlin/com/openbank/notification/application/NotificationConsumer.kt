@@ -391,7 +391,11 @@ class NotificationConsumer @Inject constructor(
     fun retryJointPending(notificationId: UUID): Uni<Void> = Panache.withSession {
         notificationRepo.find("notificationId", notificationId).firstResult()
     }.chain { entity ->
-        if (entity == null || entity.status != NotificationStatus.PENDING.name) {
+        if (
+            entity == null ||
+            entity.status != NotificationStatus.PENDING.name ||
+            entity.channel != NotificationChannel.PUSH.name
+        ) {
             return@chain Uni.createFrom().voidItem()
         }
         val template = when (entity.template) {
