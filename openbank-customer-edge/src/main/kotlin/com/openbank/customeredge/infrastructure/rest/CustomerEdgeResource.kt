@@ -38,6 +38,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.math.BigDecimal
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Clock
@@ -2890,24 +2891,8 @@ class CustomerEdgeResource(
         val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
         if (!currency.equals("CZK", ignoreCase = true)) return badRequest("Domestic proposals require CZK")
 
-        val decisionUrl = "$accountServiceUrl/api/v1/accounts/$debtor/delegation/" +
-            "payment-proposal-authorization?partyId=${customer.actorPartyId}" +
-            "&amount=${amount.toPlainString()}&currency=CZK"
-        val decision = upstream.get(decisionUrl, customer.actorPartyId.toString())
-        val evidence = parseJson(decision)
-        if (decision.status != 200 || evidence?.path("authorized")?.asBoolean() != true) {
-            return forbidden("Payment proposal is not available")
-        }
-        if (evidence.path("outcome").asText() != "ALLOWED") {
-            return forbidden("Payment proposal is not available")
-        }
-        val owner = evidence.path("grantorPartyId").asText().let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val owner = fetchPaymentProposalOwner(debtor, customer.actorPartyId, amount)
             ?: return forbidden("Payment proposal is not available")
-        val grant = evidence.path("delegationId").asText().let { runCatching { UUID.fromString(it) }.getOrNull() }
-            ?: return forbidden("Payment proposal is not available")
-        if (owner == customer.actorPartyId || grant == UUID(0, 0)) {
-            return forbidden("Payment proposal is not available")
-        }
         val accountJson = fetchAccount(debtor, owner) ?: return forbidden("Payment proposal is not available")
         if (extractOwnerPartyId(accountJson) != owner.toString()) {
             return forbidden("Payment proposal is not available")
@@ -2939,6 +2924,22 @@ class CustomerEdgeResource(
             enriched,
             idempotencyKey,
         )
+    }
+
+    /** Separate HTTP seam so the consumer Pact can exercise the literal provider contract. */
+    internal fun fetchPaymentProposalOwner(accountId: UUID, makerPartyId: UUID, amount: BigDecimal): UUID? {
+        val decisionUrl = "$accountServiceUrl/api/v1/accounts/$accountId/delegation/" +
+            "payment-proposal-authorization?partyId=$makerPartyId" +
+            "&amount=${amount.toPlainString()}&currency=CZK"
+        val decision = upstream.get(decisionUrl, makerPartyId.toString())
+        val evidence = parseJson(decision)
+        if (decision.status != 200 || evidence?.path("authorized")?.asBoolean() != true) return null
+        if (evidence.path("outcome").asText() != "ALLOWED") return null
+        val owner = evidence.path("grantorPartyId").asText().let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return null
+        val grant = evidence.path("delegationId").asText().let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return null
+        return owner.takeIf { it != makerPartyId && grant != UUID(0, 0) }
     }
 
     // --- Domestic payments (initiate; settlement is a separate, SCA-gated step) ---

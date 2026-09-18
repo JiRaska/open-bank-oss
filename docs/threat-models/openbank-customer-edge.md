@@ -285,3 +285,6 @@ Trust boundaries:
   a separate immutable corporate-approval snapshot and SCA decision workflow is implemented.
   Rollout: account decision endpoint, then payment writer, then edge route. Rollback removes
   the edge route first; stored drafts remain retained, never executed.
+  The exact maker query is pinned by a consumer Pact using the real HTTP client; account-service's
+  folder provider suite replays it against the served endpoint and a grant with only
+  `ACCOUNT_PROPOSE_PAYMENT`, so direct-debit authority cannot satisfy the fixture by accident.

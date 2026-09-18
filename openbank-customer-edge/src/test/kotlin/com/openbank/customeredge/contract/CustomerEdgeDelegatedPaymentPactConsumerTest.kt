@@ -29,8 +29,9 @@ import java.time.Clock
 import java.util.UUID
 
 /**
- * Consumer-driven contract for the DEBIT-AUTHORIZATION call — the one that decides whether a
- * delegate may move money out of somebody else's account (ADR-0232 D3/D5, issue #2990 AC9).
+ * Consumer-driven contracts for delegated debit and distinct maker-only proposal authorization.
+ * The debit call decides whether a delegate may move money out of somebody else's account
+ * (ADR-0232 D3/D5, issue #2990 AC9); the maker call can only prepare an immutable DRAFT.
  *
  * ## Why this contract has to exist
  *
@@ -165,6 +166,26 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         .toPact()
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-account-service")
+    fun paymentProposalMakerAuthorizationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an account with an ACTIVE maker-only payment delegation to a known party exists")
+        .uponReceiving("GET the maker-only payment proposal decision for an amount within the ceiling")
+        .path("/api/v1/accounts/$ACCOUNT_ID/delegation/payment-proposal-authorization")
+        .query("partyId=$DELEGATE_PARTY_ID&amount=$AMOUNT&currency=$CURRENCY")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.booleanValue("authorized", true)
+                o.stringValue("outcome", "ALLOWED")
+                o.stringValue("delegationId", GRANT_ID)
+                o.stringValue("grantorPartyId", GRANTOR_PARTY_ID)
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-account-service")
     fun approvalRequiredPaymentAuthorizationPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("an account with an ACTIVE N_OF_M payment delegation to a known party exists")
         .uponReceiving("GET a direct-debit decision for a grant requiring operation approval")
@@ -262,6 +283,18 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         assertThat(decision.outcome).isEqualTo("DELEGATED")
         assertThat(decision.delegationId).isEqualTo(GRANT_ID)
         assertThat(decision.grantorPartyId).isEqualTo(UUID.fromString(GRANTOR_PARTY_ID))
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "paymentProposalMakerAuthorizationPact")
+    fun `the edge requests maker-only authority with the human and exact amount`(mockServer: MockServer) {
+        val owner = edgeResource(mockServer.getUrl()).fetchPaymentProposalOwner(
+            accountId = UUID.fromString(ACCOUNT_ID),
+            makerPartyId = UUID.fromString(DELEGATE_PARTY_ID),
+            amount = java.math.BigDecimal(AMOUNT),
+        )
+
+        assertThat(owner).isEqualTo(UUID.fromString(GRANTOR_PARTY_ID))
     }
 
     @Test
