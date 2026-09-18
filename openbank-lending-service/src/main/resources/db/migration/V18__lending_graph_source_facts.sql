@@ -16,6 +16,10 @@ CREATE TABLE lending_graph_asset (
         ('REAL_ESTATE', 'VEHICLE', 'SECURITIES', 'CASH_DEPOSIT', 'OTHER')),
     identity_jurisdiction CHAR(2) NOT NULL
         CHECK (identity_jurisdiction ~ '^[A-Z]{2}$'),
+    source_register VARCHAR(64) NOT NULL
+        CHECK (length(trim(source_register)) BETWEEN 2 AND 64),
+    source_record_ref VARCHAR(256) NOT NULL
+        CHECK (length(trim(source_record_ref)) BETWEEN 1 AND 256),
     source_document_id UUID NOT NULL,
     source_sha256 CHAR(64) NOT NULL CHECK (source_sha256 ~ '^[0-9a-f]{64}$'),
     supersedes_asset_id UUID UNIQUE REFERENCES lending_graph_asset(asset_id),
@@ -38,6 +42,11 @@ CREATE TABLE lending_graph_asset (
             AND decided_by <> proposed_by AND decided_at >= proposed_at)
     )
 );
+-- One reviewed canonical identity per register record. Corrections keep this
+-- tuple; two independent registers are not silently asserted to be the same asset.
+CREATE UNIQUE INDEX uq_lending_graph_asset_source_root
+    ON lending_graph_asset(identity_jurisdiction, source_register, source_record_ref)
+    WHERE revision = 1;
 
 CREATE TABLE lending_graph_allocation (
     allocation_id UUID PRIMARY KEY,
@@ -181,17 +190,22 @@ DECLARE
     prior_status VARCHAR(16);
     prior_asset_type VARCHAR(32);
     prior_jurisdiction CHAR(2);
+    prior_source_register VARCHAR(64);
+    prior_source_record_ref VARCHAR(256);
 BEGIN
     IF NEW.supersedes_asset_id IS NOT NULL THEN
-        SELECT asset_id, canonical_asset_id, revision, status, asset_type, identity_jurisdiction
+        SELECT asset_id, canonical_asset_id, revision, status, asset_type, identity_jurisdiction,
+               source_register, source_record_ref
           INTO prior_asset_id, prior_canonical_asset_id, prior_revision, prior_status,
-               prior_asset_type, prior_jurisdiction
+               prior_asset_type, prior_jurisdiction, prior_source_register, prior_source_record_ref
           FROM lending_graph_asset WHERE asset_id = NEW.supersedes_asset_id;
         IF prior_asset_id IS NULL OR prior_status IS DISTINCT FROM 'APPROVED' OR
            prior_canonical_asset_id IS DISTINCT FROM NEW.canonical_asset_id OR
            prior_revision IS DISTINCT FROM NEW.revision - 1 OR
            prior_asset_type IS DISTINCT FROM NEW.asset_type OR
-           prior_jurisdiction IS DISTINCT FROM NEW.identity_jurisdiction THEN
+           prior_jurisdiction IS DISTINCT FROM NEW.identity_jurisdiction OR
+           prior_source_register IS DISTINCT FROM NEW.source_register OR
+           prior_source_record_ref IS DISTINCT FROM NEW.source_record_ref THEN
             RAISE EXCEPTION 'asset correction must supersede the approved prior revision of the same identity';
         END IF;
     END IF;
