@@ -4,6 +4,7 @@ package com.openbank.context.integration
 import com.openbank.context.infrastructure.AssignmentAdministrationService
 import com.openbank.context.infrastructure.ContextAuditCommitment
 import com.openbank.context.infrastructure.ContextReadAuditEntity
+import com.openbank.context.infrastructure.IncidentProjectionConsumer
 import com.openbank.context.infrastructure.MakerCheckerViolation
 import com.openbank.context.infrastructure.ProposeAssignmentRequest
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -48,6 +49,9 @@ class ContextApiIT {
 
     @Inject
     lateinit var assignmentAdministration: AssignmentAdministrationService
+
+    @Inject
+    lateinit var incidentProjection: IncidentProjectionConsumer
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
@@ -266,6 +270,29 @@ class ContextApiIT {
         assertThat(response).doesNotContain("ledger-service")
         assertThat(disclosureRows("incident:$incidentId"))
             .containsExactly(1 to "[\"incident:$incidentId:ICT_INCIDENT_STATUS_CHANGED:${version + 1}\"]")
+    }
+
+    @Test
+    fun `incident projection rejects conflicting replay of a recorded revision`() {
+        val incidentId = UUID.randomUUID()
+        val version = NOW.epochSecond * 1_000_000_000 + NOW.nano
+        val original = incidentEvent(incidentId, version, listOf("ledger-service"))
+        onVertxContext { incidentProjection.consume(original) }
+        onVertxContext { incidentProjection.consume(original) }
+
+        assertThatThrownBy {
+            onVertxContext {
+                incidentProjection.consume(incidentEvent(incidentId, version, listOf("payment-service")))
+            }
+        }.hasMessageContaining("conflicting ICT incident revision replay")
+        assertThatThrownBy {
+            onVertxContext {
+                incidentProjection.consume(
+                    original.replace("ICT_INCIDENT_STATUS_CHANGED", "ICT_INCIDENT_REPORTED"),
+                )
+            }
+        }.hasStackTraceContaining("idx_context_incident_revision_digest")
+        assertThat(count("context_edges", "from_key = ?", "incident:$incidentId")).isEqualTo(1)
     }
 
     @Test
