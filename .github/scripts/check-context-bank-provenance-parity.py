@@ -80,6 +80,7 @@ def main() -> int:
     except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
         print(f"::error::deployment bank provenance parity: {exc}", file=sys.stderr)
         return 1
+    print(f"SUBJECTS={len(values)}  # deployment manifests")
     print("deployment bank provenance parity: PASS — Context and Document agree")
     return 0
 
