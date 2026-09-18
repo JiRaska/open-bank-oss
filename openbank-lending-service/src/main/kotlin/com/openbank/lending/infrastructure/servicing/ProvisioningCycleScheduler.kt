@@ -159,12 +159,6 @@ class ProvisioningCycleScheduler(
                     outcome.loansAssessed,
                     outcome.journalsQueued,
                 )
-                if (outcome.batchLimitReached) {
-                    log.warnf(
-                        "IFRS 9 provisioning cycle %s reached its batch limit; coverage is checked separately",
-                        period,
-                    )
-                }
             }
             .flatMap { publishCoverage(period) }
             .invoke { complete -> if (complete) liveness?.recordSuccess() }

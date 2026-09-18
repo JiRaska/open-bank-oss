@@ -66,7 +66,6 @@ import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
-import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Clock
@@ -81,7 +80,6 @@ import java.util.UUID
  * lives here — it is all in libs.
  */
 private const val MAX_PROVISIONING_BATCH = 10_000
-private const val MAX_PROVISIONING_BATCHES = 10_000
 private val CLOSED_EXPOSURE_STATES = setOf(
     LoanStatus.CLOSED,
     LoanStatus.WRITTEN_OFF,
@@ -116,8 +114,6 @@ class LendingService @Inject constructor(
     private val borrowerAccounts: com.openbank.lending.application.port.out.BorrowerAccountLookupPort,
     private val borrowerCredit: com.openbank.lending.application.port.out.BorrowerCreditPort,
     private val catalogLoanProfiles: CatalogLoanProfilePort = UnusedCatalogLoanProfilePort,
-    @ConfigProperty(name = "lending.provisioning.cycle.max-batches", defaultValue = "40")
-    private val provisioningMaxBatches: Int,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -1345,10 +1341,7 @@ class LendingService @Inject constructor(
         require(period == asOf.toString() || period == java.time.YearMonth.from(asOf).toString()) {
             "Reporting key must match asOf (yyyy-MM-dd or legacy yyyy-MM)"
         }
-        require(provisioningMaxBatches in 1..MAX_PROVISIONING_BATCHES) {
-            "Provisioning max batches must be between 1 and 10000"
-        }
-        return provisionBatch(period, asOf, limit, 0, 0, 0)
+        return provisionBatch(period, asOf, limit, 0, 0, null)
     }
 
     private fun provisionBatch(
@@ -1357,8 +1350,14 @@ class LendingService @Inject constructor(
         limit: Int,
         assessed: Int,
         posted: Int,
-        batchesRun: Int,
+        previousBatchIds: Set<LoanId>?,
     ): Uni<ProvisioningRunOutcome> = loans.findUnprovisioned(period, limit).flatMap { active ->
+        val batchIds = active.map { it.id }.toSet()
+        if (active.isNotEmpty() && batchIds == previousBatchIds) {
+            return@flatMap Uni.createFrom().failure(
+                IllegalStateException("Provisioning scan made no progress for period $period"),
+            )
+        }
         Multi.createFrom().iterable(active)
             .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
             .collect().asList()
@@ -1367,10 +1366,8 @@ class LendingService @Inject constructor(
                 val journals = posted + results.count { it }
                 if (active.size < limit) {
                     Uni.createFrom().item(ProvisioningRunOutcome(period, total, journals))
-                } else if (batchesRun + 1 >= provisioningMaxBatches) {
-                    Uni.createFrom().item(ProvisioningRunOutcome(period, total, journals, batchLimitReached = true))
                 } else {
-                    provisionBatch(period, asOf, limit, total, journals, batchesRun + 1)
+                    provisionBatch(period, asOf, limit, total, journals, batchIds)
                 }
             }
     }

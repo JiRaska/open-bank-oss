@@ -190,12 +190,12 @@ class LendingWorkflowLivenessTest {
     }
 
     @Test
-    fun `a capped provisioning pass with uncovered loans records no success`() {
+    fun `a provisioning pass with uncovered loans records no success`() {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
         val cycleUseCase = object : RunProvisioningCycleUseCase {
             override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int) = Uni.createFrom().item(
-                ProvisioningRunOutcome(period, loansAssessed = 500, journalsQueued = 20, batchLimitReached = true),
+                ProvisioningRunOutcome(period, loansAssessed = 500, journalsQueued = 20),
             )
         }
         val coverage = mockk<com.openbank.lending.application.port.out.ProvisioningCoverageRepository> {

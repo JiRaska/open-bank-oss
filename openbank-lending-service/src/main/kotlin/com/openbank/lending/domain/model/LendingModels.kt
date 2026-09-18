@@ -348,9 +348,4 @@ data class LoanProvisioningRecord(
 )
 
 /** Outcome of one scheduled IFRS 9 provisioning pass over the live book. */
-data class ProvisioningRunOutcome(
-    val period: String,
-    val loansAssessed: Int,
-    val journalsQueued: Int,
-    val batchLimitReached: Boolean = false,
-)
+data class ProvisioningRunOutcome(val period: String, val loansAssessed: Int, val journalsQueued: Int)

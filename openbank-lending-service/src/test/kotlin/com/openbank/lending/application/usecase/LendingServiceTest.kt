@@ -134,7 +134,6 @@ class LendingServiceTest {
         borrowerAccounts,
         borrowerCredit,
         catalogLoanProfiles,
-        provisioningMaxBatches = 40,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -339,7 +338,6 @@ class LendingServiceTest {
             ),
             borrowerAccounts,
             borrowerCredit,
-            provisioningMaxBatches = 40,
         )
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
@@ -1663,34 +1661,37 @@ class LendingServiceTest {
     }
 
     @Test
-    fun `provisioning stops a nonprogressing scan at the configured batch limit`() {
+    fun `provisioning fails when the same unprovisioned batch repeats`() {
         val (loan, _) = currentLoanWithSchedule(LoanId.random())
         every { loans.findUnprovisioned("2026-06", 1) } returns Uni.createFrom().item(listOf(loan))
         every { loans.findById(loan.id) } returns Uni.createFrom().item(loan.copy(status = LoanStatus.CLOSED))
 
-        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
-            .await().indefinitely()
+        assertThatThrownBy {
+            service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
+                .await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("made no progress")
 
-        assertThat(outcome.batchLimitReached).isTrue()
-        assertThat(outcome.loansAssessed).isEqualTo(40)
-        assertThat(outcome.journalsQueued).isZero()
-        verify(exactly = 40) { loans.findUnprovisioned("2026-06", 1) }
+        verify(exactly = 2) { loans.findUnprovisioned("2026-06", 1) }
         verify(exactly = 0) { provisioning.save(any()) }
     }
 
     @Test
-    fun `a short final batch at the limit is reported as exhausted`() {
+    fun `provisioning drains past forty distinct batches before reporting success`() {
         val (loan, _) = currentLoanWithSchedule(LoanId.random())
+        val loansForPass = List(41) { loan.copy(id = LoanId.random()) }
         every { loans.findUnprovisioned("2026-06", 1) } returnsMany
-            (List(39) { Uni.createFrom().item(listOf(loan)) } + Uni.createFrom().item(emptyList<Loan>()))
-        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan.copy(status = LoanStatus.CLOSED))
+            (loansForPass.map { Uni.createFrom().item(listOf(it)) } + Uni.createFrom().item(emptyList<Loan>()))
+        every { loans.findById(any()) } answers {
+            Uni.createFrom().item(loan.copy(id = firstArg(), status = LoanStatus.CLOSED))
+        }
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
             .await().indefinitely()
 
-        assertThat(outcome.batchLimitReached).isFalse()
-        assertThat(outcome.loansAssessed).isEqualTo(39)
-        verify(exactly = 40) { loans.findUnprovisioned("2026-06", 1) }
+        assertThat(outcome.loansAssessed).isEqualTo(41)
+        assertThat(outcome.journalsQueued).isZero()
+        verify(exactly = 42) { loans.findUnprovisioned("2026-06", 1) }
     }
 
     @Test
