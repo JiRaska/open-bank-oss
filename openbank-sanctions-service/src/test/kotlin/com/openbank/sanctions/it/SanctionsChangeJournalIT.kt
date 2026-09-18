@@ -62,6 +62,11 @@ class SanctionsChangeJournalIT {
             .awaitSuspending().iterator().next().getLong("total")
     }
 
+    private fun unresolvedJournalCount(): Long = onEventLoop {
+        pool.query("SELECT count(*) AS total FROM sanctions_change_journal WHERE resolved_at IS NULL").execute()
+            .awaitSuspending().iterator().next().getLong("total")
+    }
+
     @BeforeEach
     fun clearEntriesAndJournal() {
         execute("DELETE FROM sanctions_entries")
@@ -373,6 +378,47 @@ class SanctionsChangeJournalIT {
         assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.WITHHELD)
         assertThat(journalCount()).isEqualTo(1)
         assertThat(payloads("SANCTIONS_LIST_CHANGE_STORM").single()["reason"].asText()).isEqualTo("MISSING_SOURCE_ID")
+    }
+
+    @Test
+    fun `repairing a missing source identity releases retained publication`() {
+        execute(
+            "INSERT INTO sanctions_entries (list_type, external_id, primary_name) " +
+                "SELECT 'PEP_GLOBAL', 'baseline-' || n, 'Baseline ' || n FROM generate_series(1, 10) n",
+        )
+        execute("DELETE FROM sanctions_change_journal")
+        execute("INSERT INTO sanctions_entries (list_type, primary_name) VALUES ('PEP_GLOBAL', 'No source key')")
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.WITHHELD)
+
+        execute("UPDATE sanctions_entries SET external_id = 'repaired-source' WHERE primary_name = 'No source key'")
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(unresolvedJournalCount()).isZero()
+        assertThat(journalCount()).isEqualTo(2)
+        assertThat(payloads("SANCTIONS_LIST_CHANGED").single()["changedExternalIds"].map { it.asText() })
+            .containsExactly("repaired-source")
+    }
+
+    @Test
+    fun `failed repaired publication keeps unresolved evidence for retry`() {
+        execute(
+            "INSERT INTO sanctions_entries (list_type, external_id, primary_name) " +
+                "SELECT 'PEP_GLOBAL', 'baseline-' || n, 'Baseline ' || n FROM generate_series(1, 10) n",
+        )
+        execute("DELETE FROM sanctions_change_journal")
+        execute("INSERT INTO sanctions_entries (list_type, primary_name) VALUES ('PEP_GLOBAL', 'No source key')")
+        execute("UPDATE sanctions_entries SET external_id = 'repaired-source' WHERE primary_name = 'No source key'")
+        execute(
+            "ALTER TABLE sanctions_outbox ADD CONSTRAINT reject_repair_for_test " +
+                "CHECK (event_type <> 'SANCTIONS_LIST_CHANGED') NOT VALID",
+        )
+        try {
+            assertThatThrownBy { publish() }.hasMessageContaining("reject_repair_for_test")
+            assertThat(unresolvedJournalCount()).isEqualTo(3)
+        } finally {
+            execute("ALTER TABLE sanctions_outbox DROP CONSTRAINT reject_repair_for_test")
+        }
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(unresolvedJournalCount()).isZero()
     }
 
     @Test

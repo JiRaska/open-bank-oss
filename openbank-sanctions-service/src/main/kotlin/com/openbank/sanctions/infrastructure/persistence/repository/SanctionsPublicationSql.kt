@@ -9,9 +9,21 @@ internal object SanctionsPublicationSql {
     const val CREATE_SELECTION = """
         CREATE TEMP TABLE sanctions_publication_selection (id BIGINT PRIMARY KEY) ON COMMIT DROP
     """
+    const val RESOLVE_REPAIRED_IDENTITIES = """
+        UPDATE sanctions_change_journal j
+        SET resolved_at = clock_timestamp(), resolved_by_external_id = e.external_id
+        FROM sanctions_entries e
+        WHERE j.list_type = :type AND j.resolved_at IS NULL
+          AND j.entry_id = e.id AND j.list_type = e.list_type
+          AND (j.external_id IS NULL OR octet_length(to_json(j.external_id)::text) > :maxBytes)
+          AND e.external_id IS NOT NULL
+          AND octet_length(to_json(e.external_id)::text) <= :maxBytes
+          AND j.external_id IS DISTINCT FROM e.external_id
+    """
     const val SELECT_PENDING = """
         INSERT INTO sanctions_publication_selection (id)
-        SELECT id FROM sanctions_change_journal WHERE list_type = :type ORDER BY id FOR UPDATE
+        SELECT id FROM sanctions_change_journal
+        WHERE list_type = :type AND resolved_at IS NULL ORDER BY id FOR UPDATE
     """
     const val CREATE_CHANGES = """
         CREATE TEMP TABLE sanctions_publication_changes ON COMMIT DROP AS

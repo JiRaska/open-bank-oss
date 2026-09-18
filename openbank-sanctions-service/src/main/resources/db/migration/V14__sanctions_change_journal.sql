@@ -12,7 +12,9 @@ CREATE TABLE sanctions_change_journal (
     active BOOLEAN NOT NULL,
     previously_active BOOLEAN NOT NULL,
     existed_before BOOLEAN NOT NULL,
-    changed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    resolved_at TIMESTAMPTZ,
+    resolved_by_external_id TEXT
 );
 CREATE INDEX idx_sanctions_change_journal_list ON sanctions_change_journal (list_type, id);
 

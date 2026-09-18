@@ -47,6 +47,12 @@ class SanctionsChangePublisherImpl(
                             "WHERE list_type = :type FOR UPDATE",
                         String::class.java,
                     ).setParameter("type", listType.name).singleResult.awaitSuspending()
+                    // A source key that was too invalid to publish can be repaired later. Archive
+                    // its historical journal rows only when a bounded current key exists; this
+                    // update shares the outbox transaction, so publication failure rolls it back.
+                    session.createNativeQuery<Any>(SanctionsPublicationSql.RESOLVE_REPAIRED_IDENTITIES)
+                        .setParameter("type", listType.name).setParameter("maxBytes", MAX_ID_BYTES)
+                        .executeUpdate().awaitSuspending()
                     session.createNativeQuery<Any>(SanctionsPublicationSql.CREATE_SELECTION)
                         .executeUpdate().awaitSuspending()
                     val selectedCount = session.createNativeQuery<Any>(SanctionsPublicationSql.SELECT_PENDING)
