@@ -19,7 +19,7 @@ class FraudCaseAuditConsumerTest {
     private val subject = FraudCaseAuditConsumer(ObjectMapper(), audit)
 
     @Test
-    fun `valid minimized event persists before ack`() = runBlocking {
+    fun `valid minimized event persists before ack`(): Unit = runBlocking {
         val payload = validPayload()
         coEvery { audit.persist(payload, any()) } returns Unit
         val message = mockk<Message<String>>()
@@ -33,7 +33,7 @@ class FraudCaseAuditConsumerTest {
     }
 
     @Test
-    fun `store failure leaves the record unacknowledged`() = runBlocking {
+    fun `store failure leaves the record unacknowledged`(): Unit = runBlocking {
         val payload = validPayload()
         coEvery { audit.persist(payload, any()) } throws IllegalStateException("database unavailable")
         val message = mockk<Message<String>>()
