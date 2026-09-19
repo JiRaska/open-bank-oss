@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.ScaChallengeSnapshot
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -32,9 +33,19 @@ data class ScaChallengeClientResponse(val id: UUID, val partyId: UUID, val purpo
  *  exactly when the consume states no operation. */
 data class ConsumeScaChallengeRequest(val partyId: UUID)
 
+/**
+ * sca-service's `GET /api/v1/sca/challenges/{id}` and `POST /{id}/consume` are
+ * `@RolesAllowed("ROLE_API","ROLE_OPERATOR","ROLE_ADMIN")` + `@Authorize`, so the call must carry an
+ * M2M bearer. This client registered only the taint filter, so it sent none — the same shape as the
+ * three sibling clients in this package, which all register
+ * [OidcClientRequestReactiveFilter] (oidc-client `openbank-services`). It had never been noticed
+ * because `SCA_SERVICE_URL` was unset in gitops and the request never left the pod (#10383): a
+ * connection refused on localhost:8110 arrives long before any 401 could.
+ */
 @Path("/api/v1/sca/challenges")
 @RegisterRestClient(configKey = "sca-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 interface ScaServiceRestClient {
     @GET
     @Path("/{id}")

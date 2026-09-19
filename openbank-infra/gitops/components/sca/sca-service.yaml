@@ -44,9 +44,28 @@ spec:
           ports:
             - name: http
               containerPort: 8110
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: account-service's
+            # SavingsProposalService SCA approval, #10383). HTTP/8110 stays for existing callers
+            # (document-service, consent-service) until their own reviewed migrations; same shape as
+            # account-service's own 8443 listener. NOTE: sca-internal-tls in this namespace is
+            # sca-service's CLIENT certificate for its read of party-service — a different object.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://sca-db-rw.sca.svc:5432/openbank_sca
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -131,6 +150,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -224,6 +246,12 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        # SERVER certificate for the 8443 listener. Distinct from `party-tls` below, which projects
+        # sca-internal-tls — this service's CLIENT certificate for its read of party-service.
+        - name: internal-tls
+          secret:
+            secretName: sca-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -287,6 +315,9 @@ spec:
     - name: http
       port: 8110
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -302,3 +333,6 @@ spec:
     - name: http
       port: 8110
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
