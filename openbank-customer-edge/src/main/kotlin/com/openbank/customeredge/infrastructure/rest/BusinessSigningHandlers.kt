@@ -155,7 +155,9 @@ class BusinessSigningHandlers(
         val approval = objectOrNull(current) ?: return passThrough(current)
         refuseSigner(approval, human)?.let { return it }
 
-        approvals.consumeSignerSca(human, challenge, approval)?.let { return it }
+        // Single consumer (#10315): delegation-service owns the approval and spends this challenge at
+        // sca-service with approvalRequestId + payloadSha256 (+ amount/currency/creditor). Consuming it
+        // here too would make every co-signature fail as already-consumed.
         val signed = signing.sign(entity, approvalId, human, challenge)
         audit.emit(
             eventType = "BUSINESS_APPROVAL_SIGNED",

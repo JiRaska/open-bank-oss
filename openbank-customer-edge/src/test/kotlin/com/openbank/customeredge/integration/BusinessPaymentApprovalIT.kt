@@ -137,6 +137,7 @@ class BusinessPaymentApprovalIT {
         }
 
         assertThat(BusinessApprovalStubs.requests("POST", SEPA_RAIL)).isEmpty()
+        // Single consumer for the initiator: the edge consumes once; delegation-service only verifies.
         val consumed = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
         assertThat(consumed.path("partyId").asText()).isEqualTo(INITIATOR)
         assertThat(consumed.path("creditor").asText()).isEqualTo(CREDITOR)
@@ -202,13 +203,12 @@ class BusinessPaymentApprovalIT {
             body("release.paymentId", equalTo("pay-9"))
         }
 
-        val consumed = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
-        assertThat(consumed.path("partyId").asText()).isEqualTo(COSIGNER)
-        assertThat(consumed.path("approvalRequestId").asText()).isEqualTo(APPROVAL)
-        assertThat(consumed.path("payloadSha256").asText()).isEqualTo(SHA)
-        assertThat(consumed.path("amount").asText()).isEqualTo("80000.00")
+        // Exactly one consumer per challenge: the edge never spends a co-signer's challenge;
+        // it hands it to delegation-service, which consumes it with the approval linking.
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
         val signature = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/signatures").single().body)
         assertThat(signature.path("partyId").asText()).isEqualTo(COSIGNER)
+        assertThat(signature.path("scaChallengeId").asText()).isEqualTo(SCA)
         val rail = BusinessApprovalStubs.requests("POST", SEPA_RAIL).single()
         assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
         assertThat(readJson(rail.body).path("creditorIban").asText()).isEqualTo(CREDITOR)
@@ -269,26 +269,16 @@ class BusinessPaymentApprovalIT {
     @Test
     @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
     @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
-    fun `a challenge not linked to this approval and payload is refused and nothing is signed`() {
+    fun `a challenge delegation-service finds unlinked is refused and nothing is released`() {
         BusinessApprovalStubs.stub("GET", DETAIL, body = detailBody())
-        BusinessApprovalStubs.stub("POST", CONSUME, status = 409, body = """{"message":"Dynamic linking mismatch"}""")
+        BusinessApprovalStubs.stub("POST", "$DETAIL/signatures", status = 409, body = """{"code":"SCA_NOT_LINKED"}""")
 
         sign() Then {
-            statusCode(403)
-            body("code", equalTo("SCA_REJECTED"))
+            statusCode(409)
+            body("code", equalTo("SCA_NOT_LINKED"))
         }
-        assertThat(BusinessApprovalStubs.requests("POST", "$DETAIL/signatures")).isEmpty()
-    }
-
-    @Test
-    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
-    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
-    fun `a challenge decided by someone other than the signing human is refused`() {
-        BusinessApprovalStubs.stub("GET", DETAIL, body = detailBody())
-        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED","decidedByPartyId":"$COMPANY"}""")
-
-        sign() Then { statusCode(403) }
-        assertThat(BusinessApprovalStubs.requests("POST", "$DETAIL/signatures")).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", "$DETAIL/release-claim")).isEmpty()
     }
 
     @Test
@@ -359,11 +349,10 @@ class BusinessPaymentApprovalIT {
             statusCode(200)
             body("status", equalTo("PENDING"))
         }
-        val consumed = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
-        assertThat(consumed.path("partyId").asText()).isEqualTo(INITIATOR)
-        assertThat(consumed.path("approvalRequestId").asText()).isEqualTo(APPROVAL)
-        assertThat(consumed.path("payloadSha256").asText()).isEqualTo(SHA)
-        assertThat(consumed.has("amount")).isFalse()
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
+        val signature = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/signatures").single().body)
+        assertThat(signature.path("partyId").asText()).isEqualTo(INITIATOR)
+        assertThat(signature.path("scaChallengeId").asText()).isEqualTo(SCA)
         assertThat(BusinessApprovalStubs.requests("POST", "$DETAIL/release-claim")).isEmpty()
     }
 

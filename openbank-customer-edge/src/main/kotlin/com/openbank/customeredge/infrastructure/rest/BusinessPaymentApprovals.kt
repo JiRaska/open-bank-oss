@@ -42,7 +42,9 @@ data class HeldPayment(
  * (its own SCA gate, its own rail call) — that path must not change by a byte. `required > 1`
  * consumes the initiator's SCA (bound to amount, currency and creditor, as today), creates an
  * approval request carrying the frozen rail request and the initiator's signature, and answers
- * `202 PENDING_APPROVAL`. The rail is not called.
+ * `202 PENDING_APPROVAL`. The rail is not called. The initiator's challenge is consumed HERE, once;
+ * delegation-service only verifies it is a consumed payment approval of that party. A co-signer's
+ * challenge is the opposite: delegation-service consumes it, the edge never does (#10315).
  *
  * ## Release
  *
@@ -177,39 +179,6 @@ class BusinessPaymentApprovals(
             }
         }
         return objectMapper.writeValueAsString(body)
-    }
-
-    /**
-     * Spend the SIGNER's approval challenge on exactly this approval request and payload hash (and
-     * amount/currency/creditor for a payment). Null when it was consumed by the human; otherwise
-     * the refusal response.
-     */
-    fun consumeSignerSca(human: UUID, challengeId: UUID, approval: JsonNode): Response? {
-        val payload = approval.path("payload")
-        val body = objectMapper.createObjectNode().apply {
-            put("partyId", human.toString())
-            put("approvalRequestId", approval.path("id").asText())
-            put("payloadSha256", approval.path("payloadSha256").asText())
-            if (approval.path("kind").asText() == "PAYMENT") {
-                put("amount", payload.path("amount").asText())
-                put("currency", payload.path("currency").asText())
-                payload.path("creditorIban").textOrNull()?.let { put("creditor", it) }
-            }
-        }
-        val consume = upstream.post(
-            "$scaServiceUrl/api/v1/sca/challenges/$challengeId/consume",
-            human.toString(),
-            objectMapper.writeValueAsString(body),
-        )
-        if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
-            return refusal(Response.Status.FORBIDDEN, "SCA_REJECTED", "Strong customer authentication failed")
-        }
-        // Belt and braces over sca-service's own party check: the recorded decider must be this human.
-        val decider = read((consume.entity as? String).orEmpty())?.path("decidedByPartyId")?.textOrNull()
-        if (decider != null && decider != human.toString()) {
-            return refusal(Response.Status.FORBIDDEN, "SCA_REJECTED", "The approval was not decided by the signer")
-        }
-        return null
     }
 
     /** Release after the last signature. Returns the release outcome for the sign response. */
