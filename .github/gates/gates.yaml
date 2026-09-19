@@ -2510,6 +2510,7 @@ gates:
       failed, the pod stayed Ready, and no test reads gitops. First run found 18 such URLs fleet-wide;
       17 are baselined untriaged, the aml one is fixed in the same change.
     review_after: '2027-03-19'
+    budget_seconds: 30
     min_subjects: 80
     selftest_inputs: [".github/scripts/check-restclient-url-supplied.py"]
     selftest: |
