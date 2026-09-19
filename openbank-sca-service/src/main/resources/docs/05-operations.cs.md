@@ -72,6 +72,15 @@ Symptomy: události `DEVICE_ENROLLED` nedorazí do `openbank.sca.challenge.event
 ### Push/biometrické výzvy se nikdy nedokončí
 Očekávané, pokud nebylo posláno žádné rozhodnutí zařízení — **to je korektní fail-closed chování** (ADR-0021), ne chyba. Ověř, že zapsané zařízení skutečně zavolalo `POST /challenges/{id}/decision` s platným podpisem. Nesoulad podpisu vrací `401 InvalidDeviceAssertion`; zkontroluj veřejný klíč zařízení a že podepsaný payload odpovídá `id|decision|amount|currency|creditorIban|reference`.
 
+### Zařízení zapsaná na právnickou osobu (#10281 bod 1)
+Od tohoto vydání `POST /parties/{partyId}/devices` vrací `422` pro stranu, která není fyzická osoba (typ v registru jiný než `INDIVIDUAL`/`SOLE_TRADER` nebo neznámý), a `503`, když party-service neodpoví. Řádky zapsané na firmu dříve stále existují a mohou rozhodovat výzvy vystavené pro tu firmu. Odstraň je jako schválenou změnu, nikdy ad hoc:
+1. Suchý běh (jen čtení): `SCA_DSN=... PARTY_DSN=... python3 openbank-sca-service/scripts/purge_entity_bound_devices.py > inventory.json`. Výstup obsahuje jen identifikátory, typ strany, algoritmus a čas zápisu.
+2. Přilož `inventory.json` ke změnovému záznamu; druhá osoba potvrdí každý řádek. Dotčeným lidem dej vědět, že si zařízení musí zapsat znovu pod vlastním profilem.
+3. Proveď se schváleným počtem: `... --apply --expect-count <N> --archive purged.json`. Skript odmítne, pokud se inventura od schválení změnila, řádky nejdřív archivuje a smaže je jedním příkazem.
+4. `purged.json` ulož ke změnovému záznamu. Znovu spusť suchý běh: musí hlásit `count: 0`.
+
+Podepisovaný payload výzvy `APPROVAL` přidává k platebním segmentům `|approvalRequestId|payloadSha256`.
+
 ### Redis nedostupný
 Selže OTP store, idempotence a store rozhodnutí. Výzvy nelze spolehlivě vytvářet/ověřovat; ber jako tvrdý výpadek závislosti a postupuj dle platformového Redis runbooku. Žádná trvalá data se neztratí (Postgres drží záznam výzvy).
 

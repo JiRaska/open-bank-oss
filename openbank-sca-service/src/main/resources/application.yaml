@@ -64,6 +64,22 @@ quarkus:
     tls:
       verification: none
 
+  # OUTBOUND M2M for the party-register read that gates device enrolment (#10281 item 1). Without
+  # it the call carries no bearer, party-service answers 401, and every enrolment fails closed 503.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 2000
+
   shutdown:
     timeout: 30S
 
@@ -102,6 +118,8 @@ quarkus:
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
 
 "%test":
   quarkus:
@@ -109,6 +127,9 @@ quarkus:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_sca_test
     oidc:
+      enabled: false
+    # Tests replace the party-register lookup with a stub bean, so nothing needs an outbound token.
+    oidc-client:
       enabled: false
 
 openbank:

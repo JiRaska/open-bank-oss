@@ -56,6 +56,12 @@ data class DeviceApprovalDecision(
     /** Base64-encoded signature over [dynamicLinkingPayload]. Retained for audit. */
     val signatureB64: String,
     val decidedAt: OffsetDateTime,
+    /**
+     * The party whose enrolled device signed this decision (#10281 item 3). Nullable only so a
+     * decision written by the previous release (still in Redis for at most a challenge TTL)
+     * deserialises; every decision recorded from this release on carries it.
+     */
+    val decidingPartyId: UUID? = null,
 )
 
 /**
@@ -81,6 +87,10 @@ data class DeviceApprovalDecision(
  * challenge id is segment 1 and is unique per challenge, so a signature is only ever verified
  * against the one challenge whose stored linking data produced those bytes, and `consume`
  * compares the document and card fields independently rather than positionally.
+ *
+ * [DynamicLinkingData.approvalRequestId]/[DynamicLinkingData.payloadSha256] ([ScaPurpose.APPROVAL],
+ * #10281) follow the same append-only-when-present rule, after the card pair, so every payload
+ * that existed before keeps its bytes.
  */
 fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray {
     val dl = dynamicLinkingData
@@ -91,7 +101,8 @@ fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray 
         dl?.currency.orEmpty(),
         dl?.creditorIban.orEmpty(),
         dl?.reference.orEmpty(),
-    ) + optionalPair(dl?.documentSha256, dl?.ceremonyId) + optionalPair(dl?.cardId, dl?.cardAction)
+    ) + optionalPair(dl?.documentSha256, dl?.ceremonyId) + optionalPair(dl?.cardId, dl?.cardAction) +
+        optionalPair(dl?.approvalRequestId, dl?.payloadSha256)
     return segments.joinToString("|").toByteArray(Charsets.UTF_8)
 }
 

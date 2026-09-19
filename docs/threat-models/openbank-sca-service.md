@@ -44,6 +44,9 @@ is the **authentication assurance gate** for payments and consent — defeating 
 | **E**oP | **SCA bypass via push/biometric (audit K2)** | **FIXED (ADR-0021):** push/biometric `verify` no longer auto-approves; it consults a signature-verified, dynamic-linked decision recorded out-of-band by the enrolled device. No decision ⇒ challenge stays `PENDING` (never auto-completes). |
 | **S**poofing | Forge a device approval | Decision must carry a signature over the challenge's dynamic-linking payload, verified against the party's enrolled public key; device must belong to the challenge party (ownership check) |
 | **T**ampering | Replay an approval for a different amount/payee or flip DENIED→APPROVED | Signed payload binds challenge id + decision + amount + currency + creditor (RTS Art. 5); a captured signature is invalid for any other payload |
+| **S**poofing | A person's device key enrolled to a COMPANY party approves any challenge raised for that company, unattributed (#10281 item 1) | Enrolment reads the party's register type from party-service and refuses anything but `INDIVIDUAL`/`SOLE_TRADER` (422); a register that cannot answer fails closed (503). Pre-existing entity-bound rows: inventory + reviewed purge (`openbank-sca-service/scripts/purge_entity_bound_devices.py`, dry-run default, `--expect-count` gate) |
+| **T**ampering | A co-signature on one business approval spent on another approval, or on an edited payload (#10281 item 2) | `APPROVAL` purpose: the device signs `approvalRequestId` + SHA-256 of the frozen payload (and amount/currency/creditor for a payment); initiate refuses an `APPROVAL` challenge without both (400); consume compares both, so a mismatch is 409 and does not burn the challenge |
+| **R**epudiation | A decision record that names only a credential cannot answer "who approved" once the transient decision expires (#10281 item 3) | The resolved challenge row carries `decided_by_party_id` + `decided_by_credential_id` (from the enrolled device) and `on_behalf_of_party_id` (the entity as context); both are returned by consume |
 
 ## 5. Residual risks / assumptions
 
@@ -58,6 +61,13 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-09-19** — Business approvals and attribution (#10281 items 1 and 3, plus the SCA half of
+  item 2). New outbound call sca → party-service (`GET /api/v1/parties/{id}`, `partyType` only,
+  service token) gates device enrolment to natural persons; fail-closed on a register outage,
+  so enrolment availability now depends on party-service. New `APPROVAL` purpose with dynamic
+  linking to an approval request and its payload hash. Challenge rows record the deciding party.
+  No new caller or privilege; the purge of existing entity-bound credentials is a documented,
+  reviewed procedure and has not been executed.
 - **2026-09-07** — Idempotency contract of the two creation POSTs verified and documented
   (ADR-0296, burn-down #8351). No code change: challenge initiation already replays on
   Idempotency-Key/X-Request-ID via the idempotency store (X-Idempotency-Replayed: true, 300 s

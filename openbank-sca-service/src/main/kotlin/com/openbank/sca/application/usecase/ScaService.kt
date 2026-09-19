@@ -24,6 +24,7 @@ import com.openbank.sca.application.port.out.DeviceAssertionVerifier
 import com.openbank.sca.application.port.out.EnrolledDeviceRepository
 import com.openbank.sca.application.port.out.OtpGenerator
 import com.openbank.sca.application.port.out.OtpStore
+import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
@@ -89,6 +90,22 @@ class CredentialAlreadyEnrolledException(credentialId: String) :
     RuntimeException("Credential '$credentialId' is already enrolled by another party")
 class InvalidDeviceAssertionException(id: UUID) : RuntimeException("Invalid device assertion for challenge: $id")
 
+/**
+ * #10281 item 1: a device credential may only be enrolled to a natural person. Carries the party
+ * type the register answered (null when the register has no such party) — never the party's name.
+ */
+class NonNaturalPersonEnrolmentException(partyId: UUID, partyType: String?) :
+    RuntimeException(
+        "Device enrolment refused: party $partyId is not a natural person (type=${partyType ?: "unknown"})",
+    )
+
+/** The party register could not be asked; enrolment fails closed rather than enrolling blind. */
+class PartyRegisterUnavailableException(cause: Throwable) :
+    RuntimeException("Party register unavailable; device enrolment refused", cause)
+
+/** Register types that denote a natural person. A sole trader IS a person trading under a name. */
+private val NATURAL_PERSON_TYPES = setOf("INDIVIDUAL", "SOLE_TRADER")
+
 @ApplicationScoped
 // One use-case interface per operation keeps callers narrow; the aggregate implementation
 // crosses the function-count threshold by design.
@@ -102,6 +119,7 @@ class ScaService(
     private val enrolledDeviceRepository: EnrolledDeviceRepository,
     private val decisionStore: ScaDecisionStore,
     private val assertionVerifier: DeviceAssertionVerifier,
+    private val partyTypeLookup: PartyTypeLookup,
     private val objectMapper: ObjectMapper,
     private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.sca.idempotency-ttl-seconds", defaultValue = "300")
@@ -125,6 +143,7 @@ class ScaService(
         enrolledDeviceRepository: EnrolledDeviceRepository,
         decisionStore: ScaDecisionStore,
         assertionVerifier: DeviceAssertionVerifier,
+        partyTypeLookup: PartyTypeLookup,
         objectMapper: ObjectMapper,
         metrics: DomainMetrics,
         @ConfigProperty(name = "openbank.sca.idempotency-ttl-seconds", defaultValue = "300")
@@ -138,6 +157,7 @@ class ScaService(
         enrolledDeviceRepository,
         decisionStore,
         assertionVerifier,
+        partyTypeLookup,
         objectMapper,
         metrics,
         idempotencyTtlSeconds,
@@ -151,6 +171,7 @@ class ScaService(
         // saving one nobody can ever complete (#8432).
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
         if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
+        requireApprovalLinking(command)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 
@@ -179,6 +200,7 @@ class ScaService(
             dynamicLinkingData = command.dynamicLinkingData,
             redirectUrl = command.redirectUrl,
             createdAt = now,
+            onBehalfOfPartyId = command.onBehalfOfPartyId,
         )
 
         val saved = repository.save(challenge)
@@ -240,9 +262,15 @@ class ScaService(
 
     private suspend fun verifyDecoupled(challenge: ScaChallenge, now: OffsetDateTime): ScaChallenge {
         val decision = decisionStore.find(challenge.id) ?: return challenge // PENDING — awaiting device
+        // #10281 item 3: the resolved challenge row itself names the decider, so an audit of the
+        // record alone answers "who approved" — the Redis decision expires with the challenge.
+        val attributed = challenge.copy(
+            decidedByPartyId = decision.decidingPartyId ?: challenge.partyId,
+            decidedByCredentialId = decision.credentialId,
+        )
         return when (decision.decision) {
-            DeviceDecisionType.APPROVED -> repository.save(challenge.complete(now)).also { recordResolution(it) }
-            DeviceDecisionType.DENIED -> repository.save(challenge.fail("Denied on device", now)).also {
+            DeviceDecisionType.APPROVED -> repository.save(attributed.complete(now)).also { recordResolution(it) }
+            DeviceDecisionType.DENIED -> repository.save(attributed.fail("Denied on device", now)).also {
                 recordResolution(it)
                 if (it.status == ScaStatus.FAILED) throw ScaVerificationFailedException(challenge.id)
             }
@@ -268,6 +296,14 @@ class ScaService(
     }
 
     override suspend fun enroll(command: EnrollDeviceCommand): EnrolledDevice {
+        // #10281 item 1: checked BEFORE the idempotent early-return below, so re-enrolling a
+        // credential that an entity already holds (from before this guard) is refused as well.
+        val partyType = try {
+            partyTypeLookup.partyType(command.partyId)
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            throw PartyRegisterUnavailableException(e)
+        }
+        if (partyType !in NATURAL_PERSON_TYPES) throw NonNaturalPersonEnrolmentException(command.partyId, partyType)
         enrolledDeviceRepository.findByCredentialId(command.credentialId)?.let { existing ->
             if (existing.partyId == command.partyId) return existing
             throw CredentialAlreadyEnrolledException(command.credentialId)
@@ -358,6 +394,7 @@ class ScaService(
                 decision = command.decision,
                 signatureB64 = command.signatureB64,
                 decidedAt = now,
+                decidingPartyId = device.partyId,
             ),
             ttlSeconds = ttl,
         )
@@ -392,20 +429,7 @@ class ScaService(
             challenge = verifyDecoupled(challenge, now)
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
-        val linking = challenge.dynamicLinkingData
-        // A challenge that signed nothing cannot authorise a money movement, a document
-        // signature OR a card operation; one that signed amount+payee (or a document
-        // hash+ceremony, or a card+action) must match the operation exactly (RTS Art. 5 dynamic
-        // linking, extended to documents by ADR-0169 D2 and to card management here).
-        val authorised = linking?.authorises(
-            command.amount,
-            command.currency,
-            command.creditor,
-            command.documentSha256,
-            command.ceremonyId,
-            command.cardId,
-            command.cardAction,
-        ) ?: (command.amount == null && command.documentSha256 == null && command.cardId == null)
+        val authorised = linkingAuthorises(challenge.dynamicLinkingData, command)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
             throw ScaChallengeAlreadyConsumedException(command.challengeId)
@@ -413,6 +437,30 @@ class ScaService(
         metrics.scaChallengeResolved(challenge.method.name, "consumed")
         return challenge.copy(consumedAt = now)
     }
+
+    /**
+     * A challenge that signed nothing cannot authorise a money movement, a document signature, a
+     * card operation OR an approval co-signature; one that signed any of those must match the
+     * operation exactly (RTS Art. 5 dynamic linking, extended to documents by ADR-0169 D2, to card
+     * management, and to business approvals by #10281).
+     */
+    private fun linkingAuthorises(linking: DynamicLinkingData?, command: ConsumeScaCommand): Boolean =
+        linking?.authorises(
+            command.amount,
+            command.currency,
+            command.creditor,
+            command.documentSha256,
+            command.ceremonyId,
+            command.cardId,
+            command.cardAction,
+            command.approvalRequestId,
+            command.payloadSha256,
+        ) ?: (
+            command.amount == null &&
+                command.documentSha256 == null &&
+                command.cardId == null &&
+                command.approvalRequestId == null
+            )
 
     private fun buildPushMessage(purpose: ScaPurpose, data: DynamicLinkingData?): String = when (purpose) {
         ScaPurpose.PAYMENT_INITIATION ->
@@ -435,6 +483,27 @@ class ScaService(
             "Potvrďte přijetí sdíleného přístupu"
         ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
             "Potvrďte výběr ze spořicího cíle"
+        ScaPurpose.APPROVAL ->
+            if (data?.amount != null) {
+                "Podepište platbu ${data.amount} ${data.currency} pro ${data.creditorName ?: data.creditorIban}"
+            } else {
+                "Podepište firemní požadavek ke schválení"
+            }
+    }
+
+    /**
+     * An APPROVAL challenge that is not bound to an approval request and its frozen payload would
+     * be a bare "I signed something" — exactly what dynamic linking exists to prevent. Refused at
+     * initiate (400), before a challenge exists, rather than at consume.
+     */
+    private fun requireApprovalLinking(command: InitiateScaCommand) {
+        if (command.purpose != ScaPurpose.APPROVAL) return
+        val approvalRequestId = command.dynamicLinkingData?.approvalRequestId
+        val payloadSha256 = command.dynamicLinkingData?.payloadSha256
+        require(!approvalRequestId.isNullOrBlank() && payloadSha256 != null) {
+            "APPROVAL challenge requires dynamicLinkingData.approvalRequestId and payloadSha256"
+        }
+        require(SHA256_HEX.matches(payloadSha256)) { "payloadSha256 must be 64 hex characters" }
     }
 
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {
@@ -460,7 +529,14 @@ class ScaService(
         } else {
             emptyList()
         }
-        return (base + cardSegments).joinToString(":") { it?.toString() ?: "-" }
+        // Same rule for an APPROVAL: challenges for different approval requests (or for an edited
+        // payload) must never collapse to one replayed challenge.
+        val approvalSegments = if (dl?.approvalRequestId != null || dl?.payloadSha256 != null) {
+            listOf(dl.approvalRequestId, dl.payloadSha256?.lowercase())
+        } else {
+            emptyList()
+        }
+        return (base + cardSegments + approvalSegments).joinToString(":") { it?.toString() ?: "-" }
     }
 }
 
@@ -477,6 +553,8 @@ private fun ScaChallenge.isReplayable(now: OffsetDateTime): Boolean =
  * body cannot drift apart again — they are read by different consumers and only the body
  * reaches onboarding-service.
  */
+private val SHA256_HEX = Regex("^[0-9a-fA-F]{64}$")
+
 private const val DEVICE_ENROLLED_EVENT_TYPE = "DEVICE_ENROLLED"
 
 /**
