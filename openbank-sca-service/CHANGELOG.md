@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.2...sca-service-v0.16.0) (2026-09-19)
+
+
+### Features
+
+* **sca:** link APPROVAL challenges to an approval request, record the decider, refuse entity devices ([#10312](https://github.com/JiRaska/open-bank-oss/issues/10312)) ([b2528c2](https://github.com/JiRaska/open-bank-oss/commit/b2528c274cc3b6429bdc5b40ef19ffb6022865e0))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.1...sca-service-v0.15.2) (2026-09-13)
 
 
