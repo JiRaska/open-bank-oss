@@ -180,6 +180,10 @@ openbank:
     demo-entity:
       enabled: ${OPENBANK_KYB_DEMO_ENTITY_ENABLED:false}
       representative-name: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE:Oldřich Vaněk}
+      # A second fictitious jednatel makes the register read "dva jednatelé společně" (JOINT, 2
+      # signatures), so business multi-signature can be demonstrated. Remove the key to get the
+      # single-jednatel SOLE shape back.
+      second-representative-name: ${OPENBANK_KYB_DEMO_ENTITY_SECOND_REPRESENTATIVE:Jana Testová}
       representative-address:
         street: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_STREET:Ukázková 1}
         city: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_CITY:Praha}
