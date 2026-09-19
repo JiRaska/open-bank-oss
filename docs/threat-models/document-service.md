@@ -82,3 +82,17 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature â€
   named in the same sentence, `AnnualFeeSummaryReadyConsumer`, does exist and is unchanged. Only
   the topic name in this document was wrong; nothing about the PAD Art. 5 push duty, the
   poison-pill posture or the trust boundary changes.
+
+- **2026-09-20** â€” **New inbound edge: a parallel private-CA mTLS listener (8443, client auth REQUIRED,
+  TLSv1.3; server cert `document-service-internal-tls`), the same shape as party-service's and
+  account-service's.** HTTP/8143 stays for existing callers. The callers on 8443 are
+  domestic-payment (`PaymentConfirmationRenderAdapter`), sepa-payment (`DocumentPreviewAdapter`) and
+  statement-service (`DocumentTemplateRestAdapter`), all reading
+  `GET /api/v1/documents/templates` and `POST /api/v1/documents/templates/preview` as the shared
+  `service-account-openbank-services`. Both methods are `@RolesAllowed("ROLE_API","ROLE_OPERATOR",
+  "ROLE_ADMIN")` with **no** `@Authorize`, so no OPA action and no policy change; `document_rest_ext.rego`
+  covers only `document.business-agreement.*` and is untouched. Before this none of the three had a
+  `DOCUMENT_SERVICE_URL` in gitops, so each dialled `localhost:8143` inside its own pod and the edge
+  existed in code but never reached this service (#10383). **Risk class:** confidentiality of template
+  metadata and rendered previews to three payment/statement services; no mutation, no new action.
+  Rollback: drop the listener env and the three caller env vars.
