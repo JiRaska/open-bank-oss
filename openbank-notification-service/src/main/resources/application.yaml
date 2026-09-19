@@ -257,6 +257,25 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.consent.events.notification.dlq
+      # #10281: multi-signature approval notifications (ApprovalNotificationConsumer) — the one
+      # consumer of the topic delegation-service's outbox publishes approval lifecycle events on.
+      # client.id / group.id / auto.offset.reset are dotted keys and can only live in the gitops
+      # msg-override ConfigMap (issue #686); they are added there in a follow-up once an image
+      # carrying this channel is deployed, because naming a channel the running image cannot serve
+      # is an SRMSG00071 boot failure (msg-channel-image-parity gate).
+      approval-events-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.approval-events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # The consumer retries in-process and then fails its Uni; SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel. Explicit topic, NESTED form: the
+        # dotted leaf `dead-letter-queue.topic:` is quoted by the YAML source and never read (#686).
+        # KafkaTopic CR: openbank-infra/gitops/components/kafka/kafka-dlq-topics.yaml; Write ACL:
+        # components/notifications/kafka-notification-mtls.yaml.
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.notification.approval-events-in
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —

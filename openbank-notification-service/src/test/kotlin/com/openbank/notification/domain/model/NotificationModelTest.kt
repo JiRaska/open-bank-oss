@@ -36,7 +36,8 @@ class NotificationModelTest {
         // 21 since #8568 removed PASSWORD_RESET: no password flow exists (passkeys/biometrics only;
         // Keycloak has resetPasswordAllowed=false and no SMTP), so nothing could produce it either.
         // +1 for DELEGATION_FIRST_USE and +1 for the reminder-only recertification task = 23.
-        assertThat(NotificationTemplate.values()).hasSize(23)
+        // +5 for the #10281 multi-signature approval templates = 28.
+        assertThat(NotificationTemplate.values()).hasSize(28)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -74,6 +75,17 @@ class NotificationModelTest {
                 NotificationTemplate.DELEGATION_RECERTIFICATION_DUE,
             ),
         ).allSatisfy { assertThat(it.category).isEqualTo(NotificationCategory.SECURITY) }
+        // #10281: a signature request is an authorisation step like SCA_APPROVAL - never mutable.
+        // The outcomes are ordinary payment news and follow the customer's PAYMENTS preference.
+        assertThat(NotificationTemplate.APPROVAL_REQUIRED.category).isEqualTo(NotificationCategory.SECURITY)
+        assertThat(
+            listOf(
+                NotificationTemplate.APPROVAL_COMPLETED,
+                NotificationTemplate.APPROVAL_REJECTED,
+                NotificationTemplate.APPROVAL_EXPIRED,
+                NotificationTemplate.PAYMENT_RELEASE_FAILED,
+            ),
+        ).allSatisfy { assertThat(it.category).isEqualTo(NotificationCategory.PAYMENTS) }
     }
 
     @Test
@@ -128,6 +140,28 @@ class NotificationModelTest {
     }
 
     @Test
+    fun `business approval deep link admits exactly the canonical detail shape (#10281)`() {
+        val id = "0199a1b2-0000-7000-8000-0000000a0001"
+        assertThat(MobileDeepLink.isAllowed("openbank://business/approvals/$id")).isTrue()
+        assertThat(MobileDeepLink.businessApproval(UUID.fromString(id)))
+            .isEqualTo("openbank://business/approvals/$id")
+        listOf(
+            "openbank://business/approvals/",
+            "openbank://business/approvals/not-a-uuid",
+            "openbank://business/approvals/${id.uppercase()}",
+            "openbank://business/approvals/$id?next=https://evil.invalid",
+            "openbank://business/approvals/$id/extra",
+            "openbank://business/approvals/$id#frag",
+            "openbank://business/approvals",
+            "openbank://business/$id",
+            "openbank://business/approvals/../savings",
+            "https://business/approvals/$id",
+            "OPENBANK://business/approvals/$id",
+            " openbank://business/approvals/$id",
+        ).forEach { assertThat(MobileDeepLink.isAllowed(it)).describedAs(it).isFalse() }
+    }
+
+    @Test
     fun `no-device fallback is a closed reviewed template policy`() {
         assertThat(
             NotificationTemplate.entries.filter { it.noDeviceFallbackChannel == NotificationChannel.EMAIL },
@@ -136,6 +170,7 @@ class NotificationModelTest {
             NotificationTemplate.KYC_REJECTED,
             NotificationTemplate.TRANSACTION_FAILED,
             NotificationTemplate.DELEGATION_FIRST_USE,
+            NotificationTemplate.PAYMENT_RELEASE_FAILED,
         )
         assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.OTP_CODE.noDeviceFallbackChannel).isNull()
