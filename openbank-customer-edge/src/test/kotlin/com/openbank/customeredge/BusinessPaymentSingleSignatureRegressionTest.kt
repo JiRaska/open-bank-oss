@@ -93,9 +93,7 @@ class BusinessPaymentSingleSignatureRegressionTest {
                 every { evaluate(company, any()) } returns SigningReply(200, """{"required":1,"trusted":true}""")
             }
             businessApprovals =
-                BusinessPaymentApprovals(signing, upstream, ObjectMapper(), mockk(relaxed = true)).also {
-                    it.enforce = true
-                }
+                BusinessPaymentApprovals(signing, upstream, ObjectMapper(), mockk(relaxed = true), enforce = true)
         }
     }
 
@@ -144,7 +142,7 @@ class BusinessPaymentSingleSignatureRegressionTest {
                 SigningReply(201, """{"id":"${UUID.randomUUID()}","required":2}""")
         }
         r.businessApprovals =
-            BusinessPaymentApprovals(signing, u, ObjectMapper(), mockk(relaxed = true)).also { it.enforce = true }
+            BusinessPaymentApprovals(signing, u, ObjectMapper(), mockk(relaxed = true), enforce = true)
 
         val resp = r.createSepaPayment(
             """{"debtorAccountId":"$account","amount":"80000","currency":"EUR","creditorIban":"DE89370400440532013000","creditorName":"D"}""",

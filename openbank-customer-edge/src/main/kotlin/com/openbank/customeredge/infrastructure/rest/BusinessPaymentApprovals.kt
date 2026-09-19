@@ -66,11 +66,14 @@ class BusinessPaymentApprovals(
     private val upstream: UpstreamClient,
     private val objectMapper: ObjectMapper,
     private val audit: EdgeAuditPublisher,
-) {
-
-    /** Off until delegation-service serves the signing API in the environment (deploy order), see application.yaml. */
+    /**
+     * Off until delegation-service serves the signing API in the environment (deploy order), see
+     * application.yaml. A constructor parameter WITHOUT a Kotlin default: a default would make Arc
+     * build the bean through the synthetic constructor and never apply the config.
+     */
     @ConfigProperty(name = "openbank.edge.business-approvals.enforce", defaultValue = "false")
-    var enforce: Boolean = false
+    private val enforce: Boolean,
+) {
 
     @ConfigProperty(name = "openbank.edge.domestic-payment-service-url")
     lateinit var domesticPaymentServiceUrl: String
@@ -207,14 +210,27 @@ class BusinessPaymentApprovals(
         val ref = read(respBody)?.path("id")?.textOrNull()
         val error = if (ok) null else "rail answered ${resp.status}: ${respBody.take(ERROR_MAX_CHARS)}"
         report(entity, approvalId, ok, ref, error)
-        audit.emit(
-            eventType = if (ok) "CUSTOMER_PAYMENT_RELEASED" else "CUSTOMER_PAYMENT_RELEASE_FAILED",
-            partyId = entity.toString(),
-            operation = "payments.${rail.name.lowercase()}",
-            result = if (ok) "SUCCESS" else "FAILURE",
-            resourceId = approvalId.toString(),
-            details = mapOf("railStatus" to resp.status.toString(), "paymentId" to ref),
-        )
+        val operation = "payments.${rail.name.lowercase()}"
+        val details = mapOf("railStatus" to resp.status.toString(), "paymentId" to ref)
+        if (ok) {
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_RELEASED",
+                partyId = entity.toString(),
+                operation = operation,
+                result = "SUCCESS",
+                resourceId = approvalId.toString(),
+                details = details,
+            )
+        } else {
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_RELEASE_FAILED",
+                partyId = entity.toString(),
+                operation = operation,
+                result = "FAILURE",
+                resourceId = approvalId.toString(),
+                details = details,
+            )
+        }
         return linkedMapOf(
             "status" to if (ok) "RELEASED" else "RELEASE_FAILED",
             "railStatus" to resp.status,
