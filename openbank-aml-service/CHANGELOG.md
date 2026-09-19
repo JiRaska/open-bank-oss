@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.12.0...aml-service-v0.12.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **aml:** point the party-resolution sweep at account-service, not localhost ([#10380](https://github.com/JiRaska/open-bank-oss/issues/10380)) ([e08acd9](https://github.com/JiRaska/open-bank-oss/commit/e08acd912e070fb09f50ed9d8c9f567272af3464))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.11.0...aml-service-v0.12.0) (2026-09-19)
 
 
