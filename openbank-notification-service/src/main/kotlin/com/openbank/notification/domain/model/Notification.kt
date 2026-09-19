@@ -268,6 +268,7 @@ data class NotificationRequest(
 object MobileDeepLink {
     private const val DELEGATION_DETAIL_PREFIX = "openbank://delegations/"
     private const val BUSINESS_APPROVAL_DETAIL_PREFIX = "openbank://business/approvals/"
+    private const val ENTITY_QUERY = "?entity="
 
     private val allowed = setOf(
         "openbank://home",
@@ -280,10 +281,31 @@ object MobileDeepLink {
     fun isAllowed(value: String?): Boolean = value == null ||
         value in allowed ||
         isCanonicalDetail(value, DELEGATION_DETAIL_PREFIX) ||
-        isCanonicalDetail(value, BUSINESS_APPROVAL_DETAIL_PREFIX)
+        isCanonicalBusinessApproval(value)
 
-    /** Builds the approval-detail link the app routes to its entity profile (#10281). */
-    fun businessApproval(approvalId: UUID): String = BUSINESS_APPROVAL_DETAIL_PREFIX + approvalId
+    /**
+     * Builds the approval-detail link (#10281). With [entityPartyId] the app switches straight to
+     * that company's profile; without it the app falls back to resolving the entity itself.
+     */
+    fun businessApproval(approvalId: UUID, entityPartyId: UUID? = null): String =
+        BUSINESS_APPROVAL_DETAIL_PREFIX + approvalId + (entityPartyId?.let { ENTITY_QUERY + it } ?: "")
+
+    /**
+     * `<prefix><uuid>` optionally followed by exactly `?entity=<uuid>` — one query parameter, that
+     * name, a canonical UUID value, nothing after it. Any other parameter, a second one, an
+     * encoded or empty value, or a fragment is refused: the link steers device navigation.
+     */
+    private fun isCanonicalBusinessApproval(value: String): Boolean {
+        val queryAt = value.indexOf('?')
+        if (queryAt < 0) return isCanonicalDetail(value, BUSINESS_APPROVAL_DETAIL_PREFIX)
+        val query = value.substring(queryAt)
+        return isCanonicalDetail(value.substring(0, queryAt), BUSINESS_APPROVAL_DETAIL_PREFIX) &&
+            query.startsWith(ENTITY_QUERY) &&
+            isCanonicalUuid(query.removePrefix(ENTITY_QUERY))
+    }
+
+    private fun isCanonicalUuid(id: String): Boolean =
+        runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
 
     /**
      * `<prefix><uuid>` and nothing else: the remainder must round-trip as a canonical lower-case

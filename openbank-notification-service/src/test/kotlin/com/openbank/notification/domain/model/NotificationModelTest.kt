@@ -143,8 +143,12 @@ class NotificationModelTest {
     fun `business approval deep link admits exactly the canonical detail shape (#10281)`() {
         val id = "0199a1b2-0000-7000-8000-0000000a0001"
         assertThat(MobileDeepLink.isAllowed("openbank://business/approvals/$id")).isTrue()
+        val entity = "0199a1b2-0000-7000-8000-0000000e0001"
+        assertThat(MobileDeepLink.isAllowed("openbank://business/approvals/$id?entity=$entity")).isTrue()
         assertThat(MobileDeepLink.businessApproval(UUID.fromString(id)))
             .isEqualTo("openbank://business/approvals/$id")
+        assertThat(MobileDeepLink.businessApproval(UUID.fromString(id), UUID.fromString(entity)))
+            .isEqualTo("openbank://business/approvals/$id?entity=$entity")
         listOf(
             "openbank://business/approvals/",
             "openbank://business/approvals/not-a-uuid",
@@ -158,6 +162,18 @@ class NotificationModelTest {
             "https://business/approvals/$id",
             "OPENBANK://business/approvals/$id",
             " openbank://business/approvals/$id",
+            "openbank://business/approvals/$id?entity=",
+            "openbank://business/approvals/$id?entity=not-a-uuid",
+            "openbank://business/approvals/$id?entity=${entity.uppercase()}",
+            "openbank://business/approvals/$id?entity=$entity&next=https://evil.invalid",
+            "openbank://business/approvals/$id?entity=$entity#frag",
+            "openbank://business/approvals/$id?entity=$entity/extra",
+            "openbank://business/approvals/$id?other=$entity",
+            "openbank://business/approvals/$id?next=$entity",
+            "openbank://business/approvals/$id?entity=$entity?entity=$entity",
+            "openbank://business/approvals/$id?Entity=$entity",
+            "openbank://business/approvals/$id?entity%3D$entity",
+            "openbank://business/approvals/not-a-uuid?entity=$entity",
         ).forEach { assertThat(MobileDeepLink.isAllowed(it)).describedAs(it).isFalse() }
     }
 

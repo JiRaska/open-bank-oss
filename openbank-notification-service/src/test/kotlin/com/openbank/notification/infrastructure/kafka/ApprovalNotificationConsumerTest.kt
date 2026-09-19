@@ -74,7 +74,8 @@ class ApprovalNotificationConsumerTest {
         assertThat(requests).allSatisfy { req ->
             assertThat(req.template).isEqualTo(NotificationTemplate.APPROVAL_REQUIRED)
             assertThat(req.channel).isEqualTo(NotificationChannel.PUSH)
-            assertThat(req.deepLink).isEqualTo("openbank://business/approvals/$approvalId")
+            assertThat(req.deepLink)
+                .isEqualTo("openbank://business/approvals/$approvalId?entity=0199a1b2-0000-7000-8000-0000000e0001")
             assertThat(MobileDeepLink.isAllowed(req.deepLink)).isTrue()
             assertThat(req.correlationId).isEqualTo(approvalId)
             assertThat(req.language).isEqualTo(NotificationLanguage.CS)
@@ -176,6 +177,17 @@ class ApprovalNotificationConsumerTest {
         verify(exactly = 0) { notificationConsumer.consume(any()) }
         assertThat(counted("APPROVAL_REQUESTED", "malformed")).isEqualTo(2.0)
         assertThat(counted("?", "malformed")).isEqualTo(2.0)
+    }
+
+    @Test
+    fun `an absent or malformed entityPartyId falls back to the bare link, which the allow-list accepts`() {
+        run(event { remove("entityPartyId") })
+        run(event { put("entityPartyId", "x&next=https://evil.invalid") })
+
+        assertThat(captured()).hasSize(4).allSatisfy { req ->
+            assertThat(req.deepLink).isEqualTo("openbank://business/approvals/$approvalId")
+            assertThat(MobileDeepLink.isAllowed(req.deepLink)).isTrue()
+        }
     }
 
     @Test

@@ -221,7 +221,9 @@ class ApprovalNotificationIT {
             it.data["notificationId"] == required.notificationId.toString()
         }
         assertThat(pushed).hasSize(1)
-        assertThat(pushed.single().data["deepLink"]).startsWith("openbank://business/approvals/")
+        assertThat(pushed.single().data["deepLink"]).matches(
+            "openbank://business/approvals/[0-9a-f-]{36}\\?entity=0199a1b2-0000-7000-8000-0000000e0001",
+        )
         // Lock-screen text carries nothing about the company or the money (ADR-0135 §3).
         assertThat(pushed.single().title).doesNotContain("Example", "CZK")
 

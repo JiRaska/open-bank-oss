@@ -66,7 +66,7 @@ import java.util.UUID
  * `failure-strategy` decides what follows (`application.yaml`).
  *
  * **Push vs inbox.** Every request is `PUSH` with the deep link
- * `openbank://business/approvals/{approvalId}`. The persisted notification row IS the in-app inbox
+ * `openbank://business/approvals/{approvalId}?entity={entityPartyId}`. The persisted notification row IS the in-app inbox
  * entry (unread until the app marks it read), so a party with no registered device still sees it
  * in the inbox; the push itself reports `accepted` from the provider, never `delivered`.
  */
@@ -166,7 +166,7 @@ class ApprovalNotificationConsumer @Inject constructor(
                 variables = variables,
                 correlationId = e.approvalId,
                 deduplicationKey = deduplicationKey(e.eventId, partyId),
-                deepLink = MobileDeepLink.businessApproval(e.approvalId),
+                deepLink = MobileDeepLink.businessApproval(e.approvalId, e.entityPartyId),
                 language = language,
             )
         }
@@ -182,6 +182,8 @@ class ApprovalNotificationConsumer @Inject constructor(
             approvalId = approvalId,
             initiatorPartyId = initiator,
             recipients = recipients,
+            // Optional: an absent or malformed id yields the bare link, which the app still routes.
+            entityPartyId = node.uuid("entityPartyId"),
             entityName = node.text("entityName"),
             kind = node.text("kind"),
             amount = node.path("amount").takeIf { it.isNumber || it.isTextual }?.asText()
@@ -215,6 +217,7 @@ class ApprovalNotificationConsumer @Inject constructor(
         val approvalId: UUID,
         val initiatorPartyId: UUID,
         val recipients: List<UUID>,
+        val entityPartyId: UUID?,
         val entityName: String,
         val kind: String,
         val amount: BigDecimal?,
