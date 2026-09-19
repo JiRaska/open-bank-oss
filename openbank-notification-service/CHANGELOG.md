@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.32.0...notification-service-v0.33.0) (2026-09-19)
+
+
+### Features
+
+* **notification:** notify co-signers of multi-signature approvals ([#10313](https://github.com/JiRaska/open-bank-oss/issues/10313)) ([2fc178a](https://github.com/JiRaska/open-bank-oss/commit/2fc178a40d6d397796f212c4f6b11bc518d8ce35))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.31.1...notification-service-v0.32.0) (2026-09-13)
 
 
