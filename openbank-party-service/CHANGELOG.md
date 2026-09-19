@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.0...party-service-v0.24.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **party:** make party read-modify-write atomic under a row lock ([#10360](https://github.com/JiRaska/open-bank-oss/issues/10360)) ([14b6ded](https://github.com/JiRaska/open-bank-oss/commit/14b6dede981c83487f23cdac766f638ba6290d13))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.1...party-service-v0.24.0) (2026-09-17)
 
 
