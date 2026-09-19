@@ -16,7 +16,6 @@ import com.openbank.delegation.infrastructure.rest.dto.EvaluateRequest
 import com.openbank.delegation.infrastructure.rest.dto.EvaluationResponse
 import com.openbank.delegation.infrastructure.rest.dto.ListEnvelope
 import com.openbank.delegation.infrastructure.rest.dto.MoneyBody
-import com.openbank.delegation.infrastructure.rest.dto.PendingForHumanResponse
 import com.openbank.delegation.infrastructure.rest.dto.ProposeGroupRequest
 import com.openbank.delegation.infrastructure.rest.dto.ProposePayeeRequest
 import com.openbank.delegation.infrastructure.rest.dto.ProposePolicyRequest
@@ -301,20 +300,6 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
 
     private fun accepted(request: com.openbank.delegation.domain.model.ApprovalRequest): Response =
         Response.status(Response.Status.ACCEPTED).entity(ApprovalRequestResponse.from(request, codec)).build()
-}
-
-/** Everything waiting for one human's signature across all entities they may sign for now. */
-@Tag(name = "Business signing")
-@Path("/api/v1/parties/{humanId}/approval-requests")
-@Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed("ROLE_API")
-class PendingApprovalsResource(private val service: BusinessSigningService, private val codec: SigningPayloadCodec) {
-    @GET
-    @Path("/pending")
-    @Authorize(action = "delegation.signing.pending.read", resource = "#humanId")
-    @Operation(summary = "Approval requests waiting for this human's signature, grouped by entity")
-    suspend fun pending(@PathParam("humanId") humanId: UUID): PendingForHumanResponse =
-        PendingForHumanResponse.from(humanId, service.pendingFor(humanId), codec)
 }
 
 /** One mapper for the whole signing boundary: `{status, error, code}`. */

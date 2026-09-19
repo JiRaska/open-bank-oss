@@ -101,6 +101,32 @@ class BusinessSigningOpenApiTest {
         assertThat(claim["description"] as String).contains("Exactly one caller")
     }
 
+    /**
+     * The negative half (ADR-0279 #3): every state-changing signing route documents the 403 a
+     * wrong identity gets (not eligible, mandate lapsed, SCA not linked to this request), and every
+     * route addressed at one approval documents the 404 a foreign entity gets.
+     */
+    @Test
+    fun `wrong identity and foreign resources are documented refusals`() {
+        val mutating = listOf(
+            "/api/v1/entities/{entityId}/approval-requests" to "post",
+            "/api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures" to "post",
+            "/api/v1/entities/{entityId}/approval-requests/{approvalId}/rejection" to "post",
+            "/api/v1/entities/{entityId}/signing-policy" to "put",
+            "/api/v1/entities/{entityId}/trusted-payees" to "post",
+        )
+        mutating.forEach { (path, verb) ->
+            val responses = (paths.getValue(path)[verb] as Map<String, Any?>)["responses"] as Map<String, Any?>
+            assertThat(responses.keys).describedAs("$verb $path").contains("403")
+        }
+        listOf("signatures", "rejection", "release-claim", "release-result").forEach { action ->
+            val op = paths.getValue(
+                "/api/v1/entities/{entityId}/approval-requests/{approvalId}/$action",
+            )["post"] as Map<String, Any?>
+            assertThat((op["responses"] as Map<String, Any?>).keys).describedAs(action).contains("404")
+        }
+    }
+
     private companion object {
         const val EXPECTED_OPERATIONS = 16
     }

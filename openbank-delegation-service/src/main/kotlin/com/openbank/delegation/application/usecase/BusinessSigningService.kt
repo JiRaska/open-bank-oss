@@ -38,6 +38,7 @@ import com.openbank.delegation.domain.model.SigningPolicyRule
 import com.openbank.delegation.domain.model.TrustedPayee
 import com.openbank.delegation.domain.model.TrustedPayeeStatus
 import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import java.security.MessageDigest
 import java.time.Clock
@@ -412,7 +413,7 @@ class BusinessSigningService(
                 "a signer no longer holds an active mandate; the round is incomplete",
             )
         }
-        val token = UUID.randomUUID()
+        val token = Ids.randomId()
         if (!repository.claimRelease(entityPartyId, id, token, now)) {
             throw refused(CONFLICT, "ALREADY_CLAIMED", "approval request $id was already released")
         }
@@ -519,7 +520,7 @@ class BusinessSigningService(
             ApprovalKind.PAYMENT -> null
             ApprovalKind.PAYEE_ADD -> AppliedChange.AddPayee(
                 TrustedPayee(
-                    id = UUID.randomUUID(),
+                    id = Ids.newId(),
                     entityPartyId = signed.entityPartyId,
                     iban = payload["iban"] as String,
                     name = payload["name"] as String,
@@ -598,7 +599,7 @@ class BusinessSigningService(
             "expiry must be within ${ApprovalRequest.DEFAULT_TTL_HOURS} hours"
         }
         return ApprovalRequest(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             entityPartyId = entityPartyId,
             kind = kind,
             payload = payload,

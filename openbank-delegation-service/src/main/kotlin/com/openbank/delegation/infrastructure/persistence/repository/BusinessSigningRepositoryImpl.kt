@@ -28,6 +28,7 @@ import com.openbank.delegation.infrastructure.persistence.entity.SignerGroupEnti
 import com.openbank.delegation.infrastructure.persistence.entity.SigningPolicyEntity
 import com.openbank.delegation.infrastructure.persistence.entity.TrustedPayeeEntity
 import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
@@ -244,7 +245,7 @@ class BusinessSigningRepositoryImpl(
     private fun persistSignatures(s: Mutiny.Session, request: ApprovalRequest, existing: Set<UUID>): Uni<Void> {
         val added = request.signatures.filter { it.partyId !in existing }.map { sig ->
             ApprovalSignatureEntity().also {
-                it.id = UUID.randomUUID()
+                it.id = Ids.newId()
                 it.approvalRequestId = request.id
                 it.partyId = sig.partyId
                 it.scaChallengeId = sig.scaChallengeId
@@ -288,7 +289,7 @@ class BusinessSigningRepositoryImpl(
             change.group.entityPartyId,
         ).setParameter(2, change.group.id).singleResultOrNull.flatMap { existing ->
             val row = existing ?: SignerGroupEntity().also {
-                it.rowId = UUID.randomUUID()
+                it.rowId = Ids.newId()
                 it.id = change.group.id
                 it.entityPartyId = change.group.entityPartyId
             }
