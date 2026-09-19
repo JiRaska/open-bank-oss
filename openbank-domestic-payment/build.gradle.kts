@@ -63,6 +63,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     // ADR-0063 P2: consumer-driven contract tests (Pact).
     testImplementation(libs.pact.consumer)
     testImplementation(libs.pact.provider)

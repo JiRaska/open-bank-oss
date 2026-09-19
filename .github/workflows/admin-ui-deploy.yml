@@ -535,17 +535,17 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -u
+          python3 .github/scripts/extract-test-intelligence-envelope.py --self-test
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           touch openbank-admin-ui/test-run-history/.staged-ids
-          # Measured 2026-09-04: only 54 non-expired main-branch `test-intelligence-run-*`
-          # artifacts exist repo-wide, so this cap does not bind and lowering it saves ~4
-          # requests, not ~50. Left at 100 deliberately. What those 54 buy is the number
-          # that matters and it is not this one: 21 components across 10 CI runs spanning
-          # 0.6 HOURS, median 2 envelopes per component — a snapshot, not the per-test-case
-          # history it feeds. Artifact retention no longer binds the HISTORY (the cache
-          # above keeps envelopes past expiry); the cap now bounds only what one build
-          # downloads, not what it knows.
+          # The restored cache can predate ZIP validation. Remove non-main or malformed
+          # envelopes before the collector reads them; a missing file overrides its old
+          # .staged-ids entry so an available artifact is re-fetched, not suppressed.
+          python3 .github/scripts/extract-test-intelligence-envelope.py \
+            --prune-cache openbank-admin-ui/test-run-history || exit 1
+          # The cache preserves history past artifact expiry. Bound only the number of
+          # candidates downloaded by this build, not the retained history.
           MAX_ENVELOPES=100
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero
@@ -554,31 +554,49 @@ jobs:
           # newest-first across the entire repository; one 100-item page is readily filled
           # by per-service evidence, so page it before applying the bounded 100-envelope cap.
           # GitHub's `name` filter is exact-match and cannot select run-id-suffixed artifacts.
+          # High-volume PR CI can push the latest main browser run beyond five
+          # repository-wide artifact pages (observed 2026-09-18). Fetch that producer's
+          # latest completed main run directly so a valid browser verdict cannot vanish
+          # merely because unrelated branches uploaded many artifacts.
           KNOWN_BEFORE=$(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ')
-          for page in 1 2 3 4 5; do
-            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-              | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
-          done \
+          {
+            browser_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-browser-synthetic.yml/runs?branch=main&status=completed&per_page=1" \
+              | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
+            if [ -n "${browser_run_id}" ]; then
+              api "https://api.github.com/repos/${REPO}/actions/runs/${browser_run_id}/artifacts?per_page=100" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            fi
+            for page in 1 2 3 4 5; do
+              api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            done
+          } \
+            | awk '!seen[$1]++' \
             | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
                 [ -n "${artifact_id}" ] || continue
-                # Diff-forward: skip any artifact id the cache already staged, whatever its
-                # current expiry state — the staged envelope outlives the artifact. The
-                # candidate list above is still bounded at MAX_ENVELOPES BEFORE any download;
-                # this skip is why steady state downloads a handful, not the bound.
-                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids && continue
+                # Diff-forward: a validated cached file is authoritative, even if its ID
+                # ledger entry is missing. A stale ID without a file must not suppress repair.
+                # The candidate list is bounded before any download.
+                cached="openbank-admin-ui/test-run-history/${artifact_name}.json"
+                if [ -f "${cached}" ]; then
+                  grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
+                    || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                  continue
+                fi
                 archive="/tmp/${artifact_name}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
-                # actions/upload-artifact strips the uploaded directory prefix, so the
-                # immutable service envelope is normally `run.json` at the zip root.
-                # Keep accepting a nested path for compatibility with an artifact action
-                # layout change, but never require a source-tree path that is not retained.
-                envelope="$(unzip -Z1 "${archive}" | awk '$0 == "run.json" || /\/run\.json$/ { print; exit }' || true)"
-                [ -n "${envelope}" ] || continue
-                unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
-                echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                # Browser variants retain run-chromium.json / run-firefox.json,
+                # unlike service envelopes named run.json. Require exactly one
+                # schema-valid main envelope; never guess among ZIP members.
+                if ! python3 .github/scripts/extract-test-intelligence-envelope.py \
+                  "${archive}" "${cached}"; then
+                  continue
+                fi
+                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
+                  || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
               done
-          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) downloaded this build."
+          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
 
       - name: Save staged test-run history
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -598,9 +616,12 @@ jobs:
         run: |
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
+          # A one-item response has selected an older completed run while a newer
+          # main run and its artifacts existed. Compare attempt timestamps explicitly
+          # rather than trusting the API's first item (reruns can change recency).
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=100" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
             echo "No completed pitest run found — skipping pitest staging."

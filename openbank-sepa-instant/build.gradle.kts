@@ -44,6 +44,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.quarkus.test.security)
     // In-memory reactive-messaging connector: SctInstBootSmokeIT swaps the Kafka outgoing

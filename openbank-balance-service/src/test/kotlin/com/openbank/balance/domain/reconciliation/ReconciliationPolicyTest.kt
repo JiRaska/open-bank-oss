@@ -57,6 +57,17 @@ class ReconciliationPolicyTest {
     }
 
     @Test
+    fun `drift after a healthy currency still raises the aggregate alert`() {
+        val report = reconcile(
+            ledger = mapOf("CZK" to BigDecimal("100.00"), "EUR" to BigDecimal("50.00")),
+            booked = mapOf("CZK" to BigDecimal("100.00"), "EUR" to BigDecimal("49.00")),
+        )
+
+        assertTrue(report.hasDrift)
+        assertEquals(listOf("EUR"), report.driftedCurrencies)
+    }
+
+    @Test
     fun `a currency present on only one side reconciles against an implicit zero`() {
         val report = reconcile(
             ledger = mapOf("CZK" to BigDecimal("100.00")),

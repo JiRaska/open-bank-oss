@@ -53,6 +53,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract test against ledger-service postJournal (ADR-0063 P2 Batch B).
     testImplementation(libs.pact.consumer)
 }
