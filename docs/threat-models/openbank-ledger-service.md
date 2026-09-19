@@ -461,3 +461,23 @@ set) apply equally to the new `ledger.approval.decide` action.
   bodies before projecting the journal reference as complaint evidence. It adds no journal lines,
   amount, account, actor or description and does not change ledger posting. Risk class = provenance
   integrity with low additional disclosure. Rollback is wire-compatible because the field is additive.
+
+- **2026-09-20** — **Two new inbound edges over a new private-CA mTLS listener** (8443, client auth
+  REQUIRED, TLSv1.3; server cert `ledger-service-internal-tls`), the same shape as account-service
+  and party-service. HTTP/8101 is unchanged for its existing callers (transaction, lending,
+  settlement, balance, billing, finrep), so this is additive, not a migration. The two callers on
+  8443 are clearing-service `NetSettlementPostingConsumer` (ADR-0281, `ClearingLedgerRestClient`)
+  and interest-service `RestLedgerPostingAdapter` (ADR-0033 §D, `LedgerRestClient`), both doing
+  `POST /api/v1/journals` (`ledger.create`) as the shared `service-account-openbank-services` —
+  which `ledger_rest_ext.rego`'s `service-ledger-post` already admits for `ledger.create` only, so
+  there is no policy change and no new action. Neither caller has a `reverseJournal` method, so
+  `service-ledger-reverse` is untouched. Before this, neither caller's gitops manifest set
+  `LEDGER_SERVICE_URL`, so both dialled the `application.yaml` fallback `http://localhost:8101`
+  inside their own pods: the edges existed in code and never reached this service, and neither
+  net-settlement nor capitalization journals have ever been posted from the cluster. **Risk class:**
+  the book of record gains two authenticated write callers that were always intended to have it
+  (integrity of journal ingestion); no new principal, no new action, no widened role. The shared
+  service-account identity means OPA still cannot distinguish which of the five M2M posters is
+  calling — unchanged residual risk, already recorded against `service-ledger-post`. Rollback: drop
+  the two callers' `LEDGER_SERVICE_URL` env vars and the listener env; the 8101 path is untouched
+  throughout, so nothing that works today depends on this change.

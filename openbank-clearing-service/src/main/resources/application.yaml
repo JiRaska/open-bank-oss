@@ -175,3 +175,23 @@ authz:
   # runbook is reviewed.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # ADR-0281 net-settlement journal posting reads ledger-service. Production uses a named TLS
+    # bucket over ledger-service's private-CA mTLS listener (8443, client auth REQUIRED), the same
+    # shape as aml-service and notification-service. Local/test fixtures speak plain HTTP, so this
+    # stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      ledger-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      ledger-service:
+        tls-configuration-name: ledger-authority
