@@ -71,6 +71,7 @@ import com.openbank.kyb.domain.model.Representative
 import com.openbank.kyb.domain.model.SignerStatus
 import com.openbank.kyb.domain.model.SourceOfFunds
 import com.openbank.kyb.domain.model.UboFinding
+import com.openbank.kyb.domain.model.UboObservation
 import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.registry.DemoEntity
 import io.mockk.coEvery
@@ -107,6 +108,7 @@ class BusinessOnboardingServiceTest {
     /** In-memory repository: the service's transitions are what is under test, not JPQL. */
     private val store = linkedMapOf<UUID, BusinessOnboardingCase>()
     private val events = mutableListOf<KybEvent>()
+    private val observations = mutableListOf<UboObservation>()
     private val repo = object : BusinessOnboardingCaseRepository {
         override suspend fun save(case: BusinessOnboardingCase, event: KybEvent?) = case.also {
             store[it.id] = it
@@ -115,6 +117,21 @@ class BusinessOnboardingServiceTest {
         override suspend fun update(case: BusinessOnboardingCase, event: KybEvent?) = case.also {
             store[it.id] = it
             event?.let(events::add)
+        }
+        override suspend fun updateWithUboObservation(
+            case: BusinessOnboardingCase,
+            finding: UboFinding,
+            recordedAt: Instant,
+        ): UboObservation {
+            store[case.id] = case
+            return UboObservation(
+                UUID.randomUUID(),
+                case.id,
+                observations.count { it.caseId == case.id }.toLong() + 1,
+                finding,
+                "0".repeat(64),
+                recordedAt,
+            ).also(observations::add)
         }
         override suspend fun findById(id: UUID) = store[id]
         override suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier) =
@@ -468,7 +485,10 @@ class BusinessOnboardingServiceTest {
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Karel Vlastník")
             .hasMessageNotContaining("Holding")
+        assertThat(observations).isEmpty()
         service.makeDeclarations(MakeDeclarationsCommand(id, initiator, cleanDeclarations(id)))
+        assertThat(observations).hasSize(1)
+        assertThat(observations.single().finding.owners).hasSize(2)
     }
 
     @Test
