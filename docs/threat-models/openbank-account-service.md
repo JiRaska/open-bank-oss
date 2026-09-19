@@ -701,3 +701,15 @@ decision use first; the additive projection table may remain until its consumer 
   opening (a forged ACTIVE event for a business party could open and activate an account; the
   mitigation is unchanged — only party-service publishes the topic over mTLS + KafkaUser ACLs); no
   money mutation, no welcome bonus, no new principal. Rollback: set the flag false.
+- **2026-09-19** — **Business-account catch-up (new outbound read: account-service → party-service)**
+  (#10372). `BusinessAccountCatchUp` (suspend `@Scheduled`, ~30 s after start then every 15 min) pages
+  party-service's existing `GET /api/v1/parties?status=ACTIVE` (`ROLE_API`, OIDC client-credentials) over
+  party-service's private-CA mTLS listener (8443, client cert `account-internal-tls`), and for every ACTIVE
+  COMPANY / SOLE_TRADER with no CURRENT account opens and activates the business account through the same
+  `BusinessOnboardingAccount` the event path uses (same idempotency key, so a race or replay yields one).
+  It makes the outcome independent of deploy order: a party that became ACTIVE before this service could
+  react gets no second event. **Who can trigger it:** nobody over HTTP; its input is party-service's
+  register, read-only. Behind BOTH `open-business-accounts` and `business-catch-up.enabled` (default
+  false, sandbox on). Only id, type, status and legal name are bound from the response. **Risk class:**
+  integrity of account opening (a compromised party-service could list a forged ACTIVE business party —
+  the same trust already placed in its events); no money mutation, no bonus. Rollback: set the flag false.

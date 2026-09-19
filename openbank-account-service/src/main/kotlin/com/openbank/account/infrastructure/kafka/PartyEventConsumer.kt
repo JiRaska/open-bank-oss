@@ -5,6 +5,7 @@
 package com.openbank.account.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.account.application.onboarding.BusinessOnboardingAccount
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
@@ -257,22 +258,20 @@ class PartyEventConsumer(
         }
     }
 
-    private suspend fun openBusinessAccount(partyId: UUID, legalName: String) {
-        val existingTypes = accountRepository.findByPartyId(partyId, 50, null).map { it.accountType }.toSet()
-        if (AccountType.CURRENT in existingTypes) return
-        accountUseCase.openAccount(
-            OpenAccountCommand(
-                idempotencyKey = "onboarding-business-account-$partyId",
-                partyId = partyId,
-                productId = UUID.fromString(businessProductId),
-                accountType = AccountType.CURRENT,
-                currency = CurrencyCode.of(businessCurrency),
-                requestedBy = UUID.fromString(systemActorId),
-                legalName = legalName,
-                initialStatus = AccountStatus.PENDING_ACTIVATION,
-            ),
+    private val businessAccount by lazy {
+        BusinessOnboardingAccount(
+            accountRepository,
+            accountUseCase,
+            UUID.fromString(businessProductId),
+            businessCurrency,
+            UUID.fromString(systemActorId),
         )
-        log.infof("Opened PENDING_ACTIVATION onboarding business CURRENT account for party %s", partyId)
+    }
+
+    private suspend fun openBusinessAccount(partyId: UUID, legalName: String) {
+        if (businessAccount.openIfMissing(partyId, legalName)) {
+            log.infof("Opened PENDING_ACTIVATION onboarding business CURRENT account for party %s", partyId)
+        }
     }
 
     private suspend fun openRetailAccounts(partyId: UUID, legalName: String) {
@@ -370,6 +369,6 @@ class PartyEventConsumer(
         const val MAX_PROJECTION_ATTEMPTS = 4
         const val RETRY_BACKOFF_MS = 500L
         const val BUSINESS_CURRENT_PRODUCT_ID = "d4275d2a-1343-3052-a6c0-8a99149b6c62"
-        val BUSINESS_PARTY_TYPES = setOf("COMPANY", "SOLE_TRADER")
+        val BUSINESS_PARTY_TYPES = BusinessOnboardingAccount.BUSINESS_PARTY_TYPES
     }
 }
