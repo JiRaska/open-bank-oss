@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "fa9f8f193398bbeb"
+    openbank.tech/policy-checksum: "3fd0844d734fb3b5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -625,6 +625,24 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
     	role in input.principal.roles
     	startswith(input.action, "kyb.")
+    }
+
+    human_restriction_admin if {
+        input.principal.type == "HUMAN"
+        "ROLE_ADMIN" in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+    }
+
+    allowed_reasons contains "admin-kyb-observation-restriction" if {
+        input.action == "kyb.ubo.restrict"
+        human_restriction_admin
+    }
+
+    # The general staff `kyb.` reason also admits KYC and operators. A veto at the
+    # final decision prevents that or a future matrix grant from widening restriction.
+    prohibited if {
+        input.action == "kyb.ubo.restrict"
+        not human_restriction_admin
     }
 
     # The customer edge proxying the customer's own business onboarding (ADR-0284 D6). Enumerated,

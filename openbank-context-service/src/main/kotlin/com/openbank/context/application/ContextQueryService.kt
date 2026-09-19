@@ -29,6 +29,66 @@ class ContextQueryService(
     @ConfigProperty(name = "openbank.context.max-edges") private val maxEdges: Int,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
 ) {
+    internal suspend fun <T> authorizationEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> T,
+    ): T = authorized(
+        "context.authorization.read",
+        "AUTHORIZATION_REVIEW",
+        ContextNamespace.AUTHORIZATION,
+        "delegation:$ref",
+        actor,
+        context,
+        block,
+    )
+
+    internal suspend fun <T> amlCaseEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> T,
+    ): T = authorized(
+        "context.aml-case.read",
+        "AML_INVESTIGATION",
+        ContextNamespace.AML,
+        "aml-case:$ref",
+        actor,
+        context,
+        block,
+    )
+
+    internal suspend fun <T> kybCaseEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> T,
+    ): T = authorized(
+        "context.kyb-case.read",
+        "KYB_OWNERSHIP_REVIEW",
+        ContextNamespace.KYB,
+        "kyb-case:$ref",
+        actor,
+        context,
+        block,
+    )
+
+    internal suspend fun <T> fraudCaseEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> T,
+    ): T = authorized(
+        "context.fraud-case.read",
+        "FRAUD_INVESTIGATION",
+        ContextNamespace.FRAUD,
+        "fraud-case:$ref",
+        actor,
+        context,
+        block,
+    )
+
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =
         authorized(
             "context.complaint.read",
@@ -96,7 +156,18 @@ class ContextQueryService(
             decisionMetric(action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
-        if (!assignments.isAssigned(actor.id, context.caseId, context.purpose, now)) {
+        val rootScoped = namespace in setOf(
+            ContextNamespace.AUTHORIZATION,
+            ContextNamespace.AML,
+            ContextNamespace.KYB,
+            ContextNamespace.FRAUD,
+        )
+        val assigned = if (rootScoped) {
+            assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
+        } else {
+            assignments.isAssigned(actor.id, context.caseId, context.purpose, now)
+        }
+        if (!assigned) {
             audit.record(entry(actor, context, action, root, "DENIED", null, "NO_ACTIVE_ASSIGNMENT", now))
             decisionMetric(action, "denied", "no_active_assignment")
             throw ContextAccessDenied()
@@ -111,6 +182,9 @@ class ContextQueryService(
                         "caseId" to context.caseId,
                         "purpose" to context.purpose,
                         "assignmentVerified" to true,
+                        "rootScopeVerified" to rootScoped,
+                        "effectiveAt" to context.asOf.toString(),
+                        "knownAt" to context.knownAt?.toString(),
                         "bankScope" to bankScope,
                     ),
                 ),
@@ -150,5 +224,5 @@ class ContextQueryService(
         version: String?,
         reason: String,
         now: java.time.Instant,
-    ) = ContextReadAudit(actor.id, c.caseId, c.purpose, action, root, decision, version, reason, now)
+    ) = ContextReadAudit(actor.id, c.caseId, c.purpose, action, root, decision, version, reason, now, c.asOf, c.knownAt)
 }

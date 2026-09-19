@@ -19,10 +19,12 @@ import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
 
-/** Publishes to `openbank.fraud.hold.changed` (ADR-0220 D3.5, issue #2749). */
+/** Routes source-owned outbox events to their dedicated topics. */
 @ApplicationScoped
 class KafkaFraudOutboxEventPublisher(
-    @Channel("fraud-outbox-out") private val emitter: MutinyEmitter<String>,
+    @Channel("fraud-outbox-out") private val holdEmitter: MutinyEmitter<String>,
+    @Channel("fraud-case-outbox-out") private val caseEmitter: MutinyEmitter<String>,
+    @Channel("fraud-case-audit-out") private val caseAuditEmitter: MutinyEmitter<String>,
     private val objectMapper: ObjectMapper,
 ) : OutboxEventPublisher {
 
@@ -33,7 +35,24 @@ class KafkaFraudOutboxEventPublisher(
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        emitter.sendMessage(Message.of(withSourceService(entry.payload)).addMetadata(meta)).awaitSuspending()
+        when (entry.eventType) {
+            "fraud.hold_changed" -> {
+                holdEmitter.sendMessage(
+                    Message.of(withSourceService(entry.payload)).addMetadata(meta),
+                ).awaitSuspending()
+            }
+            "fraud.case_opened", "fraud.case_closed" -> {
+                caseEmitter.sendMessage(
+                    Message.of(entry.payload).addMetadata(meta),
+                ).awaitSuspending()
+            }
+            "fraud.case_opened.audit", "fraud.case_closed.audit" -> {
+                caseAuditEmitter.sendMessage(
+                    Message.of(entry.payload).addMetadata(meta),
+                ).awaitSuspending()
+            }
+            else -> error("unsupported fraud outbox event type: ${entry.eventType}")
+        }
     }
 
     /**
@@ -50,9 +69,9 @@ class KafkaFraudOutboxEventPublisher(
      * `record_hash`. Every day the field is absent produces rows whose attribution is permanently
      * inferred, so the fix is forward-only by construction.
      *
-     * The stamp lives on the publisher, not on each event data class, because this module has no
-     * shared event supertype -- a per-class field would have to be repeated on every event type and
-     * silently omitted by the next one added. The channel has exactly one exit and this is it.
+     * The hold stamp lives on the publisher, not on its event class. Case references deliberately
+     * bypass this transformation: their dedicated channel has a strict four-field data-minimisation
+     * contract, and only Context can read it.
      *
      * The literal key matters: the payload is a serialised data class, so the wire key exists only
      * as a Kotlin property name at runtime and a quoted-string probe over this module finds nothing.

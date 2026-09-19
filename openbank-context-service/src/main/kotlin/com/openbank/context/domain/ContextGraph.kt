@@ -3,7 +3,7 @@ package com.openbank.context.domain
 
 import java.time.Instant
 
-enum class ContextNamespace { COMPLAINT, INCIDENT }
+enum class ContextNamespace { COMPLAINT, INCIDENT, AUTHORIZATION, AML, KYB, FRAUD }
 enum class DataClassification { INTERNAL, CONFIDENTIAL, RESTRICTED }
 
 data class ContextNode(
@@ -49,4 +49,9 @@ data class IncidentImpact(
     val projectionStatus: ImpactProjectionStatus,
 )
 data class Investigator(val id: String, val roles: List<String>)
-data class InvestigationContext(val caseId: String, val purpose: String, val asOf: Instant)
+data class InvestigationContext(
+    val caseId: String,
+    val purpose: String,
+    val asOf: Instant,
+    val knownAt: Instant? = null,
+)

@@ -23,6 +23,9 @@ import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
+import com.openbank.kyb.application.port.out.UboObservationAccess
+import com.openbank.kyb.application.port.out.UboObservationAccessDecision
+import com.openbank.kyb.application.port.out.UboObservationRepository
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -94,6 +97,10 @@ class KybResource {
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
 
     @Inject lateinit var ubo: BeneficialOwnershipPort
+
+    @Inject lateinit var observations: UboObservationRepository
+
+    @Inject lateinit var observationAccess: UboObservationAccess
 
     @Inject lateinit var representation: RepresentationAttestationUseCase
 
@@ -213,6 +220,69 @@ class KybResource {
         // analyst has to act on, not an error: 404 here would read as "this company has no owners",
         // which is the one conclusion none of the three sources supports.
         return Response.ok(UboResponse.from(ubo.lookup(parsed))).build()
+    }
+
+    @GET
+    @Path("/cases/{id}/ubo-observations/{observationId}")
+    @RolesAllowed(Roles.KYC, Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.read", resource = "#caseId")
+    @Operation(summary = "Read one historical UBO observation for an authorised KYB investigation")
+    suspend fun uboObservation(
+        @PathParam("id") caseId: UUID,
+        @PathParam("observationId") observationId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Authorization") authorization: String?,
+    ): Response {
+        require(purpose == "KYB_OWNERSHIP_REVIEW") { "KYB_OWNERSHIP_REVIEW is required" }
+        val bearer = authorization?.takeIf { it.startsWith("Bearer ") && it.length > "Bearer ".length }
+            ?: return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        when (observationAccess.check(caseId, bearer)) {
+            UboObservationAccessDecision.DENIED ->
+                return Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+            UboObservationAccessDecision.UNAVAILABLE ->
+                return Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+            UboObservationAccessDecision.ALLOWED -> Unit
+        }
+        val observation = observations.findUboObservation(caseId, observationId) ?: return notFound()
+        observations.recordUboObservationRead(
+            caseId,
+            observationId,
+            identity.principal.name,
+            purpose,
+            clock.instant(),
+        )
+        return Response.ok(
+            mapOf(
+                "id" to observation.id,
+                "caseId" to observation.caseId,
+                "revision" to observation.revision,
+                "sourceSha256" to observation.sourceSha256,
+                "recordedAt" to observation.recordedAt,
+                "finding" to UboResponse.from(observation.finding),
+            ),
+        ).header("Cache-Control", "no-store").build()
+    }
+
+    @POST
+    @Path("/cases/{id}/ubo-observations/{observationId}/restrict")
+    @RolesAllowed(Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.restrict", resource = "#caseId")
+    @Operation(summary = "Permanently restrict a historical ownership observation from further reads")
+    suspend fun restrictUboObservation(
+        @PathParam("id") caseId: UUID,
+        @PathParam("observationId") observationId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        request: RestrictUboObservationRequest?,
+    ): Response {
+        require(purpose == "KYB_OWNERSHIP_REVIEW") { "KYB_OWNERSHIP_REVIEW is required" }
+        val reason = requireNotNull(request?.reasonCode) { "reasonCode is required" }
+        require(reason in RESTRICTION_REASONS) { "unsupported restriction reasonCode" }
+        return when (
+            observations.restrictUboObservation(caseId, observationId, reason, identity.principal.name, clock.instant())
+        ) {
+            null -> notFound()
+            else -> Response.noContent().header("Cache-Control", "no-store").build()
+        }
     }
 
     @POST
@@ -579,8 +649,11 @@ class KybResource {
 
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        private val RESTRICTION_REASONS = setOf("SOURCE_WITHDRAWN", "EVIDENCE_CHALLENGED", "PRIVACY_RESTRICTION")
         private const val MAX_PAGE = 100
         private const val MIN_REASON = 10
         private const val DEFAULT_LANG = "cs"
     }
 }
+
+data class RestrictUboObservationRequest(val reasonCode: String?)

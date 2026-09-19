@@ -6,7 +6,9 @@ info:
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
-  version: 1.7.0
+  # 1.7.0 -> 1.8.0: additive — case-scoped historical UBO observation read for authorised staff.
+  # 1.8.0 -> 1.9.0: additive — administrative restriction of a historical observation.
+  version: 1.9.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -204,6 +206,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/ubo-observations/{observationId}:
+    get:
+      tags: [KYB]
+      summary: Historical beneficial-ownership observation for an authorised KYB investigation
+      operationId: getUboObservation
+      description: >-
+        Staff-only; the observation must belong to the exact case in the path. KYB checks the
+        caller's still-active, approved case-root assignment with Context on every read and fails
+        closed if that check is unavailable. The source finding stays in KYB and never enters Context.
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: observationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Purpose
+          in: header
+          required: true
+          schema: { type: string, enum: [KYB_OWNERSHIP_REVIEW] }
+      responses:
+        '200':
+          description: Versioned mapped finding and source hash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UboObservation' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/kyb/cases/{id}/ubo-observations/{observationId}/restrict:
+    post:
+      tags: [KYB]
+      summary: Permanently restrict a historical ownership observation from further reads
+      operationId: restrictUboObservation
+      description: >-
+        ADMIN-only protective action. Repeating the same restriction is idempotent; no owner
+        attributes or free text enter its reference-only event. There is no unrestrict route.
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: observationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Purpose
+          in: header
+          required: true
+          schema: { type: string, enum: [KYB_OWNERSHIP_REVIEW] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reasonCode]
+              properties:
+                reasonCode:
+                  type: string
+                  enum: [SOURCE_WITHDRAWN, EVIDENCE_CHALLENGED, PRIVACY_RESTRICTION]
+      responses:
+        '204':
+          description: Restricted or already restricted; no source detail returned
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/kyb/cases/{id}/initiator:
@@ -703,6 +777,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: Live Context assignment check is unavailable; evidence was not released
     Conflict:
       description: The transition is not valid in the case's current state
       content:
@@ -808,6 +884,16 @@ components:
           allOf: [{ $ref: '#/components/schemas/Attestation' }]
           nullable: true
           description: The confirmation that was superseded, so the reviewer is told what changed.
+    UboObservation:
+      type: object
+      required: [id, caseId, revision, sourceSha256, recordedAt, finding]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        recordedAt: { type: string, format: date-time }
+        finding: { $ref: '#/components/schemas/UboFinding' }
     UboFinding:
       type: object
       properties:

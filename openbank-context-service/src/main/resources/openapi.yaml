@@ -2,9 +2,163 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.1.0
+  version: 1.8.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/fraud-cases/{caseId}/network:
+    get:
+      operationId: getAssignedFraudCaseNetwork
+      summary: Explore explicit shared source references among independently authorized open Fraud cases
+      description: >-
+        Fraud obtains the first 256 assigned case references directly from Context, then matches
+        source-owned identifiers within that set.
+        Each returned match is independently authorized and read-audited. A limit or source gap
+        makes this a partial one-hop view, never a fraud finding or identity inference.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: Root and at most four related open cases with evidence for each explicit equality
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudCaseNetwork' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Root role, assignment, policy or current source state denied }
+        '503': { description: Authorization, reference store or source unavailable }
+  /api/v1/context/fraud-cases/{caseId}/access:
+    get:
+      operationId: verifyAssignedFraudCaseAccess
+      summary: Verify a human administrator's active assignment to this exact Fraud case
+      description: Returns no case data. Intended for source-owned, case-scoped evidence reads.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '204': { description: Active root-scoped assignment and policy allow }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization unavailable }
+  /api/v1/context/fraud-cases/{caseId}/assigned-candidates:
+    get:
+      operationId: getAssignedFraudCandidates
+      summary: Return a bounded assigned case set after human root authorization
+      description: >-
+        Used by Fraud's source matcher. The caller cannot supply case IDs for comparison;
+        Context selects the human investigator's live assigned open-case references.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most 256 case IDs and a truncation flag; no source identifiers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudAssignedCandidates' }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization or reference store unavailable }
+  /api/v1/context/kyb-cases/{id}/ownership-observations:
+    get:
+      operationId: getKybOwnershipObservationReferences
+      summary: Read bounded reference-only ownership history for an assigned KYB case
+      description: Owner attributes remain in KYB. recordedAt is Context ingestion time, not finding time.
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: At most 50 case-scoped references with a truncation flag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KybObservationHistory' }
+        '400': { description: Case and purpose mismatch or future knownAt }
+        '403': { description: Role, root assignment or policy denied }
+        '503': { description: Authorization unavailable }
+  /api/v1/context/aml-cases/{id}/network:
+    get:
+      operationId: getAssignedAmlCaseNetwork
+      summary: Find explicit shared references among source-open AML cases assigned to the same investigator
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Root and at most four independently authorized case histories; shared identifiers are leads
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AmlCaseNetwork' }
+        '400': { description: Invalid case, purpose or future timestamp }
+        '403': { description: Root role, assignment, policy or current source state denied }
+        '503': { description: Authorization or AML case source unavailable }
+  /api/v1/context/aml-cases/{id}:
+    get:
+      operationId: getAmlCaseEvidence
+      summary: Read source-observed AML case evidence within an approved case root
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Bounded observations after an uncached current-state check with the owning AML service
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AmlCaseHistory' }
+        '400': { description: Invalid case, purpose or future timestamp }
+        '403': { description: Role, root assignment, policy or current source case state denied }
+        '503': { description: Authorization or AML case source unavailable }
+  /api/v1/context/authorizations/{id}:
+    get:
+      operationId: getAuthorityHistory
+      summary: Read immutable source delegation observations for an explicitly approved root
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Bounded source observations; no assertion about authorization of a business action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthorityHistory' }
+        '400': { description: Invalid purpose, scope or future timestamp }
+        '403': { description: Role, root assignment or policy denied }
+        '503': { description: Authorization unavailable }
   /api/v1/context/assignment-proposals:
     post:
       operationId: proposeContextAssignment
@@ -126,6 +280,83 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    FraudAssignedCandidates:
+      type: object
+      required: [ids, truncated]
+      properties:
+        ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        truncated: { type: boolean }
+    FraudCaseNetwork:
+      type: object
+      required: [root, related, inspectedCandidates, candidateTruncated]
+      properties:
+        root: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
+        inspectedCandidates:
+          type: integer
+          minimum: 0
+          maximum: 4
+          description: Source-matched candidates independently checked by Context.
+        comparedCandidates:
+          type: integer
+          minimum: 0
+          maximum: 256
+          description: Assigned candidates compared by Fraud; absent in older responses.
+        candidateTruncated:
+          type: boolean
+          description: Assignment scan or source match limit was reached; no exhaustive negative conclusion is possible.
+        related:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [evidence, shared]
+            properties:
+              evidence: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
+              shared:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required: [type, sourceId]
+                  properties:
+                    type: { type: string, enum: [ACCOUNT, COUNTERPARTY] }
+                    sourceId: { type: string, format: uuid }
+    FraudCaseSourceEvidence:
+      type: object
+      required: [caseId, scoreId, accountId, status, revision, openedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        scoreId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        counterpartyId: { type: [string, "null"], format: uuid }
+        status: { type: string, enum: [OPEN] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
+    KybObservationHistory:
+      type: object
+      required: [root, knownAt, observations, truncated]
+      properties:
+        root: { type: string, pattern: '^kyb-case:[0-9a-f-]{36}$' }
+        knownAt: { type: string, format: date-time }
+        observations:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/KybObservationSummary' }
+        truncated: { type: boolean }
+    KybObservationSummary:
+      type: object
+      required: [observationId, revision, sourceSha256, recordedAt]
+      additionalProperties: false
+      properties:
+        observationId: { type: string, format: uuid }
+        revision: { type: integer, minimum: 1 }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        recordedAt: { type: string, format: date-time }
     IncidentImpact:
       type: object
       required: [incidentRef, affectedByType, total, drilldownAvailable, projectionStatus]
@@ -152,8 +383,98 @@ components:
         purpose: { type: string, minLength: 1, maxLength: 80 }
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
+        rootRef:
+          type: [string, "null"]
+          maxLength: 300
+          description: Required exact case root for authorization, AML, KYB or Fraud investigation; absent for complaint and incident purposes
     DecideAssignment:
       type: object
       required: [approve]
       properties:
         approve: { type: boolean }
+    AmlCaseNetwork:
+      type: object
+      required: [root, related]
+      properties:
+        root: { $ref: '#/components/schemas/AmlCaseHistory' }
+        related:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/AmlCaseHistory' }
+    AmlCaseHistory:
+      type: object
+      required: [root, effectiveAt, knownAt, observations, truncated]
+      properties:
+        root: { type: string, maxLength: 45 }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        observations:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [evidence, recordedAt, evidenceRef, contentHash]
+            properties:
+              recordedAt: { type: string, format: date-time }
+              evidenceRef: { type: string, maxLength: 300 }
+              contentHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+              evidence: { $ref: '#/components/schemas/AmlCaseObservation' }
+    AmlCaseObservation:
+      type: object
+      required: [eventId, caseId, partyId, eventType, status, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        accountId: { type: [string, "null"], format: uuid }
+        transactionId: { type: [string, "null"], format: uuid }
+        eventType: { type: string, enum: [aml.case.created.v1, aml.case.status_changed.v1] }
+        status: { type: string, enum: [OPEN, UNDER_REVIEW, CLEARED, BLOCKED, ESCALATED] }
+        previousStatus: { type: [string, "null"], enum: [OPEN, UNDER_REVIEW, CLEARED, BLOCKED, ESCALATED, null] }
+        riskLevel: { type: [string, "null"], pattern: '^(LOW|MEDIUM|HIGH|CRITICAL)$' }
+        screeningType: { type: [string, "null"], enum: [CUSTOMER_ONBOARDING, TRANSACTION_MONITORING, PERIODIC_REVIEW, MANUAL_INVESTIGATION, null] }
+        occurredAt: { type: string, format: date-time }
+    AuthorityHistory:
+      type: object
+      required: [root, effectiveAt, knownAt, observations, truncated, actionAuthorization]
+      properties:
+        root: { type: string, maxLength: 47 }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        actionAuthorization: { type: string, const: UNKNOWN }
+        observations:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [evidence, recordedAt, evidenceRef, contentHash]
+            properties:
+              recordedAt: { type: string, format: date-time }
+              evidenceRef: { type: string, maxLength: 300 }
+              contentHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+              evidence: { $ref: '#/components/schemas/AuthorityEvidence' }
+    AuthorityEvidence:
+      type: object
+      required: [delegationId, revision, eventType, grantorPartyId, granteePartyId, capabilities, occurredAt]
+      properties:
+        delegationId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 0 }
+        eventType:
+          type: string
+          enum: [DelegationOffered, DelegationActivated, DelegationReinstated, DelegationDeclined, DelegationRevoked, DelegationSuspended, DelegationRenounced, DelegationExpired]
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: [string, "null"], maxLength: 80 }
+        resourceId: { type: [string, "null"], format: uuid }
+        capabilities:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, maxLength: 80 }
+        approvalPolicy: { type: [string, "null"], maxLength: 80 }
+        requiredApprovals: { type: [integer, "null"], minimum: 1, maximum: 100 }
+        validFrom: { type: [string, "null"], format: date-time }
+        validTo: { type: [string, "null"], format: date-time }
+        occurredAt: { type: string, format: date-time }

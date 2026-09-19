@@ -6,6 +6,7 @@ metadata:
   name: context-service
   namespace: context
   labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
+  annotations: { openbank.io/service-dependencies: "aml/aml-service,fraud/fraud-service" }
 spec:
   replicas: 1
   strategy:
@@ -14,7 +15,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "c3fb0d0a2287a872" }
+      annotations: { openbank.tech/policy-checksum: "8da104078aa79c55" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -43,6 +44,13 @@ spec:
             - { name: QUARKUS_OIDC_AUTH_SERVER_URL, value: http://keycloak.iam.svc:8080/realms/openbank }
             - name: OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: context-service-oidc, key: OIDC_CLIENT_SECRET } }
+            - { name: CONTEXT_INVESTIGATION_OIDC_URL, value: "$(QUARKUS_OIDC_AUTH_SERVER_URL)" }
+            - name: CONTEXT_INVESTIGATION_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: context-investigation-oidc, key: CONTEXT_INVESTIGATION_CLIENT_SECRET } }
+            - name: AML_CASE_SOURCE_URL
+              valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
+            - name: FRAUD_CASE_SOURCE_URL
+              valueFrom: { secretKeyRef: { name: context-fraud-source-discovery, key: FRAUD_CASE_SOURCE_URL } }
             - { name: KAFKA_BOOTSTRAP_SERVERS, value: openbank-cluster-kafka-bootstrap.messaging.svc:9093 }
             - { name: KAFKA_SECURITY_PROTOCOL, value: SSL }
             - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: /mnt/kafka-user/user.p12 }
@@ -67,6 +75,7 @@ spec:
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
             - { name: context-tls, mountPath: /mnt/context-tls, readOnly: true }
+            - { name: fraud-tls-trust, mountPath: /mnt/fraud-tls/ca.crt, subPath: ca.crt, readOnly: true }
             - { name: kafka-user, mountPath: /mnt/kafka-user, readOnly: true }
             - { name: kafka-ca, mountPath: /mnt/kafka-ca, readOnly: true }
             - { name: msg-override, mountPath: /mnt/msg-config, readOnly: true }
@@ -96,6 +105,7 @@ spec:
         - { name: tmp, emptyDir: {} }
         - { name: opa-tmp, emptyDir: {} }
         - { name: context-tls, secret: { secretName: context-service-internal-tls } }
+        - { name: fraud-tls-trust, secret: { secretName: context-fraud-trust } }
         - { name: kafka-user, secret: { secretName: context-service-kafka-keystore } }
         - { name: kafka-ca, secret: { secretName: kafka-cluster-ca-truststore } }
         - { name: msg-override, configMap: { name: context-service-msg-override } }

@@ -9,12 +9,14 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { RefreshCw, ShieldAlert, CircleAlert, Clock3 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { parseFraudReviewQueue, type FraudReviewEvidence } from '@/lib/fraud/fraudReviewContract'
+import { FraudCaseInvestigation } from '@/components/context/FraudCaseInvestigation'
 
 function scoreTone(score: number): Tone {
   if (score >= 80) return 'danger'
@@ -24,6 +26,7 @@ function scoreTone(score: number): Tone {
 
 export default function FraudPage() {
   const { t, language } = useLanguage()
+  const { data: session } = useSession()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [rows, setRows] = useState<FraudReviewEvidence[]>([])
   const [loading, setLoading] = useState(true)
@@ -140,6 +143,7 @@ export default function FraudPage() {
         </table>
         )}
       </div>
+      {session?.user?.roles?.includes('ROLE_ADMIN') && <FraudCaseInvestigation />}
     </div>
   )
 }

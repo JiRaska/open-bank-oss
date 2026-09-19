@@ -2757,26 +2757,17 @@ pr_build_cloud_credentials:
 oidc_secret_convention:
   script: .github/scripts/check-oidc-secret-convention.py
   wired_into: .github/gates/gates.yaml    # gate id oidc-secret-convention, group gitops, enforced
-  # THE DECISION (issue #3485). The OIDC client secret lives in ONE KV entry, `account-service`,
-  # and every ExternalSecret reads it from there. Not because that name is apt -- it is a
-  # historical accident -- but because the fleet has exactly one Keycloak confidential client,
-  # `openbank-services`, and therefore exactly one secret VALUE. A per-service key name promises
-  # a per-service credential that does not exist, while costing a KV write nobody is prompted to
-  # make. Independent rotation is the only thing the per-service form buys, and nothing can use
-  # it while all 39 projections hold the same client's secret.
+  # The shared `openbank-services` client secret lives in ONE KV entry, `account-service`.
+  # The Context investigation client is a distinct confidential client and must have a
+  # distinct credential. Its exact manifest/key pair is checked in the gate; the tracked
+  # manifest alone does not prove the KV entry exists in an environment.
   rule: >-
     Under openbank-infra/gitops/components/, an ExternalSecret data entry projecting the OIDC
-    client secret (remoteRef.property or secretKey == OIDC_CLIENT_SECRET) must read
-    remoteRef.key: account-service.
-  basis: one_client_implies_one_kv_entry
-  baseline: in-script BASELINE dict -- 10 pre-existing per-service entries, SHRINK-ONLY
-  # WHY BASELINED AND NOT MIGRATED. Changing a live ExternalSecret's remoteRef re-projects the
-  # Secret and rolls the pod. Nothing in this repo can see what those 10 KV entries hold, so the
-  # switch is safe only if `account-service` is current -- likely (28 live consumers) but not
-  # verified from here, and being wrong breaks authentication on 10 services at once. The gate
-  # therefore FREEZES today's split rather than moving it: the losing side cannot grow, and a
-  # migration done later must delete its baseline entry or the gate fails on the stale
-  # exemption. Migration is tracked on #3485.
+    shared client secret (remoteRef.property or secretKey == OIDC_CLIENT_SECRET) must read
+    remoteRef.key: account-service. The exact Context investigation ExternalSecret may read
+    context-investigation-service for its dedicated Keycloak client.
+  basis: one_kv_entry_per_distinct_keycloak_client
+  baseline: in-script BASELINE dict -- empty, SHRINK-ONLY
   # PRIOR ART: openbank-delegation-service, 2026-08 -- shipped `remoteRef.key: delegation-service`,
   # an entry nobody had written. ESO answered `Secret does not exist`, the Secret was never
   # created, the pod sat in CreateContainerConfigError for its entire life, and ~12 alerts fired

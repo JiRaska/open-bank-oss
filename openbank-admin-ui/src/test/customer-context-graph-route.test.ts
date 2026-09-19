@@ -50,7 +50,13 @@ describe('Customer graph live overlay route', () => {
     expect(result.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(7)
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
-      `http://card-issuance-service.payments.svc:8118/api/v1/cards/party/${PARTY}`,
+      `http://card-issuance-service.payments.svc:8118/api/v1/cards/party/${PARTY}?limit=51`,
+    )
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `http://lending-service.lending.svc:8126/api/v1/lending/applications?partyId=${PARTY}&limit=31`,
+    )
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `http://notification-service.notifications.svc:8112/api/v1/devices?partyId=${PARTY}&limit=21`,
     )
     expect(body.unavailable).toEqual([])
     expect(body.truncated).toEqual([])
@@ -77,6 +83,27 @@ describe('Customer graph live overlay route', () => {
     const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
     const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
     expect(await result.json()).toMatchObject({ cards: [], unavailable: ['cards'] })
+  })
+
+  it('returns only the visible slice and marks larger card and lending histories', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) return response(Array.from({ length: 51 }, (_, index) => ({
+        id: `card-${index}`, accountId: 'account-1', status: 'ACTIVE',
+      })))
+      if (url.includes(':8126/')) return response(Array.from({ length: 31 }, (_, index) => ({
+        id: `application-${index}`, status: 'APPROVED',
+      })))
+      if (url.includes(':8100/')) return response({ data: [] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    const body = await result.json()
+    expect(body.cards).toHaveLength(50)
+    expect(body.lendingApplications).toHaveLength(30)
+    expect(body.truncated).toEqual(['cards', 'lending'])
   })
 
   it('denies unauthenticated access before any source call', async () => {

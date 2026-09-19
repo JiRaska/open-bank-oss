@@ -9,6 +9,7 @@ import com.openbank.cardissuance.application.port.`in`.CardUseCase
 import com.openbank.cardissuance.application.port.`in`.ReadSecureDetailsQuery
 import com.openbank.cardissuance.application.port.`in`.UpdateControlsCommand
 import com.openbank.cardissuance.application.port.`in`.UpdateLimitsCommand
+import com.openbank.cardissuance.application.port.out.MAX_PARTY_CARD_LIST_LIMIT
 import com.openbank.cardissuance.infrastructure.rest.dto.CardStatusRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.IssueCardRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.UpdateControlsRequest
@@ -81,8 +82,17 @@ class CardResource(private val cardUseCase: CardUseCase) {
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "card.list", resource = "#partyId")
     @Operation(summary = "List cards by party")
-    suspend fun listByParty(@PathParam("partyId") partyId: UUID): Response =
-        Response.ok(cardUseCase.listByParty(partyId).map { it.toResponse() }).build()
+    suspend fun listByParty(@PathParam("partyId") partyId: UUID, @QueryParam("limit") limit: Int?): Response {
+        val cards = if (limit == null) {
+            cardUseCase.listByParty(partyId)
+        } else {
+            require(limit in 1..MAX_PARTY_CARD_LIST_LIMIT) {
+                "limit must be between 1 and $MAX_PARTY_CARD_LIST_LIMIT"
+            }
+            cardUseCase.listRecentByParty(partyId, limit)
+        }
+        return Response.ok(cards.map { it.toResponse() }).build()
+    }
 
     /**
      * A virtual card's synthetic PAN/CVV. `no-store` is mandatory: this body must not sit in a

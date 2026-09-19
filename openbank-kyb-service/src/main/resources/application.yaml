@@ -100,6 +100,10 @@ quarkus:
       url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
       connect-timeout: 2000
       read-timeout: 10000
+    context-service:
+      url: ${CONTEXT_SERVICE_URL:http://localhost:8149}
+      connect-timeout: 1000
+      read-timeout: 3000
     # Public registers (ADR-0284 D1). Free, no key. Egress from the pod goes through the NAT
     # gateway; the NetworkPolicy generator sees these as external edges.
     ares:
@@ -138,6 +142,14 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
+      kyb-ubo-observation-references-out:
+        connector: smallrye-kafka
+        client.id: kyb-ubo-reference-${quarkus.uuid}
+        topic: openbank.kyb.ubo-observation-references
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       kyb-events-out:
         connector: smallrye-kafka
         client.id: kyb-service-${quarkus.uuid}
@@ -234,6 +246,18 @@ authz:
   enforce: "${AUTHZ_ENFORCE:true}"
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%prod":
+  quarkus:
+    tls:
+      context-ownership:
+        trust-store:
+          pem:
+            certs: /mnt/context-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      context-service:
+        tls-configuration-name: context-ownership
 
 "%dev":
   quarkus:

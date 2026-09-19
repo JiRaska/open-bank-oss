@@ -25,4 +25,28 @@ class ContextApiContractTest {
         )
         assertThat(contract).doesNotContain("bankScope", "queryLanguage", "cypher", "drilldownIds")
     }
+
+    @Test
+    fun `fraud source access contract exposes only a case scoped decision`() {
+        val operation = contract.substringAfter("/api/v1/context/fraud-cases/{caseId}/access:")
+            .substringBefore("/api/v1/context/fraud-cases/{caseId}/assigned-candidates:")
+        assertThat(operation).contains("verifyAssignedFraudCaseAccess", "'204'", "'403'", "'503'")
+        assertThat(operation).doesNotContain("accountId", "counterpartyId", "score", "amount", "reason")
+    }
+
+    @Test
+    fun `Fraud candidate set is bounded and tied to the authorized human root`() {
+        val operation = contract.substringAfter("/api/v1/context/fraud-cases/{caseId}/assigned-candidates:")
+            .substringBefore("/api/v1/context/kyb-cases/{id}/ownership-observations:")
+        assertThat(operation).contains("getAssignedFraudCandidates", "FraudAssignedCandidates", "'403'", "'503'")
+        assertThat(contract).contains("maxItems: 256", "uniqueItems: true")
+    }
+
+    @Test
+    fun `fraud network contract is bounded and labels incomplete candidate coverage`() {
+        val operation = contract.substringAfter("/api/v1/context/fraud-cases/{caseId}/network:")
+            .substringBefore("/api/v1/context/fraud-cases/{caseId}/access:")
+        assertThat(operation).contains("getAssignedFraudCaseNetwork", "FraudCaseNetwork", "'403'", "'503'")
+        assertThat(contract).contains("candidateTruncated:", "inspectedCandidates:", "maxItems: 4")
+    }
 }

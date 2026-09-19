@@ -64,7 +64,7 @@ class KafkaFraudOutboxEventPublisherTest {
             lastError = null,
         )
 
-        runBlocking { KafkaFraudOutboxEventPublisher(emitter, mapper).publish(entry) }
+        runBlocking { KafkaFraudOutboxEventPublisher(emitter, emitter, emitter, mapper).publish(entry) }
 
         assertThat(mapper.readTree(captured.captured.payload).get("sourceService").asText())
             .isEqualTo("fraud-service")
@@ -98,10 +98,74 @@ class KafkaFraudOutboxEventPublisherTest {
             lastError = null,
         )
 
-        runBlocking { KafkaFraudOutboxEventPublisher(emitter, ObjectMapper()).publish(entry) }
+        runBlocking { KafkaFraudOutboxEventPublisher(emitter, emitter, emitter, ObjectMapper()).publish(entry) }
 
         // This is the money path: an unattributed row is a strictly better outcome than a
         // publish that throws and wedges the outbox dispatcher.
         assertThat(captured.captured.payload).isEqualTo("not json at all")
+    }
+
+    @Test
+    fun `case references use only the dedicated emitter and retain the exact minimal payload`() {
+        val holdEmitter = mockk<MutinyEmitter<String>>()
+        val caseEmitter = mockk<MutinyEmitter<String>>()
+        val captured = slot<Message<String>>()
+        every { caseEmitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
+        val caseId = UUID.randomUUID()
+        val payload = """{"eventType":"fraud.case_opened","caseId":"$caseId","revision":1,""" +
+            """"occurredAt":"2026-09-17T00:00:00Z"}"""
+        val entry = OutboxEntry(
+            eventId = UUID.randomUUID(),
+            aggregateId = caseId,
+            eventType = "fraud.case_opened",
+            payload = payload,
+            status = OutboxStatus.PENDING,
+            attemptCount = 0,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+            sentAt = null,
+            lastError = null,
+        )
+
+        runBlocking {
+            KafkaFraudOutboxEventPublisher(holdEmitter, caseEmitter, holdEmitter, ObjectMapper()).publish(entry)
+        }
+
+        assertThat(captured.captured.payload).isEqualTo(payload)
+        assertThat(ObjectMapper().readTree(captured.captured.payload).fieldNames().asSequence().toSet())
+            .containsExactlyInAnyOrder("eventType", "caseId", "revision", "occurredAt")
+        io.mockk.verify(exactly = 0) { holdEmitter.sendMessage(any()) }
+    }
+
+    @Test
+    fun `audit case events use only the Audit emitter`() {
+        val holdEmitter = mockk<MutinyEmitter<String>>()
+        val caseEmitter = mockk<MutinyEmitter<String>>()
+        val auditEmitter = mockk<MutinyEmitter<String>>()
+        val captured = slot<Message<String>>()
+        every { auditEmitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
+        val caseId = UUID.randomUUID()
+        val eventId = UUID.randomUUID()
+        val payload = """{"eventId":"$eventId","eventType":"fraud.case_opened.audit","aggregateId":"$caseId"}"""
+        val entry = OutboxEntry(
+            eventId = eventId,
+            aggregateId = caseId,
+            eventType = "fraud.case_opened.audit",
+            payload = payload,
+            status = OutboxStatus.PENDING,
+            attemptCount = 0,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+            sentAt = null,
+            lastError = null,
+        )
+
+        runBlocking {
+            KafkaFraudOutboxEventPublisher(holdEmitter, caseEmitter, auditEmitter, ObjectMapper()).publish(entry)
+        }
+
+        assertThat(captured.captured.payload).isEqualTo(payload)
+        io.mockk.verify(exactly = 0) { holdEmitter.sendMessage(any()) }
+        io.mockk.verify(exactly = 0) { caseEmitter.sendMessage(any()) }
     }
 }

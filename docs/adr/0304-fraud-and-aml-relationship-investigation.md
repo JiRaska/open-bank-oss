@@ -1,11 +1,12 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
-delivery-repos: []
+delivery-repos: [open-bank-oss]
+followup: "#9945 — fraud-case source contract, wider AML network, retention and workload qualification remain"
 tags: [fraud, aml-sanctions, authz, admin-ui]
 summary: "Fraud and AML investigators use separate purpose-bound lenses over the shared context graph to examine explainable device, counterparty and money-flow relationships without turning similarity into evidence."
 ---
@@ -67,6 +68,114 @@ Acceptance covers cross-case/customer IDOR, hidden-node path leakage, revoked as
 unavailable OPA/audit, timing/count side channels, high-degree nodes, replay, duplicates
 and currency-safe aggregation. Measure task precision/recall and false associations as
 well as latency. Pilot on synthetic data, then a limited investigator group without export.
+
+## Source evidence delivered in the first P2 step
+
+AML case creation and status changes originate from the AML service's transactional outbox.
+The Kafka body carries the case, party, optional account/transaction and observed status;
+`ce-id` and `ce-type` are **headers**, not body fields. The context projector requires those
+headers and a matching idempotency key. It persists a bank-scoped, append-only, event-time
+and recorded-time history with typed indexes for explicit case links. The projector drops
+customer references, matched names, reasons, analyst names and other free text. Duplicate
+event IDs with changed normalized content fail; a late event cannot rewrite an earlier
+knowledge-time view. The consumer has its own group, DLQ and bounded database timeout.
+
+The first read surface is limited to one assigned AML case. Before it returns evidence,
+it checks the current case status with the owning AML service through a bounded,
+uncached call carrying the investigator's authenticated bearer (1.5 s total timeout, 16 in-flight calls per
+context instance, no retry); closed, unknown, overloaded or unavailable status yields no
+evidence. That dependency is configured outside the public repository. Authorization
+also binds the investigator, case, root and AML purpose through the existing assignment,
+OPA and durable audit path. The AML service has case lifecycle events but no monotonic
+revision in their body, so a timestamp alone cannot prove a complete transition
+sequence. Event history presents observations, never a final legal conclusion. No
+device-use edge, transaction settlement or inference is delivered.
+
+The next bounded read surface discovers cases with an explicitly equal party, account
+or transaction identifier in the same effective/knowledge window. Candidate discovery
+joins only currently approved assignments for that investigator and returns at most four
+cases. Every candidate is then independently re-authorized, read-audited and checked
+against its current source status before any evidence is returned. A revoked or terminal
+candidate is omitted; source or policy unavailability fails the whole request. Each
+related case returns at most 20 observations. If that bounded slice no longer includes
+the linking observation, the candidate is omitted rather than drawn without visible
+evidence. The displayed network is intentionally incomplete: the four-case cap,
+observation cap, assignment scope and source lag mean absence of an edge does not
+prove absence of a relationship. Exact identifier equality is a lead, not a fraud
+finding or inferred ownership.
+
+Fraud's current source emits a temporary fraud-hold change for marketing suppression;
+it does not have a case/assignment lifecycle or an authoritative fraud finding. Its
+signals cannot be reused as an investigative case or an account restriction. A true
+fraud-case source contract, purpose-bound authorization and independent negative tests
+are prerequisites for the Fraud lens.
+
+The first Fraud network lens now uses a distinct reference-only Fraud topic. Context
+fetches live OPEN case associations from Fraud over HTTPS only after a case-scoped
+assignment, policy decision and committed audit; every candidate repeats that chain.
+Only exact account or counterparty UUID equality within the same identifier role
+becomes a visible edge. Discovery is limited to four currently assigned case
+references, and the UI labels a truncated or empty result as a partial search.
+No device graph, inferred identity, vector-generated edge or fraud finding is
+represented. The source URL is required runtime secret material, while the tracked
+deployment declares service identity for generated network policy. Missing secret,
+TLS trust, source, PDP or audit fails closed. This is an investigative pilot slice.
+
+Broader cross-case expansion, retention/restriction workflow, load evidence and a
+controlled pilot remain required. The bounded AML and Fraud networks are not
+completion of ADR-0304.
+
+The first Fraud pilot selects the first four assigned case references by UUID
+**before** comparing source-owned account and counterparty identifiers. Once an
+investigator has more than four eligible cases, a genuinely related case can be
+outside that slice. The `candidateTruncated` response flag warns about this; an
+empty related list must not be described as an exhaustive negative finding.
+
+The subsequent Fraud network increment selects candidates by explicit equality in
+Fraud's indexed case store. Fraud will fetch a bounded set of case IDs directly
+from Context under the investigator's bearer, after a fresh root-scoped assignment,
+policy and audit decision. The caller cannot supply candidate IDs. Fraud will match
+only the returned IDs against the live root case's account and counterparty **within the
+same identifier role**. The source response will contain candidate case IDs only,
+not account or counterparty IDs. Context will independently re-authorize, audit
+and fetch each candidate's evidence before returning it to the UI. A page limit
+or unavailable source will be reported as partial or unavailable, never as a
+complete network. The reference Kafka topic remains case-ID/revision/time only.
+Measure lookup selectivity, authorization cost and p95/p99 latency with 1× and
+10× assigned-case populations before increasing the interactive expansion cap.
+
+Candidate IDs supplied in an HTTP body are **not proof of assignment**. Fraud must
+not return a match, count, truncation signal or timing-distinguishable result for
+an unverified candidate: a caller with access to the root could otherwise probe
+guessed case IDs. The source lookup therefore requires authenticated Context
+service identity *and* the human investigator's bearer. Fraud obtains candidates
+only from Context's live, human-authorized case-scoped endpoint before evaluating
+equality. Context independently re-authorizes and audits each matching case before
+disclosing its source evidence. A plain caller-controlled header or a client-side-only
+filter does not satisfy this condition. Until dual authorization and bounded 1×/10×
+load behavior are verified, the four-case pilot remains the exposed behavior.
+
+Fraud case transitions create two outbox records in the same source transaction.
+The approved reference feed retains exactly four fields and Context-only read access.
+A separate Audit-only feed records event ID, case ID, actor, revision, event time and
+producer identity; it carries no account, counterparty, score, amount or reason.
+Audit consumes that feed on a strict channel and acknowledges only after the
+append-only hash-chain write. It has an independent group, DLQ, seven-day source
+retention and earliest-offset replay so an Audit image deployed after Fraud can
+catch up within that retention window. A stalled or DLQ-routed audit event must
+raise an operational finding; Kafka send success alone is not proof of an Audit row.
+The reference feed is excluded from the legacy audit-subscription gate only because
+the separate audit feed is subscribed, attributed and ACL-granted. Deployment must
+verify a real open/close event in Audit before treating lifecycle provenance as live;
+local database tests do not prove broker delivery.
+
+Rollout is sequenced: provision the dedicated OIDC client credential in the
+existing secret store, verify its service-account principal and sole investigation
+role against the sandbox realm, and wait for the Context ExternalSecret to be
+Ready before applying the Deployment reference. The Context Deployment retains
+`maxUnavailable: 0`, so an absent secret stalls the new pod while the existing
+replica serves. Do not count the matcher as deployed until a real token exchange,
+denied direct-admin request, authorized case read and 1×/10× latency check pass.
 
 ## Alternatives considered
 

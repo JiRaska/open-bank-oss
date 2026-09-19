@@ -14,3 +14,37 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Reference-only investigation lifecycle feed. Source details remain in fraud-service.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.fraud.investigation.case.references
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+# Separate Audit-only lifecycle evidence; Context has no read grant on this topic.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.fraud.investigation.case.audit
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

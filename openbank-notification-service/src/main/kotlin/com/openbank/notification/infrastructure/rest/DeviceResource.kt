@@ -38,6 +38,9 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Devices")
 class DeviceResource {
+    private companion object {
+        const val MAX_LIST_LIMIT = 100
+    }
 
     @Inject
     lateinit var repo: DeviceTokenRepository
@@ -80,10 +83,12 @@ class DeviceResource {
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "device.list", resource = "")
     @Operation(summary = "List a party's registered devices (no tokens returned)")
-    suspend fun list(@QueryParam("partyId") partyId: UUID?): Response {
+    suspend fun list(@QueryParam("partyId") partyId: UUID?, @QueryParam("limit") limit: Int?): Response {
         partyId ?: return badRequest("partyId query parameter is required")
-        val items = repo.listByParty(partyId)
-        return Response.ok(mapOf("items" to items.map { view(it) }, "total" to items.size)).build()
+        if (limit != null && limit !in 1..MAX_LIST_LIMIT) return badRequest("limit must be between 1 and 100")
+        val items = repo.listByParty(partyId, limit)
+        val total = if (limit == null) items.size.toLong() else repo.countByParty(partyId)
+        return Response.ok(mapOf("items" to items.map { view(it) }, "total" to total)).build()
     }
 
     @DELETE

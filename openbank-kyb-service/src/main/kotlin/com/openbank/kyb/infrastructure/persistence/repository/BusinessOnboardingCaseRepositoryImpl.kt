@@ -7,27 +7,39 @@ package com.openbank.kyb.infrastructure.persistence.repository
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.KybOutboxRepository
 import com.openbank.kyb.application.port.out.RegistryExtractCache
+import com.openbank.kyb.application.port.out.UboObservationRepository
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.UboFinding
+import com.openbank.kyb.domain.model.UboObservation
+import com.openbank.kyb.infrastructure.messaging.UboObservationReference
+import com.openbank.kyb.infrastructure.messaging.UboObservationRestrictionReference
 import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCaseEntity
 import com.openbank.kyb.infrastructure.persistence.entity.RegistryExtractEntity
+import com.openbank.kyb.infrastructure.persistence.entity.UboObservationEntity
+import com.openbank.kyb.infrastructure.persistence.entity.UboObservationReadEntity
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 @ApplicationScoped
 @Suppress("TooManyFunctions") // one query per lookup the use cases need, plus the two mappers
 class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxRepository) :
     BusinessOnboardingCaseRepository,
+    UboObservationRepository,
     PanacheRepository<BusinessOnboardingCaseEntity> {
 
     /** Row + outbox entry in ONE transaction — the event is evidence of the state, so they commit together or not at all. */
@@ -49,6 +61,138 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         }.awaitSuspending()
         return case
     }
+
+    override suspend fun updateWithUboObservation(
+        case: BusinessOnboardingCase,
+        finding: UboFinding,
+        recordedAt: Instant,
+    ): UboObservation {
+        require(finding.identifier == case.identifier) { "UBO observation identifier differs from case" }
+        val json = KybUboJson.write(finding)
+        require(json.toByteArray(Charsets.UTF_8).size <= MAX_OBSERVATION_BYTES) { "UBO observation exceeds size limit" }
+        val hash = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(json.toByteArray(Charsets.UTF_8)),
+        )
+        return Panache.withTransaction {
+            find("caseId", case.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { row ->
+                requireNotNull(row) { "case ${case.id} vanished" }.fill(case)
+                Panache.getSession().flatMap { session ->
+                    session.createQuery(
+                        "select coalesce(max(o.revision), 0) from UboObservationEntity o where o.caseId = :caseId",
+                        java.lang.Long::class.java,
+                    ).setParameter("caseId", case.id).singleResult.flatMap { latest ->
+                        val observation = UboObservation(
+                            id = Ids.newId(),
+                            caseId = case.id,
+                            revision = latest.toLong() + 1,
+                            finding = finding,
+                            sourceSha256 = hash,
+                            recordedAt = recordedAt,
+                        )
+                        session.persist(
+                            UboObservationEntity().apply {
+                                observationId = observation.id
+                                caseId = observation.caseId
+                                revision = observation.revision
+                                source = finding.source.name
+                                sourceSha256 = hash
+                                findingJson = json
+                                fetchedAt = finding.fetchedAt
+                                this.recordedAt = recordedAt
+                            },
+                        ).flatMap {
+                            outbox.persistInTransaction(
+                                UboObservationReference.from(observation).toOutboxMessage(recordedAt),
+                            ).replaceWith(observation)
+                        }
+                    }
+                }
+            }
+        }.awaitSuspending()
+    }
+
+    override suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "from UboObservationEntity o where o.caseId = :caseId and o.observationId = :observationId " +
+                    "and not exists (select r.observationId from UboObservationRestrictionEntity r " +
+                    "where r.observationId = o.observationId)",
+                UboObservationEntity::class.java,
+            ).setParameter("caseId", caseId).setParameter("observationId", observationId)
+                .resultList.map { rows -> rows.firstOrNull() }
+        }
+    }.awaitSuspending()?.let { row ->
+        UboObservation(
+            id = row.observationId,
+            caseId = row.caseId,
+            revision = row.revision,
+            finding = KybUboJson.read(row.findingJson),
+            sourceSha256 = row.sourceSha256,
+            recordedAt = row.recordedAt,
+        )
+    }
+
+    override suspend fun recordUboObservationRead(
+        caseId: UUID,
+        observationId: UUID,
+        principalId: String,
+        purpose: String,
+        readAt: Instant,
+    ) {
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.persist(
+                    UboObservationReadEntity().apply {
+                        readId = Ids.newId()
+                        this.caseId = caseId
+                        this.observationId = observationId
+                        this.principalId = principalId
+                        this.purpose = purpose
+                        this.readAt = readAt
+                    },
+                )
+            }
+        }.awaitSuspending()
+    }
+
+    override suspend fun restrictUboObservation(
+        caseId: UUID,
+        observationId: UUID,
+        reasonCode: String,
+        actorId: String,
+        restrictedAt: Instant,
+    ): Boolean? = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.find(UboObservationEntity::class.java, observationId).flatMap { row ->
+                if (row == null || row.caseId != caseId) {
+                    Uni.createFrom().nullItem<Boolean>()
+                } else {
+                    session.createNativeMutationQuery(
+                        """INSERT INTO kyb_ubo_observation_restrictions
+                           (observation_id, case_id, reason_code, actor_id, restricted_at)
+                           VALUES (:observation, :case, :reason, :actor, :restrictedAt)
+                           ON CONFLICT DO NOTHING
+                        """.trimIndent(),
+                    ).setParameter("observation", observationId).setParameter("case", caseId)
+                        .setParameter("reason", reasonCode).setParameter("actor", actorId)
+                        .setParameter("restrictedAt", restrictedAt).executeUpdate().flatMap { inserted ->
+                            if (inserted == 0) {
+                                Uni.createFrom().item(false)
+                            } else {
+                                outbox.persistInTransaction(
+                                    UboObservationRestrictionReference.from(
+                                        caseId,
+                                        observationId,
+                                        row.revision,
+                                        row.sourceSha256,
+                                    ).toOutboxMessage(restrictedAt),
+                                ).replaceWith(true)
+                            }
+                        }
+                }
+            }
+        }
+    }.awaitSuspending()
 
     private fun withEvent(event: KybEvent?): Uni<Void> =
         if (event == null) Uni.createFrom().voidItem() else outbox.persistInTransaction(event.toOutboxMessage())
@@ -132,6 +276,10 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         payload = KybJson.mapper.writeValueAsString(payload),
         createdAt = occurredAt,
     )
+
+    private companion object {
+        const val MAX_OBSERVATION_BYTES = 262144
+    }
 }
 
 @ApplicationScoped

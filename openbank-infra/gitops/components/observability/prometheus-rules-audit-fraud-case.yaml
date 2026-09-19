@@ -1,0 +1,66 @@
+# Fraud case lifecycle must reach Audit independently of the Context reference feed.
+# One DLQ record loses a case transition from the live chain until an operator replays it.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-audit-fraud-case-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.audit.fraud-case
+      interval: 1m
+      rules:
+        - alert: FraudCaseAuditDeadLettered
+          expr: |
+            sum(increase(kafka_topic_partition_current_offset{
+              topic="openbank.dlq.audit.fraud-case-audit-in"
+            }[1h])) > 0
+          for: 0m
+          labels:
+            severity: critical
+            team: security
+          annotations:
+            subject_period: continuous
+            summary: "Fraud case lifecycle event was dead-lettered by Audit"
+            description: >-
+              Audit could not persist a Fraud case transition. Inspect the dedicated DLQ,
+              restore the consumer, replay the record and verify its hash-chained audit row.
+        - alert: FraudCaseAuditConsumerLag
+          expr: |
+            sum(kafka_consumergroup_lag{
+              consumergroup="audit-service-fraud-case",
+              topic="openbank.fraud.investigation.case.audit"
+            }) > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Audit is behind Fraud case lifecycle events"
+            description: >-
+              The dedicated Audit consumer has not caught up for 15 minutes. Check the
+              consumer, its topic/group ACLs and the source outbox before seven-day
+              source-topic retention expires.
+        - alert: FraudCaseAuditConsumerAbsent
+          # A lag alert sees no series at all when the consumer group never forms.
+          # Wait for at least one source event so an empty new sandbox is quiet.
+          expr: |
+            (sum(kafka_topic_partition_current_offset{
+              topic="openbank.fraud.investigation.case.audit"
+            }) > 0)
+            unless on()
+            count(kafka_consumergroup_lag{
+              consumergroup="audit-service-fraud-case",
+              topic="openbank.fraud.investigation.case.audit"
+            })
+          for: 15m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Fraud case events exist but the Audit consumer group is absent"
+            description: >-
+              Fraud published case lifecycle events, but no dedicated Audit consumer group
+              reports lag. Check the Audit deployment, group ACL and Kafka configuration.

@@ -2,7 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
-followup: "#9945 — ingest historical authorization evidence and add governed evidentiary export"
+followup: "#9945 — connect immutable business-action decisions with policy versions and add governed evidentiary export"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -89,6 +89,28 @@ disclosure. The admin UI exposes the controlled lifecycle and hides it from non-
 denies service accounts from assignment administration even if a broad operational role is present.
 Export to the fleet tamper-evident audit store and historical authorization evidence ingestion remain,
 so this ADR stays `partial`.
+
+### Source delegation history and root-scoped review
+
+The authority-history lens consumes the existing versioned delegation lifecycle stream and
+stores immutable, deduplicated source observations. It retains event time and database record
+time independently, supports `effectiveAt` and `knownAt`, and rejects conflicting content for
+an already recorded source revision. The audit view exposes grantor, grantee, resource,
+capabilities and lifecycle evidence with provenance, bounded to 100 observations.
+
+`AUTHORIZATION_REVIEW` requires a maker/checker-approved assignment to the exact delegation
+root. A broad case assignment, another delegation root, or a historical grant cannot satisfy
+this check. OPA restricts the purpose and human compliance/admin role, while database row-level
+security applies a transaction-local bank scope. Both requested timestamps enter the read audit.
+
+These are source delegation assertions. The response explicitly reports business-action
+`actionAuthorization: UNKNOWN`: without an immutable decision from the actual enforcement
+point, this view does not establish that a specific payment or approval was authorized.
+Generic success audit events are not substituted for that missing decision evidence.
+
+Rollback stops the history consumer and endpoint while retaining append-only observations.
+The nullable assignment/audit columns preserve the earlier P1 access contract. New delegation
+topic replay is isolated from source services and uses a dedicated dead-letter topic.
 
 ## Alternatives considered
 

@@ -284,3 +284,81 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   lands, since output stays shadow-only), D2 (native inference engine DoS — bounded by a
   fixed/repo-bundled model and try/catch degrade-to-null). Rollback: revert this commit
   (`BaselineFraudModel` restored verbatim); no data migration, no config change.
+
+- **2026-09-17** — ADR-0304 investigation case source (#10236). New inbound
+  `/api/v1/fraud/cases` surface opens one case only from a persisted `REVIEW` score and
+  closes it without a fraud finding. `ROLE_ADMIN`, policy authorization and an exact
+  `FRAUD_INVESTIGATION` purpose gate every operation; the response omits account,
+  counterparty, amount and scoring reasons and is `no-store`. The case table retains
+  the source score/account/counterparty identifiers and opening/closing actors for
+  source authority. A case transition and its four-field Kafka reference commit
+  atomically through the transactional outbox. The dedicated topic carries only
+  event type, case ID, revision and time; it cannot itself prove fraud or establish
+  a cross-customer relationship.
+
+  **New trust boundaries and mitigations:** S4 (forged case opener or reader):
+  role, policy, purpose and source-score checks; T5 (replay, reordered or conflicting
+  transitions): one case per score, monotonic revision and idempotent outbox creation;
+  I4 (case-index disclosure): mTLS topic ACLs restrict writing to Fraud and reading
+  to the approved service identities, with no sensitive source IDs in the payload;
+  D3 (Context or broker unavailable): the case write commits independently and the
+  outbox retries without blocking scoring; E3 (using a mere REVIEW lead as a finding):
+  only a human-opened case is emitted, and close explicitly records no finding.
+  Before Context exposes any case detail, it must verify live case-scoped access and
+  audit each read. The Context DLQ is separate, retains records for 14 days, and must
+  be access controlled before its consumer is enabled. Sandbox uses one Kafka replica
+  because that cluster has one broker; production replication follows broker capacity.
+
+  Rollback: disable the new producer, leave the additive case table and outbox rows
+  intact for investigation history, then remove its topic grants after pending
+  references are resolved. Do not delete case evidence merely to reverse a deployment.
+
+- **2026-09-17** — Source-owned case association read. The new `/cases/{id}/evidence`
+  returns the REVIEW score's account and optional counterparty only after Fraud's
+  role/purpose/policy check and a live Context check for that exact case using the
+  investigator's bearer. Context commits the case-scoped read audit before returning
+  204; a missing token, denied assignment, policy/audit outage or unexpected response
+  yields no source identifiers. The call uses a bounded HTTPS client with a mounted
+  CA and explicit Fraud-to-Context network edge. A service identity cannot replace
+  the investigator's token. Associations are leads, not a finding or payment action.
+  Rollback: disable this detail route and remove the outbound Context edge and trust
+  mount; preserve the source cases and minimal reference feed for audit continuity.
+
+- **2026-09-17** — Context's bounded Fraud network view calls this source association
+  route once per independently authorized, assigned OPEN case. The source still
+  authorizes each human bearer and exact case through Context before disclosing
+  account or counterparty UUIDs. Context inspects at most four candidates and
+  limits concurrent source calls; the route is not a bulk export. Matching UUIDs
+  are leads only. The Context URL is a required secret-backed HTTPS endpoint with
+  managed certificate trust; missing URL or trust material blocks readiness rather
+  than falling back to HTTP.
+
+- **2026-09-18** — The candidate matcher is a separate source read restricted to a
+  dedicated Context service principal and the human investigator's bearer. A human
+  administrator or the shared machine principal cannot invoke it. Fraud checks the
+  root's current Context assignment by obtaining the candidate set directly from
+  Context's root-scoped endpoint under the human bearer before running equality;
+  the caller cannot submit case IDs. That Context endpoint exposes only case IDs
+  already assigned to the same investigator and purpose; evidence remains separately
+  policy-gated. Context independently authorizes and audits
+  each returned match before exposing source evidence. The source query is bounded
+  to 256 assigned case IDs and five results (four displayed plus truncation), with
+  no account, counterparty, score or reason in its response. Missing credential,
+  denied assignment, malformed candidate set or Context outage fails closed.
+  Rollback: leave the four-case pilot active and disable the dedicated matcher;
+  retain source cases and their minimal reference history.
+
+- **2026-09-18** — Case lifecycle audit delivery is isolated from the Context reference
+  topic. Each open/close commits both outbox rows with the case transition, and Fraud
+  writes the audit event to a separate topic that only Audit can read. Its payload
+  contains the case ID, event ID, revision, actor, time and source identity; account,
+  counterparty, score, amount and reason stay in Fraud. Audit validates the exact
+  envelope and acknowledges after append-only persistence. A source outage after
+  commit leaves both rows retryable; a poison audit event goes to its own DLQ rather
+  than stopping the consumer. The new topic has seven-day retention, so deployment
+  order must allow Audit to replay from earliest before those records expire.
+  Residual risks: a secret or ACL misconfiguration can halt the Audit consumer, and
+  local tests do not establish broker delivery. Sandbox rollout must prove a real
+  event's Audit row, source attribution and chain hash, plus lag/DLQ alerting.
+  Rollback disables the new producer/consumer after draining the outbox and preserves
+  source cases and existing audit rows; it never deletes evidentiary history.

@@ -32,8 +32,14 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
         find("partyId = ?1 and status = ?2", partyId, "ACTIVE").list()
 
     /** All tokens for a party, for the REST listing. */
-    suspend fun listByParty(partyId: UUID): List<DeviceTokenEntity> =
-        Panache.withSession { find("partyId", partyId).list() }.awaitSuspending()
+    suspend fun listByParty(partyId: UUID, limit: Int? = null): List<DeviceTokenEntity> = Panache.withSession {
+        val query = find("partyId = ?1 order by createdAt desc, id desc", partyId)
+        if (limit == null) query.list() else query.range(0, limit - 1).list()
+    }.awaitSuspending()
+
+    suspend fun countByParty(partyId: UUID): Long = Panache.withSession {
+        count("partyId", partyId)
+    }.awaitSuspending()
 
     /**
      * Register (or refresh) a device token. Idempotent on (platform, token): a re-registration
