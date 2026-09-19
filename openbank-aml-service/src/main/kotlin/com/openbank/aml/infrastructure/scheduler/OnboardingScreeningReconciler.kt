@@ -56,7 +56,16 @@ import java.time.Duration
  */
 @Startup
 @ApplicationScoped
-class OnboardingScreeningReconciler {
+class OnboardingScreeningReconciler(
+    @ConfigProperty(name = "openbank.aml.onboarding-reconcile.enabled", defaultValue = "false")
+    var enabled: Boolean,
+    @ConfigProperty(name = "openbank.aml.onboarding-reconcile.page-size", defaultValue = "100")
+    val pageSize: Int,
+    @ConfigProperty(name = "openbank.aml.onboarding-reconcile.max-pages", defaultValue = "20")
+    var maxPages: Int,
+    @ConfigProperty(name = "openbank.aml.auto-clear", defaultValue = "false")
+    val autoClear: Boolean,
+) {
 
     @Inject
     lateinit var parties: PartyDirectoryPort
@@ -72,18 +81,6 @@ class OnboardingScreeningReconciler {
 
     @Inject
     lateinit var domainMetrics: DomainMetrics
-
-    @ConfigProperty(name = "openbank.aml.onboarding-reconcile.enabled", defaultValue = "false")
-    var enabled: Boolean = false
-
-    @ConfigProperty(name = "openbank.aml.onboarding-reconcile.page-size", defaultValue = "100")
-    var pageSize: Int = DEFAULT_PAGE_SIZE
-
-    @ConfigProperty(name = "openbank.aml.onboarding-reconcile.max-pages", defaultValue = "20")
-    var maxPages: Int = DEFAULT_MAX_PAGES
-
-    @ConfigProperty(name = "openbank.aml.auto-clear", defaultValue = "false")
-    var autoClear: Boolean = false
 
     private val log = Logger.getLogger(OnboardingScreeningReconciler::class.java)
     private var opened: Counter? = null
@@ -168,8 +165,6 @@ class OnboardingScreeningReconciler {
     private companion object {
         const val PENDING_KYC = "PENDING_KYC"
         const val KYC_APPROVED = "APPROVED"
-        const val DEFAULT_PAGE_SIZE = 100
-        const val DEFAULT_MAX_PAGES = 20
         const val WORKFLOW_NAME = "aml-onboarding-reconcile"
         val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(15)
     }

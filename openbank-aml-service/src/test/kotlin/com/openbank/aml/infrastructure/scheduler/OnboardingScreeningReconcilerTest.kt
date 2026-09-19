@@ -37,20 +37,18 @@ class OnboardingScreeningReconcilerTest {
 
     @BeforeEach
     fun setUp() {
-        reconciler = OnboardingScreeningReconciler().also {
-            it.parties = parties
-            it.caseRepository = repository
-            it.amlUseCase = useCase
-            it.enabled = true
-            it.pageSize = 100
-            it.maxPages = 20
-            val instance = mockk<Instance<MeterRegistry>>()
-            every { instance.isResolvable } returns true
-            every { instance.get() } returns registry
-            it.registryInstance = instance
-            it.domainMetrics = mockk(relaxed = true)
-            it.register()
-        }
+        reconciler =
+            OnboardingScreeningReconciler(enabled = true, pageSize = 100, maxPages = 20, autoClear = false).also {
+                it.parties = parties
+                it.caseRepository = repository
+                it.amlUseCase = useCase
+                val instance = mockk<Instance<MeterRegistry>>()
+                every { instance.isResolvable } returns true
+                every { instance.get() } returns registry
+                it.registryInstance = instance
+                it.domainMetrics = mockk(relaxed = true)
+                it.register()
+            }
         coEvery { repository.findByIdempotencyKey(any()) } returns null
         coEvery { useCase.createCase(any()) } answers { mockk<AmlCase>(relaxed = true) }
     }
