@@ -85,6 +85,11 @@ spec:
                 secretKeyRef:
                   name: sca-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Device enrolment reads the party's register type (#10281 item 1: refuse non-natural
+            # persons). A new east-west edge, so it takes party-service's private-CA mTLS listener
+            # (8443, TLSv1.3, client cert from sca-internal-tls) like delegation-service, not :8111.
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.sca.svc:6379
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
@@ -130,6 +135,9 @@ spec:
               mountPath: /tmp
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: party-tls
+              mountPath: /mnt/party-tls
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
@@ -223,6 +231,10 @@ spec:
         - name: opa-bundle
           configMap:
             name: sca-opa-bundle
+        - name: party-tls
+          secret:
+            secretName: sca-internal-tls
+            optional: false
         - name: kafka-keystore
           secret:
             secretName: sca-service-kafka-keystore
