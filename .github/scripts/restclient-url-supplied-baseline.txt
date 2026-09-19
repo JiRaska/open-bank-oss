@@ -14,4 +14,3 @@ openbank-lending-service: quarkus.rest-client.consent-service.url falls back to 
 openbank-lending-service: quarkus.rest-client.product-catalog.url falls back to localhost and gitops never sets PRODUCT_CATALOG_URL
 openbank-sepa-payment: quarkus.rest-client.document-service.url falls back to localhost and gitops never sets DOCUMENT_SERVICE_URL
 openbank-statement-service: quarkus.rest-client.document-api.url falls back to localhost and gitops never sets DOCUMENT_SERVICE_URL
-openbank-transaction-service: quarkus.rest-client.fx-service.url falls back to localhost and gitops never sets FX_SERVICE_URL

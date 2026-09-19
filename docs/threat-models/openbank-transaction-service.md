@@ -531,3 +531,20 @@ every URL and the upload path is unaffected.
   and widens no role, and the authorization question above is left open for a human decision rather
   than closed by widening a money-path grant. Rollback: drop the listener env block and
   interest's `TRANSACTION_SERVICE_URL`.
+
+- **2026-09-20** — **New outbound edge: transaction-service → fx-service over fx-service's new
+  private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; client cert
+  `transaction-internal-tls`, `%prod` TLS bucket `fx-authority`). Without `FX_SERVICE_URL`,
+  `FxRateClient` dialled `http://localhost:8119` inside this pod and every cross-currency rate
+  lookup was a connection refused. Unlike the inbound entry above, this edge IS authorized today:
+  `fx_rest_ext.rego`'s `service-fx-shared-client-m2m` is identity-gated with no role predicate, so
+  `fx.read` resolves `allow=true` for `service-account-openbank-services` under the deployed
+  realm's `ROLE_API`, measured against the committed `fx-opa-bundle` with `opa eval`.
+  **This pod now mounts two distinct private-CA secrets and they must not be confused:**
+  `transaction-service-internal-tls` is the SERVER certificate for its own 8443 listener, mounted
+  at `/mnt/internal-tls`; `transaction-internal-tls` is the CLIENT identity for calling fx-service,
+  mounted at `/mnt/fx-tls`. Presenting the server cert as a client identity would be a silent
+  misconfiguration — both paths exist and both files parse — so `FxClientProdTlsWiringTest` asserts
+  the `fx-authority` bucket never references the server mount. **Risk class:** read-only outbound
+  edge; no new action, principal or role. Rollback: drop `FX_SERVICE_URL`, the `/mnt/fx-tls` mount
+  and the `fx-authority` bucket.

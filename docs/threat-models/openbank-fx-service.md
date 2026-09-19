@@ -165,3 +165,23 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   `FxConversion.rateId` still references the real `fx_rates` row on both paths (FK unchanged), so
   dispute defense via §5 is preserved. Risk class = **repudiation/auditability (reduced)**.
   API contract: additive, `info.version` 1.5.0 → 1.6.0.
+
+- **2026-09-20** — **New inbound edge over a new private-CA mTLS listener** (8443, client auth
+  REQUIRED, TLSv1.3; server cert `fx-service-internal-tls`), the same shape as account-service,
+  ledger-service and transaction-service. HTTP/8119 is unchanged for its existing callers
+  (customer-edge, ledger-service, agent-service), so this is additive, not a migration. The caller
+  on 8443 is transaction-service `FxRateClient` reading
+  `GET /api/v1/fx/rates/{base}/{quote}` (`fx.read`) as the shared
+  `service-account-openbank-services`. Before this, transaction-service's gitops manifest set no
+  `FX_SERVICE_URL`, so it dialled `http://localhost:8119` inside its own pod and every
+  cross-currency rate lookup was a connection refused.
+  **No policy change, and that is measured against the realm that ships.** `fx_rest_ext.rego`'s
+  identity-gated `service-fx-shared-client-m2m` admits `fx.read`/`fx.list` for that account with no
+  role predicate, so it holds even though the deployed realm template grants the account `ROLE_API`
+  only. Evaluating the committed `fx-opa-bundle` ConfigMap with `opa eval`: `ROLE_API` →
+  `allow=true` (`reason: service-fx-shared-client-m2m`), and the must-DENY controls hold —
+  `fx.convert` is denied for that account and for the edge identity, and a principal with no roles
+  is denied `fx.read`. **Risk class:** confidentiality of published FX rates (already readable by
+  three other in-cluster callers over HTTP) to one more authenticated service; read-only, no
+  mutation, no new action, no widened role. Rollback: drop the listener env block and
+  transaction-service's `FX_SERVICE_URL`.
