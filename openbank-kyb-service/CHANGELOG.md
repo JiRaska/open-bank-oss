@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.7.0...kyb-service-v0.8.0) (2026-09-19)
+
+
+### Features
+
+* **kyb:** give the sandbox demo company a second jednatel acting jointly ([#10349](https://github.com/JiRaska/open-bank-oss/issues/10349)) ([3ab9e43](https://github.com/JiRaska/open-bank-oss/commit/3ab9e43e793370c156828553f3c0b73422edfa6a)), closes [#10281](https://github.com/JiRaska/open-bank-oss/issues/10281)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.6.0...kyb-service-v0.7.0) (2026-09-17)
 
 
