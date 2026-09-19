@@ -44,6 +44,9 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: aml
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: analytics
         - namespaceSelector:
             matchLabels:
@@ -90,6 +93,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8100
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

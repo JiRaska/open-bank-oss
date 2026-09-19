@@ -121,6 +121,12 @@ spec:
               value: "true"
             - name: PARTY_SERVICE_URL
               value: https://party-service.party.svc:8443
+            # The #3413 party-resolution sweep reads account-service. Without this the app default
+            # (localhost:8100) was dialled inside this pod and every lookup failed. mTLS listener
+            # (8443, client cert aml-internal-tls, %prod bucket account-authority); account.read is
+            # already granted to the shared service account in account_rest_ext.rego.
+            - name: ACCOUNT_SERVICE_URL
+              value: https://account-service.accounts.svc:8443
             # ADR-0034 Phase 5 / issue #1797: aml-service shipped @Authorize with the app default
             # AUTHZ_ENFORCE=true and NO sidecar — so the PDP call failed and amlCase read/list/
             # updateDecision failed closed (HTTP 422). The `opa` sidecar below now answers the PDP

@@ -2499,6 +2499,24 @@ gates:
     run: |
       python3 .github/scripts/check-configproperty-supplied.py --enforce
 
+  - id: restclient-url-supplied
+    name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      application.yaml's `${X_URL:http://localhost:N}` is right on a laptop and wrong in a pod: when
+      the service's gitops manifest never sets X_URL the deployed client dials its own pod and gets
+      connection refused. aml-service's #3413 party-resolution sweep ran that way — every lookup
+      failed, the pod stayed Ready, and no test reads gitops. First run found 18 such URLs fleet-wide;
+      17 are baselined untriaged, the aml one is fixed in the same change.
+    review_after: '2027-03-19'
+    min_subjects: 80
+    selftest_inputs: [".github/scripts/check-restclient-url-supplied.py"]
+    selftest: |
+      python3 .github/scripts/check-restclient-url-supplied.py --self-test
+    run: |
+      python3 .github/scripts/check-restclient-url-supplied.py
+
   # webpack rejects a non-route value export from an App Router route handler with
   # `"X" is not a valid Route export field`. This has broken the admin-ui build twice —
   # infra/status (#3262) and delegations/projection-health (#3611, where it was the last blocker to
