@@ -5006,7 +5006,11 @@ components:
       properties:
         id: {type: string, format: uuid}
         kind: {type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE]}
-        status: {type: string, enum: [AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED]}
+        status:
+          type: string
+          description: >-
+            Owned by delegation-service (AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED,
+            RELEASED, RELEASE_FAILED); passed through, not an edge enum.
         payload: {type: object, additionalProperties: true, description: The frozen item being signed.}
         payloadSha256: {type: string}
         required: {type: integer}
