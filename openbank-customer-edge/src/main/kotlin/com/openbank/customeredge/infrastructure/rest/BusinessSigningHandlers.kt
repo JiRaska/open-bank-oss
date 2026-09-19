@@ -32,7 +32,7 @@ import java.util.UUID
  * (sca-service dynamic linking). On the last signature of a PAYMENT the edge releases it to the
  * rail through [BusinessPaymentApprovals.release].
  *
- * The handlers live in this bean; the JAX-RS classes in `BusinessSigningResources.kt` are thin
+ * The handlers live in this bean; the JAX-RS classes (`Business*Resource`, `MyApprovalsResource`) are thin
  * delegators, one per path prefix, because JAX-RS picks the resource CLASS by its longest matching
  * `@Path` first: under `/customer/v1` these routes were shadowed by `CustomerBusinessResource`'s
  * `/customer/v1/business` and answered 404.
