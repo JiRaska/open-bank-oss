@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.4](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.3...interest-service-v0.20.4) (2026-09-19)
+
+
+### Bug Fixes
+
+* **ledger:** give ledger an mTLS listener and point clearing + interest at it ([#10397](https://github.com/JiRaska/open-bank-oss/issues/10397)) ([4e21311](https://github.com/JiRaska/open-bank-oss/commit/4e21311eac1a431c3670d0f4c86ccb38d762e3ba))
+
 ## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.2...interest-service-v0.20.3) (2026-09-13)
 
 
