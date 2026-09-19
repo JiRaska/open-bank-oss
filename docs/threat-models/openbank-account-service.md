@@ -713,3 +713,12 @@ decision use first; the additive projection table may remain until its consumer 
   false, sandbox on). Only id, type, status and legal name are bound from the response. **Risk class:**
   integrity of account opening (a compromised party-service could list a forged ACTIVE business party —
   the same trust already placed in its events); no money mutation, no bonus. Rollback: set the flag false.
+- **2026-09-19** — **New inbound edge: aml-service → account-service over a new private-CA mTLS listener**
+  (8443, client auth REQUIRED, TLSv1.3; server cert `account-service-internal-tls`), the same shape as
+  party-service. HTTP/8100 stays for existing callers. The only caller on 8443 is aml-service
+  `PartyResolutionScheduler` (#3413), reading `GET /api/v1/accounts/{id}` (`account.read`) as the shared
+  `service-account-openbank-services`, which `account_rest_ext.rego` already admits for `account.read`
+  only — no policy change. Before this, aml had no `ACCOUNT_SERVICE_URL` and dialled localhost, so the
+  edge existed in code but never reached this service. **Risk class:** confidentiality of account
+  reads (party id of an account) to a compliance service; no mutation, no new action. Rollback: drop
+  the listener env and the aml env var.
