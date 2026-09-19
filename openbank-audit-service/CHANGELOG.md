@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.5...audit-service-v0.19.0) (2026-09-19)
+
+
+### Features
+
+* **delegation:** business payment signing - N-of-M approvals, trusted payees, single-use release ([#10315](https://github.com/JiRaska/open-bank-oss/issues/10315)) ([94da2b7](https://github.com/JiRaska/open-bank-oss/commit/94da2b7a8c62f9da48db60ac6477063b0af40b5b))
+
 ## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.4...audit-service-v0.18.5) (2026-09-08)
 
 

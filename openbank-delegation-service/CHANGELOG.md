@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.16.0...delegation-service-v0.17.0) (2026-09-19)
+
+
+### Features
+
+* **delegation:** business payment signing - N-of-M approvals, trusted payees, single-use release ([#10315](https://github.com/JiRaska/open-bank-oss/issues/10315)) ([94da2b7](https://github.com/JiRaska/open-bank-oss/commit/94da2b7a8c62f9da48db60ac6477063b0af40b5b))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.15.0...delegation-service-v0.16.0) (2026-09-13)
 
 
