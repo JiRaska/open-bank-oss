@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.aml.application.port.out.PartyDirectoryPort
 import com.openbank.aml.application.port.out.PartyPage
 import com.openbank.aml.application.port.out.PartySummary
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -28,6 +29,7 @@ import java.util.UUID
  * over party-service's private-CA mTLS listener (named TLS bucket `party-authority`).
  */
 @RegisterRestClient(configKey = "party-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)
