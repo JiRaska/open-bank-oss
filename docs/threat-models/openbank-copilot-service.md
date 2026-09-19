@@ -163,3 +163,11 @@ framework-free (ADR-0002).
   should land before production. (E) max TTL 90 days, rolling; a manual erasure hook is required
   for GDPR Art. 17 (`PARTY_ERASED` consumer — open item, same as audit and analytics fleet-wide
   pattern). Residency: CNPG cluster is in the same region as every other service datastore (ADR-0175).
+
+- **2026-09-20** — **New outbound edge: consent-service over private-CA mTLS (8443).** `CreditAiLevelResolver`
+  now reaches `consent-service.consent.svc:8443` with the client certificate `copilot-internal-tls` (`%prod` TLS
+  bucket `consent-authority`, TLSv1.3). Previously `CONSENT_SERVICE_URL` was unset in gitops and the
+  client dialled `localhost:8107` inside this pod, so the consent check never left the process
+  (#10383). This pod is **egress default-deny** (`networkpolicy-copilot-egress.yaml`), so the URL and the certificate would still have been dropped without the matching egress rule added in the same change — the policy generator emits ingress only. The call is a read of `consent.validate` state only; no mutation, no new principal,
+  no money movement. **Risk class:** confidentiality of consent state in transit, now protected by
+  mutual TLS rather than plaintext. Rollback: drop `CONSENT_SERVICE_URL` and the `consent-tls` volume.
