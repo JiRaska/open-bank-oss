@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.0...notification-service-v0.33.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **notification:** point EMAIL recipient resolution at party-service, not localhost ([#10382](https://github.com/JiRaska/open-bank-oss/issues/10382)) ([c0fbf06](https://github.com/JiRaska/open-bank-oss/commit/c0fbf068d4ac6fcd60b835c1a169ee7266e5bc2f)), closes [#10372](https://github.com/JiRaska/open-bank-oss/issues/10372)
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.32.0...notification-service-v0.33.0) (2026-09-19)
 
 

@@ -259,10 +259,13 @@ mp:
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%prod":
   quarkus:
-    # CatalogInterestProfileSynchronizer calls product-catalog. Production uses a named TLS bucket
-    # over product-catalog's private-CA mTLS listener (8443, client auth REQUIRED), the same shape
-    # as notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so
-    # this stays under %prod: the client certificate only exists in the cluster.
+    # CatalogInterestProfileSynchronizer calls product-catalog and the ADR-0033 §D capitalization
+    # credit leg calls ledger-service. Both upstreams terminate a private-CA mTLS listener on 8443
+    # with client auth REQUIRED, so each rest-client names its own TLS bucket. ONE `tls:` map and
+    # ONE `rest-client:` map: SmallRye/SnakeYAML keep only the LAST of a repeated mapping key and
+    # silently drop the rest, so taking both sides of this merge verbatim would have deleted one of
+    # the two buckets with nothing to notice. Local/test fixtures speak plain HTTP, so this stays
+    # under %prod: the client certificate only exists in the cluster.
     tls:
       catalog-authority:
         key-store:
@@ -274,6 +277,18 @@ mp:
           pem:
             certs: /mnt/catalog-tls/ca.crt
         protocols: TLSv1.3
+      ledger-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
+      ledger-service:
+        tls-configuration-name: ledger-authority

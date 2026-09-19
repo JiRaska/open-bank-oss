@@ -156,3 +156,17 @@ not change any existing request's outcome until explicitly flipped.
   original item, so nothing downstream can distinguish replay from first submit. Rollback:
   revert the commit and `DROP INDEX IF EXISTS uq_clearing_items_payment` — pre-duplicate data
   must be cleaned before V9 (detection query in the migration).
+
+- **2026-09-20** — **New outbound edge: clearing-service → ledger-service over ledger's new
+  private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; client cert
+  `clearing-internal-tls`, `%prod` TLS bucket `ledger-authority`). The ADR-0281 net-settlement
+  journal posting had no `LEDGER_SERVICE_URL` in this service's gitops manifest, so
+  `ClearingLedgerRestClient` used the `application.yaml` fallback `http://localhost:8101` inside its
+  own pod: every `POST /api/v1/journals` was a connection refused and the net-settlement leg never
+  reached the book of record. The action (`ledger.create`) and the identity (the shared
+  `service-account-openbank-services` bearer minted by `OidcClientRequestReactiveFilter`) are
+  unchanged — `ledger_rest_ext.rego`'s `service-ledger-post` already admits them, so no policy
+  change. **Risk class:** integrity/availability of net-settlement journal posting (a money-path
+  write that has never landed now lands); the new material is a private-CA client key mounted
+  read-only from a cert-manager Secret, scoped to this one upstream. No inbound surface, no new
+  role, no new data class. Rollback: drop the env var and the `%prod` bucket.

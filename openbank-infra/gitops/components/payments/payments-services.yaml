@@ -1463,6 +1463,15 @@ spec:
                 secretKeyRef:
                   name: clearing-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0281 net-settlement journal posting. Without this the rest-client fell back to
+            # application.yaml's http://localhost:8101 inside this pod, every POST /api/v1/journals
+            # was a connection refused, and the net-settlement leg never reached the book of record.
+            # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED, client cert
+            # clearing-internal-tls, %prod bucket ledger-authority). ledger.create for the shared
+            # openbank-services service account is already allowed by service-ledger-post in
+            # ledger_rest_ext.rego, so no policy change.
+            - name: LEDGER_SERVICE_URL
+              value: https://ledger-service.ledger.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1498,6 +1507,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: ledger-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -1588,6 +1600,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: ledger-tls
+          secret:
+            secretName: clearing-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
