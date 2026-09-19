@@ -739,3 +739,41 @@ in the admin UI. The capped detail endpoint is diagnostic only. API errors and i
 contracts render an error rather than a zero exposure. Override rates require a recorded human
 actor and decision time. Stage 3 uses conditional default probability one; this correction does
 not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).
+
+### Planned Context Graph source boundary (ADR-0307; no new route yet)
+
+The existing approved `collateral` record belongs to one loan and contributes to
+IFRS 9 LGD. It cannot establish that two loans share the same physical asset,
+and `type=GUARANTEE` does not identify a guarantor or enforceable guarantee.
+V18 adds separate source tables for these facts, with no enabled writer or read
+route; no historical row is inferred or backfilled. Deriving links from equal
+descriptions, values or names would
+create a false cross-borrower disclosure. The planned source model therefore
+requires verified IDs, independent maker/checker decisions, effective intervals,
+source hashes and immutable correction lineage before Context receives any P3
+reference. The present collateral/provisioning calculation must remain unchanged
+during an additive migration. Under ADR-0152, the Lending database belongs to one
+bank per deployment: graph facts use local foreign keys, and the future writer
+must stamp outgoing Context references from trusted deployment configuration.
+It must compare that identifier with Document's server-stamped provenance; a
+request-supplied bank identifier cannot establish ownership. Cross-borrower expansion and any financial total
+require separate authorization and reconciliation to authoritative snapshots;
+missing data must produce `UNKNOWN` or `TOTAL_UNAVAILABLE`, never a reassuring zero.
+The dedicated Lending graph client has a boolean-only Party endpoint for a
+prospective guarantor's current ACTIVE/KYC-approved/AML-cleared identity state.
+The shared backend account and staff are denied before Party lookup, even while
+OPA is advisory. This bit is not a guarantee contract or consent; a signed,
+loan-bound Document proof and an independent checker are still required.
+
+The internal guarantee-registration use case now implements those source checks
+before both proposal and approval and defaults to `writer-enabled=false`. Its
+repository locks the pending fact, repeats the maker/checker check and inserts
+the minimized approval pointer into Lending's outbox in the same transaction.
+There is **no HTTP route** or client credential for this use case yet. The shared
+Lending Kafka publisher explicitly rejects `lending.graph.*` messages, so an
+accidental internal call cannot disclose graph references on the broad existing
+topic. Before enabling a writer, add a dedicated topic and ACL, a case-scoped
+authorization decision, route and real-DB atomicity tests. Source proof failure
+must propagate; a prior positive result cannot substitute for the approval-time
+check. A post-approval source change still requires revalidation at publication
+and source read time, so no Context edge is currently authorized from these rows.

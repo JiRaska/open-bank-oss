@@ -19,9 +19,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * Data-level idempotency for onboarding-document issuance (ADR-0162 D7): the partial unique index on
@@ -35,6 +37,9 @@ class DocumentRepositoryImplIT {
 
     @Inject
     lateinit var repo: DocumentRepositoryImpl
+
+    @Inject
+    lateinit var dataSource: DataSource
 
     private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
@@ -137,5 +142,26 @@ class DocumentRepositoryImplIT {
 
         assertThat(saved.id).isEqualTo(doc.id)
         assertThat(repo.findById(doc.id)).isNotNull
+    }
+
+    @Test
+    fun `bank provenance persists only for new documents and cannot be rewritten`() {
+        val legacy = onboardingDoc("onboarding:${UUID.randomUUID()}")
+        val scoped = onboardingDoc("onboarding:${UUID.randomUUID()}").copy(bankScope = "test-bank-a")
+        onVertxContext {
+            repo.save(legacy)
+            repo.save(scoped)
+            assertThat(repo.findById(legacy.id)!!.bankScope).isNull()
+            assertThat(repo.findById(scoped.id)!!.bankScope).isEqualTo("test-bank-a")
+        }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("UPDATE documents SET bank_scope = ? WHERE id = ?").use { statement ->
+                statement.setString(1, "test-bank-b")
+                statement.setObject(2, scoped.id)
+                assertThatThrownBy {
+                    statement.executeUpdate()
+                }.hasMessageContaining("document bank scope is immutable")
+            }
+        }
     }
 }

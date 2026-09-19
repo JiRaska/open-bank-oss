@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "151c0c9854ebc9cb"
+    openbank.tech/policy-checksum: "8d553342c28e9cb0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -649,6 +649,26 @@ data:
     		"party.consent.update",
     		"party:resolve",
     	}
+    }
+
+    # A verified-identity bit is the only Party fact the Lending graph client may
+    # read. It does not prove consent or an enforceable guarantee; Document verifies
+    # the signed, loan-bound contract separately. The broad operator-party-write
+    # rule above would otherwise admit staff and edge tokens for this action.
+    allowed_reasons contains "service-lending-guarantor-identity" if {
+        input.principal.id == "service-account-openbank-lending-graph"
+        "ROLE_LENDING_GRAPH_PROOF" in input.principal.roles
+        input.action == "party.guaranteeIdentity.verify"
+    }
+
+    prohibited if {
+        input.action == "party.guaranteeIdentity.verify"
+        input.principal.id != "service-account-openbank-lending-graph"
+    }
+
+    prohibited if {
+        input.action == "party.guaranteeIdentity.verify"
+        not "ROLE_LENDING_GRAPH_PROOF" in input.principal.roles
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

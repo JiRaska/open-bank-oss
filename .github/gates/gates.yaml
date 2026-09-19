@@ -1078,6 +1078,20 @@ gates:
     run: |
       python3 .github/scripts/check-gitops-secret-refs.py
 
+  - id: context-bank-provenance-parity
+    name: "Context, Document, and Lending deployment-bank provenance agree"
+    group: gitops
+    mode: enforced
+    budget_seconds: 10
+    min_subjects: 3
+    rationale: "A guarantee proof must not succeed across deployment-bank configurations; static GitOps parity catches drift before enabling the Lending graph publisher (ADR-0311)."
+    review_after: "2027-09-18"
+    selftest: python3 .github/scripts/check-context-bank-provenance-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-context-bank-provenance-parity.py"]
+    run: |
+      python3 .github/scripts/check-context-bank-provenance-parity.py
+
   # The in-cluster twin of external-feed-declaration-drift: a hostname naming another Service in
   # this cluster is stubbed by the unit test, overridden to localhost by the IT and never sent by
   # a consumer pact, so it is wrong only once a pod dials it. openbank-analytics-sink pointed at

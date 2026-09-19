@@ -18,6 +18,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.storage.ObjectStorePort
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Instant
 
@@ -35,7 +36,12 @@ class DocumentRenderService(
     private val objectStore: ObjectStorePort,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
+    @ConfigProperty(name = "openbank.document.bank-scope") private val bankScope: String,
 ) : DocumentRenderUseCase {
+
+    init {
+        require(bankScope.matches(Regex("[a-z0-9][a-z0-9-]{0,63}"))) { "Invalid document bank scope" }
+    }
 
     override suspend fun render(cmd: RenderDocumentCommand): Document {
         // ADR-0162 version-resolution policy: an explicit templateVersion pins to that exact
@@ -73,6 +79,9 @@ class DocumentRenderService(
                 "templateCode" to template.code,
                 "templateVersion" to template.version,
                 "locale" to template.locale,
+                // Server-owned provenance. A render caller cannot claim another bank by
+                // supplying a metadata key with the same name.
+                "bankScope" to bankScope,
             ),
             partyRef = cmd.partyRef,
             caseRef = cmd.caseRef,
@@ -80,6 +89,7 @@ class DocumentRenderService(
             retainUntil = cmd.retainUntil,
             createdAt = now,
             idempotencyKey = cmd.idempotencyKey,
+            bankScope = bankScope,
         )
 
         val outboxMessage = OutboxMessage(

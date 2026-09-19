@@ -27,6 +27,11 @@ class KafkaLendingOutboxEventPublisher(
     private val mapper: ObjectMapper,
 ) : OutboxEventPublisher {
     override suspend fun publish(entry: OutboxEntry) {
+        // The shared Lending topic has broad existing readers. Graph pointers need their own
+        // topic and ACL before this disabled writer can be activated; fail closed until then.
+        check(!entry.eventType.startsWith("lending.graph.")) {
+            "Lending graph reference topic is not configured"
+        }
         if (entry.eventType == "lending.allowance.posting") {
             val command = mapper.readValue(entry.payload, AllowancePostingCommand::class.java)
             ledger.post(
