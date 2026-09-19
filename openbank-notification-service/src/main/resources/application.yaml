@@ -259,10 +259,11 @@ mp:
           topic: openbank.consent.events.notification.dlq
       # #10281: multi-signature approval notifications (ApprovalNotificationConsumer) — the one
       # consumer of the topic delegation-service's outbox publishes approval lifecycle events on.
-      # client.id / group.id / auto.offset.reset are dotted keys and can only live in the gitops
-      # msg-override ConfigMap (issue #686); they are added there in a follow-up once an image
-      # carrying this channel is deployed, because naming a channel the running image cannot serve
-      # is an SRMSG00071 boot failure (msg-channel-image-parity gate).
+      # client.id / group.id / auto.offset.reset are dotted keys YAML cannot carry (issue #686).
+      # They live in application.properties, baked into the SAME image as this channel, rather
+      # than the gitops msg-override ConfigMap: naming a channel there before an image serving it
+      # is deployed is an SRMSG00071 boot failure (msg-channel-image-parity), and without them the
+      # channel would run under an ACL-denied default group and consume nothing.
       approval-events-in:
         connector: smallrye-kafka
         topic: openbank.delegation.approval-events

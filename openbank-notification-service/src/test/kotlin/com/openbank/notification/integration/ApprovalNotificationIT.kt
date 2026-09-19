@@ -20,6 +20,7 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import io.smallrye.reactive.messaging.memory.InMemorySource
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.Metadata
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
@@ -155,6 +156,23 @@ class ApprovalNotificationIT {
                 )
             }
         }
+    }
+
+    /**
+     * The key the Kafka connector actually reads must resolve from the image alone: a missing or
+     * YAML-quoted `group.id` falls back to the application name, which the KafkaUser ACL does not
+     * grant, and the channel then consumes nothing while reporting healthy (#686).
+     */
+    @Test
+    fun `the channel consumer group and offset reset resolve from the image under the keys the connector reads`() {
+        val config = ConfigProvider.getConfig()
+        assertThat(config.getOptionalValue("mp.messaging.incoming.approval-events-in.group.id", String::class.java))
+            .hasValue("notification-service-approval")
+        assertThat(
+            config.getOptionalValue("mp.messaging.incoming.approval-events-in.auto.offset.reset", String::class.java),
+        ).hasValue("earliest")
+        assertThat(config.getOptionalValue("mp.messaging.incoming.approval-events-in.client.id", String::class.java))
+            .hasValueSatisfying { assertThat(it).startsWith("notification-service-approval-").doesNotContain("\${") }
     }
 
     @Test
