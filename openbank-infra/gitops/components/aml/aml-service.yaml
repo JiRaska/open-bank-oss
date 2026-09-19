@@ -111,6 +111,16 @@ spec:
             # the AML side is recorded in aml-service's own docs/ only (#5785).
             - name: OPENBANK_AML_AUTO_CLEAR
               value: "true"
+            # Self-heal onboarding screening: open the missing onboarding AML case for parties that
+            # are KYC-approved but were never screened (created before this service screened their
+            # type, or whose PARTY_CREATED was never consumed) — they otherwise wait in PENDING_KYC
+            # forever. Off by default in the app; on here. Reads party-service's party list — a
+            # new east-west edge, so it takes party-service's private-CA mTLS listener (8443,
+            # TLSv1.3, client cert from aml-internal-tls) like sca/delegation, not :8111.
+            - name: AML_ONBOARDING_RECONCILE_ENABLED
+              value: "true"
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
             # ADR-0034 Phase 5 / issue #1797: aml-service shipped @Authorize with the app default
             # AUTHZ_ENFORCE=true and NO sidecar — so the PDP call failed and amlCase read/list/
             # updateDecision failed closed (HTTP 422). The `opa` sidecar below now answers the PDP
@@ -152,6 +162,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: party-tls
+              mountPath: /mnt/party-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -242,6 +255,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: party-tls
+          secret:
+            secretName: aml-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
