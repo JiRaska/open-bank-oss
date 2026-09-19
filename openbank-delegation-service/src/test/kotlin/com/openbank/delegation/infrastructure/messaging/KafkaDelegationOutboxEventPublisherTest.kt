@@ -97,7 +97,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry(realEventPayload()))
+            KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper, emitter).publish(entry(realEventPayload()))
         }
 
         assertThat(mapper.readTree(captured.captured.payload).get("sourceService").asText())
@@ -111,7 +111,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
         val payload = realEventPayload()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry(payload)) }
+        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper, emitter).publish(entry(payload)) }
 
         val before = mapper.readTree(payload)
         val after = mapper.readTree(captured.captured.payload)
@@ -131,7 +131,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         val captured = slot<Message<String>>()
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry("not json at all")) }
+        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper, emitter).publish(entry("not json at all")) }
 
         // This is the money path: an unattributed row is a strictly better outcome than a publish
         // that throws and wedges the outbox dispatcher.
@@ -146,7 +146,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         val reservationId = UUID.randomUUID()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper).publish(
+            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper, mockk()).publish(
                 entry(
                     statePayload(reservationId, 1L),
                     DelegationSpendReservationStateChanged.EVENT_TYPE,
@@ -164,7 +164,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         val lifecycleEmitter = mockk<MutinyEmitter<String>>()
         val stateEmitter = mockk<MutinyEmitter<String>>()
         val reservationId = UUID.randomUUID()
-        val publisher = KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper)
+        val publisher = KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper, mockk())
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
             runBlocking {
@@ -179,5 +179,22 @@ class KafkaDelegationOutboxEventPublisherTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
         verify(exactly = 0) { stateEmitter.sendMessage(any()) }
         verify(exactly = 0) { lifecycleEmitter.sendMessage(any()) }
+    }
+
+    @Test
+    fun `an ADR-0312 approval event goes to the approval topic and nowhere else`() {
+        val lifecycleEmitter = mockk<MutinyEmitter<String>>()
+        val stateEmitter = mockk<MutinyEmitter<String>>()
+        val approvalEmitter = mockk<MutinyEmitter<String>>()
+        every { approvalEmitter.sendMessage(any()) } returns Uni.createFrom().voidItem()
+
+        runBlocking {
+            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper, approvalEmitter)
+                .publish(entry("""{"eventType":"APPROVAL_REQUESTED"}""", eventType = "APPROVAL_REQUESTED"))
+        }
+
+        verify(exactly = 1) { approvalEmitter.sendMessage(any()) }
+        verify(exactly = 0) { lifecycleEmitter.sendMessage(any()) }
+        verify(exactly = 0) { stateEmitter.sendMessage(any()) }
     }
 }
