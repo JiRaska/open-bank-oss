@@ -363,3 +363,13 @@ simply stops existing).
   indistinguishable. Residual: `null` still does not distinguish "no such account" from "lookup
   failed" at the *data* level, and the case row itself carries no marker of which branch produced
   it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.
+
+- **2026-09-20** — **No boundary change for this service.** Recorded because
+  `openbank-infra/gitops/components/payments/payments-services.yaml` is a shared multi-service
+  manifest and the threat-model gate attributes a Deployment/Rollout hunk in it to every money-path
+  service whose name appears in the file, not to the workload the hunk actually sits in. The change
+  in question belongs to the co-tenant **clearing-service** Rollout: a `LEDGER_SERVICE_URL` pointing
+  at ledger-service's new mTLS listener, plus the client-certificate volume it needs. sepa-payment's
+  own container spec, ports, identity, privilege, NetworkPolicy and rest-clients are byte-identical
+  to `main`. **Risk class:** none — no surface, principal, action or data flow of this service is
+  touched. Nothing to roll back here.
