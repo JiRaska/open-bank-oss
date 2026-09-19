@@ -169,3 +169,12 @@ money-path service, not adjacent.
   downstream effect is that withholding tax is now actually assembled and remitted (the §38d statutory
   filing owner is decided separately in ADR-0180). Rollback: revert the commit (the scheduler stops).
 - **2026-07-18** — Initial lightweight threat model (ADR-0030 D2), added alongside `openbank-interest-service`'s addition to `money_path_services` (#1478).
+
+- **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `CatalogInterestProfileSynchronizer`
+  now reaches `product-catalog.accounts.svc:8443` with the client certificate `interest-service-internal-tls`
+  (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in
+  gitops and the client dialled `localhost:8104` inside this pod, so the scheduled catalog snapshot never reached the catalog (#10383).
+  The calls are reads of the `/api/v2` catalog surface only; no mutation, no new principal, no money
+  movement. **Risk class:** confidentiality and integrity of product/offering data in transit, now
+  protected by mutual TLS rather than plaintext. Rollback: drop `PRODUCT_CATALOG_URL` and the
+  `catalog-tls` volume.

@@ -117,6 +117,13 @@ spec:
             # Ledger service in-cluster URL (default resolves only localhost).
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
+            # RestCatalogLoanProfilePort reads product-catalog for the loan product profile.
+            # Without this the app default (localhost:8104) was dialled inside this pod and every
+            # read failed (#10383). product-catalog's private-CA mTLS listener (8443, client auth
+            # REQUIRED); client cert lending-internal-tls, %prod TLS bucket catalog-authority.
+            # ASVS V9.1 forbids a new plaintext http:// value here.
+            - name: PRODUCT_CATALOG_URL
+              value: https://product-catalog.accounts.svc:8443
             # Same build-time caveat as LENDING_LEDGER_BACKEND above (#6057): this never
             # activated AccountServiceClient + BorrowerCreditClient (#3931), because
             # lending.borrower-credit.backend was absent from application.yaml entirely and the
@@ -242,6 +249,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -332,6 +342,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: catalog-tls
+          secret:
+            secretName: lending-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for interest-service's mTLS calls to product-catalog (8443, client
+# auth REQUIRED) — the CatalogInterestProfileSynchronizer catalog sync (#10383). Same shape as notification-internal-tls and
+# sca-internal-tls: tls.crt/tls.key identify the caller, ca.crt trusts product-catalog.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: interest-service-internal-tls
+  namespace: interest
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: interest-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: interest-service.interest.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
