@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.11.0...aml-service-v0.12.0) (2026-09-19)
+
+
+### Features
+
+* **aml:** reconcile parties KYC-approved but never AML-screened ([#10373](https://github.com/JiRaska/open-bank-oss/issues/10373)) ([dca8cea](https://github.com/JiRaska/open-bank-oss/commit/dca8ceae6edc631950a264d5a35421e90dff7ba7))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.3...aml-service-v0.11.0) (2026-09-17)
 
 
