@@ -36,7 +36,7 @@
   "openbank-mcp-service": "0.17.0",
   "openbank-notification-service": "0.33.0",
   "openbank-onboarding-service": "0.10.1",
-  "openbank-party-service": "0.24.0",
+  "openbank-party-service": "0.24.1",
   "openbank-pid-service": "0.10.3",
   "openbank-product-catalog": "0.18.5",
   "openbank-psd2-service": "0.11.3",
