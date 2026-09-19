@@ -5,6 +5,7 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.sanctions.application.port.out.ListImportOutcome
+import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
@@ -23,6 +24,7 @@ class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
     private val importer: SanctionsImportService,
     private val clock: Clock,
+    private val publisher: SanctionsChangePublisher,
 ) {
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
@@ -31,7 +33,8 @@ class SanctionsListService(
     constructor(
         repo: SanctionsListRepositoryImpl,
         importer: SanctionsImportService,
-    ) : this(repo, importer, Clock.systemUTC())
+        publisher: SanctionsChangePublisher,
+    ) : this(repo, importer, Clock.systemUTC(), publisher)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -57,9 +60,12 @@ class SanctionsListService(
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
         val count = if (enumType != null) {
             val result = importer.importList(enumType, list.sourceUrl)
+            // Failed imports may already have committed earlier batches. Publish what actually
+            // committed, including retained evidence from previous attempts, regardless of outcome.
+            publisher.publishPending(list.id, enumType)
             // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
-            // the stored list now reflects the upstream source; every other outcome left the
-            // stored entries untouched, so the stored count stays the honest number.
+            // the usable feed count is known. Other outcomes cannot establish a new population,
+            // so retain the prior reported count; committed partial changes are journaled separately.
             if (result.outcome == ListImportOutcome.IMPORTED) {
                 result.entriesImported
             } else {
@@ -123,19 +129,23 @@ class SanctionsListService(
     // failure here is logged and the list is simply retried on its next due tick.
     suspend fun scheduledRefresh() {
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
-        val due = repo.listSanctionsLists().filter { it.isDueForScheduledRefresh(now) }
-        for (list in due) {
-            Log.infof("Scheduled refresh for %s", list.listType)
+        for (list in repo.listSanctionsLists()) {
             try {
-                refresh(list.listType)
+                if (list.enabled && list.isDueForScheduledRefresh(now)) {
+                    Log.infof("Scheduled refresh for %s", list.listType)
+                    refresh(list.listType)
+                } else {
+                    // A disabled feed can still have committed changes from a previous import.
+                    // Drain its journal without importing or waiting for the feed to be enabled.
+                    val type = LIST_TYPES[list.listType] ?: continue
+                    publisher.publishPending(list.id, type)
+                }
             } catch (ex: Exception) {
-                // observed-by: the list's own due-ness. A failed refresh does not advance
-                // lastRefreshedAt, so `isDueForScheduledRefresh` stays true and the next tick
-                // re-attempts it — the work is rescheduled rather than lost, which is why this
-                // per-item catch is not the #5698 swallow even though it logs and continues.
-                // Aborting the batch instead would let one unreachable list starve every other.
+                // observed-by: every enabled list is revisited on the next tick. Pending journal
+                // evidence is retained on failure and retried even outside the feed's cron minute.
+                // Aborting the sweep would let one unavailable list starve the other lists.
                 Log.warnf(
-                    "Scheduled refresh failed for %s (%s: %s) — will retry next due tick",
+                    "Scheduled refresh or publication failed for %s (%s: %s) — will retry next tick",
                     list.listType,
                     ex.javaClass.simpleName,
                     ex.message,
@@ -194,6 +204,7 @@ class SanctionsListService(
     }
 
     companion object {
+        private val LIST_TYPES = SanctionsListType.entries.associateBy { it.name }
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
     }
 }

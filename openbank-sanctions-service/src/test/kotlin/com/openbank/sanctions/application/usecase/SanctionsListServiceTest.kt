@@ -5,6 +5,8 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.sanctions.application.port.out.ListImportResult
+import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
+import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
@@ -32,7 +34,10 @@ class SanctionsListServiceTest {
     private val repo = mockk<SanctionsListRepositoryImpl>()
     private val importer = mockk<SanctionsImportService>()
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
-    private val service = SanctionsListService(repo, importer, clock)
+    private val publisher = mockk<SanctionsChangePublisher> {
+        coEvery { publishPending(any(), any()) } returns SanctionsPublicationOutcome.NO_CHANGES
+    }
+    private val service = SanctionsListService(repo, importer, clock, publisher)
 
     // ──── listAll / getById ─────────────────────────────────────────────────
 
@@ -283,6 +288,7 @@ class SanctionsListServiceTest {
         service.scheduledRefresh()
 
         coVerify(exactly = 0) { importer.importList(any(), any()) }
+        coVerify(exactly = 1) { publisher.publishPending(flaggedDisabled.id, SanctionsListType.OFAC_SDN) }
     }
 
     @Test
@@ -422,6 +428,41 @@ class SanctionsListServiceTest {
                 coVerify { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") }
             }
         }
+    }
+
+    @Test
+    fun `scheduled tick recovers pending publication outside the import cron`(): Unit = runBlocking {
+        val list = sampleList(cronHour = 6)
+        coEvery { repo.listSanctionsLists() } returns listOf(list)
+
+        service.scheduledRefresh()
+
+        coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
+    }
+
+    @Test
+    fun `a failed import still publishes previously committed changes`(): Unit = runBlocking {
+        val list = sampleList(lastEntryCount = 10)
+        coEvery { repo.findByListType(list.listType) } returns list
+        coEvery { importer.importList(any(), any()) } returns ListImportResult.failedKeptExisting("fixture failure")
+        coEvery { repo.markUpdated(list.listType, 10) } returns list
+
+        service.refresh(list.listType)
+
+        coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+    }
+
+    @Test
+    fun `publication failure does not mark refresh completed`() {
+        val list = sampleList()
+        coEvery { repo.findByListType(list.listType) } returns list
+        coEvery { importer.importList(any(), any()) } returns ListImportResult.imported(10)
+        coEvery { publisher.publishPending(any(), any()) } throws IllegalStateException("outbox unavailable")
+
+        assertThatThrownBy { runBlocking { service.refresh(list.listType) } }
+            .hasMessageContaining("outbox unavailable")
+        coVerify(exactly = 0) { repo.markUpdated(any(), any()) }
     }
 
     private fun sampleList(

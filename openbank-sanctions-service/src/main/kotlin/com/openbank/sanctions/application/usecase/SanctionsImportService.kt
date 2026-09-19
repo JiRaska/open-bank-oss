@@ -81,7 +81,7 @@ class SanctionsImportService(
     /**
      * Downloads and imports [listType] from [sourceUrl].
      *
-     * @return the import outcome — [ListImportOutcome.IMPORTED] with the upserted count, or a
+     * @return the import outcome — [ListImportOutcome.IMPORTED] with the usable feed-entry count, or a
      * named non-success (see [ListImportResult]); the caller must key its bookkeeping on the
      * outcome, never on "count > 0".
      */
@@ -164,6 +164,7 @@ class SanctionsImportService(
             inputStream.use { EuFsfSaxParser.parse(it) }
         }
         Log.infof("SAX-parsed %d EU FSF sanction entities", entities.size)
+        if (entities.isEmpty()) return 0
 
         var total = 0
         val seenExternalIds = mutableSetOf<String>()
@@ -186,8 +187,8 @@ class SanctionsImportService(
         }
 
         val deactivated = entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, seenExternalIds)
-        Log.infof("Imported %d EU FSF entries (%d no longer present, deactivated)", total, deactivated)
-        return total
+        Log.infof("Updated %d EU FSF entries (%d no longer present, deactivated)", total, deactivated)
+        return entities.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -305,7 +306,7 @@ class SanctionsImportService(
             total += entryRepo.upsertAll(chunk)
         }
         Log.infof("Upserted %d OFAC SDN entries", total)
-        total
+        allEntries.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -327,7 +328,10 @@ class SanctionsImportService(
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { reader.readLine() } ?: return 0
+        val headerLine = withContext(Dispatchers.IO) { reader.readLine() } ?: run {
+            reader.close()
+            return 0
+        }
         val headers = parseCsvLine(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
@@ -346,6 +350,7 @@ class SanctionsImportService(
         }
 
         var total = 0
+        var entriesSeen = 0
         val batch = mutableListOf<SanctionsEntry>()
         // Present-set for the end-of-stream reconciliation sweep below — NOT a deactivate-first
         // pass. Deactivating stale entries used to run BEFORE this loop, unconditionally, for
@@ -372,6 +377,7 @@ class SanctionsImportService(
                 val programRaw = col(cols, idxProgramIds)
 
                 if (name.isBlank()) continue
+                entriesSeen += 1
                 id.takeIf { it.isNotBlank() }?.let { seenExternalIds += it }
 
                 val aliases = aliasesRaw.split(";")
@@ -417,6 +423,7 @@ class SanctionsImportService(
             reader.close()
         }
 
+        if (entriesSeen == 0) return 0
         if (batch.isNotEmpty()) total += entryRepo.upsertAll(batch)
 
         // Only reached if the loop above completed without throwing — a mid-stream failure
@@ -424,12 +431,12 @@ class SanctionsImportService(
         // existing list is left untouched rather than partially wiped.
         val deactivated = entryRepo.deactivateMissing(listType, seenExternalIds)
         Log.infof(
-            "Imported %d OpenSanctions entries for %s (%d no longer present, deactivated)",
+            "Updated %d OpenSanctions entries for %s (%d no longer present, deactivated)",
             total,
             listType,
             deactivated,
         )
-        return total
+        return entriesSeen
     }
 
     // ──────────────────────────────────────────────────────────────────────────
