@@ -40,6 +40,13 @@ import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 
+private val PROVISIONING_CLOSED_STATES = setOf(
+    com.openbank.lending.domain.model.LoanStatus.CLOSED,
+    com.openbank.lending.domain.model.LoanStatus.WRITTEN_OFF,
+    com.openbank.lending.domain.model.LoanStatus.UNWOUND,
+    com.openbank.lending.domain.model.LoanStatus.SETTLED,
+)
+
 @ApplicationScoped
 class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
@@ -297,12 +304,7 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
         )
             .setParameter(
                 "closed",
-                setOf(
-                    com.openbank.lending.domain.model.LoanStatus.CLOSED,
-                    com.openbank.lending.domain.model.LoanStatus.WRITTEN_OFF,
-                    com.openbank.lending.domain.model.LoanStatus.UNWOUND,
-                    com.openbank.lending.domain.model.LoanStatus.SETTLED,
-                ),
+                PROVISIONING_CLOSED_STATES,
             )
             .setParameter("period", period)
             .setMaxResults(limit)
@@ -589,4 +591,40 @@ internal fun foldLoanSummaries(rows: List<Array<Any?>>): List<LoanStateSummary> 
                 .sortedBy { it.currency },
         )
     }.sortedBy { it.status }
+}
+
+@ApplicationScoped
+class ProvisioningCoverageRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
+    com.openbank.lending.application.port.out.ProvisioningCoverageRepository {
+    @WithSession
+    override fun countEligibleForProvisioning(): Uni<Long> = sf.withSession { session ->
+        session.createQuery(
+            "SELECT COUNT(l) FROM LoanEntity l WHERE l.status NOT IN :closed",
+            java.lang.Long::class.java,
+        )
+            .setParameter("closed", PROVISIONING_CLOSED_STATES)
+            .singleResult
+    }.map { it.toLong() }
+
+    @WithSession
+    override fun countUnprovisioned(period: String): Uni<Long> = sf.withSession { session ->
+        session.createQuery(
+            "SELECT COUNT(l) FROM LoanEntity l WHERE l.status NOT IN :closed AND NOT EXISTS " +
+                "(SELECT p.id FROM LoanProvisioningEntity p WHERE p.loanId = l.id AND p.period = :period)",
+            java.lang.Long::class.java,
+        )
+            .setParameter("closed", PROVISIONING_CLOSED_STATES)
+            .setParameter("period", period)
+            .singleResult
+    }.map { it.toLong() }
+
+    @WithSession
+    override fun countForPeriod(period: String): Uni<Long> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(p) FROM LoanProvisioningEntity p WHERE p.period = :period",
+            java.lang.Long::class.java,
+        )
+            .setParameter("period", period)
+            .singleResult
+    }.map { it.toLong() }
 }

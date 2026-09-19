@@ -155,6 +155,16 @@ class LendingWorkflowLivenessTest {
                 batchSize = 500,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
+                // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
+                // Uni that never emits, so the coverage read after the drain hung the test forever
+                // (CI cancelled the lending build at 45 min).
+                coverage =
+                mockk(relaxed = true) {
+                    every { countEligibleForProvisioning() } returns Uni.createFrom().item(5L)
+                    every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
+                    every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
+                },
+                registry = null,
             )
 
         scheduler.onStart(StartupEvent())
@@ -176,6 +186,55 @@ class LendingWorkflowLivenessTest {
         assertThat(ageOf(registry, "lending-provisioning-cycle")!!)
             .describedAs("the job ran but recorded no success")
             .isLessThan(TOLERANCE_SECONDS)
+        assertThat(successRecordedOf(registry, "lending-provisioning-cycle")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a provisioning pass with uncovered loans records no success`() {
+        val registry = SimpleMeterRegistry()
+        val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
+        val cycleUseCase = object : RunProvisioningCycleUseCase {
+            override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int) = Uni.createFrom().item(
+                ProvisioningRunOutcome(period, loansAssessed = 500, journalsQueued = 20),
+            )
+        }
+        val coverage = mockk<com.openbank.lending.application.port.out.ProvisioningCoverageRepository> {
+            every { countEligibleForProvisioning() } returns Uni.createFrom().item(501L)
+            every { countForPeriod(any()) } returns Uni.createFrom().item(500L)
+            every { countUnprovisioned(any()) } returns Uni.createFrom().item(1L)
+        }
+        val scheduler = ProvisioningCycleScheduler(cycleUseCase, 500, clock, metricsOver(registry), coverage, null)
+        scheduler.onStart(StartupEvent())
+
+        scheduler.runProvisioningPass().await().indefinitely()
+
+        assertThat(successRecordedOf(registry, "lending-provisioning-cycle"))
+            .describedAs("an incomplete reporting period must not count as a successful workflow")
+            .isEqualTo(NOT_YET_SUCCEEDED)
+    }
+
+    @Test
+    fun `an unreadable provisioning coverage cannot certify success`() {
+        val registry = SimpleMeterRegistry()
+        val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
+        val cycleUseCase = object : RunProvisioningCycleUseCase {
+            override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int) =
+                Uni.createFrom().item(ProvisioningRunOutcome(period, loansAssessed = 500, journalsQueued = 20))
+        }
+        val coverage = mockk<com.openbank.lending.application.port.out.ProvisioningCoverageRepository> {
+            every { countEligibleForProvisioning() } returns Uni.createFrom().item(500L)
+            every { countForPeriod(any()) } returns Uni.createFrom().item(500L)
+            every { countUnprovisioned(any()) } returns
+                Uni.createFrom().failure(IllegalStateException("read unavailable"))
+        }
+        val scheduler = ProvisioningCycleScheduler(cycleUseCase, 500, clock, metricsOver(registry), coverage, null)
+        scheduler.onStart(StartupEvent())
+
+        scheduler.runProvisioningPass().await().indefinitely()
+
+        assertThat(successRecordedOf(registry, "lending-provisioning-cycle"))
+            .describedAs("an unknown coverage result must not count as a successful workflow")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     @Test
@@ -195,6 +254,16 @@ class LendingWorkflowLivenessTest {
                 batchSize = 500,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
+                // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
+                // Uni that never emits, so the coverage read after the drain hung the test forever
+                // (CI cancelled the lending build at 45 min).
+                coverage =
+                mockk(relaxed = true) {
+                    every { countEligibleForProvisioning() } returns Uni.createFrom().item(5L)
+                    every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
+                    every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
+                },
+                registry = null,
             )
         scheduler.onStart(StartupEvent())
 

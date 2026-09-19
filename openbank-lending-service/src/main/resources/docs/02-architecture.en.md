@@ -96,11 +96,11 @@ Emitted event types: `loan.disbursed`, `loan.interest_accrued`, `loan.written_of
 
 ## IFRS 9 provisioning cycle (ADR-0028 Phase 3)
 
-`ProvisioningCycleScheduler` ticks on `lending.provisioning.cycle.every` (default `720h`, ~monthly, delayed 60s, `concurrentExecution = SKIP`; the interval is a plain duration, not calendar-month-aware). Each pass computes the current period key (`yyyy-MM` from the injected `Clock`) and calls `runProvisioningCycle(period, asOf, batchSize)`, which for every `ACTIVE` loan (`LoanRepository.findActive`, up to `batchSize`):
+`ProvisioningCycleScheduler` ticks on `lending.provisioning.cycle.every` (default `24h`, delayed 60s, `concurrentExecution = SKIP`). Each pass derives the current reporting date (`yyyy-MM-dd`) from the injected `Clock` and calls `runProvisioningCycle(period, asOf, batchSize)`. The repository selects nonterminal loans without a row for that date in successive batches until a short batch proves exhaustion. For each selected loan, the cycle:
 
 1. Skips the loan if it already has a `loan_provisioning` row for this `period` (idempotent re-run).
 2. Recomputes the IFRS 9 stage/ECL snapshot (the same `Ifrs9.assess` + `Delinquency` primitives `ProvisioningUseCase.assess` uses).
-3. Reads the loan's most recent **earlier** period's ECL (`ProvisioningRepository.findLatestBefore`), defaulting to zero if this is the loan's first cycle.
+3. Reads the loan's most recent provisioning record (`ProvisioningRepository.findLatestByLoan`), rejects a record newer than `asOf`, and uses zero ECL if none exists.
 4. Posts the **delta** (`newEcl − priorEcl`) as a `PROVISIONING` journal — skipped entirely if the delta is zero — and persists the new `loan_provisioning` row either way (the audit trail is written even when nothing is posted).
 5. Emits `loan.provisioned` only when a journal was posted.
 

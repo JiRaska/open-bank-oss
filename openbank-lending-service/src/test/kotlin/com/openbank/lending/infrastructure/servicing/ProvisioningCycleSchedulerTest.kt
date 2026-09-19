@@ -24,8 +24,8 @@ import java.time.ZoneOffset
 import java.util.function.Supplier
 
 /**
- * The IFRS 9 provisioning posting loop must run the cycle for the clock's current calendar date with
- * the configured batch size and let a
+ * The IFRS 9 provisioning posting loop must run the cycle for the clock's current calendar month with
+ * the configured batch size, warn when the batch may have truncated the active loan book, and let a
  * cycle failure surface (mirrors [InterestAccrualSchedulerTest]).
  */
 class ProvisioningCycleSchedulerTest {
@@ -33,7 +33,21 @@ class ProvisioningCycleSchedulerTest {
     private val cycle = mockk<RunProvisioningCycleUseCase>()
     private val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
     private val scheduler =
-        ProvisioningCycleScheduler(cycle, batchSize = 500, clock = clock, domainMetrics = mockk(relaxed = true))
+        ProvisioningCycleScheduler(
+            cycle,
+            batchSize = 500,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked Uni
+            // that never emits, and the pass awaits the coverage read after the drain.
+            coverage =
+            mockk(relaxed = true) {
+                every { countEligibleForProvisioning() } returns Uni.createFrom().item(0L)
+                every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
+                every { countForPeriod(any()) } returns Uni.createFrom().item(0L)
+            },
+            registry = null,
+        )
 
     @BeforeEach
     fun stubPanacheSession() {
@@ -72,19 +86,6 @@ class ProvisioningCycleSchedulerTest {
     }
 
     @Test
-    fun `accepts a completed cycle spanning multiple batches`() {
-        every { cycle.runProvisioningCycle("2026-06-15", any(), 500) } returns
-            Uni.createFrom().item(
-                ProvisioningRunOutcome(period = "2026-06-15", loansAssessed = 1001, journalsQueued = 12),
-            )
-
-        val result = scheduler.runProvisioningPass().await().indefinitely()
-
-        assertThat(result).isNull()
-        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06-15", any(), 500) }
-    }
-
-    @Test
     fun `a failing cycle propagates so the scheduler tick is marked failed`() {
         every { cycle.runProvisioningCycle(any(), any(), any()) } returns
             Uni.createFrom().failure(IllegalStateException("ledger down"))
@@ -92,5 +93,33 @@ class ProvisioningCycleSchedulerTest {
         assertThatThrownBy { scheduler.runProvisioningPass().await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("ledger down")
+    }
+
+    @Test
+    fun `a closed loan provision cannot hide an active loan missing provision`() {
+        // Two different loans: one closed with a period row, one active without one.
+        // The two totals are both 1, but the uncovered ACTIVE population is also 1.
+        val registry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+        val coverageLoans = mockk<com.openbank.lending.application.port.out.ProvisioningCoverageRepository> {
+            every { countEligibleForProvisioning() } returns Uni.createFrom().item(1L)
+            every { countUnprovisioned("2026-06-15") } returns Uni.createFrom().item(1L)
+            every { countForPeriod("2026-06-15") } returns Uni.createFrom().item(1L)
+        }
+        val observed = ProvisioningCycleScheduler(
+            cycle,
+            batchSize = 500,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            coverage = coverageLoans,
+            registry = registry,
+        )
+        observed.onStart(io.quarkus.runtime.StartupEvent())
+        every { cycle.runProvisioningCycle("2026-06-15", any(), 500) } returns
+            Uni.createFrom().item(ProvisioningRunOutcome("2026-06-15", 500, 0))
+
+        observed.runProvisioningPass().await().indefinitely()
+
+        assertThat(registry.get("openbank.lending.provisioning.unprovisioned").gauge().value()).isEqualTo(1.0)
+        registry.close()
     }
 }

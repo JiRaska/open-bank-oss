@@ -163,3 +163,10 @@ interface ProvisioningRepository {
     /** The latest persisted record per loan — one row per loan that has ever been assessed. */
     fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>>
 }
+
+/** Read-only coverage diagnostics; the population matches the provisioning scan. */
+interface ProvisioningCoverageRepository {
+    fun countEligibleForProvisioning(): Uni<Long>
+    fun countUnprovisioned(period: String): Uni<Long>
+    fun countForPeriod(period: String): Uni<Long>
+}
