@@ -1,5 +1,6 @@
 package com.openbank.referral.infrastructure.rest
 
+import com.openbank.referral.application.ReferralQualificationService
 import com.openbank.referral.application.ReferralService
 import com.openbank.referral.domain.ReferralValidationException
 import io.quarkus.security.identity.SecurityIdentity
@@ -30,7 +31,11 @@ data class QualifyReferralInviteRequest(val eventName: String, val eventId: Stri
 @Path("/api/v1/referrals")
 @ApplicationScoped
 @RolesAllowed("ROLE_OPERATOR")
-class ReferralResource(private val service: ReferralService, private val identity: SecurityIdentity) {
+class ReferralResource(
+    private val service: ReferralService,
+    private val qualification: ReferralQualificationService,
+    private val identity: SecurityIdentity,
+) {
     private fun actor() = identity.principal.name
 
     @GET
@@ -113,7 +118,7 @@ class ReferralResource(private val service: ReferralService, private val identit
         req: AttributeReferralInviteRequest,
     ): Response {
         if (key.isNullOrBlank()) throw ReferralValidationException("Idempotency-Key is required")
-        return Response.ok(service.attributeInvite(token, req.refereePartyId, key, actor())).build()
+        return Response.ok(qualification.attributeAndQualify(token, req.refereePartyId, key, actor())).build()
     }
 
     @POST
