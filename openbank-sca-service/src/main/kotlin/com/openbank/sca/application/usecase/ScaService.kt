@@ -36,6 +36,7 @@ import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
+import com.openbank.sca.domain.model.canonicalAmount
 import com.openbank.sca.domain.model.dynamicLinkingPayload
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -504,6 +505,17 @@ class ScaService(
             "APPROVAL challenge requires dynamicLinkingData.approvalRequestId and payloadSha256"
         }
         require(SHA256_HEX.matches(payloadSha256)) { "payloadSha256 must be 64 hex characters" }
+        // A payment approval signs amount, currency and creditor in canonical form (see
+        // approvalLinkingPayload): all three or none, and an amount that has a canonical form.
+        val dl = requireNotNull(command.dynamicLinkingData)
+        if (dl.amount != null) {
+            require(!dl.currency.isNullOrBlank() && !dl.creditorIban.isNullOrBlank()) {
+                "a payment APPROVAL challenge needs amount, currency and creditorIban together"
+            }
+            require(runCatching { canonicalAmount(dl.amount) }.isSuccess) {
+                "amount must be a decimal with at most two fractional digits"
+            }
+        }
     }
 
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {

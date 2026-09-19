@@ -79,7 +79,7 @@ Od tohoto vydání `POST /parties/{partyId}/devices` vrací `422` pro stranu, kt
 3. Proveď se schváleným počtem: `... --apply --expect-count <N> --archive purged.json`. Skript odmítne, pokud se inventura od schválení změnila, řádky nejdřív archivuje a smaže je jedním příkazem.
 4. `purged.json` ulož ke změnovému záznamu. Znovu spusť suchý běh: musí hlásit `count: 0`.
 
-Podepisovaný payload výzvy `APPROVAL` přidává k platebním segmentům `|approvalRequestId|payloadSha256`.
+Podepisovaný payload výzvy `APPROVAL` má vlastní kanonický tvar: `id|decision|APPROVAL|approvalRequestId|payloadSha256`, u platby navíc `|amount|currency|creditorIban` (částka jako desetinné číslo se dvěma desetinnými místy, měna velkými písmeny, IBAN velkými písmeny bez mezer, hash malými písmeny).
 
 ### Redis nedostupný
 Selže OTP store, idempotence a store rozhodnutí. Výzvy nelze spolehlivě vytvářet/ověřovat; ber jako tvrdý výpadek závislosti a postupuj dle platformového Redis runbooku. Žádná trvalá data se neztratí (Postgres drží záznam výzvy).

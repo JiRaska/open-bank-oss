@@ -31,8 +31,8 @@ import javax.sql.DataSource
  * challenge, and the refusal to enrol a device to a non-natural person.
  *
  * The device decision is signed with a real P-256 key over the literal payload format, so the
- * test also pins the byte layout the app must sign: `id|APPROVED|amount|currency|creditor|ref|
- * approvalRequestId|payloadSha256`.
+ * test also pins the byte layout the app must sign:
+ * `id|APPROVED|APPROVAL|approvalRequestId|payloadSha256|amount|currency|creditorIban`.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
@@ -95,7 +95,8 @@ class ScaApprovalLinkingIT {
         enrol(human, credentialId, keys.spki(), expect = 201)
 
         val challengeId = initiateApproval(human, entity, approvalId, sha)
-        val payload = "$challengeId|APPROVED|1000.00|CZK|$iban|INV-1|$approvalId|$sha"
+        // The canonical APPROVAL form (DeviceApproval.approvalLinkingPayload), spelled out literally.
+        val payload = "$challengeId|APPROVED|APPROVAL|$approvalId|$sha|1000.00|CZK|$iban"
         Given {
             contentType("application/json")
             body("""{"credentialId":"$credentialId","decision":"APPROVED","signature":"${keys.sign(payload)}"}""")

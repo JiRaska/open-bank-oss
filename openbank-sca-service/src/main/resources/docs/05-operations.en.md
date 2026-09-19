@@ -79,7 +79,7 @@ Since this release `POST /parties/{partyId}/devices` answers `422` for a party t
 3. Apply with the reviewed size: `... --apply --expect-count <N> --archive purged.json`. The script refuses if the inventory changed since review, archives the rows first, and deletes them in one statement.
 4. Keep `purged.json` with the change record. Re-run the dry run: it must report `count: 0`.
 
-Signing payload for an `APPROVAL` challenge appends `|approvalRequestId|payloadSha256` to the payment segments.
+Signing payload for an `APPROVAL` challenge is its own canonical form: `id|decision|APPROVAL|approvalRequestId|payloadSha256`, plus `|amount|currency|creditorIban` for a payment (amount plain decimal with two fractional digits, currency upper-case, IBAN upper-case without spaces, hash lower-case).
 
 ### Redis unavailable
 OTP store, idempotency, and decision store fail. Challenges cannot be created/verified reliably; treat as a hard dependency outage and follow the platform Redis runbook. No durable data is lost (Postgres holds the challenge record).

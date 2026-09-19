@@ -88,11 +88,12 @@ data class DeviceApprovalDecision(
  * against the one challenge whose stored linking data produced those bytes, and `consume`
  * compares the document and card fields independently rather than positionally.
  *
- * [DynamicLinkingData.approvalRequestId]/[DynamicLinkingData.payloadSha256] ([ScaPurpose.APPROVAL],
- * #10281) follow the same append-only-when-present rule, after the card pair, so every payload
- * that existed before keeps its bytes.
+ * An [ScaPurpose.APPROVAL] challenge signs its own canonical form instead — see
+ * [approvalLinkingPayload]. No challenge of any other purpose ever carries approval fields, so
+ * every payload that existed before keeps its bytes.
  */
 fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray {
+    if (purpose == ScaPurpose.APPROVAL) return approvalLinkingPayload(decision)
     val dl = dynamicLinkingData
     val segments = listOf(
         id.toString(),
@@ -101,10 +102,51 @@ fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray 
         dl?.currency.orEmpty(),
         dl?.creditorIban.orEmpty(),
         dl?.reference.orEmpty(),
-    ) + optionalPair(dl?.documentSha256, dl?.ceremonyId) + optionalPair(dl?.cardId, dl?.cardAction) +
-        optionalPair(dl?.approvalRequestId, dl?.payloadSha256)
+    ) + optionalPair(dl?.documentSha256, dl?.ceremonyId) + optionalPair(dl?.cardId, dl?.cardAction)
     return segments.joinToString("|").toByteArray(Charsets.UTF_8)
 }
+
+/**
+ * The bytes a device signs for an [ScaPurpose.APPROVAL] challenge (#10281) — the canonical form the
+ * app builds in `approvalDynamicLink`:
+ *
+ * ```
+ * <challengeId>|<decision>|APPROVAL|<approvalRequestId>|<payloadSha256>                                   (non-payment)
+ * <challengeId>|<decision>|APPROVAL|<approvalRequestId>|<payloadSha256>|<amount>|<currency>|<creditorIban> (payment)
+ * ```
+ *
+ * Canonicalisation, applied to what was stored at initiate so the app and this service can never
+ * disagree on formatting:
+ *  - `payloadSha256`: lower-case hex;
+ *  - `amount`: plain decimal, dot separator, exactly two fractional digits (`1000` → `1000.00`,
+ *    `250.5` → `250.50`); an amount that needs more than two digits is refused at initiate;
+ *  - `currency`: upper-case ISO code;
+ *  - `creditorIban`: upper-case, all spaces removed.
+ *
+ * The payment segments are present iff the challenge carries an amount (a PAYMENT approval).
+ * `reference` and `creditorName` are display-only and never signed here: the payload hash already
+ * binds the whole frozen instruction.
+ */
+fun ScaChallenge.approvalLinkingPayload(decision: DeviceDecisionType): ByteArray {
+    val dl = dynamicLinkingData
+    val segments = mutableListOf(
+        id.toString(),
+        decision.name,
+        ScaPurpose.APPROVAL.name,
+        dl?.approvalRequestId.orEmpty(),
+        dl?.payloadSha256.orEmpty().lowercase(),
+    )
+    dl?.amount?.let { amount ->
+        segments += canonicalAmount(amount)
+        segments += dl.currency.orEmpty().uppercase()
+        segments += dl.creditorIban.orEmpty().replace(" ", "").uppercase()
+    }
+    return segments.joinToString("|").toByteArray(Charsets.UTF_8)
+}
+
+/** Plain decimal with exactly two fractional digits; throws for a malformed or over-precise amount. */
+fun canonicalAmount(amount: String): String =
+    java.math.BigDecimal(amount.trim()).setScale(2, java.math.RoundingMode.UNNECESSARY).toPlainString()
 
 /**
  * One conditionally-appended dynamic-linking pair: both segments or neither, never one. An absent
