@@ -696,3 +696,14 @@ decision use first; the additive projection table may remain until its consumer 
   edge existed in code but never reached this service. **Risk class:** confidentiality of account
   reads (party id of an account) to a compliance service; no mutation, no new action. Rollback: drop
   the listener env and the aml env var.
+
+- **2026-09-20** — **Namespace note, not a change to this service.** `product-catalog` shares the
+  `accounts` namespace and component directory, and it gains a parallel private-CA mTLS listener on
+  8443 (server cert `product-catalog-internal-tls`, client auth REQUIRED, TLSv1.3) for
+  interest-service and lending-service (#10383). The regenerated
+  `accounts/network-policies.yaml` therefore admits the `interest` and `lending` namespaces to
+  **product-catalog's own pod selector on 8443** — account-service's own ingress allow-list, ports
+  and workload are untouched, and no new principal, action or data path reaches account-service.
+  **Risk class:** none for this service; the confidentiality and integrity considerations belong to
+  product-catalog's catalog reads. Rollback: drop product-catalog's listener env and the two caller
+  env vars.
