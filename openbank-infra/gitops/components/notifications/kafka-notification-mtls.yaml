@@ -127,6 +127,22 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # #10281: multi-signature approval notifications (ApprovalNotificationConsumer) — the
+      # consumer of the approval lifecycle topic delegation-service publishes via its outbox.
+      - resource:
+          type: topic
+          name: openbank.delegation.approval-events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #10281: without Write here the DLQ send itself fails and the consumer wedges on the very
+      # failure it was meant to park — same lockout class as the DLQ grants above.
+      - resource:
+          type: topic
+          name: openbank.dlq.notification.approval-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: group
           name: notification-service
@@ -154,6 +170,13 @@ spec:
       - resource:
           type: group
           name: notification-service-consent
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # #10281: the approval-events-in channel's own group (set via the msg-override ConfigMap).
+      - resource:
+          type: group
+          name: notification-service-approval
           patternType: literal
         operations: [Read]
         host: "*"
