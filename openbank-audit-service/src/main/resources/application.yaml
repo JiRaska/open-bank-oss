@@ -85,6 +85,20 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      context-audit-commitments-in:
+        connector: smallrye-kafka
+        enabled: ${AUDIT_CONTEXT_COMMITMENT_KAFKA_ENABLED:false}
+        topic: openbank.context.audit.commitments
+        group:
+          id: audit-service-context-commitments
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.audit.context-audit-commitments-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # D5 provenance is isolated from the legacy mixed stream: its handler only acknowledges a
       # Kafka record after append-only persistence succeeds.
       agent-audit-events-in:

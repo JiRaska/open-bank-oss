@@ -42,6 +42,7 @@ class KafkaSepaPaymentEventPublisher(
         actorType: String,
         correlationId: String?,
         reversalPerformed: Boolean,
+        reversalTransactionId: java.util.UUID?,
     ): String = objectMapper.writeValueAsString(
         SepaPaymentReturnedEvent(
             paymentId = payment.id,
@@ -52,6 +53,7 @@ class KafkaSepaPaymentEventPublisher(
             actorType = actorType,
             correlationId = correlationId,
             reversalPerformed = reversalPerformed,
+            reversalTransactionId = reversalTransactionId,
             occurredAt = java.time.Instant.now(java.time.Clock.systemUTC()),
         ),
     )
