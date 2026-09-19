@@ -180,6 +180,11 @@ spec:
             # -> delegation call timed out for as long as this line was missing.
             - name: DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
+            # #10281 multi-signature hold on payments under X-Acting-For. Fail-closed when on (a policy
+            # that cannot be evaluated refuses the payment), so it stays off until delegation-service
+            # serves /api/v1/entities/{id}/signing/* in this environment; flipping it is this one line.
+            - name: BUSINESS_APPROVALS_ENFORCE
+              value: "false"
             # ADR-0284: business onboarding proxy + the profile-switch mandate check (via party-service).
             - name: KYB_SERVICE_URL
               value: http://kyb-service.kyb.svc:8157

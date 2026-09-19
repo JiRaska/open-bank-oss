@@ -22,7 +22,7 @@ info:
   # 1.69.0 -> 1.70.0: additive — GET /business/company (the acting-for company's register facts,
   # representatives, signing rule and accounts). SCA routes documented as the HUMAN's under
   # X-Acting-For (no shape change).
-  version: 1.70.0
+  version: 1.71.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1918,6 +1918,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
       requestBody:
         required: true
@@ -1937,6 +1944,15 @@ paths:
                 constantSymbol: {type: string, nullable: true}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Payment instruction created
         '400':
@@ -1950,6 +1966,10 @@ paths:
             `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
             hold the grant, so naming their own limit is not an oracle; how much headroom remains
             is deliberately not echoed.
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /domestic-payments/{paymentId}:
     get:
@@ -1997,6 +2017,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
       requestBody:
         required: true
@@ -2014,12 +2041,25 @@ paths:
                 creditorBic: {type: string, nullable: true}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: SEPA payment instruction created
         '400':
           description: Incomplete body (need creditorIban, creditorName, amount) or unresolvable debtor
         '403':
           description: Debtor account does not belong to caller
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /sepa-payments/{paymentId}:
     get:
@@ -2285,6 +2325,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
         - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -2303,12 +2350,25 @@ paths:
                 currency: {type: string, default: EUR}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: SEPA Instant payment submitted
         '400':
           description: Missing or malformed field
         '403':
           description: Debtor account does not belong to caller, or SCA missing/rejected
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /sepa-instant/{paymentId}/recall:
     post:
@@ -2350,6 +2410,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}}
         - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -2368,6 +2435,15 @@ paths:
                 currency: {type: string, default: EUR}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: SWIFT message accepted
           content:
@@ -2388,6 +2464,10 @@ paths:
           description: Missing or malformed field
         '403':
           description: Debtor account does not belong to caller, or SCA missing/rejected
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /vop/verify:
     post:
@@ -3696,6 +3776,297 @@ paths:
         '403': {description: No X-Acting-For, or no active mandate for the named company}
         '404': {description: The company party does not exist}
 
+  /business/signing-policy:
+    get:
+      tags: [Business]
+      summary: The company's signing policy, with a plain-language summary
+      description: >-
+        delegation-service owns the policy; with none stored it is derived from the register mandate
+        (SOLE any one signer, JOINT requiredSignatures) and isDerivedFromRegister is true.
+      operationId: getBusinessSigningPolicy
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: Accept-Language
+          in: header
+          required: false
+          description: "`en…` for English summaries, otherwise Czech."
+          schema: { type: string }
+      responses:
+        '200':
+          description: The policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SigningPolicy'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+    put:
+      tags: [Business]
+      summary: Propose a new signing policy (creates a POLICY_CHANGE approval request)
+      description: >-
+        A policy change is itself a signed item and needs the full round of the strictest rule;
+        the initiator is the signed-in human. Applied when the round completes.
+      operationId: changeBusinessSigningPolicy
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SigningPolicy'}
+      responses:
+        '202':
+          description: Approval request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalCreated'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/trusted-payees:
+    get:
+      tags: [Business]
+      summary: The company's trusted payees
+      description: >-
+        Payments to an ACTIVE trusted payee need one signature, unless the policy caps them.
+      operationId: listBusinessTrustedPayees
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Trusted payees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/TrustedPayee'}}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+    post:
+      tags: [Business]
+      summary: Propose a trusted payee (creates a PAYEE_ADD approval request)
+      description: >-
+        The payee becomes trusted only when the full round completes. IBAN is validated and
+        normalised; the initiator is the signed-in human, never a body field.
+      operationId: addBusinessTrustedPayee
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TrustedPayeeProposal'}
+      responses:
+        '202':
+          description: Approval request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalCreated'}
+        '400': {description: Invalid IBAN or name}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/trusted-payees/{id}:
+    delete:
+      tags: [Business]
+      summary: Propose removing a trusted payee (creates a PAYEE_REMOVE approval request)
+      description: >-
+        Needs the full round, like adding one.
+      operationId: removeBusinessTrustedPayee
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: Approval request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalCreated'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/approvals:
+    get:
+      tags: [Business]
+      summary: Approval requests of the company
+      description: >-
+        status=PENDING|DONE; mine=toSign (waiting for the signed-in human) or initiated.
+      operationId: listBusinessApprovals
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - {name: status, in: query, required: false, schema: {type: string, enum: [PENDING, DONE]}}
+        - {name: mine, in: query, required: false, schema: {type: string, enum: [toSign, initiated]}}
+      responses:
+        '200':
+          description: Approval requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BusinessApprovalRequest'}}
+        '400': {description: Unknown filter value}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/approvals/{id}:
+    get:
+      tags: [Business]
+      summary: One approval request, with signers, canSign and a human-readable summary
+      description: >-
+        The frozen payload exactly as it will execute, who initiated it, who signed and who can.
+      operationId: getBusinessApproval
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: Accept-Language
+          in: header
+          required: false
+          description: "`en…` for English summaries, otherwise Czech."
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The approval request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessApprovalRequest'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+        '404': {description: No such request for this company}
+
+  /business/approvals/{id}/sign:
+    post:
+      tags: [Business]
+      summary: Sign an approval request with the signed-in human's SCA
+      description: >-
+        X-SCA-Challenge-Id must be an APPROVAL challenge dynamically linked to this approval id and
+        its payload hash (and amount/currency/creditor for a payment). The signer is always the
+        human; the initiator of a payment cannot co-sign; nobody signs twice. On the last
+        signature of a PAYMENT the edge releases it to the rail once (single-use claim,
+        Idempotency-Key = approval id) and returns the outcome in `release`.
+      operationId: signBusinessApproval
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: Accept-Language
+          in: header
+          required: false
+          description: "`en…` for English summaries, otherwise Czech."
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Signed; `release` present when this signature released a payment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessApprovalRequest'}
+        '403': {description: No mandate, SCA missing, or SCA not linked to this request}
+        '409': {description: Not pending, initiator co-signing, or already signed}
+
+  /business/approvals/{id}/reject:
+    post:
+      tags: [Business]
+      summary: Reject an approval request (any eligible signer)
+      description: >-
+        Nothing executes. The reason is optional and shown to the others.
+      operationId: rejectBusinessApproval
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, maxLength: 500}
+      responses:
+        '200': {description: Rejected}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /me/approvals/pending:
+    get:
+      tags: [Business]
+      summary: Everything waiting for the signed-in human's signature, across companies
+      description: >-
+        For the personal-profile row and the profile-switcher badges. Always the human's own view;
+        X-Acting-For is ignored.
+      operationId: listMyPendingApprovals
+      security:
+        - customerOidc: [profile:read]
+      responses:
+        '200':
+          description: Per company
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/PendingApprovalsForEntity'}}
+
   /business/schemes:
     get:
       tags: [Business]
@@ -4557,6 +4928,110 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    PaymentPendingApproval:
+      type: object
+      required: [approvalId, status, required, collected]
+      properties:
+        approvalId: {type: string, format: uuid}
+        status: {type: string, enum: [PENDING_APPROVAL]}
+        payloadSha256: {type: string, description: SHA-256 of the frozen instruction co-signers sign.}
+        required: {type: integer, minimum: 2}
+        collected: {type: integer, description: Signatures collected so far (the initiator's).}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    ApprovalCreated:
+      type: object
+      description: >-
+        A created POLICY_CHANGE / PAYEE_ADD / PAYEE_REMOVE request. It starts AWAITING_INITIATOR with
+        nothing collected: the initiator signs it via /business/approvals/{id}/sign with an APPROVAL
+        SCA challenge linked to approvalId + payloadSha256 before any co-signer is asked. Unsigned, it
+        expires after 15 minutes.
+      properties:
+        approvalId: {type: string, format: uuid}
+        status: {type: string, enum: [AWAITING_INITIATOR]}
+        payloadSha256: {type: string}
+        required: {type: integer, nullable: true}
+        collected: {type: integer}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    SigningPolicy:
+      type: object
+      additionalProperties: true
+      properties:
+        entityPartyId: {type: string, format: uuid}
+        version: {type: integer}
+        rules:
+          type: array
+          items:
+            type: object
+            properties:
+              minAmount: {type: object, nullable: true, additionalProperties: true}
+              maxAmount: {type: object, nullable: true, additionalProperties: true}
+              currency: {type: string, nullable: true}
+              requiredSignatures: {type: integer, minimum: 1}
+              groupId: {type: string, nullable: true}
+              mustIncludeGroupId: {type: string, nullable: true}
+        trustedPayeeCap: {type: object, nullable: true, additionalProperties: true}
+        summary:
+          type: array
+          items: {type: string}
+          description: Plain-language lines, Czech or English by Accept-Language (read-only).
+        isDerivedFromRegister: {type: boolean}
+    TrustedPayee:
+      type: object
+      additionalProperties: true
+      properties:
+        id: {type: string, format: uuid}
+        iban: {type: string}
+        name: {type: string}
+        bic: {type: string, nullable: true}
+        status: {type: string, enum: [ACTIVE, REMOVED]}
+    TrustedPayeeProposal:
+      type: object
+      required: [iban, name]
+      properties:
+        iban: {type: string}
+        name: {type: string, maxLength: 140}
+        bic: {type: string, nullable: true}
+    BusinessApprovalSigner:
+      type: object
+      properties:
+        partyId: {type: string, format: uuid}
+        name: {type: string, nullable: true}
+        status: {type: string, enum: [SIGNED, WAITING]}
+        signedAt: {type: string, nullable: true}
+        isYou: {type: boolean}
+        isInitiator: {type: boolean}
+    BusinessApprovalRequest:
+      type: object
+      additionalProperties: true
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE]}
+        status: {type: string, enum: [AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED]}
+        payload: {type: object, additionalProperties: true, description: The frozen item being signed.}
+        payloadSha256: {type: string}
+        required: {type: integer}
+        initiatorPartyId: {type: string, format: uuid}
+        expiresAt: {type: string, format: date-time}
+        signers: {type: array, items: {$ref: '#/components/schemas/BusinessApprovalSigner'}}
+        canSign: {type: boolean}
+        collected: {type: integer}
+        summaryText: {type: string}
+        release:
+          type: object
+          nullable: true
+          properties:
+            status: {type: string, enum: [RELEASED, RELEASE_FAILED, RELEASE_NOT_CLAIMED]}
+            railStatus: {type: integer, nullable: true}
+            paymentId: {type: string, nullable: true}
+            error: {type: string, nullable: true}
+    PendingApprovalsForEntity:
+      type: object
+      additionalProperties: true
+      properties:
+        entityPartyId: {type: string, format: uuid}
+        entityName: {type: string, nullable: true}
+        count: {type: integer}
+        oldestExpiresAt: {type: string, format: date-time, nullable: true}
     BusinessCompany:
       type: object
       required: [partyId, representatives, accounts]

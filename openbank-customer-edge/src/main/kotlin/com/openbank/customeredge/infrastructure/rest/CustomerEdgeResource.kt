@@ -187,6 +187,13 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.sca-service-url")
     lateinit var scaServiceUrl: String
 
+    /**
+     * Multi-signature hold for payments under `X-Acting-For` (#10281). Field-injected and optional:
+     * a resource built by hand in a test has none and takes the single-signature path unchanged.
+     */
+    @Inject
+    lateinit var businessApprovals: BusinessPaymentApprovals
+
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
 
@@ -2858,6 +2865,23 @@ class CustomerEdgeResource(
             creditorAcctNo,
             creditorBank,
         ) ?: return badRequest("Malformed or incomplete payment body")
+        if (customer.actingFor != null) {
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.DOMESTIC,
+                    amount,
+                    currency,
+                    creditorForSca,
+                    extractTextField(objectMapper, body, "creditorName"),
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    enriched,
+                ),
+                scaChallengeId,
+                "payments.domestic",
+            )?.let { return it }
+        }
         // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
         // delegate's monthly limit will refuse must not first cost them a biometric prompt and a
         // single-use challenge they cannot get back. Every return below this point releases.
@@ -2968,6 +2992,23 @@ class CustomerEdgeResource(
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
         val creditorIban = extractTextField(objectMapper, body, "creditorIban")
+        if (customer.actingFor != null) {
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.SEPA,
+                    amount,
+                    currency,
+                    creditorIban,
+                    extractTextField(objectMapper, body, "creditorName"),
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    enriched,
+                ),
+                scaChallengeId,
+                "payments.sepa",
+            )?.let { return it }
+        }
         scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepa")?.let { return it }
         val resp = upstream.post(
             "$sepaPaymentServiceUrl/api/v1/sepa-payments",
@@ -2989,6 +3030,8 @@ class CustomerEdgeResource(
     @Path("/sepa-instant")
     @Authorize(action = "customer.payments.initiate")
     @Blocking
+    // + the #10281 multi-signature hold branch; the rail steps stay inline and in order.
+    @Suppress("CyclomaticComplexMethod")
     fun createSepaInstant(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -3012,6 +3055,27 @@ class CustomerEdgeResource(
             ?: return badRequest("Missing creditorName")
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
+        if (customer.actingFor != null) {
+            val held = buildSctInstRequest(
+                body, idempotencyKey?.takeIf { it.isNotBlank() } ?: "scti-$debtor-$creditorIban-$amount",
+                debtor.toString(), debtorIban, debtorName, creditorIban, creditorName, amount, currency,
+            )
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.SEPA_INSTANT,
+                    amount,
+                    currency,
+                    creditorIban,
+                    creditorName,
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    held,
+                ),
+                scaChallengeId,
+                "payments.sepaInstant",
+            )?.let { return it }
+        }
         scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepaInstant")?.let { return it }
         val key = idempotencyKey?.takeIf { it.isNotBlank() } ?: "scti-$debtor-$creditorIban-$amount"
         val request = buildSctInstRequest(
@@ -3136,6 +3200,8 @@ class CustomerEdgeResource(
     @Path("/swift")
     @Authorize(action = "customer.payments.initiate")
     @Blocking
+    // + the #10281 multi-signature hold branch; the rail steps stay inline and in order.
+    @Suppress("CyclomaticComplexMethod")
     fun createSwift(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -3160,6 +3226,28 @@ class CustomerEdgeResource(
             ?: return badRequest("Missing beneficiary BIC")
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
+        if (customer.actingFor != null) {
+            val held = buildSwiftRequest(
+                idempotencyKey?.takeIf { it.isNotBlank() } ?: "swift-$debtor-$beneficiaryIban-$amount",
+                debtor.toString(), debtorIban, debtorName, beneficiaryIban, beneficiaryName,
+                receiverBic, amount, currency, extractTextField(objectMapper, body, "reference"),
+            )
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.SWIFT,
+                    amount,
+                    currency,
+                    beneficiaryIban,
+                    beneficiaryName,
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    held,
+                ),
+                scaChallengeId,
+                "payments.swift",
+            )?.let { return it }
+        }
         scaGate(scaChallengeId, customer, amount, currency, beneficiaryIban, "payments.swift")?.let { return it }
         val key = idempotencyKey?.takeIf { it.isNotBlank() } ?: "swift-$debtor-$beneficiaryIban-$amount"
         val request = buildSwiftRequest(
@@ -5058,6 +5146,23 @@ class CustomerEdgeResource(
             "delegationId" to debit?.delegationId,
         ),
     )
+
+    /**
+     * Business multi-signature hold (#10281). Null — continue on the unchanged single-signature path
+     * — for a personal payment, with no hold configured, or when the entity's policy needs one
+     * signature. Otherwise the 202/503/SCA-refusal response to return; the rail is not called.
+     */
+    private fun holdForApproval(
+        customer: CustomerIdentity,
+        payment: HeldPayment,
+        scaChallengeId: String?,
+        operation: String,
+    ): Response? {
+        if (customer.actingFor == null || !this::businessApprovals.isInitialized) return null
+        return businessApprovals.hold(customer, payment, scaChallengeId) {
+            scaGate(scaChallengeId, customer, payment.amount, payment.currency, payment.creditor, operation)
+        }
+    }
 
     /**
      * The settlement gate (ADR-0021): refuse the payment unless the caller presents an SCA
