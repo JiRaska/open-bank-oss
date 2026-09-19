@@ -22,11 +22,20 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.util.Optional
 
 /**
  * A SANDBOX-ONLY fictitious company, so business onboarding can be demonstrated end to end without
  * borrowing a real one: search finds it, the case opens on it, and once the representation rule is
- * confirmed (automatically: it has a single jednatel and a sole rule) the configured person can sign and act for it.
+ * confirmed the configured people can sign and act for it.
+ *
+ * Two shapes, chosen by `openbank.kyb.demo-entity.second-representative-name`:
+ *  - set (the shipped default): two jednatelé who act JOINTLY ([RepresentationMode.JOINT_N], 2) —
+ *    the shape that makes business multi-signature demonstrable, since every payment then needs a
+ *    second representative's signature. A joint rule is never auto-confirmed, so an operator
+ *    attests it once, as for any real company;
+ *  - absent: a single jednatel with a SOLE rule, confirmed automatically (no second signatory can
+ *    exist) — the fully self-service path.
  *
  * Every datum is deliberately impossible, so nobody mistakes it for a register record:
  *  - IČO `00000001` — the lowest IČO that passes the mod-11 checksum (`00000000` does not), and one
@@ -52,6 +61,9 @@ class DemoEntity(
     private val representativePostalCode: String,
     @ConfigProperty(name = "openbank.kyb.demo-entity.representative-address.country", defaultValue = "CZ")
     private val representativeCountry: String,
+    /** Fictitious second jednatel; present ⇒ the demo register reads JOINT, 2 signatures. */
+    @ConfigProperty(name = "openbank.kyb.demo-entity.second-representative-name")
+    private val secondRepresentativeName: Optional<String>,
     private val clock: Clock,
 ) {
 
@@ -73,28 +85,33 @@ class DemoEntity(
         registeredAddress = ADDRESS,
         incorporatedOn = FOUNDED,
         taxId = null,
-        representatives = listOf(
-            Representative(
-                representativeName,
-                null,
-                "jednatelé",
-                "jednatel",
-                FOUNDED,
-                // Fictitious, and the same address the sandbox demo user's profile carries, so the
-                // initiator's address comparison is exercised and matches.
-                address = RegisteredAddress(
-                    representativeStreet,
-                    representativeCity,
-                    representativePostalCode,
-                    representativeCountry,
-                ),
-            ),
-        ),
-        representationRule = RepresentationRule(RepresentationMode.SOLE, 1, RULE_TEXT),
+        representatives = listOfNotNull(representative(representativeName), secondName()?.let(::representative)),
+        representationRule = secondName()
+            ?.let { RepresentationRule(RepresentationMode.JOINT_N, 2, JOINT_RULE_TEXT) }
+            ?: RepresentationRule(RepresentationMode.SOLE, 1, SOLE_RULE_TEXT),
         source = RegistryExtract.SANDBOX_DEMO_SOURCE,
         sourceRef = "SANDBOX DEMO — fictitious entity, not in any register",
         verification = ExtractVerification.VERIFIED,
         fetchedAt = Instant.now(clock),
+    )
+
+    private fun secondName(): String? =
+        secondRepresentativeName.map(String::trim).filter(String::isNotEmpty).orElse(null)
+
+    // Fictitious, and the same address the sandbox demo users' profiles carry, so the initiator's
+    // address comparison is exercised and matches.
+    private fun representative(name: String) = Representative(
+        name,
+        null,
+        "jednatelé",
+        "jednatel",
+        FOUNDED,
+        address = RegisteredAddress(
+            representativeStreet,
+            representativeCity,
+            representativePostalCode,
+            representativeCountry,
+        ),
     )
 
     fun hit(): RegistrySearchHit = RegistrySearchHit(
@@ -108,7 +125,8 @@ class DemoEntity(
         const val ICO = "00000001"
         const val LEGAL_NAME = "OpenBank Demo s.r.o."
         private const val LIMITED_COMPANY_CODE = "112"
-        private const val RULE_TEXT = "Za společnost jedná jednatel samostatně."
+        const val SOLE_RULE_TEXT = "Za společnost jedná jednatel samostatně."
+        const val JOINT_RULE_TEXT = "Za společnost jednají dva jednatelé společně."
         private val IDENTIFIER = LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, ICO)
         private val ADDRESS = RegisteredAddress("Ukázková 0", "Demo", "00000", "CZ")
         private val FOUNDED: LocalDate = LocalDate.of(2026, 1, 1)
