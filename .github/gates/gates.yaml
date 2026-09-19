@@ -367,6 +367,23 @@ gates:
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
   # ==== gitops =========================================================
+  # ADR-0310 D5: a URL may be configured while its backend is deliberately scaled to zero.
+  # The customer capability switch must not turn that desired state into a `live` claim.
+  # Run on every PR so a later GitOps-only scale-down is checked too.
+  - id: customer-capability-activation
+    name: "a live customer capability has a declared, nonzero backend workload"
+    group: gitops
+    mode: enforced
+    budget_seconds: 5
+    min_subjects: 2  # loyalty and referrals; an absent switch means disabled
+    rationale: "The referral URL is configured while its workload has zero replicas, so a flag-only activation would falsely publish live to the app (#10016)."
+    review_after: "2027-03-18"
+    selftest: python3 .github/scripts/check-customer-capability-activation.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-customer-capability-activation.py"]
+    run: |
+      python3 .github/scripts/check-customer-capability-activation.py --root .
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a
@@ -2321,7 +2338,7 @@ gates:
       bash .github/scripts/spot-kill-retry.sh --self-test
 
   - id: ci-reconcile-selector-selftest
-    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    name: "CI reconciler verifies bounded queries and recent retry/flake candidates (issues #9645, #10262, enforced)"
     group: registry
     mode: enforced
     selftest_exempt: >-
@@ -2330,7 +2347,7 @@ gates:
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
-    min_subjects: 3
+    min_subjects: 16
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
 

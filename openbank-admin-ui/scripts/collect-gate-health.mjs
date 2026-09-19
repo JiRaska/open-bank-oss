@@ -34,9 +34,7 @@
 //                                              [--gate-detail-runs <n>]
 
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
-import path from 'path'
+import { writeFileSync } from 'fs'
 
 const args = process.argv.slice(2)
 const getArg = (flag, dflt) => {
@@ -78,34 +76,39 @@ async function ghJson(pathname) {
   return (await gh(pathname)).json()
 }
 
-// One HTTP round trip per artifact; `unzip` shelled out to rather than an npm dependency,
-// same "no new dependency" convention collect-dora.mjs already keeps (execFileSync + fs
-// only). Returns null on ANY failure (expired artifact, no `unzip` on PATH, corrupt zip) —
-// the caller must treat that run as shard-only, not crash the whole collector over one gap.
-async function downloadArtifactJson(artifact, workdir) {
+// Read only the expected JSON member in memory. Artifact bytes come from the network;
+// extracting the archive onto the runner would make its member paths filesystem writes.
+// Python is already required by the CI gate runner and avoids a new npm dependency.
+const READ_GATE_JSON = `
+import io, sys, zipfile
+name = sys.argv[1]
+with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
+    matches = [entry for entry in archive.infolist() if entry.filename == name]
+    if len(matches) != 1 or matches[0].is_dir() or matches[0].file_size > 4 * 1024 * 1024:
+        raise ValueError("expected exactly one bounded gate JSON member")
+    sys.stdout.buffer.write(archive.read(matches[0]))
+`
+
+// One HTTP round trip per artifact. Missing or malformed evidence degrades that
+// run to shard-only data; it never becomes a fabricated per-gate verdict.
+async function downloadArtifactJson(artifact) {
   try {
-    // CodeQL js/http-to-file-access: the GitHub Actions API is a trusted, authenticated source
-    // (not a "download from evil.com" backdoor pattern) and the zip is only ever unzipped and
-    // read back as JSON, never executed — but the path built from `artifact.id` below is worth
-    // hardening on its own terms (CWE-434): reject anything that isn't the safe integer the
-    // API contract promises before it reaches path.join, rather than trusting the shape.
     if (!Number.isInteger(artifact.id) || artifact.id < 0) {
       throw new Error(`unexpected artifact id shape: ${JSON.stringify(artifact.id)}`)
+    }
+    if (!/^gate-results-[a-z0-9-]+$/.test(artifact.name)) {
+      throw new Error(`unexpected gate artifact name: ${JSON.stringify(artifact.name)}`)
     }
     const res = await gh(`/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
       redirect: 'follow',
     })
     const buf = Buffer.from(await res.arrayBuffer())
-    const zipPath = path.join(workdir, `${artifact.id}.zip`)
-    writeFileSync(zipPath, buf)
-    execFileSync('unzip', ['-o', '-q', zipPath, '-d', workdir], { stdio: 'ignore' })
-    const jsonName = artifact.name.replace(/^gate-results-/, '') + '.json'
-    // run-gates.py --json writes whatever filename the caller passed; ci.yml (this change)
-    // names it gate-results-<group>.json inside the artifact, matching the artifact's own
-    // name — read that, and fall back to the first *.json in the extracted dir so a rename
-    // on either side degrades to "not found" rather than a silent empty array.
-    const candidate = path.join(workdir, `gate-results-${jsonName.replace('.json', '')}.json`)
-    const text = readFileSync(candidate, 'utf8')
+    const text = execFileSync('python3', ['-c', READ_GATE_JSON, `${artifact.name}.json`], {
+      input: buf,
+      encoding: 'utf8',
+      maxBuffer: 4 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
     return JSON.parse(text)
   } catch {
     return null
@@ -147,25 +150,20 @@ try {
 
   // --- Tier: per-gate detail from the last GATE_DETAIL_RUNS runs' artifacts ----------------
   const gateRuns = [] // [{runId, sha, createdAt, gates: [...json_records()...]}]
-  const workdir = mkdtempSync(path.join(tmpdir(), 'gate-health-'))
-  try {
-    for (const run of runs.slice(0, GATE_DETAIL_RUNS)) {
-      const artifactsResp = await ghJson(
-        `/repos/${REPO}/actions/runs/${run.id}/artifacts?per_page=100`,
-      )
-      const gateArtifacts = (artifactsResp.artifacts || [])
-        .filter((a) => a.name.startsWith('gate-results-'))
-      const perGate = []
-      for (const artifact of gateArtifacts) {
-        const records = await downloadArtifactJson(artifact, workdir)
-        if (records) perGate.push(...records)
-      }
-      if (perGate.length) {
-        gateRuns.push({ runId: run.id, sha: run.head_sha, createdAt: run.created_at, gates: perGate })
-      }
+  for (const run of runs.slice(0, GATE_DETAIL_RUNS)) {
+    const artifactsResp = await ghJson(
+      `/repos/${REPO}/actions/runs/${run.id}/artifacts?per_page=100`,
+    )
+    const gateArtifacts = (artifactsResp.artifacts || [])
+      .filter((a) => a.name.startsWith('gate-results-'))
+    const perGate = []
+    for (const artifact of gateArtifacts) {
+      const records = await downloadArtifactJson(artifact)
+      if (records) perGate.push(...records)
     }
-  } finally {
-    rmSync(workdir, { recursive: true, force: true })
+    if (perGate.length) {
+      gateRuns.push({ runId: run.id, sha: run.head_sha, createdAt: run.created_at, gates: perGate })
+    }
   }
 
   // --- Derive: per-gate current state, last-red, flaky (Tier 3, ADR-0255) -----------------

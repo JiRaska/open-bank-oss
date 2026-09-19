@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: Apache-2.0
+// A successful resolver task alone does not prove every dependency was resolved.
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+
+gradle.beforeProject { project ->
+    project.tasks.configureEach { task ->
+        if (task.name == 'ForceDependencyResolutionPlugin_resolveProjectDependencies') {
+            task.doLast {
+                def excluded = java.util.regex.Pattern.compile(System.getenv('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') ?: '')
+                def configurations = project.configurations.findAll {
+                    it.canBeResolved && !excluded.matcher(it.name).matches()
+                }
+                def unresolved = []
+                configurations.each { configuration ->
+                    configuration.incoming.resolutionResult.allDependencies.each { dependency ->
+                        if (dependency instanceof UnresolvedDependencyResult) {
+                            unresolved.add("${project.path}:${configuration.name}: ${dependency.attempted.displayName}")
+                        }
+                    }
+                }
+                if (!unresolved.empty) {
+                    throw new GradleException('Incomplete dependency graph: ' + unresolved.unique().sort().join('; '))
+                }
+                def directory = System.getenv('DEPENDENCY_GRAPH_COVERAGE_DIR')
+                def sha = System.getenv('GITHUB_DEPENDENCY_GRAPH_SHA')
+                if (!directory || !sha) {
+                    throw new GradleException('Missing dependency graph receipt identity')
+                }
+                def digest = java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(project.path.getBytes('UTF-8')).encodeHex().toString()
+                def receipt = new File(directory, digest + '.json')
+                if (receipt.exists()) {
+                    throw new GradleException('Duplicate dependency graph project receipt: ' + project.path)
+                }
+                receipt.text = JsonOutput.toJson([
+                    version: 1,
+                    sha: sha,
+                    project: project.path,
+                    configurations: configurations.collect { it.name }.sort(),
+                ])
+            }
+        }
+    }
+}
