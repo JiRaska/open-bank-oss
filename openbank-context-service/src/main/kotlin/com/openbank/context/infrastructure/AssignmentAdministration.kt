@@ -51,6 +51,9 @@ class AssignmentProposalEntity {
     @Column(name = "purpose")
     lateinit var purpose: String
 
+    @Column(name = "root_ref")
+    var rootRef: String? = null
+
     @Column(name = "valid_from")
     lateinit var validFrom: Instant
 
@@ -107,6 +110,9 @@ class AssignmentChangeAuditEntity {
     @Column(name = "purpose")
     lateinit var purpose: String
 
+    @Column(name = "root_ref")
+    var rootRef: String? = null
+
     @Column(name = "occurred_at")
     lateinit var occurredAt: Instant
 }
@@ -117,6 +123,7 @@ data class ProposeAssignmentRequest(
     val purpose: String,
     val validFrom: Instant?,
     val validTo: Instant,
+    val rootRef: String? = null,
 )
 
 data class DecideAssignmentRequest(val approve: Boolean)
@@ -134,6 +141,7 @@ data class AssignmentProposalResponse(
     val createdAt: Instant,
     val decidedAt: Instant?,
     val assignmentId: UUID? = null,
+    val rootRef: String? = null,
 )
 
 data class ActiveAssignmentResponse(
@@ -143,6 +151,7 @@ data class ActiveAssignmentResponse(
     val purpose: String,
     val validFrom: Instant,
     val validTo: Instant,
+    val rootRef: String? = null,
 )
 
 class MakerCheckerViolation(message: String) : ClientErrorException(message, Response.Status.CONFLICT)
@@ -166,6 +175,14 @@ class AssignmentAdministrationService(
             principalId = request.principalId.trim()
             caseId = request.caseId.trim()
             purpose = request.purpose.trim()
+            rootRef = request.rootRef?.let { root ->
+                val prefix = when (request.purpose) {
+                    "AML_INVESTIGATION" -> "aml-case:"
+                    "KYB_OWNERSHIP_REVIEW" -> "kyb-case:"
+                    else -> "delegation:"
+                }
+                "$prefix${UUID.fromString(root.removePrefix(prefix))}"
+            }
             this.validFrom = validFrom
             validTo = request.validTo
             status = "PENDING"
@@ -199,7 +216,9 @@ class AssignmentAdministrationService(
                 ).setParameter("bankScope", bankScope).setParameter("now", now)
                     .setMaxResults(limit.coerceIn(1, MAX_QUEUE_SIZE)).resultList
             },
-        ).map { ActiveAssignmentResponse(it.id, it.principalId, it.caseId, it.purpose, it.validFrom, it.validTo) }
+        ).map {
+            ActiveAssignmentResponse(it.id, it.principalId, it.caseId, it.purpose, it.validFrom, it.validTo, it.rootRef)
+        }
     }
 
     @Suppress("ThrowsCount")
@@ -224,6 +243,7 @@ class AssignmentAdministrationService(
                         principalId = value.principalId
                         caseId = value.caseId
                         purpose = value.purpose
+                        rootRef = value.rootRef
                         validFrom = value.validFrom
                         validTo = value.validTo
                         createdAt = now
@@ -257,6 +277,27 @@ class AssignmentAdministrationService(
         }
         require(request.caseId.isNotBlank() && request.caseId.length <= MAX_CASE_LENGTH) { "invalid caseId" }
         require(request.purpose in ALLOWED_PURPOSES) { "invalid purpose" }
+        if (request.purpose == "AUTHORIZATION_REVIEW") {
+            val root = requireNotNull(request.rootRef) { "AUTHORIZATION_REVIEW requires a delegation root" }
+            require(root.startsWith("delegation:") && root.length == DELEGATION_ROOT_LENGTH) {
+                "invalid delegation root"
+            }
+            UUID.fromString(root.removePrefix("delegation:"))
+        } else if (request.purpose == "AML_INVESTIGATION") {
+            val root = requireNotNull(request.rootRef) { "AML_INVESTIGATION requires an AML case root" }
+            require(root.startsWith("aml-case:") && root.length == AML_CASE_ROOT_LENGTH) { "invalid AML case root" }
+            val id = UUID.fromString(root.removePrefix("aml-case:"))
+            require(request.caseId == id.toString()) { "the investigation case must match the AML source case" }
+        } else if (request.purpose == "KYB_OWNERSHIP_REVIEW") {
+            val root = requireNotNull(request.rootRef) { "KYB_OWNERSHIP_REVIEW requires a KYB case root" }
+            require(root.startsWith("kyb-case:") && root.length == KYB_CASE_ROOT_LENGTH) {
+                "invalid KYB case root"
+            }
+            val id = UUID.fromString(root.removePrefix("kyb-case:"))
+            require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
+        } else {
+            require(request.rootRef == null) { "root scope is not supported for this purpose" }
+        }
         require(
             validFrom >= now.minus(MAX_CLOCK_SKEW) &&
                 request.validTo > validFrom &&
@@ -277,6 +318,7 @@ class AssignmentAdministrationService(
             subjectId = p.principalId
             caseId = p.caseId
             purpose = p.purpose
+            rootRef = p.rootRef
             occurredAt = clock.instant()
         }
 
@@ -289,6 +331,7 @@ class AssignmentAdministrationService(
         subjectId = a.principalId
         caseId = a.caseId
         purpose = a.purpose
+        rootRef = a.rootRef
         occurredAt = now
     }
 
@@ -302,12 +345,22 @@ class AssignmentAdministrationService(
         .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
 
     private companion object {
+        const val DELEGATION_ROOT_LENGTH = 47
+        const val AML_CASE_ROOT_LENGTH = 45
+        const val KYB_CASE_ROOT_LENGTH = 45
         const val MAX_QUEUE_SIZE = 200
         const val MAX_PRINCIPAL_LENGTH = 200
         const val MAX_CASE_LENGTH = 200
         const val MAX_VALIDITY_DAYS = 31L
         val MAX_CLOCK_SKEW: Duration = Duration.ofMinutes(5)
-        val ALLOWED_PURPOSES = setOf("PAYMENT_COMPLAINT", "INCIDENT_IMPACT")
+        val ALLOWED_PURPOSES =
+            setOf(
+                "PAYMENT_COMPLAINT",
+                "INCIDENT_IMPACT",
+                "AUTHORIZATION_REVIEW",
+                "AML_INVESTIGATION",
+                "KYB_OWNERSHIP_REVIEW",
+            )
     }
 }
 
@@ -368,4 +421,5 @@ private fun AssignmentProposalEntity.response(assignmentId: UUID? = null) = Assi
     createdAt,
     decidedAt,
     assignmentId ?: this.assignmentId,
+    rootRef,
 )

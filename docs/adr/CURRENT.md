@@ -114,7 +114,7 @@ _Also tagged `fees-billing`: 0282_
 
 - **[0084](0084-fraud-detection-bounded-context.md)** · Fraud detection bounded context — real-time transaction risk scoring · `shipped` · A new openbank-fraud-service scores payments in real time, returning ALLOW/CHALLENGE/REVIEW/DECLINE verdicts, and builds behavioural aggregates from Kafka events; it fails open behind a flag during rollout.
 - **[0247](0247-fraud-hold-as-a-party-level-adverse-state.md)** · Fraud hold as a party-level adverse state _(proposed)_ · `planned` · A fraud hold is a deliberate, expiring decision about a party recorded by fraud-service, never a transaction verdict promoted into one — published as a hold/release pair so consumers can both apply and lift the exclusion.
-- **[0304](0304-fraud-and-aml-relationship-investigation.md)** · Fraud and AML relationship investigation · `planned` · Fraud and AML investigators use separate purpose-bound lenses over the shared context graph to examine explainable device, counterparty and money-flow relationships without turning similarity into evidence.
+- **[0304](0304-fraud-and-aml-relationship-investigation.md)** · Fraud and AML relationship investigation · `partial` · Fraud and AML investigators use separate purpose-bound lenses over the shared context graph to examine explainable device, counterparty and money-flow relationships without turning similarity into evidence.
 
 _Also tagged `fraud`: 0102 0139 0140 0203 0230_
 
@@ -141,7 +141,7 @@ _Also tagged `onboarding`: 0066 0162 0170 0268 0305_
 - **[0116](0116-kyc-engine-risk-checks-and-four-eyes-gate.md)** · KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode · `shipped` · The KYC engine runs five risk-based checks with a split opener/reviewer four-eyes gate, screens PEPs against the free OpenSanctions dataset (matches escalate to manual review, never auto-reject), with a sandbox straight-through mode.
 - **[0179](0179-party-identity-merge.md)** · Duplicate party identity merge _(proposed)_ · `partial` · Party-service gains a first-class merge operation (status MERGED plus merged_into, four-eyes gated, emitting PARTY_MERGED) distinct from GDPR erasure, because retiring a duplicate via erasure is a false compliance statement.
 - **[0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md)** · Perpetual KYC: event-driven re-screening between periodic reviews _(proposed)_ · `partial` · KYC review turns event-driven: a sanctions-list refresh whose per-entry content hashes actually changed, and KYC case expiry, open a re-screening case through the case coordinator — the trigger opens the case, a human still decides it.
-- **[0305](0305-corporate-kyc-ownership-and-authority-graph.md)** · Corporate KYC ownership and authority graph · `planned` · Corporate KYC uses a bitemporal ownership-and-authority lens on the shared context graph, keeping UBO, ownership, representation and evidence distinct and requiring case-scoped access.
+- **[0305](0305-corporate-kyc-ownership-and-authority-graph.md)** · Corporate KYC ownership and authority graph · `partial` · Corporate KYC uses a bitemporal ownership-and-authority lens on the shared context graph, keeping UBO, ownership, representation and evidence distinct and requiring case-scoped access.
 
 _Also tagged `kyc`: 0068 0069 0072 0094 0102 0267 0284_
 

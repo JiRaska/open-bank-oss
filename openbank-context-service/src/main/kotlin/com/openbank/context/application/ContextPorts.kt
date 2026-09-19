@@ -16,6 +16,13 @@ interface ContextGraphPort {
 }
 
 interface CaseAssignmentPort {
+    suspend fun isAssignedToRoot(
+        principalId: String,
+        caseId: String,
+        purpose: String,
+        root: String,
+        at: Instant,
+    ): Boolean = false
     suspend fun isAssigned(principalId: String, caseId: String, purpose: String, at: Instant): Boolean
 }
 
@@ -33,6 +40,8 @@ data class ContextReadAudit(
     val policyVersion: String?,
     val reasonCode: String,
     val occurredAt: Instant,
+    val effectiveAt: Instant? = null,
+    val knownAt: Instant? = null,
 )
 
 class ContextAccessDenied : RuntimeException()

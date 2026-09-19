@@ -11,6 +11,29 @@ staff := {"type": "HUMAN", "id": "alice", "roles": ["ROLE_KYC"]}
 
 shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
+admin := {"type": "HUMAN", "id": "kyb-admin", "roles": ["ROLE_ADMIN"]}
+
+operator := {"type": "HUMAN", "id": "kyb-operator", "roles": ["ROLE_OPERATOR"]}
+
+test_observation_restriction_requires_human_admin if {
+    "admin-kyb-observation-restriction" in rest.allowed_reasons with input as {"principal": admin, "action": "kyb.ubo.restrict"}
+    not rest.prohibited with input as {"principal": admin, "action": "kyb.ubo.restrict"}
+    every principal in [operator, staff, shared, edge] {
+        rest.prohibited with input as {"principal": principal, "action": "kyb.ubo.restrict"}
+    }
+}
+
+test_ubo_corrections_require_human_kyc_or_admin if {
+    every action in {"kyb.ubo.correction.propose", "kyb.ubo.correction.read", "kyb.ubo.correction.decide"} {
+        every principal in [staff, admin] {
+            not rest.prohibited with input as {"principal": principal, "action": action}
+        }
+        every principal in [operator, shared, edge] {
+            rest.prohibited with input as {"principal": principal, "action": action}
+        }
+    }
+}
+
 test_edge_may_start_a_case if {
 	"edge-service-kyb" in rest.allowed_reasons with input as {"principal": edge, "action": "kyb.case.start"}
 }

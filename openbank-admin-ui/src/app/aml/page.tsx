@@ -14,11 +14,13 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { StatCard } from '@/components/ui/StatCard'
 import { parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
+import { AmlCaseInvestigation } from '@/components/context/AmlCaseInvestigation'
 
 export default function AmlPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
+  const [investigationCaseId, setInvestigationCaseId] = useState('')
   const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
   const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
     svcUrl('aml-service', '/api/v1/aml/cases'),
@@ -114,6 +116,8 @@ export default function AmlPage() {
           ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.color === 'var(--danger)' ? 'danger' : k.color === 'var(--warning)' ? 'warning' : undefined} />)}
         </div>}
 
+        <AmlCaseInvestigation key={investigationCaseId} initialCaseId={investigationCaseId} />
+
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
@@ -158,6 +162,7 @@ export default function AmlPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}><UserRoundSearch size={12} aria-hidden="true" />{c.customerReference}</div>
                       <div style={{ marginTop: 3, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>#{c.id}</div>
                       <div style={{ marginTop: 2, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{t('Party', 'Party')}: {c.partyId}</div>
+                      {['OPEN', 'UNDER_REVIEW', 'ESCALATED'].includes(c.status) && <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => setInvestigationCaseId(c.id)}>{t('Vazby v grafu', 'Explore graph')}</button>}
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.screeningType.replaceAll('_', ' ')}</td>
                     <td style={{ padding: '12px 16px' }}>
