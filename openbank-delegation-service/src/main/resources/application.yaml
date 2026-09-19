@@ -163,6 +163,16 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ADR-0312 business-signing lifecycle (APPROVAL_REQUESTED … PAYMENT_RELEASE_FAILED), keyed by
+      # approval request id. Consumers: notification-service (#10313), audit-service.
+      approval-events-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-approval-${quarkus.uuid}
+        topic: openbank.delegation.approval-events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:
@@ -231,6 +241,10 @@ openbank:
     # scheduler does not.
     expiration:
       cron: "0 7 * * * ?"
+    business-signing:
+      # ADR-0312: flips PENDING / unclaimed-APPROVED approval requests past expiresAt to EXPIRED.
+      # A config expression so BusinessApprovalExpirySweepIT can drive the REAL scheduler.
+      expiry-cron: "0 */5 * * * ?"
     recertification:
       # A reminder-only sweep. Due tasks are idempotent and the grant remains ACTIVE after dueAt.
       cron: "0 15 * * * ?"

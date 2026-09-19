@@ -71,7 +71,7 @@ party-service at signing and again at release; the same person counts once; the 
 SCA is the first signature and the initiator is never a co-signer; each signature's SCA challenge
 is dynamically linked to `approvalRequestId + payloadSha256` (and amount, currency, creditor IBAN
 for a payment). Unsigned requests expire (default 72 h); an expired request never executes.
-Lifecycle events are published through the transactional outbox on `delegation.approval-events`.
+Lifecycle events are published through the transactional outbox on `openbank.delegation.approval-events`.
 
 ## Alternatives considered
 
@@ -106,7 +106,7 @@ Lifecycle events are published through the transactional outbox on `delegation.a
 ### Delivery check
 
 `grep -c 'release-claim' openbank-delegation-service/src/main/resources/openapi.yaml` prints ≥ 1
-and `grep -rn 'delegation.approval-events' openbank-delegation-service/src/main/resources/application.yaml`
+and `grep -rn 'openbank.delegation.approval-events' openbank-delegation-service/src/main/resources/application.yaml`
 prints the outgoing channel. Absent either, this ADR is not delivered.
 
 ## Threats
@@ -115,6 +115,9 @@ prints the outgoing channel. Absent either, this ADR is not delivered.
   `409` for the rest; rail `Idempotency-Key = approvalId` as the second barrier.
 - **Stale mandate** — a representative removed from the register after the request was created:
   eligibility re-checked live at every signature and at release.
+- **Unsigned administrative requests** — POLICY_CHANGE / PAYEE_ADD / PAYEE_REMOVE start in
+  AWAITING_INITIATOR: nobody is notified and nobody else may sign until the initiator signs with
+  their own linked SCA; unsigned, they expire silently after 15 minutes.
 - **Initiator self-cosign** — the initiator signing twice, or via a second device: distinct
   party ids, initiator excluded from co-signers.
 - **Device keys bound to the entity** — an SCA credential enrolled to the company party could
