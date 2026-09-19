@@ -95,7 +95,9 @@ data class SigningPolicy(
             return SigningPolicy(
                 entityPartyId = entityPartyId,
                 version = 0,
-                rules = listOf(SigningPolicyRule(requiredSignatures = required.coerceAtMost(SigningPolicyRule.MAX_SIGNATURES))),
+                rules = listOf(
+                    SigningPolicyRule(requiredSignatures = required.coerceAtMost(SigningPolicyRule.MAX_SIGNATURES)),
+                ),
                 derivedFromRegister = true,
             )
         }
@@ -105,18 +107,9 @@ data class SigningPolicy(
 enum class MandateAuthority { SOLE, JOINT }
 
 /** An ACTIVE, in-window representation mandate as party-service reports it right now. */
-data class RepresentationMandate(
-    val agentPartyId: UUID,
-    val authority: MandateAuthority,
-    val requiredSignatures: Int,
-)
+data class RepresentationMandate(val agentPartyId: UUID, val authority: MandateAuthority, val requiredSignatures: Int)
 
-data class SignerGroup(
-    val id: String,
-    val entityPartyId: UUID,
-    val name: String,
-    val memberPartyIds: Set<UUID>,
-) {
+data class SignerGroup(val id: String, val entityPartyId: UUID, val name: String, val memberPartyIds: Set<UUID>) {
     init {
         require(ID.matches(id)) { "signer group id must match ${ID.pattern}" }
         require(name.isNotBlank() && name.length <= MAX_NAME) { "signer group name must be 1..$MAX_NAME characters" }
@@ -189,7 +182,8 @@ object SigningPolicyEvaluator {
         // No band covers the amount (or currency): fail closed onto the strictest rule.
         val index = if (matched >= 0) matched else policy.rules.indexOf(policy.strictestRule())
         val rule = policy.rules[index]
-        val trusted = Iban.normalize(payment.creditorIban) in trustedIbans && withinCap(policy.trustedPayeeCap, payment.amount)
+        val trusted =
+            Iban.normalize(payment.creditorIban) in trustedIbans && withinCap(policy.trustedPayeeCap, payment.amount)
         if (trusted) {
             // A trusted payee lowers the COUNT to one — the initiator's own SCA. It is never an
             // SCA exemption (RTS Article 13 is not applied here).
@@ -226,8 +220,9 @@ object SigningPolicyEvaluator {
     ): SigningEvaluation {
         val eligible = rule.groupId?.let { id -> groups[id]?.memberPartyIds.orEmpty() intersect activeSignerIds }
             ?: activeSignerIds
-        val mustInclude = rule.mustIncludeGroupId?.let { id -> groups[id]?.memberPartyIds.orEmpty() intersect activeSignerIds }
-            ?: emptySet()
+        val mustInclude =
+            rule.mustIncludeGroupId?.let { id -> groups[id]?.memberPartyIds.orEmpty() intersect activeSignerIds }
+                ?: emptySet()
         return SigningEvaluation(
             required = rule.requiredSignatures,
             eligibleSignerIds = eligible,
@@ -307,6 +302,7 @@ data class ApprovalRequest(
      * The four signature guards, in order. Each is proven by a sabotage test: remove it and a
      * specific test goes red.
      */
+    @Suppress("ThrowsCount") // one throw per guard, by design
     fun sign(partyId: UUID, scaChallengeId: UUID, at: Instant): ApprovalRequest {
         if (status != ApprovalStatus.PENDING && status != ApprovalStatus.AWAITING_INITIATOR) {
             throw SignatureRefusedException(SignatureRefusal.NOT_PENDING, "approval request $id is $status")

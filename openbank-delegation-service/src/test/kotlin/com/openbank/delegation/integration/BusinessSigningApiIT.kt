@@ -97,7 +97,9 @@ class BusinessSigningApiIT {
         assertThat(v1.getString("payeeName")).isEqualTo("Dodavatel s.r.o.")
         assertThat(v1.getString("kind")).isEqualTo("PAYMENT")
         assertThat(v1.getInt("schemaVersion")).isEqualTo(1)
-        assertThat(java.time.Instant.parse(v1.getString("expiresAt"))).describedAs("ISO-8601, as the consumer parses it").isAfter(java.time.Instant.now())
+        assertThat(
+            java.time.Instant.parse(v1.getString("expiresAt")),
+        ).describedAs("ISO-8601, as the consumer parses it").isAfter(java.time.Instant.now())
 
         val signed = sign(id, bob, sca.approval(bob, id, sha))
         assertThat(signed.statusCode).isEqualTo(HTTP_OK)
@@ -106,7 +108,7 @@ class BusinessSigningApiIT {
 
         val claim = claim(id)
         assertThat(claim.statusCode).isEqualTo(HTTP_OK)
-        assertThat(claim.jsonPath().getString("payload.creditorAccount.iban")).isEqualTo(CREDITOR)
+        assertThat(claim.jsonPath().getString("payload.railRequest.creditorAccount.iban")).isEqualTo(CREDITOR)
 
         val result = post("/approval-requests/$id/release-result", mapOf("ok" to true, "releaseRef" to "DOM-123"))
         assertThat(result.statusCode).isEqualTo(HTTP_OK)
@@ -259,7 +261,14 @@ class BusinessSigningApiIT {
     @Test
     fun `a payee becomes trusted only when the full round completes`() {
         register.joint(entity, 2, alice, bob)
-        val proposal = post("/trusted-payees", mapOf("initiatorPartyId" to alice, "iban" to "CZ65 0800 0000 1920 0014 5399", "name" to "Dodavatel s.r.o."))
+        val proposal = post(
+            "/trusted-payees",
+            mapOf(
+                "initiatorPartyId" to alice,
+                "iban" to "CZ65 0800 0000 1920 0014 5399",
+                "name" to "Dodavatel s.r.o.",
+            ),
+        )
         assertThat(proposal.statusCode).isEqualTo(HTTP_ACCEPTED)
         val id = UUID.fromString(proposal.jsonPath().getString("id"))
         val sha = proposal.jsonPath().getString("payloadSha256")
@@ -304,14 +313,23 @@ class BusinessSigningApiIT {
     @Test
     fun `an administrative request stays silent and co-signer-proof until its initiator signs`() {
         register.joint(entity, 2, alice, bob)
-        val proposal = post("/trusted-payees", mapOf("initiatorPartyId" to alice, "iban" to CREDITOR, "name" to "Dodavatel s.r.o."))
+        val proposal = post(
+            "/trusted-payees",
+            mapOf(
+                "initiatorPartyId" to alice,
+                "iban" to CREDITOR,
+                "name" to "Dodavatel s.r.o.",
+            ),
+        )
         assertThat(proposal.statusCode).isEqualTo(HTTP_ACCEPTED)
         val id = UUID.fromString(proposal.jsonPath().getString("id"))
         val sha = proposal.jsonPath().getString("payloadSha256")
         assertThat(proposal.jsonPath().getString("status")).isEqualTo("AWAITING_INITIATOR")
         assertThat(proposal.jsonPath().getInt("collected")).isZero()
         assertThat(sha).hasSize(SHA_LENGTH)
-        assertThat(outboxCount(id, "APPROVAL_REQUESTED")).describedAs("nobody is told before the initiator signs").isZero()
+        assertThat(
+            outboxCount(id, "APPROVAL_REQUESTED"),
+        ).describedAs("nobody is told before the initiator signs").isZero()
 
         val early = sign(id, bob, sca.approval(bob, id, sha))
         assertThat(early.statusCode).isEqualTo(HTTP_CONFLICT)
@@ -325,7 +343,14 @@ class BusinessSigningApiIT {
         assertThat(JsonPath(requested).getString("entityPartyId")).isEqualTo(entity.toString())
         assertThat(outboxCount(id, "APPROVAL_SIGNED")).isZero()
 
-        val duplicate = post("/trusted-payees", mapOf("initiatorPartyId" to alice, "iban" to CREDITOR, "name" to "Dodavatel s.r.o."))
+        val duplicate = post(
+            "/trusted-payees",
+            mapOf(
+                "initiatorPartyId" to alice,
+                "iban" to CREDITOR,
+                "name" to "Dodavatel s.r.o.",
+            ),
+        )
         assertThat(duplicate.statusCode).isEqualTo(HTTP_CONFLICT)
         assertThat(duplicate.jsonPath().getString("code")).isEqualTo("PAYEE_CHANGE_PENDING")
     }
@@ -354,7 +379,9 @@ class BusinessSigningApiIT {
             .then().statusCode(HTTP_OK).extract().jsonPath()
         assertThat(list.getList<Any>("data")).hasSize(1)
 
-        val pending = RestAssured.given().get("/api/v1/parties/$bob/approval-requests/pending").then().statusCode(HTTP_OK)
+        val pending = RestAssured.given().get(
+            "/api/v1/parties/$bob/approval-requests/pending",
+        ).then().statusCode(HTTP_OK)
             .extract().jsonPath()
         assertThat(pending.getInt("total")).isEqualTo(1)
         assertThat(pending.getString("entities[0].entityName")).isEqualTo("Dodavatel s.r.o.")
@@ -380,10 +407,23 @@ class BusinessSigningApiIT {
 
     // ------------------------------------------------------------------ helpers
 
+    /** Exactly the body customer-edge (#10314) sends. */
     private fun paymentBody(initiator: UUID, challenge: UUID, expiresInSeconds: Long? = null) = buildMap<String, Any?> {
-        put("initiator", mapOf("partyId" to initiator, "scaChallengeId" to challenge))
-        put("payment", mapOf("amount" to "120000.00", "currency" to "CZK", "creditorIban" to CREDITOR, "creditorName" to "Dodavatel s.r.o.", "rail" to "DOMESTIC"))
-        put("payload", mapOf("amount" to "120000.00", "currency" to "CZK", "creditorAccount" to mapOf("iban" to CREDITOR), "reference" to "INV-2026-09"))
+        put("kind", "PAYMENT")
+        put("initiatorSignature", mapOf("partyId" to initiator, "scaChallengeId" to challenge))
+        put(
+            "payload",
+            mapOf(
+                "rail" to "DOMESTIC",
+                "amount" to "120000.00",
+                "currency" to "CZK",
+                "creditorIban" to CREDITOR,
+                "creditorName" to "Dodavatel s.r.o.",
+                "reference" to "INV-2026-09",
+                "railRequest" to
+                    mapOf("amount" to "120000.00", "currency" to "CZK", "creditorAccount" to mapOf("iban" to CREDITOR)),
+            ),
+        )
         expiresInSeconds?.let { put("expiresInSeconds", it) }
     }
 
@@ -399,15 +439,22 @@ class BusinessSigningApiIT {
     private fun claim(id: UUID) = RestAssured.given().contentType(ContentType.JSON)
         .post("/api/v1/entities/$entity/approval-requests/$id/release-claim")
 
-    private fun get(id: UUID): JsonPath =
-        RestAssured.given().get("/api/v1/entities/$entity/approval-requests/$id").then().statusCode(HTTP_OK).extract().jsonPath()
+    private fun get(id: UUID): JsonPath = RestAssured.given().get(
+        "/api/v1/entities/$entity/approval-requests/$id",
+    ).then().statusCode(HTTP_OK).extract().jsonPath()
 
-    private fun policy(): JsonPath =
-        RestAssured.given().get("/api/v1/entities/$entity/signing-policy").then().statusCode(HTTP_OK).extract().jsonPath()
+    private fun policy(): JsonPath = RestAssured.given().get(
+        "/api/v1/entities/$entity/signing-policy",
+    ).then().statusCode(HTTP_OK).extract().jsonPath()
 
     private fun evaluate(): JsonPath = post(
         "/signing/evaluate",
-        mapOf("amount" to "120000.00", "currency" to "CZK", "creditorIban" to "CZ6508000000192000145399", "rail" to "DOMESTIC"),
+        mapOf(
+            "amount" to "120000.00",
+            "currency" to "CZK",
+            "creditorIban" to "CZ6508000000192000145399",
+            "rail" to "DOMESTIC",
+        ),
     ).then().statusCode(HTTP_OK).extract().jsonPath()
 
     private fun post(path: String, body: Any) = RestAssured.given().contentType(ContentType.JSON).body(body)

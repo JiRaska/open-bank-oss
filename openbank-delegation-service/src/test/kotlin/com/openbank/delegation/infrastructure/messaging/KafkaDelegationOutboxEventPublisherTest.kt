@@ -131,7 +131,9 @@ class KafkaDelegationOutboxEventPublisherTest {
         val captured = slot<Message<String>>()
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper, emitter).publish(entry("not json at all")) }
+        runBlocking {
+            KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper, emitter).publish(entry("not json at all"))
+        }
 
         // This is the money path: an unattributed row is a strictly better outcome than a publish
         // that throws and wedges the outbox dispatcher.

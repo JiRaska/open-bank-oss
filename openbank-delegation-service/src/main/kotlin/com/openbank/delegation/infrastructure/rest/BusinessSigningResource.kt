@@ -9,6 +9,7 @@ import com.openbank.delegation.application.usecase.PaymentApprovalCommand
 import com.openbank.delegation.application.usecase.SigningPayloadCodec
 import com.openbank.delegation.domain.model.ApprovalStatus
 import com.openbank.delegation.domain.model.SignerGroup
+import com.openbank.delegation.domain.model.SigningAmount
 import com.openbank.delegation.infrastructure.rest.dto.ApprovalRequestResponse
 import com.openbank.delegation.infrastructure.rest.dto.CreatePaymentApprovalRequest
 import com.openbank.delegation.infrastructure.rest.dto.EvaluateRequest
@@ -22,11 +23,11 @@ import com.openbank.delegation.infrastructure.rest.dto.ProposePolicyRequest
 import com.openbank.delegation.infrastructure.rest.dto.RejectionBody
 import com.openbank.delegation.infrastructure.rest.dto.ReleaseClaimResponse
 import com.openbank.delegation.infrastructure.rest.dto.ReleaseResultBody
+import com.openbank.delegation.infrastructure.rest.dto.RemovePayeeBody
 import com.openbank.delegation.infrastructure.rest.dto.SignatureBody
 import com.openbank.delegation.infrastructure.rest.dto.SignerGroupBody
 import com.openbank.delegation.infrastructure.rest.dto.SigningPolicyResponse
 import com.openbank.delegation.infrastructure.rest.dto.TrustedPayeeResponse
-import com.openbank.delegation.domain.model.SigningAmount
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -57,10 +58,7 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API")
 @Suppress("TooManyFunctions")
-class BusinessSigningResource(
-    private val service: BusinessSigningService,
-    private val codec: SigningPayloadCodec,
-) {
+class BusinessSigningResource(private val service: BusinessSigningService, private val codec: SigningPayloadCodec) {
 
     @POST
     @Path("/signing/evaluate")
@@ -68,7 +66,13 @@ class BusinessSigningResource(
     @Operation(summary = "How many signatures a payment needs, and from whom")
     suspend fun evaluate(@PathParam("entityId") entityId: UUID, body: EvaluateRequest?): EvaluationResponse {
         requireNotNull(body) { "request body is required" }
-        val amount = SigningAmount(requireNotNull(body.amount) { "amount is required" }, requireNotNull(body.currency?.uppercase()) { "currency is required" })
+        val amount =
+            SigningAmount(
+                requireNotNull(body.amount) {
+                    "amount is required"
+                },
+                requireNotNull(body.currency?.uppercase()) { "currency is required" },
+            )
         return EvaluationResponse.from(
             service.evaluate(
                 entityId,
@@ -93,7 +97,12 @@ class BusinessSigningResource(
     suspend fun proposePolicy(@PathParam("entityId") entityId: UUID, body: ProposePolicyRequest?): Response {
         requireNotNull(body) { "request body is required" }
         val rules = requireNotNull(body.rules) { "rules is required" }.map { it.toDomain() }
-        val request = service.proposePolicy(entityId, initiator(body.initiatorPartyId), rules, body.trustedPayeeCap?.toDomain("trustedPayeeCap"))
+        val request = service.proposePolicy(
+            entityId,
+            initiator(body.initiatorPartyId),
+            rules,
+            body.trustedPayeeCap?.toDomain("trustedPayeeCap"),
+        )
         return accepted(request)
     }
 
@@ -151,26 +160,43 @@ class BusinessSigningResource(
         @PathParam("entityId") entityId: UUID,
         @PathParam("payeeId") payeeId: UUID,
         @QueryParam("initiatorPartyId") initiatorPartyId: UUID?,
-    ): Response = accepted(service.proposePayeeRemove(entityId, initiator(initiatorPartyId), payeeId))
+        body: RemovePayeeBody?,
+    ): Response =
+        accepted(service.proposePayeeRemove(entityId, initiator(initiatorPartyId ?: body?.initiatorPartyId), payeeId))
 
     @POST
     @Path("/approval-requests")
     @Authorize(action = "delegation.signing.approval.create", resource = "#entityId")
-    @Operation(summary = "Hold a payment for co-signature (kind PAYMENT; the initiator's consumed SCA is the first signature)")
+    @Operation(
+        summary = "Hold a payment for co-signature (kind PAYMENT; the initiator's consumed SCA is the first signature)",
+    )
     suspend fun createPayment(@PathParam("entityId") entityId: UUID, body: CreatePaymentApprovalRequest?): Response {
         requireNotNull(body) { "request body is required" }
-        val initiator = requireNotNull(body.initiator) { "initiator is required" }
-        val payment = requireNotNull(body.payment) { "payment is required" }
+        require(body.kind == null || body.kind == "PAYMENT") { "only kind PAYMENT is created here" }
+        val initiator = requireNotNull(body.initiatorSignature) { "initiatorSignature is required" }
+        val payload = requireNotNull(body.payload) { "payload is required" }
+        require(payload["railRequest"] is Map<*, *>) { "payload.railRequest must be an object" }
         val request = service.createPayment(
             PaymentApprovalCommand(
                 entityPartyId = entityId,
-                initiatorPartyId = requireNotNull(initiator.partyId) { "initiator.partyId is required" },
-                initiatorScaChallengeId = requireNotNull(initiator.scaChallengeId) { "initiator.scaChallengeId is required" },
-                amount = MoneyBody(payment.amount, payment.currency).toDomain("payment"),
-                creditorIban = requireNotNull(payment.creditorIban) { "payment.creditorIban is required" },
-                creditorName = payment.creditorName,
-                rail = requireNotNull(payment.rail?.takeIf { it.isNotBlank() }) { "payment.rail is required" },
-                payload = requireNotNull(body.payload) { "payload is required" },
+                initiatorPartyId = requireNotNull(initiator.partyId) { "initiatorSignature.partyId is required" },
+                initiatorScaChallengeId = requireNotNull(initiator.scaChallengeId) {
+                    "initiatorSignature.scaChallengeId is required"
+                },
+                amount = MoneyBody(
+                    payload["amount"]?.toString()?.toBigDecimalOrNull(),
+                    payload["currency"] as? String,
+                ).toDomain("payload"),
+                creditorIban = requireNotNull(payload["creditorIban"] as? String) {
+                    "payload.creditorIban is required"
+                },
+                creditorName = payload["creditorName"] as? String,
+                rail = requireNotNull(
+                    (payload["rail"] as? String)?.takeIf {
+                        it.isNotBlank()
+                    },
+                ) { "payload.rail is required" },
+                payload = payload,
                 ttl = body.expiresInSeconds?.let { Duration.ofSeconds(it) },
             ),
         )
@@ -188,17 +214,24 @@ class BusinessSigningResource(
         @QueryParam("initiator") initiator: UUID?,
     ): ListEnvelope<ApprovalRequestResponse> {
         val parsed = status?.let { s ->
-            ApprovalStatus.entries.firstOrNull { it.name == s.uppercase() } ?: throw IllegalArgumentException("unknown status '$s'")
+            ApprovalStatus.entries.firstOrNull { it.name == s.uppercase() }
+                ?: throw IllegalArgumentException("unknown status '$s'")
         }
-        return ListEnvelope(service.list(entityId, parsed, signer, initiator).map { ApprovalRequestResponse.from(it, codec) })
+        return ListEnvelope(
+            service.list(entityId, parsed, signer, initiator).map {
+                ApprovalRequestResponse.from(it, codec)
+            },
+        )
     }
 
     @GET
     @Path("/approval-requests/{approvalId}")
     @Authorize(action = "delegation.signing.approval.read", resource = "#entityId")
     @Operation(summary = "One approval request with its frozen payload and signatures")
-    suspend fun get(@PathParam("entityId") entityId: UUID, @PathParam("approvalId") approvalId: UUID): ApprovalRequestResponse =
-        ApprovalRequestResponse.from(service.get(entityId, approvalId), codec)
+    suspend fun get(
+        @PathParam("entityId") entityId: UUID,
+        @PathParam("approvalId") approvalId: UUID,
+    ): ApprovalRequestResponse = ApprovalRequestResponse.from(service.get(entityId, approvalId), codec)
 
     @POST
     @Path("/approval-requests/{approvalId}/signatures")
@@ -239,7 +272,10 @@ class BusinessSigningResource(
     @Path("/approval-requests/{approvalId}/release-claim")
     @Authorize(action = "delegation.signing.approval.claim", resource = "#entityId")
     @Operation(summary = "Single-use claim of an APPROVED payment: the token and frozen payload, once; 409 after")
-    suspend fun claim(@PathParam("entityId") entityId: UUID, @PathParam("approvalId") approvalId: UUID): ReleaseClaimResponse {
+    suspend fun claim(
+        @PathParam("entityId") entityId: UUID,
+        @PathParam("approvalId") approvalId: UUID,
+    ): ReleaseClaimResponse {
         val claim = service.claimRelease(entityId, approvalId)
         return ReleaseClaimResponse(claim.claimToken, codec.parseObject(claim.payload))
     }
@@ -272,10 +308,7 @@ class BusinessSigningResource(
 @Path("/api/v1/parties/{humanId}/approval-requests")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API")
-class PendingApprovalsResource(
-    private val service: BusinessSigningService,
-    private val codec: SigningPayloadCodec,
-) {
+class PendingApprovalsResource(private val service: BusinessSigningService, private val codec: SigningPayloadCodec) {
     @GET
     @Path("/pending")
     @Authorize(action = "delegation.signing.pending.read", resource = "#humanId")
@@ -286,7 +319,8 @@ class PendingApprovalsResource(
 
 /** One mapper for the whole signing boundary: `{status, error, code}`. */
 @jakarta.ws.rs.ext.Provider
-class BusinessSigningExceptionMapper : jakarta.ws.rs.ext.ExceptionMapper<com.openbank.delegation.application.usecase.BusinessSigningException> {
+class BusinessSigningExceptionMapper :
+    jakarta.ws.rs.ext.ExceptionMapper<com.openbank.delegation.application.usecase.BusinessSigningException> {
     override fun toResponse(exception: com.openbank.delegation.application.usecase.BusinessSigningException): Response =
         Response.status(exception.status)
             .entity(mapOf("status" to exception.status, "error" to exception.message, "code" to exception.code))

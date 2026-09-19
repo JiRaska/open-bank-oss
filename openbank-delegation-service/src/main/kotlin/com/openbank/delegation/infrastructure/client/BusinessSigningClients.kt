@@ -88,7 +88,10 @@ class RestMandateDirectory(
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     override suspend fun entityName(entityPartyId: UUID): String? = try {
-        client.getParty(entityPartyId).let { p -> p.tradingName?.takeIf { it.isNotBlank() } ?: p.legalName?.takeIf { it.isNotBlank() } }
+        client.getParty(entityPartyId).let { p ->
+            p.tradingName?.takeIf { it.isNotBlank() }
+                ?: p.legalName?.takeIf { it.isNotBlank() }
+        }
     } catch (e: Exception) {
         null
     }
@@ -110,9 +113,13 @@ class RestMandateDirectory(
             val now = clock.instant()
             client.mandates(entityPartyId)
                 .filter { it.status == "ACTIVE" && it.agentPartyId != null }
-                .filter { (it.validFrom == null || !it.validFrom.isAfter(now)) && (it.validTo == null || it.validTo.isAfter(now)) }
+                .filter {
+                    (it.validFrom == null || !it.validFrom.isAfter(now)) &&
+                        (it.validTo == null || it.validTo.isAfter(now))
+                }
                 .mapNotNull { m ->
-                    val authority = MandateAuthority.entries.firstOrNull { it.name == m.authority } ?: return@mapNotNull null
+                    val authority =
+                        MandateAuthority.entries.firstOrNull { it.name == m.authority } ?: return@mapNotNull null
                     RepresentationMandate(m.agentPartyId!!, authority, m.requiredSignatures ?: 1)
                 }
                 .distinctBy { it.agentPartyId }
@@ -177,7 +184,10 @@ interface ApprovalScaRestClient {
 
     @POST
     @Path("/{id}/consume")
-    suspend fun consume(@PathParam("id") id: UUID, request: ConsumeApprovalChallengeRequest): ApprovalScaChallengeResponse
+    suspend fun consume(
+        @PathParam("id") id: UUID,
+        request: ConsumeApprovalChallengeRequest,
+    ): ApprovalScaChallengeResponse
 }
 
 /** No retry on consume: it is a single-use state change, and a retried success reads as a 409. */
@@ -187,7 +197,11 @@ class RestApprovalScaVerifier(@RestClient private val client: ApprovalScaRestCli
     @Suppress("TooGenericExceptionCaught")
     override suspend fun verifyConsumedInitiatorChallenge(challengeId: UUID, partyId: UUID): ScaVerdict = try {
         val c = client.getChallenge(challengeId)
-        val ok = c.partyId == partyId && c.purpose == PAYMENT_PURPOSE && c.status == COMPLETED && !c.consumedAt.isNullOrBlank()
+        val ok =
+            c.partyId == partyId &&
+                c.purpose == PAYMENT_PURPOSE &&
+                c.status == COMPLETED &&
+                !c.consumedAt.isNullOrBlank()
         if (ok) ScaVerdict.VERIFIED else ScaVerdict.REFUSED
     } catch (e: WebApplicationException) {
         verdictFor(e)
@@ -197,25 +211,26 @@ class RestApprovalScaVerifier(@RestClient private val client: ApprovalScaRestCli
     }
 
     @Suppress("TooGenericExceptionCaught")
-    override suspend fun consumeApprovalChallenge(challengeId: UUID, partyId: UUID, link: ApprovalLink): ScaVerdict = try {
-        val c = client.consume(
-            challengeId,
-            ConsumeApprovalChallengeRequest(
-                partyId = partyId,
-                approvalRequestId = link.approvalRequestId,
-                payloadSha256 = link.payloadSha256,
-                amount = link.amount?.amount?.toPlainString(),
-                currency = link.amount?.currency,
-                creditor = link.creditorIban,
-            ),
-        )
-        if (c.partyId == partyId && c.purpose == APPROVAL_PURPOSE) ScaVerdict.VERIFIED else ScaVerdict.REFUSED
-    } catch (e: WebApplicationException) {
-        verdictFor(e)
-    } catch (e: Exception) {
-        Log.errorf(e, "approval SCA consume for challenge %s failed", challengeId)
-        ScaVerdict.UNAVAILABLE
-    }
+    override suspend fun consumeApprovalChallenge(challengeId: UUID, partyId: UUID, link: ApprovalLink): ScaVerdict =
+        try {
+            val c = client.consume(
+                challengeId,
+                ConsumeApprovalChallengeRequest(
+                    partyId = partyId,
+                    approvalRequestId = link.approvalRequestId,
+                    payloadSha256 = link.payloadSha256,
+                    amount = link.amount?.amount?.toPlainString(),
+                    currency = link.amount?.currency,
+                    creditor = link.creditorIban,
+                ),
+            )
+            if (c.partyId == partyId && c.purpose == APPROVAL_PURPOSE) ScaVerdict.VERIFIED else ScaVerdict.REFUSED
+        } catch (e: WebApplicationException) {
+            verdictFor(e)
+        } catch (e: Exception) {
+            Log.errorf(e, "approval SCA consume for challenge %s failed", challengeId)
+            ScaVerdict.UNAVAILABLE
+        }
 
     private fun verdictFor(e: WebApplicationException): ScaVerdict {
         val status = e.response?.status ?: 0

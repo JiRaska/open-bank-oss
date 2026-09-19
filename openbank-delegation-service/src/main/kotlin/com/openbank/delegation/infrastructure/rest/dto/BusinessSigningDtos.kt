@@ -45,7 +45,13 @@ data class EvaluationResponse(
 ) {
     companion object {
         fun from(e: SigningEvaluation) = EvaluationResponse(
-            e.required, e.eligibleSignerIds.sorted(), e.mustIncludeGroupId, e.trusted, e.ruleIndex, e.policyVersion, e.derivedFromRegister,
+            e.required,
+            e.eligibleSignerIds.sorted(),
+            e.mustIncludeGroupId,
+            e.trusted,
+            e.ruleIndex,
+            e.policyVersion,
+            e.derivedFromRegister,
         )
     }
 }
@@ -69,7 +75,12 @@ data class RuleBody(
 
     companion object {
         fun from(r: SigningPolicyRule) = RuleBody(
-            MoneyBody.from(r.minAmount), MoneyBody.from(r.maxAmount), r.currency, r.requiredSignatures, r.groupId, r.mustIncludeGroupId,
+            MoneyBody.from(r.minAmount),
+            MoneyBody.from(r.maxAmount),
+            r.currency,
+            r.requiredSignatures,
+            r.groupId,
+            r.mustIncludeGroupId,
         )
     }
 }
@@ -85,13 +96,22 @@ data class SigningPolicyResponse(
 ) {
     companion object {
         fun from(p: SigningPolicy) = SigningPolicyResponse(
-            p.entityPartyId, p.version, p.rules.map(RuleBody::from), MoneyBody.from(p.trustedPayeeCap),
-            p.updatedAt, p.updatedByApprovalId, p.derivedFromRegister,
+            p.entityPartyId,
+            p.version,
+            p.rules.map(RuleBody::from),
+            MoneyBody.from(p.trustedPayeeCap),
+            p.updatedAt,
+            p.updatedByApprovalId,
+            p.derivedFromRegister,
         )
     }
 }
 
-data class ProposePolicyRequest(val initiatorPartyId: UUID?, val rules: List<RuleBody>?, val trustedPayeeCap: MoneyBody? = null)
+data class ProposePolicyRequest(
+    val initiatorPartyId: UUID?,
+    val rules: List<RuleBody>?,
+    val trustedPayeeCap: MoneyBody? = null,
+)
 
 data class SignerGroupBody(val id: String, val name: String, val memberPartyIds: List<UUID>) {
     companion object {
@@ -99,7 +119,12 @@ data class SignerGroupBody(val id: String, val name: String, val memberPartyIds:
     }
 }
 
-data class ProposeGroupRequest(val initiatorPartyId: UUID?, val id: String?, val name: String?, val memberPartyIds: List<UUID>?)
+data class ProposeGroupRequest(
+    val initiatorPartyId: UUID?,
+    val id: String?,
+    val name: String?,
+    val memberPartyIds: List<UUID>?,
+)
 
 data class TrustedPayeeResponse(
     val id: UUID,
@@ -112,32 +137,50 @@ data class TrustedPayeeResponse(
     val status: String,
 ) {
     companion object {
-        fun from(p: TrustedPayee) = TrustedPayeeResponse(p.id, p.entityPartyId, p.iban, p.name, p.bic, p.addedAt, p.addedByApprovalId, p.status.name)
+        fun from(p: TrustedPayee) = TrustedPayeeResponse(
+            p.id,
+            p.entityPartyId,
+            p.iban,
+            p.name,
+            p.bic,
+            p.addedAt,
+            p.addedByApprovalId,
+            p.status.name,
+        )
     }
 }
 
-data class ProposePayeeRequest(val initiatorPartyId: UUID?, val iban: String?, val name: String?, val bic: String? = null)
+data class ProposePayeeRequest(
+    val initiatorPartyId: UUID?,
+    val iban: String?,
+    val name: String?,
+    val bic: String? = null,
+)
 
 data class SignatureBody(val partyId: UUID?, val scaChallengeId: UUID?)
 
-data class PaymentFactsBody(
-    val amount: BigDecimal?,
-    val currency: String?,
-    val creditorIban: String?,
-    val creditorName: String? = null,
-    val rail: String?,
-)
-
+/**
+ * The caller's shape (customer-edge #10314): `payload` is the frozen document — `rail`, `amount`,
+ * `currency`, `creditorIban`, optional `creditorName`/`reference`/`debtorAccountId`, and the exact
+ * `railRequest` the edge will post on release — plus the initiator's consumed payment SCA.
+ */
 data class CreatePaymentApprovalRequest(
-    val initiator: SignatureBody?,
-    val payment: PaymentFactsBody?,
+    val kind: String? = null,
     val payload: Map<String, Any?>?,
+    val initiatorSignature: SignatureBody?,
     val expiresInSeconds: Long? = null,
 )
 
+data class RemovePayeeBody(val initiatorPartyId: UUID? = null)
+
 data class RejectionBody(val partyId: UUID?, val reason: String? = null)
 
-data class ReleaseResultBody(val ok: Boolean?, val releaseRef: String? = null, val error: String? = null, val claimToken: UUID? = null)
+data class ReleaseResultBody(
+    val ok: Boolean?,
+    val releaseRef: String? = null,
+    val error: String? = null,
+    val claimToken: UUID? = null,
+)
 
 data class ReleaseClaimResponse(val claimToken: UUID, val payload: Any?)
 
@@ -193,7 +236,12 @@ data class ApprovalRequestResponse(
     }
 }
 
-data class PendingEntityResponse(val entityPartyId: UUID, val entityName: String?, val count: Int, val oldestExpiresAt: Instant)
+data class PendingEntityResponse(
+    val entityPartyId: UUID,
+    val entityName: String?,
+    val count: Int,
+    val oldestExpiresAt: Instant,
+)
 
 data class PendingForHumanResponse(
     val humanPartyId: UUID,
@@ -205,7 +253,9 @@ data class PendingForHumanResponse(
         fun from(human: UUID, p: PendingForHuman, codec: SigningPayloadCodec) = PendingForHumanResponse(
             humanPartyId = human,
             total = p.items.size,
-            entities = p.entities.map { PendingEntityResponse(it.entityPartyId, it.entityName, it.count, it.oldestExpiresAt) },
+            entities = p.entities.map {
+                PendingEntityResponse(it.entityPartyId, it.entityName, it.count, it.oldestExpiresAt)
+            },
             items = p.items.map { ApprovalRequestResponse.from(it, codec) },
         )
     }

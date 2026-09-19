@@ -85,7 +85,16 @@ data class PendingEntity(val entityPartyId: UUID, val entityName: String?, val c
  *  policy-change-needs-full-round            → [createAdministrative] uses the strictest rule
  */
 @ApplicationScoped
-@Suppress("TooManyFunctions")
+// Codes-as-exceptions keep each refusal a single visible line; payload maps are canonical JSON we wrote.
+@Suppress(
+    "TooManyFunctions",
+    "ThrowsCount",
+    "CastToNullableType",
+    "CyclomaticComplexMethod",
+    "SwallowedException",
+    "LongMethod",
+    "LargeClass",
+)
 class BusinessSigningService(
     private val repository: BusinessSigningRepository,
     private val mandates: MandateDirectory,
@@ -103,7 +112,12 @@ class BusinessSigningService(
 
     suspend fun trustedPayees(entityPartyId: UUID): List<TrustedPayee> = repository.listActivePayees(entityPartyId)
 
-    suspend fun evaluate(entityPartyId: UUID, amount: SigningAmount, creditorIban: String, rail: String): SigningEvaluation {
+    suspend fun evaluate(
+        entityPartyId: UUID,
+        amount: SigningAmount,
+        creditorIban: String,
+        rail: String,
+    ): SigningEvaluation {
         val register = liveMandates(entityPartyId)
         val active = register.mapTo(mutableSetOf()) { it.agentPartyId }
         val policy = repository.findPolicy(entityPartyId) ?: SigningPolicy.derived(entityPartyId, register)
@@ -122,7 +136,8 @@ class BusinessSigningService(
         // Natural-key idempotency: the initiator's single-use SCA challenge. A retry of a request
         // that was already created replays it; the same challenge for anything else is refused.
         repository.findBySignatureChallenge(cmd.initiatorScaChallengeId)?.let { existing ->
-            if (existing.entityPartyId == cmd.entityPartyId && existing.initiatorPartyId == cmd.initiatorPartyId &&
+            if (existing.entityPartyId == cmd.entityPartyId &&
+                existing.initiatorPartyId == cmd.initiatorPartyId &&
                 existing.kind == ApprovalKind.PAYMENT
             ) {
                 return existing
@@ -135,7 +150,11 @@ class BusinessSigningService(
         requireSatisfiable(evaluation)
         when (sca.verifyConsumedInitiatorChallenge(cmd.initiatorScaChallengeId, cmd.initiatorPartyId)) {
             ScaVerdict.VERIFIED -> Unit
-            ScaVerdict.REFUSED -> throw refused(FORBIDDEN, "SCA_NOT_VERIFIED", "initiator SCA challenge is not a consumed payment approval of this party")
+            ScaVerdict.REFUSED -> throw refused(
+                FORBIDDEN,
+                "SCA_NOT_VERIFIED",
+                "initiator SCA challenge is not a consumed payment approval of this party",
+            )
             ScaVerdict.UNAVAILABLE -> throw refused(UNAVAILABLE, "SCA_UNAVAILABLE", "sca-service could not be reached")
         }
         val payload = codec.canonical(cmd.payload)
@@ -148,7 +167,16 @@ class BusinessSigningService(
                 "rail" to cmd.rail,
             ),
         )
-        val base = newRequest(cmd.entityPartyId, ApprovalKind.PAYMENT, payload, summary, evaluation, cmd.initiatorPartyId, now, cmd.ttl)
+        val base = newRequest(
+            cmd.entityPartyId,
+            ApprovalKind.PAYMENT,
+            payload,
+            summary,
+            evaluation,
+            cmd.initiatorPartyId,
+            now,
+            cmd.ttl,
+        )
             .withNames()
         // The initiator's own SCA is the first signature (ADR-0312).
         val request = base.sign(cmd.initiatorPartyId, cmd.initiatorScaChallengeId, now)
@@ -158,10 +186,16 @@ class BusinessSigningService(
         return request
     }
 
-    suspend fun proposePolicy(entityPartyId: UUID, initiatorPartyId: UUID, rules: List<SigningPolicyRule>, cap: SigningAmount?): ApprovalRequest {
+    suspend fun proposePolicy(
+        entityPartyId: UUID,
+        initiatorPartyId: UUID,
+        rules: List<SigningPolicyRule>,
+        cap: SigningAmount?,
+    ): ApprovalRequest {
         // Validates the proposal before anyone is asked to sign it.
         SigningPolicy(entityPartyId = entityPartyId, version = 1, rules = rules, trustedPayeeCap = cap)
-        val payload = mapOf("change" to "POLICY", "rules" to rules.map { it.toMap() }, "trustedPayeeCap" to cap?.toMap())
+        val payload =
+            mapOf("change" to "POLICY", "rules" to rules.map { it.toMap() }, "trustedPayeeCap" to cap?.toMap())
         return createAdministrative(entityPartyId, ApprovalKind.POLICY_CHANGE, initiatorPartyId, payload)
     }
 
@@ -169,21 +203,42 @@ class BusinessSigningService(
         @Suppress("UNCHECKED_CAST")
         val pending = openAdministrative(entityPartyId, ApprovalKind.POLICY_CHANGE)
             .any { (codec.parseObject(it.payload)["group"] as Map<String, Any?>?)?.get("id") == group.id }
-        if (pending) throw refused(CONFLICT, "SIGNER_GROUP_CHANGE_PENDING", "a change to that group is already waiting for signatures")
+        if (pending) {
+            throw refused(
+                CONFLICT,
+                "SIGNER_GROUP_CHANGE_PENDING",
+                "a change to that group is already waiting for signatures",
+            )
+        }
         val payload = mapOf(
             "change" to "SIGNER_GROUP",
-            "group" to mapOf("id" to group.id, "name" to group.name, "memberPartyIds" to group.memberPartyIds.map { it.toString() }.sorted()),
+            "group" to
+                mapOf(
+                    "id" to group.id,
+                    "name" to group.name,
+                    "memberPartyIds" to group.memberPartyIds.map { it.toString() }.sorted(),
+                ),
         )
         return createAdministrative(entityPartyId, ApprovalKind.POLICY_CHANGE, initiatorPartyId, payload)
     }
 
-    suspend fun proposePayeeAdd(entityPartyId: UUID, initiatorPartyId: UUID, iban: String, name: String, bic: String?): ApprovalRequest {
+    suspend fun proposePayeeAdd(
+        entityPartyId: UUID,
+        initiatorPartyId: UUID,
+        iban: String,
+        name: String,
+        bic: String?,
+    ): ApprovalRequest {
         require(name.isNotBlank() && name.length <= MAX_PAYEE_NAME) { "name must be 1..$MAX_PAYEE_NAME characters" }
         val normalized = Iban.normalize(iban)
         if (repository.listActivePayees(entityPartyId).any { it.iban == normalized }) {
             throw refused(CONFLICT, "PAYEE_ALREADY_TRUSTED", "that account is already a trusted payee")
         }
-        if (openAdministrative(entityPartyId, ApprovalKind.PAYEE_ADD).any { codec.parseObject(it.payload)["iban"] == normalized }) {
+        if (openAdministrative(entityPartyId, ApprovalKind.PAYEE_ADD).any {
+                codec.parseObject(it.payload)["iban"] ==
+                    normalized
+            }
+        ) {
             throw refused(CONFLICT, "PAYEE_CHANGE_PENDING", "adding that account is already waiting for signatures")
         }
         val payload = mapOf("iban" to normalized, "name" to name.trim(), "bic" to bic?.trim()?.uppercase())
@@ -212,30 +267,54 @@ class BusinessSigningService(
         val register = liveMandates(entityPartyId)
         val active = register.mapTo(mutableSetOf()) { it.agentPartyId }
         val policy = repository.findPolicy(entityPartyId) ?: SigningPolicy.derived(entityPartyId, register)
-        val evaluation = SigningPolicyEvaluator.evaluateAdministrative(policy, active, repository.listGroups(entityPartyId).associateBy { it.id })
+        val evaluation = SigningPolicyEvaluator.evaluateAdministrative(
+            policy,
+            active,
+            repository.listGroups(entityPartyId).associateBy {
+                it.id
+            },
+        )
         requireEligibleInitiator(initiatorPartyId, evaluation)
         requireSatisfiable(evaluation)
         val canonical = codec.canonical(payload)
-        val request = newRequest(entityPartyId, kind, canonical, canonical, evaluation, initiatorPartyId, now, null).withNames()
-            .copy(status = ApprovalStatus.AWAITING_INITIATOR, expiresAt = now.plus(Duration.ofMinutes(ApprovalRequest.AWAITING_INITIATOR_TTL_MINUTES)))
+        val request = newRequest(
+            entityPartyId,
+            kind,
+            canonical,
+            canonical,
+            evaluation,
+            initiatorPartyId,
+            now,
+            null,
+        ).withNames()
+            .copy(
+                status = ApprovalStatus.AWAITING_INITIATOR,
+                expiresAt = now.plus(Duration.ofMinutes(ApprovalRequest.AWAITING_INITIATOR_TTL_MINUTES)),
+            )
         // No event: co-signers hear about it only once the initiator has signed (contract pin 1).
         repository.create(request, emptyList())
         return request
     }
 
-    private suspend fun openAdministrative(entityPartyId: UUID, kind: ApprovalKind): List<ApprovalRequest> =
-        (repository.list(entityPartyId, ApprovalStatus.AWAITING_INITIATOR, LIST_LIMIT) + repository.list(entityPartyId, ApprovalStatus.PENDING, LIST_LIMIT))
-            .filter { it.kind == kind && !it.isExpiredAt(clock.instant()) }
+    private suspend fun openAdministrative(entityPartyId: UUID, kind: ApprovalKind): List<ApprovalRequest> = (
+        repository.list(entityPartyId, ApprovalStatus.AWAITING_INITIATOR, LIST_LIMIT) +
+            repository.list(entityPartyId, ApprovalStatus.PENDING, LIST_LIMIT)
+        )
+        .filter { it.kind == kind && !it.isExpiredAt(clock.instant()) }
 
     // ---------------------------------------------------------------- reads
 
-    suspend fun get(entityPartyId: UUID, id: UUID): ApprovalRequest =
-        repository.find(entityPartyId, id) ?: throw refused(NOT_FOUND, "APPROVAL_NOT_FOUND", "approval request $id not found")
+    suspend fun get(entityPartyId: UUID, id: UUID): ApprovalRequest = repository.find(entityPartyId, id)
+        ?: throw refused(NOT_FOUND, "APPROVAL_NOT_FOUND", "approval request $id not found")
 
-    suspend fun list(entityPartyId: UUID, status: ApprovalStatus?, signer: UUID?, initiator: UUID?): List<ApprovalRequest> =
-        repository.list(entityPartyId, status, LIST_LIMIT)
-            .filter { signer == null || signer in it.eligibleSignerIds || signer == it.initiatorPartyId }
-            .filter { initiator == null || it.initiatorPartyId == initiator }
+    suspend fun list(
+        entityPartyId: UUID,
+        status: ApprovalStatus?,
+        signer: UUID?,
+        initiator: UUID?,
+    ): List<ApprovalRequest> = repository.list(entityPartyId, status, LIST_LIMIT)
+        .filter { signer == null || signer in it.eligibleSignerIds || signer == it.initiatorPartyId }
+        .filter { initiator == null || it.initiatorPartyId == initiator }
 
     /** Everything waiting for THIS human's signature, across every entity they can sign for now. */
     suspend fun pendingFor(humanPartyId: UUID): PendingForHuman {
@@ -268,7 +347,11 @@ class BusinessSigningService(
         )
         when (sca.consumeApprovalChallenge(scaChallengeId, partyId, link)) {
             ScaVerdict.VERIFIED -> Unit
-            ScaVerdict.REFUSED -> throw refused(FORBIDDEN, "SCA_NOT_LINKED", "SCA challenge is not linked to this approval request and payload")
+            ScaVerdict.REFUSED -> throw refused(
+                FORBIDDEN,
+                "SCA_NOT_LINKED",
+                "SCA challenge is not linked to this approval request and payload",
+            )
             ScaVerdict.UNAVAILABLE -> throw refused(UNAVAILABLE, "SCA_UNAVAILABLE", "sca-service could not be reached")
         }
         return repository.transition(entityPartyId, id) { fresh, context ->
@@ -306,18 +389,28 @@ class BusinessSigningService(
     suspend fun claimRelease(entityPartyId: UUID, id: UUID): ReleaseClaim {
         val now = clock.instant()
         val request = get(entityPartyId, id)
-        if (request.kind != ApprovalKind.PAYMENT) throw refused(CONFLICT, "NOT_RELEASABLE", "only a payment is released")
+        if (request.kind !=
+            ApprovalKind.PAYMENT
+        ) {
+            throw refused(CONFLICT, "NOT_RELEASABLE", "only a payment is released")
+        }
         when {
             request.status == ApprovalStatus.RELEASED || request.status == ApprovalStatus.RELEASE_FAILED ->
                 throw refused(CONFLICT, "ALREADY_CLAIMED", "approval request $id was already released")
             request.status != ApprovalStatus.APPROVED ->
                 throw refused(CONFLICT, "NOT_APPROVED", "approval request $id is ${request.status}")
-            request.isExpiredAt(now) -> throw refused(CONFLICT, "EXPIRED", "approval request $id expired at ${request.expiresAt}")
+            request.isExpiredAt(
+                now,
+            ) -> throw refused(CONFLICT, "EXPIRED", "approval request $id expired at ${request.expiresAt}")
         }
         val active = liveMandates(entityPartyId).mapTo(mutableSetOf()) { it.agentPartyId }
         val stillValid = request.copy(signatures = request.signatures.filter { it.partyId in active })
         if (!stillValid.satisfied) {
-            throw refused(CONFLICT, "MANDATE_LAPSED", "a signer no longer holds an active mandate; the round is incomplete")
+            throw refused(
+                CONFLICT,
+                "MANDATE_LAPSED",
+                "a signer no longer holds an active mandate; the round is incomplete",
+            )
         }
         val token = UUID.randomUUID()
         if (!repository.claimRelease(entityPartyId, id, token, now)) {
@@ -335,7 +428,11 @@ class BusinessSigningService(
         claimToken: UUID?,
     ): ApprovalRequest {
         val now = clock.instant()
-        if (ok) require(!releaseRef.isNullOrBlank() && releaseRef.length <= MAX_REF) { "releaseRef is required when ok" }
+        if (ok) {
+            require(!releaseRef.isNullOrBlank() && releaseRef.length <= MAX_REF) {
+                "releaseRef is required when ok"
+            }
+        }
         val message = error?.take(MAX_REASON)
         return repository.transition(entityPartyId, id) { fresh, _ ->
             if (claimToken != null && fresh.claimToken != claimToken) {
@@ -347,15 +444,28 @@ class BusinessSigningService(
             }
             if (recorded) {
                 val same = if (ok) fresh.releaseRef == releaseRef else fresh.status == ApprovalStatus.RELEASE_FAILED
-                if (!same) throw refused(CONFLICT, "RESULT_ALREADY_RECORDED", "a different release result is already recorded")
+                if (!same) {
+                    throw refused(
+                        CONFLICT,
+                        "RESULT_ALREADY_RECORDED",
+                        "a different release result is already recorded",
+                    )
+                }
                 return@transition Transition(fresh, emptyList())
             }
             if (ok) {
                 val done = fresh.copy(releaseRef = releaseRef)
                 Transition(done, listOf(event(PaymentReleased.EVENT_TYPE, done, null, now, releaseRef = releaseRef)))
             } else {
-                val failed = fresh.copy(status = ApprovalStatus.RELEASE_FAILED, releaseError = message ?: "rail rejected the payment")
-                Transition(failed, listOf(event(PaymentReleaseFailed.EVENT_TYPE, failed, null, now, reason = failed.releaseError)))
+                val failed = fresh.copy(
+                    status = ApprovalStatus.RELEASE_FAILED,
+                    releaseError =
+                    message ?: "rail rejected the payment",
+                )
+                Transition(
+                    failed,
+                    listOf(event(PaymentReleaseFailed.EVENT_TYPE, failed, null, now, reason = failed.releaseError)),
+                )
             }
         }
     }
@@ -370,13 +480,20 @@ class BusinessSigningService(
             val result = repository.transition(candidate.entityPartyId, candidate.id) { fresh, _ ->
                 val expirable = fresh.isExpiredAt(now) &&
                     (
-                        fresh.status == ApprovalStatus.PENDING || fresh.status == ApprovalStatus.AWAITING_INITIATOR ||
+                        fresh.status == ApprovalStatus.PENDING ||
+                            fresh.status == ApprovalStatus.AWAITING_INITIATOR ||
                             (fresh.status == ApprovalStatus.APPROVED && fresh.kind == ApprovalKind.PAYMENT)
                         )
                 if (!expirable) return@transition Transition(fresh, emptyList())
                 val next = fresh.copy(status = ApprovalStatus.EXPIRED)
                 // An unsigned request was never announced, so its expiry is silent too.
-                val events = if (fresh.status == ApprovalStatus.AWAITING_INITIATOR) emptyList() else listOf(event(ApprovalExpired.EVENT_TYPE, next, null, now))
+                val events = if (fresh.status ==
+                    ApprovalStatus.AWAITING_INITIATOR
+                ) {
+                    emptyList()
+                } else {
+                    listOf(event(ApprovalExpired.EVENT_TYPE, next, null, now))
+                }
                 Transition(next, events)
             }
             if (result.status == ApprovalStatus.EXPIRED) expired++
@@ -412,7 +529,11 @@ class BusinessSigningService(
                     status = TrustedPayeeStatus.ACTIVE,
                 ),
             )
-            ApprovalKind.PAYEE_REMOVE -> AppliedChange.RemovePayee(UUID.fromString(payload["trustedPayeeId"] as String), signed.id, now)
+            ApprovalKind.PAYEE_REMOVE -> AppliedChange.RemovePayee(
+                UUID.fromString(payload["trustedPayeeId"] as String),
+                signed.id,
+                now,
+            )
             ApprovalKind.POLICY_CHANGE -> {
                 if (context.currentPolicyVersion != signed.policyVersion) {
                     val superseded = signed.copy(
@@ -449,7 +570,9 @@ class BusinessSigningService(
                         id = group["id"] as String,
                         entityPartyId = signed.entityPartyId,
                         name = group["name"] as String,
-                        memberPartyIds = (group["memberPartyIds"] as List<String>).mapTo(mutableSetOf()) { UUID.fromString(it) },
+                        memberPartyIds = (group["memberPartyIds"] as List<String>).mapTo(mutableSetOf()) {
+                            UUID.fromString(it)
+                        },
                     ),
                     signed.id,
                     now,
@@ -469,7 +592,9 @@ class BusinessSigningService(
         ttl: Duration?,
     ): ApprovalRequest {
         val lifetime = ttl ?: Duration.ofHours(ApprovalRequest.DEFAULT_TTL_HOURS)
-        require(!lifetime.isNegative && !lifetime.isZero && lifetime <= Duration.ofHours(ApprovalRequest.DEFAULT_TTL_HOURS)) {
+        require(
+            !lifetime.isNegative && !lifetime.isZero && lifetime <= Duration.ofHours(ApprovalRequest.DEFAULT_TTL_HOURS),
+        ) {
             "expiry must be within ${ApprovalRequest.DEFAULT_TTL_HOURS} hours"
         }
         return ApprovalRequest(
@@ -513,25 +638,193 @@ class BusinessSigningService(
         val a = EventArgs(request, actor, recipients, signers, summary, reason, releaseRef, now)
         return when (type) {
             ApprovalRequested.EVENT_TYPE -> a.run {
-                ApprovalRequested(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                ApprovalRequested(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             ApprovalSigned.EVENT_TYPE -> a.run {
-                ApprovalSigned(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                ApprovalSigned(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             ApprovalCompleted.EVENT_TYPE -> a.run {
-                ApprovalCompleted(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                ApprovalCompleted(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             ApprovalRejected.EVENT_TYPE -> a.run {
-                ApprovalRejected(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                ApprovalRejected(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             ApprovalExpired.EVENT_TYPE -> a.run {
-                ApprovalExpired(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                ApprovalExpired(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             PaymentReleased.EVENT_TYPE -> a.run {
-                PaymentReleased(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                PaymentReleased(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             PaymentReleaseFailed.EVENT_TYPE -> a.run {
-                PaymentReleaseFailed(r.id, r.entityPartyId, r.kind, r.status, r.required, r.collected, r.initiatorPartyId, actor, recipients, signers, r.expiresAt, r.payloadSha256, summary, reason, releaseRef, now, r.id, type, r.entityName, r.initiatorName, amount, currency, payeeName)
+                PaymentReleaseFailed(
+                    r.id,
+                    r.entityPartyId,
+                    r.kind,
+                    r.status,
+                    r.required,
+                    r.collected,
+                    r.initiatorPartyId,
+                    actor,
+                    recipients,
+                    signers,
+                    r.expiresAt,
+                    r.payloadSha256,
+                    summary,
+                    reason,
+                    releaseRef,
+                    now,
+                    r.id,
+                    type,
+                    r.entityName,
+                    r.initiatorName,
+                    amount,
+                    currency,
+                    payeeName,
+                )
             }
             else -> error("unknown approval event $type")
         }
@@ -586,7 +879,11 @@ class BusinessSigningService(
 
     private fun requireSatisfiable(evaluation: SigningEvaluation) {
         if (!evaluation.satisfiable) {
-            throw refused(UNPROCESSABLE, "POLICY_UNSATISFIABLE", "the policy needs more distinct eligible signers than the register holds")
+            throw refused(
+                UNPROCESSABLE,
+                "POLICY_UNSATISFIABLE",
+                "the policy needs more distinct eligible signers than the register holds",
+            )
         }
     }
 
@@ -602,7 +899,9 @@ class BusinessSigningService(
     private fun ApprovalRequest.paymentAmount(): SigningAmount? = if (kind != ApprovalKind.PAYMENT) {
         null
     } else {
-        summary?.let { codec.parseObject(it) }?.let { SigningAmount((it["amount"] as String).toBigDecimal(), it["currency"] as String) }
+        summary?.let {
+            codec.parseObject(it)
+        }?.let { SigningAmount((it["amount"] as String).toBigDecimal(), it["currency"] as String) }
     }
 
     private fun ApprovalRequest.paymentCreditorIban(): String? =
@@ -625,7 +924,9 @@ class BusinessSigningService(
         fun refused(status: Int, code: String, message: String) = BusinessSigningException(status, code, message)
 
         fun sha256(text: String): String =
-            MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+            MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") {
+                "%02x".format(it)
+            }
 
         fun SigningAmount.toMap(): Map<String, Any?> = mapOf("amount" to amount.toPlainString(), "currency" to currency)
 
@@ -638,7 +939,8 @@ class BusinessSigningService(
             "mustIncludeGroupId" to mustIncludeGroupId,
         )
 
-        fun amountFromMap(map: Map<String, Any?>) = SigningAmount(map["amount"].toString().toBigDecimal(), map["currency"] as String)
+        fun amountFromMap(map: Map<String, Any?>) =
+            SigningAmount(map["amount"].toString().toBigDecimal(), map["currency"] as String)
 
         @Suppress("UNCHECKED_CAST")
         fun ruleFromMap(map: Map<String, Any?>) = SigningPolicyRule(

@@ -37,10 +37,15 @@ class BusinessSigningTest {
         val sole = SigningPolicy.derived(entity, listOf(RepresentationMandate(a, MandateAuthority.SOLE, 1)))
         val joint = SigningPolicy.derived(
             entity,
-            listOf(RepresentationMandate(a, MandateAuthority.SOLE, 1), RepresentationMandate(b, MandateAuthority.JOINT, 3)),
+            listOf(
+                RepresentationMandate(a, MandateAuthority.SOLE, 1),
+                RepresentationMandate(b, MandateAuthority.JOINT, 3),
+            ),
         )
         assertThat(sole.rules.single().requiredSignatures).isEqualTo(1)
-        assertThat(joint.rules.single().requiredSignatures).describedAs("a mixed register never yields fewer than its JOINT clause").isEqualTo(3)
+        assertThat(
+            joint.rules.single().requiredSignatures,
+        ).describedAs("a mixed register never yields fewer than its JOINT clause").isEqualTo(3)
         assertThat(joint.derivedFromRegister).isTrue()
         assertThat(joint.version).isZero()
     }
@@ -50,7 +55,12 @@ class BusinessSigningTest {
         val atLimit = SigningPolicyEvaluator.evaluatePayment(bands, setOf(a, b), groups, emptySet(), payment("50000"))
         val above = SigningPolicyEvaluator.evaluatePayment(bands, setOf(a, b), groups, emptySet(), payment("50000.01"))
         val eur = SigningPolicyEvaluator.evaluatePayment(
-            bands.copy(rules = listOf(SigningPolicyRule(maxAmount = czk("50000"), requiredSignatures = 1), SigningPolicyRule(currency = "CZK", requiredSignatures = 2))),
+            bands.copy(
+                rules = listOf(
+                    SigningPolicyRule(maxAmount = czk("50000"), requiredSignatures = 1),
+                    SigningPolicyRule(currency = "CZK", requiredSignatures = 2),
+                ),
+            ),
             setOf(a, b),
             emptyMap(),
             emptySet(),
@@ -66,9 +76,19 @@ class BusinessSigningTest {
     fun `a trusted payee needs one signature until the cap is exceeded`() {
         val capped = bands.copy(trustedPayeeCap = czk("200000"))
         val trusted = setOf("CZ6508000000192000145399")
-        assertThat(SigningPolicyEvaluator.evaluatePayment(capped, setOf(a, b), groups, trusted, payment("150000", "cz65 0800 0000 1920 0014 5399")).required)
+        assertThat(
+            SigningPolicyEvaluator.evaluatePayment(
+                capped,
+                setOf(a, b),
+                groups,
+                trusted,
+                payment("150000", "cz65 0800 0000 1920 0014 5399"),
+            ).required,
+        )
             .isEqualTo(1)
-        assertThat(SigningPolicyEvaluator.evaluatePayment(capped, setOf(a, b), groups, trusted, payment("200000.01")).trusted).isFalse()
+        assertThat(
+            SigningPolicyEvaluator.evaluatePayment(capped, setOf(a, b), groups, trusted, payment("200000.01")).trusted,
+        ).isFalse()
     }
 
     @Test
@@ -112,7 +132,9 @@ class BusinessSigningTest {
         val first = request().sign(a, UUID.randomUUID(), now)
         assertThat(first.status).isEqualTo(ApprovalStatus.PENDING)
         assertThatThrownBy { first.sign(a, UUID.randomUUID(), now) }
-            .isInstanceOfSatisfying(SignatureRefusedException::class.java) { assertThat(it.refusal).isEqualTo(SignatureRefusal.ALREADY_SIGNED) }
+            .isInstanceOfSatisfying(SignatureRefusedException::class.java) {
+                assertThat(it.refusal).isEqualTo(SignatureRefusal.ALREADY_SIGNED)
+            }
         assertThat(first.sign(b, UUID.randomUUID(), now).status).isEqualTo(ApprovalStatus.APPROVED)
     }
 
@@ -127,12 +149,18 @@ class BusinessSigningTest {
     fun `an outsider, an expired request and a closed request refuse signatures`() {
         val outsider = UUID.randomUUID()
         assertThatThrownBy { request().sign(outsider, UUID.randomUUID(), now) }
-            .isInstanceOfSatisfying(SignatureRefusedException::class.java) { assertThat(it.refusal).isEqualTo(SignatureRefusal.NOT_ELIGIBLE) }
+            .isInstanceOfSatisfying(SignatureRefusedException::class.java) {
+                assertThat(it.refusal).isEqualTo(SignatureRefusal.NOT_ELIGIBLE)
+            }
         assertThatThrownBy { request().sign(b, UUID.randomUUID(), now.plusSeconds(3600)) }
-            .isInstanceOfSatisfying(SignatureRefusedException::class.java) { assertThat(it.refusal).isEqualTo(SignatureRefusal.EXPIRED) }
+            .isInstanceOfSatisfying(SignatureRefusedException::class.java) {
+                assertThat(it.refusal).isEqualTo(SignatureRefusal.EXPIRED)
+            }
         val rejected = request().reject(b, "no", now)
         assertThatThrownBy { rejected.sign(c, UUID.randomUUID(), now) }
-            .isInstanceOfSatisfying(SignatureRefusedException::class.java) { assertThat(it.refusal).isEqualTo(SignatureRefusal.NOT_PENDING) }
+            .isInstanceOfSatisfying(SignatureRefusedException::class.java) {
+                assertThat(it.refusal).isEqualTo(SignatureRefusal.NOT_PENDING)
+            }
     }
 
     @Test

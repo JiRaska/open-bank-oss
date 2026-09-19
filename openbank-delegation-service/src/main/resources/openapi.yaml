@@ -712,8 +712,17 @@ paths:
           schema: { type: string, format: uuid }
         - name: initiatorPartyId
           in: query
-          required: true
+          required: false
+          description: Or in the body; one of the two is required.
           schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                initiatorPartyId: { type: string, format: uuid }
       responses:
         '202': { $ref: '#/components/responses/ApprovalAccepted' }
         '400': { description: initiatorPartyId missing }
@@ -1455,22 +1464,27 @@ components:
         scaChallengeId: { type: string, format: uuid }
     CreatePaymentApproval:
       type: object
-      required: [initiator, payment, payload]
+      required: [payload, initiatorSignature]
       properties:
-        initiator: { $ref: '#/components/schemas/ApprovalSignatureRequest' }
-        payment:
+        kind: { type: string, enum: [PAYMENT] }
+        initiatorSignature: { $ref: '#/components/schemas/ApprovalSignatureRequest' }
+        payload:
           type: object
-          required: [amount, currency, creditorIban, rail]
+          required: [rail, amount, currency, creditorIban, railRequest]
+          additionalProperties: true
+          description: The frozen document. Its canonical JSON SHA-256 is payloadSha256.
           properties:
-            amount: { type: number }
+            rail: { type: string }
+            amount: { type: string, description: Decimal; a JSON number is accepted too }
             currency: { type: string, minLength: 3, maxLength: 3 }
             creditorIban: { type: string }
             creditorName: { type: string, nullable: true }
-            rail: { type: string }
-        payload:
-          type: object
-          additionalProperties: true
-          description: The exact rail request body, minus secrets. Frozen.
+            reference: { type: string, nullable: true }
+            debtorAccountId: { type: string, nullable: true }
+            railRequest:
+              type: object
+              additionalProperties: true
+              description: The exact rail request body (minus secrets) the edge posts on release.
         expiresInSeconds:
           type: integer
           minimum: 1

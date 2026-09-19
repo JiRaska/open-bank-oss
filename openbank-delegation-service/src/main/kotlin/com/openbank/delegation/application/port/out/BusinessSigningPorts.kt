@@ -78,12 +78,9 @@ sealed interface AppliedChange {
     data class RemovePayee(val payeeId: UUID, val approvalId: UUID, val at: Instant) : AppliedChange
 }
 
-data class Transition(
-    val next: ApprovalRequest,
-    val events: List<DomainEvent>,
-    val change: AppliedChange? = null,
-)
+data class Transition(val next: ApprovalRequest, val events: List<DomainEvent>, val change: AppliedChange? = null)
 
+@Suppress("TooManyFunctions")
 interface BusinessSigningRepository {
     suspend fun findPolicy(entityPartyId: UUID): SigningPolicy?
 

@@ -81,6 +81,7 @@ class BusinessApprovalExpirySweepIT {
         }
     }
 
+    @Suppress("NestedBlockDepth")
     private fun status(id: UUID): String? = connect().use { c ->
         c.prepareStatement("select status from approval_requests where id = ?").use {
             it.setObject(1, id)
@@ -89,7 +90,9 @@ class BusinessApprovalExpirySweepIT {
     }
 
     private fun expiredEvents(id: UUID): Int = connect().use { c ->
-        c.prepareStatement("select count(*) from delegation_outbox where aggregate_id = ? and event_type = 'APPROVAL_EXPIRED'").use {
+        c.prepareStatement(
+            "select count(*) from delegation_outbox where aggregate_id = ? and event_type = 'APPROVAL_EXPIRED'",
+        ).use {
             it.setObject(1, id)
             it.executeQuery().use { rs ->
                 rs.next()
@@ -116,7 +119,9 @@ class BusinessApprovalExpirySweepIT {
         seed(unsigned, "AWAITING_INITIATOR", "now() - interval '1 minute'")
 
         assertThat(await { status(overdue) == "EXPIRED" && status(overdueApproved) == "EXPIRED" })
-            .describedAs("a scheduler-dispatched sweep must expire both; never doing so means it lost the Vert.x context")
+            .describedAs(
+                "a scheduler-dispatched sweep must expire both; never doing so means it lost the Vert.x context",
+            )
             .isTrue()
         assertThat(expiredEvents(overdue)).isEqualTo(1)
         assertThat(expiredEvents(overdueApproved)).isEqualTo(1)
@@ -125,7 +130,9 @@ class BusinessApprovalExpirySweepIT {
 
         Thread.sleep(SETTLE_MILLIS)
         assertThat(status(live)).isEqualTo("PENDING")
-        assertThat(status(released)).describedAs("a released payment already executed; expiry never rewrites it").isEqualTo("RELEASED")
+        assertThat(
+            status(released),
+        ).describedAs("a released payment already executed; expiry never rewrites it").isEqualTo("RELEASED")
         assertThat(expiredEvents(overdue)).describedAs("idempotent across ticks").isEqualTo(1)
     }
 

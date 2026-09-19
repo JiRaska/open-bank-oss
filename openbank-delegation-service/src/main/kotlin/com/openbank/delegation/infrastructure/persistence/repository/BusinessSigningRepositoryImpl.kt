@@ -39,7 +39,8 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
-@Suppress("TooManyFunctions")
+// MagicNumber: positional query parameters; one sealed `when` over the applied-change kinds.
+@Suppress("TooManyFunctions", "CyclomaticComplexMethod", "MagicNumber", "SpreadOperator", "LongMethod")
 class BusinessSigningRepositoryImpl(
     private val outbox: DelegationOutboxRepository,
     private val objectMapper: ObjectMapper,
@@ -51,7 +52,10 @@ class BusinessSigningRepositoryImpl(
 
     override suspend fun listGroups(entityPartyId: UUID): List<SignerGroup> = Panache.withSession {
         Panache.getSession().flatMap { s ->
-            s.createSelectionQuery("from SignerGroupEntity where entityPartyId = ?1 order by id", SignerGroupEntity::class.java)
+            s.createSelectionQuery(
+                "from SignerGroupEntity where entityPartyId = ?1 order by id",
+                SignerGroupEntity::class.java,
+            )
                 .setParameter(1, entityPartyId)
                 .resultList
         }
@@ -74,8 +78,8 @@ class BusinessSigningRepositoryImpl(
         Panache.withTransaction {
             Panache.getSession().flatMap { s ->
                 s.persist(request.toEntity())
-                    .chain { -> persistSignatures(s, request, emptySet()) }
-                    .chain { -> persistEvents(events) }
+                    .chain { _ -> persistSignatures(s, request, emptySet()) }
+                    .chain { _ -> persistEvents(events) }
             }
         }.awaitSuspending()
     }
@@ -94,7 +98,10 @@ class BusinessSigningRepositoryImpl(
 
     override suspend fun findBySignatureChallenge(scaChallengeId: UUID): ApprovalRequest? = Panache.withSession {
         Panache.getSession().flatMap { s ->
-            s.createSelectionQuery("from ApprovalSignatureEntity where scaChallengeId = ?1", ApprovalSignatureEntity::class.java)
+            s.createSelectionQuery(
+                "from ApprovalSignatureEntity where scaChallengeId = ?1",
+                ApprovalSignatureEntity::class.java,
+            )
                 .setParameter(1, scaChallengeId).singleResultOrNull.flatMap { sig ->
                     if (sig == null) {
                         Uni.createFrom().nullItem()
@@ -125,15 +132,16 @@ class BusinessSigningRepositoryImpl(
             }
         }.awaitSuspending()
 
-    override suspend fun listPending(entityPartyIds: Set<UUID>, limit: Int): List<ApprovalRequest> = Panache.withSession {
-        Panache.getSession().flatMap { s ->
-            s.createSelectionQuery(
-                "from ApprovalRequestEntity where entityPartyId in ?1 and status = ?2 order by expiresAt asc",
-                ApprovalRequestEntity::class.java,
-            ).setParameter(1, entityPartyIds).setParameter(2, ApprovalStatus.PENDING.name)
-                .setMaxResults(limit).resultList.flatMap { rows -> hydrate(s, rows) }
-        }
-    }.awaitSuspending()
+    override suspend fun listPending(entityPartyIds: Set<UUID>, limit: Int): List<ApprovalRequest> =
+        Panache.withSession {
+            Panache.getSession().flatMap { s ->
+                s.createSelectionQuery(
+                    "from ApprovalRequestEntity where entityPartyId in ?1 and status = ?2 order by expiresAt asc",
+                    ApprovalRequestEntity::class.java,
+                ).setParameter(1, entityPartyIds).setParameter(2, ApprovalStatus.PENDING.name)
+                    .setMaxResults(limit).resultList.flatMap { rows -> hydrate(s, rows) }
+            }
+        }.awaitSuspending()
 
     override suspend fun transition(
         entityPartyId: UUID,
@@ -146,7 +154,11 @@ class BusinessSigningRepositoryImpl(
             s.find(ApprovalRequestEntity::class.java, id, LockModeType.PESSIMISTIC_WRITE).flatMap { row ->
                 if (row == null || row.entityPartyId != entityPartyId) {
                     return@flatMap Uni.createFrom().failure(
-                        BusinessSigningService.refused(BusinessSigningService.NOT_FOUND, "APPROVAL_NOT_FOUND", "approval request $id not found"),
+                        BusinessSigningService.refused(
+                            BusinessSigningService.NOT_FOUND,
+                            "APPROVAL_NOT_FOUND",
+                            "approval request $id not found",
+                        ),
                     )
                 }
                 signatures(s, row.id).flatMap { sigs ->
@@ -154,13 +166,17 @@ class BusinessSigningRepositoryImpl(
                     // POLICY_CHANGE rounds completing at once, and a later lock UPGRADE on an
                     // already-loaded row is what Hibernate Reactive renders with the property name
                     // instead of the column (`select entityPartyId … for no key update`, 42703).
-                    s.find(SigningPolicyEntity::class.java, entityPartyId, LockModeType.PESSIMISTIC_WRITE).flatMap { policy ->
+                    s.find(
+                        SigningPolicyEntity::class.java,
+                        entityPartyId,
+                        LockModeType.PESSIMISTIC_WRITE,
+                    ).flatMap { policy ->
                         val before = row.toDomain(sigs)
                         val result = decide(before, TransitionContext(policy?.version ?: 0))
                         row.applyFrom(result.next)
                         persistSignatures(s, result.next, before.signerIds)
-                            .chain { -> applyChange(s, result.change) }
-                            .chain { -> persistEvents(result.events) }
+                            .chain { _ -> applyChange(s, result.change) }
+                            .chain { _ -> persistEvents(result.events) }
                             .replaceWith(result.next)
                     }
                 }
@@ -193,7 +209,14 @@ class BusinessSigningRepositoryImpl(
             s.createSelectionQuery(
                 "from ApprovalRequestEntity where status in ?1 and expiresAt <= ?2 order by expiresAt asc",
                 ApprovalRequestEntity::class.java,
-            ).setParameter(1, listOf(ApprovalStatus.AWAITING_INITIATOR.name, ApprovalStatus.PENDING.name, ApprovalStatus.APPROVED.name))
+            ).setParameter(
+                1,
+                listOf(
+                    ApprovalStatus.AWAITING_INITIATOR.name,
+                    ApprovalStatus.PENDING.name,
+                    ApprovalStatus.APPROVED.name,
+                ),
+            )
                 .setParameter(2, now)
                 .setMaxResults(limit).resultList.flatMap { rows -> hydrate(s, rows) }
         }
@@ -231,8 +254,11 @@ class BusinessSigningRepositoryImpl(
         return if (added.isEmpty()) Uni.createFrom().voidItem() else s.persistAll(*added.toTypedArray())
     }
 
-    private fun persistEvents(events: List<DomainEvent>): Uni<Void> = events.fold(Uni.createFrom().voidItem()) { acc, event ->
-        acc.chain { -> outbox.persistInTransaction(outboxMessage(event)) }
+    private fun persistEvents(events: List<DomainEvent>): Uni<Void> = events.fold(Uni.createFrom().voidItem()) {
+            acc,
+            event,
+        ->
+        acc.chain { _ -> outbox.persistInTransaction(outboxMessage(event)) }
     }
 
     private fun applyChange(s: Mutiny.Session, change: AppliedChange?): Uni<Void> = when (change) {
@@ -242,7 +268,12 @@ class BusinessSigningRepositoryImpl(
             .flatMap { existing ->
                 val row = existing ?: SigningPolicyEntity().also { it.entityPartyId = change.policy.entityPartyId }
                 row.version = change.policy.version
-                row.rulesJson = objectMapper.writeValueAsString(change.policy.rules.map { with(BusinessSigningService) { it.toMap() } })
+                row.rulesJson =
+                    objectMapper.writeValueAsString(
+                        change.policy.rules.map {
+                            with(BusinessSigningService) { it.toMap() }
+                        },
+                    )
                 row.trustedPayeeCapAmount = change.policy.trustedPayeeCap?.amount
                 row.trustedPayeeCapCurrency = change.policy.trustedPayeeCap?.currency
                 row.updatedAt = change.policy.updatedAt ?: Instant.now()
@@ -252,20 +283,24 @@ class BusinessSigningRepositoryImpl(
         is AppliedChange.UpsertGroup -> s.createSelectionQuery(
             "from SignerGroupEntity where entityPartyId = ?1 and id = ?2",
             SignerGroupEntity::class.java,
-        ).setParameter(1, change.group.entityPartyId).setParameter(2, change.group.id).singleResultOrNull.flatMap { existing ->
+        ).setParameter(
+            1,
+            change.group.entityPartyId,
+        ).setParameter(2, change.group.id).singleResultOrNull.flatMap { existing ->
             val row = existing ?: SignerGroupEntity().also {
                 it.rowId = UUID.randomUUID()
                 it.id = change.group.id
                 it.entityPartyId = change.group.entityPartyId
             }
             row.name = change.group.name
-            row.memberPartyIds = objectMapper.writeValueAsString(change.group.memberPartyIds.map { it.toString() }.sorted())
+            row.memberPartyIds =
+                objectMapper.writeValueAsString(change.group.memberPartyIds.map { it.toString() }.sorted())
             row.updatedAt = change.at
             row.updatedByApprovalId = change.approvalId
             val saved = if (existing == null) s.persist(row) else Uni.createFrom().voidItem()
             // Membership changes who may sign, so it moves the policy version: a POLICY_CHANGE
             // prepared before it is refused as SUPERSEDED instead of being applied blind.
-            saved.chain { ->
+            saved.chain { _ ->
                 s.find(SigningPolicyEntity::class.java, change.group.entityPartyId)
                     .invoke { policy -> policy?.let { it.version += 1 } }
                     .replaceWithVoid()
@@ -283,7 +318,11 @@ class BusinessSigningRepositoryImpl(
                 it.addedByApprovalId = change.payee.addedByApprovalId
             },
         )
-        is AppliedChange.RemovePayee -> s.find(TrustedPayeeEntity::class.java, change.payeeId, LockModeType.PESSIMISTIC_WRITE)
+        is AppliedChange.RemovePayee -> s.find(
+            TrustedPayeeEntity::class.java,
+            change.payeeId,
+            LockModeType.PESSIMISTIC_WRITE,
+        )
             .invoke { payee ->
                 if (payee != null && payee.status == TrustedPayeeStatus.ACTIVE.name) {
                     payee.status = TrustedPayeeStatus.REMOVED.name
@@ -368,8 +407,12 @@ class BusinessSigningRepositoryImpl(
     private fun SigningPolicyEntity.toDomain() = SigningPolicy(
         entityPartyId = entityPartyId,
         version = version,
-        rules = (objectMapper.readValue(rulesJson, List::class.java) as List<Map<String, Any?>>).map { BusinessSigningService.ruleFromMap(it) },
-        trustedPayeeCap = trustedPayeeCapAmount?.let { SigningAmount(it.stripTrailingZeros(), trustedPayeeCapCurrency!!) },
+        rules = (objectMapper.readValue(rulesJson, List::class.java) as List<Map<String, Any?>>).map {
+            BusinessSigningService.ruleFromMap(it)
+        },
+        trustedPayeeCap = trustedPayeeCapAmount?.let {
+            SigningAmount(it.stripTrailingZeros(), trustedPayeeCapCurrency!!)
+        },
         updatedAt = updatedAt,
         updatedByApprovalId = updatedByApprovalId,
     )

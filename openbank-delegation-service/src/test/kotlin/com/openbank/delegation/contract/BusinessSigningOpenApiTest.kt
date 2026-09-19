@@ -54,7 +54,8 @@ class BusinessSigningOpenApiTest {
         it.startsWith("/api/v1/entities/") || it == "/api/v1/parties/{humanId}/approval-requests/pending"
     }.flatMap { (path, ops) -> ops.keys.map { "$it $path" } }.toSet()
 
-    private fun properties(schema: String): Set<String> = (schemas.getValue(schema)["properties"] as Map<String, Any?>).keys
+    private fun properties(schema: String): Set<String> =
+        (schemas.getValue(schema)["properties"] as Map<String, Any?>).keys
 
     private fun fields(type: KClass<*>): Set<String> = type.primaryConstructor!!.parameters.map { it.name!! }.toSet()
 
@@ -77,13 +78,25 @@ class BusinessSigningOpenApiTest {
 
     @Test
     fun `status and kind enums are the domain's`() {
-        assertThat(schemas.getValue("ApprovalStatus")["enum"] as List<String>).containsExactlyElementsOf(ApprovalStatus.entries.map { it.name })
-        assertThat(schemas.getValue("ApprovalKind")["enum"] as List<String>).containsExactlyElementsOf(ApprovalKind.entries.map { it.name })
+        assertThat(schemas.getValue("ApprovalStatus")["enum"] as List<String>).containsExactlyElementsOf(
+            ApprovalStatus.entries.map {
+                it.name
+            },
+        )
+        assertThat(schemas.getValue("ApprovalKind")["enum"] as List<String>).containsExactlyElementsOf(
+            ApprovalKind.entries.map {
+                it.name
+            },
+        )
     }
 
     @Test
     fun `the release claim is documented as single-use`() {
-        val claim = (paths.getValue("/api/v1/entities/{entityId}/approval-requests/{approvalId}/release-claim")["post"] as Map<String, Any?>)
+        val claim = (
+            paths.getValue(
+                "/api/v1/entities/{entityId}/approval-requests/{approvalId}/release-claim",
+            )["post"] as Map<String, Any?>
+            )
         assertThat((claim["responses"] as Map<String, Any?>).keys).contains("200", "409")
         assertThat(claim["description"] as String).contains("Exactly one caller")
     }
