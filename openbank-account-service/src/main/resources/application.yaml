@@ -294,3 +294,22 @@ authz:
   # runbook is reviewed, not bundled with the wiring itself.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # SavingsProposalService's SCA approval calls sca-service. Production uses a named TLS bucket
+    # over sca-service's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
+    # speak plain HTTP, so this stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      sca-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sca-tls/tls.crt
+              key: /mnt/sca-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sca-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      sca-service:
+        tls-configuration-name: sca-authority

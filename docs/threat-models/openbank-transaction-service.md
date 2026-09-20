@@ -515,18 +515,25 @@ every URL and the upload path is unaffected.
   `service-account-openbank-services`. Before this, interest's gitops manifest set no
   `TRANSACTION_SERVICE_URL`, so it dialled `http://localhost:8102` inside its own pod and the
   withholding-tax remittance leg has never reached this service.
-  **Authorization is NOT resolved by this change, and that is measured, not assumed.**
-  `transaction.create` is admitted here only by base `rest.rego`'s `matrix-allows`, which requires
-  `ROLE_OPERATOR`. Evaluating the committed `transaction-opa-bundle` ConfigMap with `opa eval`
-  gives, for `service-account-openbank-services`: `ROLE_OPERATOR` → `allow=true`
+  **Authorization is NOT resolved by this change, and OPA is not the gate that decides it.**
+  `TransactionResource.initiateTransaction` carries `@RolesAllowed(Roles.OPERATOR)` **as well as**
+  `@Authorize(transaction.create)`, and RBAC is the OUTER gate: `AuthorizeInterceptor` is a CDI
+  interceptor at `@Priority(Interceptor.Priority.PLATFORM_AFTER + 100)` while Quarkus's
+  `@RolesAllowed` check runs at platform-before priority. So a principal RBAC rejects never reaches
+  OPA, and no `*_rest_ext.rego` rule could admit one — such a rule would be a grant that can never
+  fire. `LedgerResource.postJournal` carries the identical `@RolesAllowed`, so ledger is in the same
+  position, not a safer one.
+  At the inner layer, measured (not read) against the committed `transaction-opa-bundle` ConfigMap
+  with `opa eval`, for `service-account-openbank-services`: `ROLE_OPERATOR` → `allow=true`
   (`reason: matrix-allows`), `ROLE_API` → `allow=false`. The deployed realm template
   (`openbank-infra/gitops/components/keycloak/realm-template.json`) grants that account `ROLE_API`
   **only** — the docker and CI realms also grant `ROLE_OPERATOR` — and this service runs
-  `AUTHZ_ENFORCE=true`. So if the live realm matches the template, this edge answers 403 rather
-  than booking the remittance, and the same holds for every other M2M `transaction.create` caller.
-  The live realm's role set could not be read without administrator credentials, and the deployed
-  pod's log carries no `transaction.create` traffic at all since its 2026-09-19 start, so the
-  deployed state neither confirms nor refutes it. **Risk class:** transport only — this change adds
+  `AUTHZ_ENFORCE=true`.
+  The live role set is **unresolved**: the `keycloak-realm-drift` job reports template/live parity
+  but its own `doesNotVerify` field excludes client-role assignments, which can carry
+  `ROLE_OPERATOR` into the token; reading the token needs the client secret, not handled here; and
+  the deployed pod's log carries no `transaction.create` traffic at all since its 2026-09-19 start,
+  so the cluster neither confirms nor refutes it. Tracked with the affected-caller list in #10404. **Risk class:** transport only — this change adds
   an authenticated path where there was an unreachable one; it grants no action, adds no principal
   and widens no role, and the authorization question above is left open for a human decision rather
   than closed by widening a money-path grant. Rollback: drop the listener env block and

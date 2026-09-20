@@ -195,11 +195,17 @@ money-path service, not adjacent.
   remittance leg, whose `TransactionServiceClient` previously dialled `http://localhost:8102`
   inside this pod — `POST /api/v1/transactions` was a connection refused, retried three times and
   dead-lettered, so a due tax remittance never moved money.
-  **It does not close the authorization half.** `transaction.create` is admitted on
-  transaction-service only via `matrix-allows`, which needs `ROLE_OPERATOR`; measured against the
-  committed `transaction-opa-bundle`, the shared `service-account-openbank-services` is allowed
-  with `ROLE_OPERATOR` and denied with `ROLE_API`, and the deployed realm template grants it
-  `ROLE_API` only. See the matching entry in `docs/threat-models/openbank-transaction-service.md`.
+  **It does not close the authorization half, and OPA is not the gate that decides it.**
+  `POST /api/v1/transactions` carries `@RolesAllowed(Roles.OPERATOR)` as well as
+  `@Authorize(transaction.create)`, and RBAC runs first — `AuthorizeInterceptor` is a CDI
+  interceptor at `@Priority(PLATFORM_AFTER + 100)` while Quarkus's `@RolesAllowed` check runs at
+  platform-before priority — so no rego rule can admit a principal RBAC has already rejected. At
+  the inner layer, measured against the committed `transaction-opa-bundle`, the shared
+  `service-account-openbank-services` is allowed `transaction.create` with `ROLE_OPERATOR` and
+  denied with `ROLE_API`; the deployed realm template grants it `ROLE_API` only, but the
+  `keycloak-realm-drift` job's parity finding covers realm roles and explicitly not client-role
+  assignments, so the live role set is unresolved. Tracked in #10404. See the matching entry in
+  `docs/threat-models/openbank-transaction-service.md`.
   **Risk class:** transport only — no new action, principal or role for this service; the new
   material is the same private-CA client key already mounted for ledger-service, scoped read-only.
   Rollback: drop `TRANSACTION_SERVICE_URL`, the second mount and the `transaction-authority` bucket.
