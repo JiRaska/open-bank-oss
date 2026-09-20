@@ -131,18 +131,6 @@ spec:
             # shared M2M client via operator-read-any, and no M2M writer exists.
             - name: AUTHZ_ENFORCE
               value: "true"
-            # TEMPORARY — SANDBOX MEASUREMENT FOR #10404, REVERTED BY THE FOLLOW-UP PR.
-            # The monthly capitalization cron is `0 0 2 1 * ?` (02:00 on the 1st), so the only
-            # money-path M2M write this service makes is 11 days away and #10404 cannot be settled
-            # by observation. This fires it every 5 minutes instead, so the real flow runs and the
-            # authorization outcome can be read from the logs rather than inferred.
-            # Safe to repeat: capitalizeAll is idempotent per (account, period) — the scheduler's
-            # own KDoc relies on that for its retry story — and `concurrentExecution = SKIP` stops
-            # a slow run overlapping the next tick. Bounded: 7 distinct (account, product) pairs
-            # are pending today, so each tick attempts at most 7 POST /api/v1/journals.
-            # Remove this env var to restore the application.yaml default.
-            - name: OPENBANK_INTEREST_CAPITALIZATION_CRON
-              value: "0 */5 * * * ?"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}
