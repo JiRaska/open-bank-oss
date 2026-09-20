@@ -373,3 +373,12 @@ simply stops existing).
   own container spec, ports, identity, privilege, NetworkPolicy and rest-clients are byte-identical
   to `main`. **Risk class:** none — no surface, principal, action or data flow of this service is
   touched. Nothing to roll back here.
+
+- **2026-09-20** — **New outbound edge: document-service over private-CA mTLS (8443).** `DocumentPreviewAdapter`
+  now reaches `document-service.documents.svc:8443` with the client certificate `sepa-payment-internal-tls`
+  (`%prod` TLS bucket `document-authority`, TLSv1.3). Previously `DOCUMENT_SERVICE_URL` was unset in
+  gitops and the client dialled `localhost:8143` inside this pod, so the render path never left the
+  process (#10383). No new inbound edge, no new principal, no money mutation: the call is a read of
+  template metadata plus a preview render. **Risk class:** confidentiality of the rendered payment
+  confirmation in transit, now protected by mutual TLS rather than plaintext. Rollback: drop
+  `DOCUMENT_SERVICE_URL` and the `document-tls` volume.

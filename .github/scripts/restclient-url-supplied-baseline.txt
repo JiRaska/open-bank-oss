@@ -2,15 +2,11 @@
 # Each line: a deployed service whose rest-client URL falls back to localhost and whose gitops
 # manifest does not set the env var. NOT triaged: each may be a live outage or a dead client.
 # Grade each against the deployed pod before calling it benign; delete the line when fixed.
-openbank-account-service: quarkus.rest-client.sca-service.url falls back to localhost and gitops never sets SCA_SERVICE_URL
 openbank-agent-service: quarkus.rest-client.communication-service.url falls back to localhost and gitops never sets COMMUNICATION_SERVICE_URL
 openbank-copilot-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
 openbank-copilot-service: quarkus.rest-client.communication-service.url falls back to localhost and gitops never sets COMMUNICATION_SERVICE_URL
 openbank-copilot-service: quarkus.rest-client.consent-service.url falls back to localhost and gitops never sets CONSENT_SERVICE_URL
-openbank-domestic-payment: quarkus.rest-client.document-service.url falls back to localhost and gitops never sets DOCUMENT_SERVICE_URL
 openbank-interest-service: quarkus.rest-client.transaction-service.url falls back to localhost and gitops never sets TRANSACTION_SERVICE_URL
 openbank-lending-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
 openbank-lending-service: quarkus.rest-client.consent-service.url falls back to localhost and gitops never sets CONSENT_SERVICE_URL
-openbank-sepa-payment: quarkus.rest-client.document-service.url falls back to localhost and gitops never sets DOCUMENT_SERVICE_URL
-openbank-statement-service: quarkus.rest-client.document-api.url falls back to localhost and gitops never sets DOCUMENT_SERVICE_URL
 openbank-transaction-service: quarkus.rest-client.fx-service.url falls back to localhost and gitops never sets FX_SERVICE_URL
