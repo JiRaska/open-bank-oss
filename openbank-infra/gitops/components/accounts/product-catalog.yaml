@@ -84,9 +84,28 @@ spec:
           ports:
             - name: http
               containerPort: 8104
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: interest-service's
+            # CatalogInterestSnapshotScheduler and lending-service's RestCatalogLoanProfilePort,
+            # #10383). HTTP/8104 stays for existing callers and for the KEDA HTTP interceptor, which
+            # fronts only /api/v1/* on 8104; the v2 surface these two callers use is not routed
+            # through it. Same shape as account-service's and document-service's 8443 listeners.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -135,6 +154,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           resources:
@@ -145,6 +167,10 @@ spec:
               cpu: "1"
               memory: 512Mi
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: product-catalog-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
 ---
@@ -162,3 +188,6 @@ spec:
     - name: http
       port: 8104
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

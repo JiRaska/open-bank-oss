@@ -116,6 +116,14 @@ spec:
             # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
             - name: ACCOUNT_SERVICE_URL
               value: "http://account-service.accounts.svc:8100"
+            # CatalogInterestProfileSynchronizer, driven by CatalogInterestSnapshotScheduler,
+            # reads product-catalog on every tick. Without this the app default (localhost:8104)
+            # was dialled inside this pod and every sync failed (#10383). product-catalog's
+            # private-CA mTLS listener (8443, client auth REQUIRED); client cert
+            # interest-service-internal-tls, %prod TLS bucket catalog-authority. ASVS V9.1 forbids
+            # a new plaintext http:// value here.
+            - name: PRODUCT_CATALOG_URL
+              value: https://product-catalog.accounts.svc:8443
             # OPA sidecar enforced (ADR-0034 Phase 5, issue #3679). Advisory since the Phase-5
             # sidecar bootstrap (issue #938); coverage verified before the flip: all five
             # @Authorize actions (interest.list/read/create/delete/trigger) are granted to
@@ -131,6 +139,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           volumeMounts:
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
+              readOnly: true
             - name: ledger-tls
               mountPath: /mnt/ledger-tls
               readOnly: true
@@ -211,6 +222,13 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
+        # One client certificate, mounted twice: interest-internal-tls (#10397) identifies
+        # interest-service to BOTH upstream listeners, which trust the one private CA. Each %prod
+        # TLS bucket names its own path, so the mounts stay readable next to the config.
+        - name: catalog-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
         - name: ledger-tls
           secret:
             secretName: interest-internal-tls

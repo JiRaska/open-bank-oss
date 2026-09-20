@@ -117,6 +117,13 @@ spec:
             # Ledger service in-cluster URL (default resolves only localhost).
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
+            # RestCatalogLoanProfilePort reads product-catalog for the loan product profile.
+            # Without this the app default (localhost:8104) was dialled inside this pod and every
+            # read failed (#10383). product-catalog's private-CA mTLS listener (8443, client auth
+            # REQUIRED); client cert lending-internal-tls, %prod TLS bucket catalog-authority.
+            # ASVS V9.1 forbids a new plaintext http:// value here.
+            - name: PRODUCT_CATALOG_URL
+              value: https://product-catalog.accounts.svc:8443
             # Same build-time caveat as LENDING_LEDGER_BACKEND above (#6057): this never
             # activated AccountServiceClient + BorrowerCreditClient (#3931), because
             # lending.borrower-credit.backend was absent from application.yaml entirely and the
@@ -125,6 +132,14 @@ spec:
               value: rest
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # RestCreditOffersConsentAdapter (CreditOfferEligibilityService) reads consent-service.
+            # Without this the app default (localhost:8107) was dialled inside this pod and every
+            # eligibility check failed (#10383). consent-service's private-CA mTLS listener (8443,
+            # client auth REQUIRED); client cert lending-internal-tls, %prod bucket
+            # consent-authority. consent.validate is already granted to the shared service account
+            # by consent_rest_ext.rego's service-consent-m2m rule.
+            - name: CONSENT_SERVICE_URL
+              value: https://consent-service.consent.svc:8443
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean
@@ -242,6 +257,12 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: consent-tls
+              mountPath: /mnt/consent-tls
+              readOnly: true
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -332,6 +353,16 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        # Same client certificate as catalog-tls above (lending-internal-tls); both upstream
+        # listeners trust the one private CA, mounted twice so each %prod TLS bucket names its own path.
+        - name: consent-tls
+          secret:
+            secretName: lending-internal-tls
+            optional: false
+        - name: catalog-tls
+          secret:
+            secretName: lending-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

@@ -53,7 +53,7 @@ that is balance-service).
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-customer inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): `openbank.accounts.created` tagged only by `product_type` (closed `AccountType` enum) + `currency`; `openbank.accounts.closed` adds a `reason` **normalized to a closed set** (`customer_request`/`regulatory`/`fraud`/`inactivity`/`unspecified`/`other`) — the operator-supplied free-text reason never becomes a label; outbox-backlog gauge tagged only by `service`. Never an account id, IBAN, party id, or balance. Counters increment only after the commit + publish. `/q/metrics` is cluster-internal |
 | **I**nfo disclosure | Authorization-id enumeration via the revoke route: `DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}` distinguishing "this id exists on another account" from "this id does not exist" | `AuthorizationNotFoundExceptionMapper` and `AuthorizationNotOnAccountExceptionMapper` both answer 404 with a byte-identical `AUTHORIZATION_NOT_FOUND` body, so an operator scoped to one account gets no existence oracle over ids on accounts they do not hold. The distinction is kept in a WARN log, not on the wire. Same posture as the `X-Customer-Party-Id` row above. |
-| **S**poofing / **E**oP | Forged or replayed `PARTY_CREATED` for a COMPANY / SOLE_TRADER causes an unreviewed automatic business account | Only party-service publishes `openbank.party.events` (Kafka mTLS + KafkaUser ACLs); opening is **flag-gated default-OFF** (`openbank.account.onboarding.open-business-accounts`, sandbox only) so production keeps operator opening; the account opens `PENDING_ACTIVATION` (no debit/credit) and activates only when party-service's KYC+AML two-key gate flips the party ACTIVE; idempotent per party (`onboarding-business-account-<partyId>` + existing-CURRENT check) so a replay opens nothing; TRUST and unknown types are never opened; no savings account and no welcome bonus for business accounts |
+| **S**poofing / **E**oP | Forged or replayed `PARTY_CREATED`, or a party-ACTIVE event (`KYC_STATUS_CHANGED` / `PARTY_UPDATED`), for a COMPANY / SOLE_TRADER causes an unreviewed automatic business account | Only party-service publishes `openbank.party.events` (Kafka mTLS + KafkaUser ACLs); opening is **flag-gated default-OFF** (`openbank.account.onboarding.open-business-accounts`, sandbox only) so production keeps operator opening; the account opens `PENDING_ACTIVATION` (no debit/credit) and activates only when party-service's KYC+AML two-key gate flips the party ACTIVE; idempotent per party (`onboarding-business-account-<partyId>` + existing-CURRENT check) so a replay opens nothing; TRUST and unknown types are never opened; no savings account and no welcome bonus for business accounts |
 | **D**oS | Mass open/close churn | Gateway rate limits; outbox decouples event load |
 | **E**oP | Viewer escalates to freeze/close | Distinct roles; OPA enforce; deny-by-default |
 | **S**poofing / **E**oP (M2M) | Compromise of the `oidc-client` secret → mint a ROLE_OPERATOR token → inject arbitrary transactions via transaction-service `POST /api/v1/transactions` | Secret held only in a K8s Secret (ExternalSecret from Vault), never in image/git; rotatable; least-privilege client (`openbank-services`); welcome-bonus call is **flag-gated default-OFF** and **sandbox-only**. Residual: transaction-service does not currently distinguish caller identity beyond the role — accepted residual risk in sandbox (see §5) |
@@ -687,6 +687,32 @@ decision use first; the additive projection table may remain until its consumer 
   retail. A business account never receives the retail welcome bonus. **Risk class:** integrity of
   account opening (a forged party event could open an inert account); no money mutation, no new
   principal. Rollback: set the flag false; already-opened accounts are ordinary accounts.
+- **2026-09-19** — **The business current account is also opened on party ACTIVATION**, no new
+  route, caller, edge or privilege (#10372). A COMPANY / SOLE_TRADER party that reaches `ACTIVE`
+  (a `KYC_STATUS_CHANGED` / `PARTY_UPDATED` with `status: ACTIVE` on the existing `party-events-in`
+  channel) with no CURRENT account now gets the same business account `PARTY_CREATED` would have
+  opened: same product, currency, `PENDING_ACTIVATION` start, and the **same idempotency key**
+  `onboarding-business-account-<partyId>` plus the existing-CURRENT check, so the two paths and any
+  replay can never open two. The existing activation pass then activates it. This self-heals business
+  parties created before account-service opened business accounts, which otherwise needed an operator
+  to hand-call APIs. **Who can trigger it:** only party-service, and only on the two-key gate result;
+  still behind `openbank.account.onboarding.open-business-accounts` (**default false**, sandbox only).
+  INDIVIDUAL and TRUST parties are untouched by this path. **Risk class:** integrity of account
+  opening (a forged ACTIVE event for a business party could open and activate an account; the
+  mitigation is unchanged — only party-service publishes the topic over mTLS + KafkaUser ACLs); no
+  money mutation, no welcome bonus, no new principal. Rollback: set the flag false.
+- **2026-09-19** — **Business-account catch-up (new outbound read: account-service → party-service)**
+  (#10372). `BusinessAccountCatchUp` (suspend `@Scheduled`, ~30 s after start then every 15 min) pages
+  party-service's existing `GET /api/v1/parties?status=ACTIVE` (`ROLE_API`, OIDC client-credentials) over
+  party-service's private-CA mTLS listener (8443, client cert `account-internal-tls`), and for every ACTIVE
+  COMPANY / SOLE_TRADER with no CURRENT account opens and activates the business account through the same
+  `BusinessOnboardingAccount` the event path uses (same idempotency key, so a race or replay yields one).
+  It makes the outcome independent of deploy order: a party that became ACTIVE before this service could
+  react gets no second event. **Who can trigger it:** nobody over HTTP; its input is party-service's
+  register, read-only. Behind BOTH `open-business-accounts` and `business-catch-up.enabled` (default
+  false, sandbox on). Only id, type, status and legal name are bound from the response. **Risk class:**
+  integrity of account opening (a compromised party-service could list a forged ACTIVE business party —
+  the same trust already placed in its events); no money mutation, no bonus. Rollback: set the flag false.
 - **2026-09-19** — **New inbound edge: aml-service → account-service over a new private-CA mTLS listener**
   (8443, client auth REQUIRED, TLSv1.3; server cert `account-service-internal-tls`), the same shape as
   party-service. HTTP/8100 stays for existing callers. The only caller on 8443 is aml-service
@@ -717,3 +743,14 @@ decision use first; the additive projection table may remain until its consumer 
   authenticated and the caller now proves its identity where before it proved nothing. Rollback:
   drop `SCA_SERVICE_URL` and the `sca-tls` volume; the filter registration is inert while the
   request cannot leave the pod.
+
+- **2026-09-20** — **Namespace note, not a change to this service.** `product-catalog` shares the
+  `accounts` namespace and component directory, and it gains a parallel private-CA mTLS listener on
+  8443 (server cert `product-catalog-internal-tls`, client auth REQUIRED, TLSv1.3) for
+  interest-service and lending-service (#10383). The regenerated
+  `accounts/network-policies.yaml` therefore admits the `interest` and `lending` namespaces to
+  **product-catalog's own pod selector on 8443** — account-service's own ingress allow-list, ports
+  and workload are untouched, and no new principal, action or data path reaches account-service.
+  **Risk class:** none for this service; the confidentiality and integrity considerations belong to
+  product-catalog's catalog reads. Rollback: drop product-catalog's listener env and the two caller
+  env vars.

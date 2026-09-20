@@ -140,3 +140,19 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   caller authenticates as the shared `openbank-services` M2M client like every other consumer of
   this endpoint. Rollback: revert the network-policy edge; the code-level call fails closed
   (`ContactPolicyGate`'s D5 fail-closed-on-port-failure) if it cannot reach consent-service.
+
+- **2026-09-20** — **New inbound edge: a parallel private-CA mTLS listener (8443, client auth REQUIRED,
+  TLSv1.3; server cert `consent-service-internal-tls`), the same shape as account-service's and
+  document-service's.** HTTP/8106 stays for existing callers (notification, psd2, customer-edge,
+  campaign, engagement, agent). The callers on 8443 are lending-service
+  (`RestCreditOffersConsentAdapter`, behind `CreditOfferEligibilityService`) and copilot-service
+  (`CreditAiLevelResolver`, behind `CreditAffordabilityTool`), both reading
+  `GET /api/v1/consents/party/{partyId}/grantee/{granteeId}/active` as the shared
+  `service-account-openbank-services`. That method is
+  `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_API")` + `@Authorize(action = "consent.validate")`,
+  and `consent_rest_ext.rego`'s `service-consent-m2m` rule already admits that principal for
+  `consent.validate` — no policy change. Before this neither caller had a `CONSENT_SERVICE_URL` in
+  gitops, so both dialled `localhost:8107` and the edge existed in code but never reached this
+  service (#10383). **Risk class:** confidentiality of consent state (whether a party has granted a
+  scope to a grantee) to a lending and an AI service; read-only, no new action, no mutation.
+  Rollback: drop the listener env and the two caller env vars.

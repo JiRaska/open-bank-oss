@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.0...account-service-v0.30.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **sca:** add an mTLS listener and give account-service's SCA approval a URL and a bearer ([#10402](https://github.com/JiRaska/open-bank-oss/issues/10402)) ([99bf2e3](https://github.com/JiRaska/open-bank-oss/commit/99bf2e3acb7fde204fae95e322546cdea6031b44)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.29.0...account-service-v0.30.0) (2026-09-17)
 
 
