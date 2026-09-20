@@ -697,6 +697,27 @@ decision use first; the additive projection table may remain until its consumer 
   reads (party id of an account) to a compliance service; no mutation, no new action. Rollback: drop
   the listener env and the aml env var.
 
+- **2026-09-20** — **New outbound edge: sca-service over private-CA mTLS (8443), plus a bearer this
+  client never sent.** `SavingsProposalService`'s SCA approval reaches
+  `sca-service.sca.svc:8443` (`GET /api/v1/sca/challenges/{id}`, `POST /{id}/consume`) with the new
+  CLIENT certificate `account-service-client-tls` (`%prod` TLS bucket `sca-authority`, TLSv1.3) —
+  distinct from `account-service-internal-tls`, which is this service's own SERVER certificate for
+  its 8443 listener (#10380). Previously `SCA_SERVICE_URL` was unset in gitops and the client
+  dialled `localhost:8110`, so the approval never left the pod (#10383). **Second defect fixed in
+  the same change:** `ScaServiceRestClient` registered only `SyntheticTaintClientFilter` and not
+  `OidcClientRequestReactiveFilter`, so it carried **no Authorization header** — unlike all three
+  sibling clients in the same package. Both upstream methods are
+  `@RolesAllowed("ROLE_API","ROLE_OPERATOR","ROLE_ADMIN")` + `@Authorize`, so supplying only the URL
+  would have converted a connection refused into a 401. The filter is now registered, and
+  `sca_rest_ext.rego`'s `service-sca-shared-client-m2m` rule already admits
+  `service-account-openbank-services` for `scaChallenge.read` and `scaChallenge.consume`, which
+  `rules.yaml` `four_eyes.exemptions` exempts for that principal — no policy change.
+  **Risk class:** integrity of savings-withdrawal SCA approval (a challenge consume is a
+  state-changing call on the SCA aggregate, not a money movement); the transport is now mutually
+  authenticated and the caller now proves its identity where before it proved nothing. Rollback:
+  drop `SCA_SERVICE_URL` and the `sca-tls` volume; the filter registration is inert while the
+  request cannot leave the pod.
+
 - **2026-09-20** — **Namespace note, not a change to this service.** `product-catalog` shares the
   `accounts` namespace and component directory, and it gains a parallel private-CA mTLS listener on
   8443 (server cert `product-catalog-internal-tls`, client auth REQUIRED, TLSv1.3) for
