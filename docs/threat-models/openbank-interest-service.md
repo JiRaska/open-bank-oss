@@ -185,3 +185,13 @@ money-path service, not adjacent.
   role, no new data class. The separate `TRANSACTION_SERVICE_URL` gap (the withholding-tax
   remittance leg) is NOT addressed here — it is its own change against transaction-service's own
   listener. Rollback: drop the env var and the `%prod` bucket.
+
+- **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `CatalogInterestProfileSynchronizer`
+  now reaches `product-catalog.accounts.svc:8443` with the client certificate `interest-internal-tls` (the same client
+  certificate #10397 introduced, mounted a second time at `/mnt/catalog-tls`)
+  (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in
+  gitops and the client dialled `localhost:8104` inside this pod, so the scheduled catalog snapshot never reached the catalog (#10383).
+  The calls are reads of the `/api/v2` catalog surface only; no mutation, no new principal, no money
+  movement. **Risk class:** confidentiality and integrity of product/offering data in transit, now
+  protected by mutual TLS rather than plaintext. Rollback: drop `PRODUCT_CATALOG_URL` and the
+  `catalog-tls` volume.
