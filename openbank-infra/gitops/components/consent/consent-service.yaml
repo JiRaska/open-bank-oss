@@ -61,8 +61,13 @@ spec:
               value: "8443"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
               value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time value baked into this service's application.yaml
+            # (quarkus.http.ssl.client-auth). That property is BUILD TIME fixed, so this env can
+            # never set it — Quarkus ignores a differing runtime value and warns. It is kept, in
+            # the same spelling, so the manifest states the listener's posture and cannot silently
+            # disagree with the image.
             - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
-              value: REQUIRED
+              value: required
             - name: QUARKUS_HTTP_SSL_PROTOCOLS
               value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL

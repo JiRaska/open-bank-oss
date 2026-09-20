@@ -754,3 +754,19 @@ decision use first; the additive projection table may remain until its consumer 
   **Risk class:** none for this service; the confidentiality and integrity considerations belong to
   product-catalog's catalog reads. Rollback: drop product-catalog's listener env and the two caller
   env vars.
+
+- **2026-09-20** — **Correction, and the fix: the 8443 listener's client-certificate validation was
+  declared but not in effect.** Earlier entries describe this listener as "client auth REQUIRED".
+  That posture was expressed only as the container env `QUARKUS_HTTP_SSL_CLIENT_AUTH`, and
+  `quarkus.http.ssl.client-auth` is a **build-time** property: Quarkus fixes it into the image at
+  build time and ignores a differing runtime value (it says so in the boot log). The deployed
+  listener therefore ran with the default, `none` — server-authenticated TLS, encrypted in transit,
+  but the caller's certificate was not demanded or validated. The transport-confidentiality claims in
+  the earlier entries hold; the caller-authentication half did not, and those entries should be read
+  with this one. Completed here by setting `quarkus.http.ssl.client-auth: required` in this service's
+  `application.yaml`, the file the image is built from, so the value is baked rather than injected;
+  the gitops env is kept in the same spelling so manifest and image cannot disagree. Every declared
+  caller of this listener already mounts a private-CA client certificate and names it on its
+  rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
+  restored to what the design always stated. Rollback: revert the property (and expect the listener
+  to return to server-only TLS).
