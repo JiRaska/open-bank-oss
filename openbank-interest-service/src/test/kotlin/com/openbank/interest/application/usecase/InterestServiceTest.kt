@@ -90,6 +90,9 @@ class InterestServiceTest {
      */
     private fun stubNoClaimOutstanding() {
         every { accrualRepo.findClaimedForCapitalization(any(), any()) } returns Uni.createFrom().item(emptyList())
+        // capitalizeAll now sweeps for claims a previous attempt stranded before doing new work
+        // (#10404). Nothing outstanding is the default for these tests.
+        every { accrualRepo.findOutstandingCapitalizationClaims() } returns Uni.createFrom().item(emptyList())
         every {
             accrualRepo.claimForCapitalization(
                 capture(claimIdsSlot),
@@ -449,6 +452,7 @@ class InterestServiceTest {
     @Test
     fun `capitalizeAll returns 0 and does nothing when no pair is pending`() {
         val toDate = LocalDate.of(2026, 1, 20)
+        every { accrualRepo.findOutstandingCapitalizationClaims() } returns Uni.createFrom().item(emptyList())
         every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
             Uni.createFrom().item(emptyList())
 

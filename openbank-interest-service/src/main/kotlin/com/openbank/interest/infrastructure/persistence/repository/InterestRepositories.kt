@@ -195,6 +195,18 @@ class InterestAccrualRepositoryImpl @Inject constructor(
             ).setParameter("d", toDate).resultList
         }.map { rows -> rows.map { (it[0] as UUID) to (it[1] as String) } }
 
+    // Every outstanding claim, newest period last so a pair holding claims for several periods is
+    // recovered oldest-first — the order the interrupted attempts took them in.
+    @WithSession override fun findOutstandingCapitalizationClaims(): Uni<List<Triple<UUID, String, LocalDate>>> =
+        sf.withSession { s ->
+            s.createQuery(
+                "SELECT DISTINCT a.accountId, a.productId, a.claimedPeriodTo FROM InterestAccrualEntity a " +
+                    "WHERE a.status = 'CAPITALIZING' AND a.claimedPeriodTo IS NOT NULL " +
+                    "ORDER BY a.claimedPeriodTo",
+                Array<Any>::class.java,
+            ).resultList
+        }.map { rows -> rows.map { Triple(it[0] as UUID, it[1] as String, it[2] as LocalDate) } }
+
     @WithSession
     override fun findClaimedForCapitalization(accountId: UUID, productId: String): Uni<List<InterestAccrual>> =
         sf.withSession { s ->

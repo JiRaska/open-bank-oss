@@ -10,6 +10,7 @@ import com.openbank.interest.domain.model.*
 import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
+import com.openbank.interest.infrastructure.observability.InterestCapitalizationMetrics
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -69,6 +70,19 @@ class InterestService(
         accruableAccountTypes,
         Clock.systemUTC(),
     )
+
+    /**
+     * FIELD injection, not a constructor parameter, for two reasons that both bite here. The primary
+     * constructor already carries nine parameters and `config/detekt/detekt.yml` sets
+     * `constructorThreshold: 9`, which fires AT the threshold — a tenth would fail the gate
+     * (CLAUDE.md). And this class is constructed by hand in two unit tests, so a `lateinit` would
+     * throw the moment the recovery path ran under them.
+     *
+     * Nullable on purpose: CDI supplies it in the running service, a hand-constructed instance
+     * leaves it null, and every call site is `?.` — metrics must never be why a money path throws.
+     */
+    @Inject
+    internal var capitalizationMetrics: InterestCapitalizationMetrics? = null
 
     private val log = Logger.getLogger(InterestService::class.java)
 
@@ -547,7 +561,90 @@ class InterestService(
      * account must not stop every other account's monthly capitalization. Pairs are processed
      * sequentially (`concatenate`) to keep a bounded, polite load on the ledger.
      */
-    override fun capitalizeAll(toDate: LocalDate): Uni<Int> =
+    /**
+     * Completes every outstanding claim at **its own** frozen period, before the pending pass.
+     *
+     * [capitalize]'s KDoc says a claimed set "is always completable" and "nothing needs an operator".
+     * That was true of the METHOD and false of the SYSTEM: the only automatic caller is
+     * [capitalizeAll], which always passes *today*, so a claim frozen for any earlier period took the
+     * [inFlightClaimFailure] branch on every subsequent tick — forever, behind a WARN. Sandbox had
+     * 124 accruals across 7 pairs wedged that way since 2026-08-01, each tick refusing all 7 and
+     * reporting "capitalized 0 pair(s)" as though there were simply no work (#10404).
+     *
+     * **Why completing the claim, and not releasing it.** Releasing a stale claim back to `ACCRUING`
+     * and re-claiming it under a later period is the tempting "reclaim" shape and it is exactly the
+     * double-credit [inFlightClaimFailure] exists to prevent: the ledger idempotency key is derived
+     * from `(account, product, periodTo)`, so a later period mints a DIFFERENT key and the ledger
+     * books a SECOND journal for accruals the first attempt may already have credited. Recovery must
+     * therefore replay the original period, which is the one thing an operator was previously
+     * required to know.
+     *
+     * **Idempotent by construction, not by convention.** Passing the claimed period sends
+     * [capitalize] down its `claimed.all { it.claimedPeriodTo == toDate }` branch, so the set is
+     * `alreadyClaimed`, [claimProfile] replays the tax profile frozen at claim time rather than
+     * re-resolving it, and the derived gross/net/tax — and hence the amount-blind idempotency key —
+     * are bit-identical to the interrupted attempt's. The ledger collapses the replay onto the
+     * journal it already booked, or books it now if the crash preceded the post. There is no input
+     * under which this posts a second journal for the same `(account, product, period)`.
+     *
+     * Recovery failures are logged at ERROR, not WARN: a claim that cannot be completed is money
+     * frozen mid-credit, which is the state this whole method exists to make visible. The counts are
+     * carried into the scheduler's summary line and folded into the value it reports, so the existing
+     * `interest-capitalization` workflow-liveness gauge stops reading "succeeded, 0 pairs" over a
+     * wedge — which is how this went unnoticed for seven weeks.
+     */
+    override fun recoverOutstandingClaims(): Uni<Int> =
+        accrualRepo.findOutstandingCapitalizationClaims().flatMap { claims ->
+            if (claims.isEmpty()) {
+                // Report the zero explicitly: a gauge only ever written when something is wrong can
+                // never say "this is fixed now", which is the state an alert needs in order to clear.
+                capitalizationMetrics?.outstandingClaims(0)
+                Uni.createFrom().item(0)
+            } else {
+                log.warnf(
+                    "capitalization recovery: %d outstanding claim(s) found; completing each at its claimed period",
+                    claims.size,
+                )
+                capitalizationMetrics?.outstandingClaims(claims.size)
+                Multi.createFrom().iterable(claims)
+                    .onItem().transformToUniAndConcatenate { (accountId, productId, claimedPeriodTo) ->
+                        capitalize(accountId, productId, claimedPeriodTo)
+                            .map { 1 }
+                            .onItem().invoke { _ ->
+                                log.warnf(
+                                    "capitalization recovery: completed stale claim account=%s product=%s period=%s",
+                                    accountId,
+                                    productId,
+                                    claimedPeriodTo,
+                                )
+                                capitalizationMetrics?.claimRecovered()
+                            }
+                            .onFailure().invoke { e ->
+                                log.errorf(
+                                    e,
+                                    "capitalization recovery FAILED account=%s product=%s period=%s: %s",
+                                    accountId,
+                                    productId,
+                                    claimedPeriodTo,
+                                    e.message,
+                                )
+                                capitalizationMetrics?.claimRecoveryFailed()
+                            }
+                            .onFailure().recoverWithItem(0)
+                    }
+                    .collect().with(java.util.stream.Collectors.summingInt { it })
+                    // Re-report AFTER the pass, not just before it. Setting the gauge only from the
+                    // pre-recovery count leaves it pinned at the wedged value even once every claim
+                    // is completed — an alert that can never clear, which is the same class of
+                    // silent-wrongness this whole change exists to remove. What remains outstanding
+                    // is what was found minus what was completed.
+                    .onItem().invoke { recovered ->
+                        capitalizationMetrics?.outstandingClaims(claims.size - recovered)
+                    }
+            }
+        }
+
+    override fun capitalizeAll(toDate: LocalDate): Uni<Int> = recoverOutstandingClaims().flatMap { recovered ->
         accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
             if (pairs.isEmpty()) {
                 Uni.createFrom().item(0)
@@ -570,7 +667,8 @@ class InterestService(
                     }
                     .collect().with(java.util.stream.Collectors.summingInt { it })
             }
-        }
+        }.map { capitalized -> recovered + capitalized }
+    }
 
     override fun listAllAccruals(): Uni<List<InterestAccrual>> = accrualRepo.findAll()
 

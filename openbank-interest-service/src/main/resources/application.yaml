@@ -192,6 +192,13 @@ openbank:
   interest:
     accrual-cron: "0 0 1 * * ?"
     capitalization-cron: "0 0 2 1 * ?"
+    # How often to complete capitalization claims a previous attempt stranded. Deliberately MUCH
+    # shorter than capitalization-cron: a claim is frozen until something completes it, so pinning
+    # recovery to the monthly run would leave a wedged (account, product) pair stuck for up to a
+    # month. Sandbox sat wedged for seven weeks that way (#10404). The sweep touches only
+    # already-claimed sets and is idempotent by the ledger key, so running it often is cheap — with
+    # nothing outstanding it is one indexed query.
+    claim-recovery-interval: "15m"
     # Account types the daily accrual run posts interest for (comma-separated, matched against
     # account-service's accountType). BOTH the everyday CURRENT account and SAVINGS earn interest —
     # the onboarding balance lands on CURRENT, so interest must apply there or nearly every customer

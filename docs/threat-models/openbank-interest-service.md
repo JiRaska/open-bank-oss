@@ -218,3 +218,34 @@ money-path service, not adjacent.
   movement. **Risk class:** confidentiality and integrity of product/offering data in transit, now
   protected by mutual TLS rather than plaintext. Rollback: drop `PRODUCT_CATALOG_URL` and the
   `catalog-tls` volume.
+
+- **2026-09-20** — **New scheduled job: capitalization-claim recovery** (`recoverStrandedClaims`,
+  every 15 min, `openbank.interest.claim-recovery-interval`). It completes capitalization claims a
+  previous attempt stranded, at **their own frozen period**, and starts no new capitalization.
+  **The defect it closes.** A claim is committed `ACCRUING → CAPITALIZING` in its own transaction
+  before the ledger post; if the post fails, the set stays claimed. `capitalize` documents the
+  recovery — retry at the claimed period, the ledger collapses the replay — but the only automatic
+  caller, `capitalizeAll`, always passes *today*, so a claim frozen for an earlier period took the
+  `inFlightClaimFailure` branch on every tick, forever. Sandbox had 124 accruals across 7 pairs
+  wedged since 2026-08-01, each tick refusing all 7 and logging `capitalized 0 pair(s)` — which
+  reads as "no work to do" (#10404). Interest that had been claimed for credit was never credited.
+  **Why completing and not releasing.** Releasing a stale claim back to `ACCRUING` and re-claiming
+  under a later period is the obvious "reclaim" shape and is a double-credit: the ledger idempotency
+  key is `(account, product, periodTo)`, so a later period mints a new key and books a SECOND
+  journal for accruals the first attempt may already have credited. Recovery therefore replays the
+  original period, which makes it idempotent by construction — same claimed set, same frozen tax
+  profile, same derived gross/net/tax, same key.
+  **Risk class:** integrity of interest credit — this *restores* money movement that was stuck
+  mid-credit; it does not create a new payment path, principal, role, endpoint or external edge. The
+  ledger call is the one `capitalize` already made, under the identity it already used. The new
+  exposure is timing: journals that would have waited for the monthly run are now posted within
+  15 minutes of a stranded claim being detected. Bounded by construction — the sweep can only touch
+  sets a previous attempt already claimed.
+  **Observability** (previously log-only, which is why this hid for seven weeks):
+  `openbank_interest_capitalization_claims_recovered_total`,
+  `openbank_interest_capitalization_claims_recovery_failed_total`, and the gauge
+  `openbank_interest_capitalization_claims_outstanding`. Alert on the gauge sustained above zero
+  across more than one sweep — recovery is meant to drive it to zero, so a persistent value means
+  recovery is failing, not merely that a claim exists. A failed recovery logs at ERROR.
+  Rollback: remove `claim-recovery-interval` handling / revert the commit; claims then simply
+  remain stranded as before, which is the pre-change behaviour and loses nothing already recovered.
