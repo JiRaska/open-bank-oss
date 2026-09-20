@@ -363,3 +363,22 @@ simply stops existing).
   indistinguishable. Residual: `null` still does not distinguish "no such account" from "lookup
   failed" at the *data* level, and the case row itself carries no marker of which branch produced
   it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.
+
+- **2026-09-20** — **No boundary change for this service.** Recorded because
+  `openbank-infra/gitops/components/payments/payments-services.yaml` is a shared multi-service
+  manifest and the threat-model gate attributes a Deployment/Rollout hunk in it to every money-path
+  service whose name appears in the file, not to the workload the hunk actually sits in. The change
+  in question belongs to the co-tenant **clearing-service** Rollout: a `LEDGER_SERVICE_URL` pointing
+  at ledger-service's new mTLS listener, plus the client-certificate volume it needs. sepa-payment's
+  own container spec, ports, identity, privilege, NetworkPolicy and rest-clients are byte-identical
+  to `main`. **Risk class:** none — no surface, principal, action or data flow of this service is
+  touched. Nothing to roll back here.
+
+- **2026-09-20** — **New outbound edge: document-service over private-CA mTLS (8443).** `DocumentPreviewAdapter`
+  now reaches `document-service.documents.svc:8443` with the client certificate `sepa-payment-internal-tls`
+  (`%prod` TLS bucket `document-authority`, TLSv1.3). Previously `DOCUMENT_SERVICE_URL` was unset in
+  gitops and the client dialled `localhost:8143` inside this pod, so the render path never left the
+  process (#10383). No new inbound edge, no new principal, no money mutation: the call is a read of
+  template metadata plus a preview render. **Risk class:** confidentiality of the rendered payment
+  confirmation in transit, now protected by mutual TLS rather than plaintext. Rollback: drop
+  `DOCUMENT_SERVICE_URL` and the `document-tls` volume.

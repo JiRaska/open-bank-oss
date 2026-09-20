@@ -169,3 +169,19 @@ money-path service, not adjacent.
   downstream effect is that withholding tax is now actually assembled and remitted (the §38d statutory
   filing owner is decided separately in ADR-0180). Rollback: revert the commit (the scheduler stops).
 - **2026-07-18** — Initial lightweight threat model (ADR-0030 D2), added alongside `openbank-interest-service`'s addition to `money_path_services` (#1478).
+
+- **2026-09-20** — **New outbound edge: interest-service → ledger-service over ledger's new
+  private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; client cert
+  `interest-internal-tls`, `%prod` TLS bucket `ledger-authority`). The ADR-0033 §D capitalization
+  credit leg had no `LEDGER_SERVICE_URL` in this service's gitops manifest — the `application.yaml`
+  comment already warned that a deployment MUST set it — so `LedgerRestClient` dialled the fallback
+  `http://localhost:8101` inside its own pod and every capitalization journal (interest expense /
+  deposit-control pocket / withholding-tax payable) was a connection refused. The action
+  (`ledger.create`) and the identity (the shared `service-account-openbank-services` bearer) are
+  unchanged — `ledger_rest_ext.rego`'s `service-ledger-post` already admits them, so no policy
+  change. **Risk class:** integrity/availability of interest capitalization posting (a money-path
+  write that has never landed now lands); the new material is a private-CA client key mounted
+  read-only from a cert-manager Secret, scoped to this one upstream. No inbound surface, no new
+  role, no new data class. The separate `TRANSACTION_SERVICE_URL` gap (the withholding-tax
+  remittance leg) is NOT addressed here — it is its own change against transaction-service's own
+  listener. Rollback: drop the env var and the `%prod` bucket.

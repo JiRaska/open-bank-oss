@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-94da2b7a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-e7fad531
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}
@@ -85,6 +85,15 @@ spec:
                   name: interest-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # ADR-0033 §D capitalization credit leg. Without this the rest-client fell back to
+            # application.yaml's http://localhost:8101 inside this pod, so every capitalization
+            # journal was a connection refused — the file's own comment already said a deployment
+            # MUST set this. ledger-service's private-CA mTLS listener (8443, client auth REQUIRED,
+            # client cert interest-internal-tls, %prod bucket ledger-authority). ledger.create for
+            # the shared openbank-services service account is already allowed by service-ledger-post
+            # in ledger_rest_ext.rego, so no policy change.
+            - name: LEDGER_SERVICE_URL
+              value: https://ledger-service.ledger.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -108,6 +117,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           volumeMounts:
+            - name: ledger-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -180,6 +192,10 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
+        - name: ledger-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

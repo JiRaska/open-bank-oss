@@ -515,6 +515,12 @@ spec:
             # debit in transaction-service then advance to COMPLETED. Same namespace.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # DocumentPreviewAdapter renders through document-service. Without this the app default
+            # (localhost:8143) was dialled inside this pod and every render failed. document-service's
+            # private-CA mTLS listener (8443, client auth REQUIRED); client cert below, %prod TLS
+            # bucket document-authority. ASVS V9.1 forbids a new plaintext http:// value here.
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
@@ -546,6 +552,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: document-tls
+              mountPath: /mnt/document-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -639,6 +648,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: document-tls
+          secret:
+            secretName: sepa-payment-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -857,6 +870,12 @@ spec:
             # ADR-0108: book funds in transaction-service after scheme ACSC.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # PaymentConfirmationRenderAdapter renders through document-service. Without this the app default
+            # (localhost:8143) was dialled inside this pod and every render failed. document-service's
+            # private-CA mTLS listener (8443, client auth REQUIRED); client cert below, %prod TLS
+            # bucket document-authority. ASVS V9.1 forbids a new plaintext http:// value here.
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
@@ -888,6 +907,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: document-tls
+              mountPath: /mnt/document-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -979,6 +1001,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: document-tls
+          secret:
+            secretName: domestic-payment-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -1416,7 +1442,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-94da2b7a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-e7fad531
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1463,6 +1489,15 @@ spec:
                 secretKeyRef:
                   name: clearing-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0281 net-settlement journal posting. Without this the rest-client fell back to
+            # application.yaml's http://localhost:8101 inside this pod, every POST /api/v1/journals
+            # was a connection refused, and the net-settlement leg never reached the book of record.
+            # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED, client cert
+            # clearing-internal-tls, %prod bucket ledger-authority). ledger.create for the shared
+            # openbank-services service account is already allowed by service-ledger-post in
+            # ledger_rest_ext.rego, so no policy change.
+            - name: LEDGER_SERVICE_URL
+              value: https://ledger-service.ledger.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1498,6 +1533,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: ledger-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -1588,6 +1626,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: ledger-tls
+          secret:
+            secretName: clearing-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
