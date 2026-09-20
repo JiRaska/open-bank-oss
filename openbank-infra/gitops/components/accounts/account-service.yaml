@@ -138,6 +138,14 @@ spec:
             # Balance-service in-cluster URL (default is localhost:8103 which fails in k8s).
             - name: BALANCE_SERVICE_URL
               value: http://balance-service.balances.svc:8103
+            # SavingsProposalService's SCA approval reads and consumes an sca-service challenge.
+            # Without this the app default (localhost:8110) was dialled inside this pod and every
+            # approval failed (#10383). sca-service's private-CA mTLS listener (8443, client auth
+            # REQUIRED); client cert account-service-client-tls, %prod TLS bucket sca-authority.
+            # scaChallenge.read/consume are already granted to the shared service account by
+            # sca_rest_ext.rego's service-sca-shared-client-m2m rule.
+            - name: SCA_SERVICE_URL
+              value: https://sca-service.sca.svc:8443
             # Welcome bonus (sandbox only): on account activation, account-service initiates a
             # 100k CZK incoming credit via transaction-service (M2M openbank-services token).
             - name: TRANSACTION_SERVICE_URL
@@ -197,6 +205,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: sca-tls
+              mountPath: /mnt/sca-tls
+              readOnly: true
             - name: internal-tls
               mountPath: /mnt/internal-tls
               readOnly: true
@@ -294,6 +305,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: sca-tls
+          secret:
+            secretName: account-service-client-tls
+            optional: false
         - name: internal-tls
           secret:
             secretName: account-service-internal-tls
