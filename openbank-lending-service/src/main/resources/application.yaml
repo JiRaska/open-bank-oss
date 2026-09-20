@@ -266,6 +266,36 @@ lending:
 # separate block precisely so the offline story (dev, test, `./gradlew quarkusDev`) is unchanged:
 # only the shipped artifact posts to the real ledger and pays real borrowers.
 "%prod":
+  quarkus:
+    # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
+    # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
+    # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+      consent-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority
+      consent-service:
+        tls-configuration-name: consent-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}
