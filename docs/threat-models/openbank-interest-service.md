@@ -186,6 +186,29 @@ money-path service, not adjacent.
   remittance leg) is NOT addressed here — it is its own change against transaction-service's own
   listener. Rollback: drop the env var and the `%prod` bucket.
 
+- **2026-09-20** — **New outbound edge: interest-service → transaction-service over
+  transaction-service's new private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; the
+  existing `interest-internal-tls` client certificate, mounted a second time at
+  `/mnt/transaction-tls`, `%prod` TLS bucket `transaction-authority`). One client identity and one
+  private CA serve both upstreams; the separate bucket and mount path keep each one naming the
+  service it authenticates to. This closes the transport half of the #999 withholding-tax
+  remittance leg, whose `TransactionServiceClient` previously dialled `http://localhost:8102`
+  inside this pod — `POST /api/v1/transactions` was a connection refused, retried three times and
+  dead-lettered, so a due tax remittance never moved money.
+  **It does not close the authorization half, and OPA is not the gate that decides it.**
+  `POST /api/v1/transactions` carries `@RolesAllowed(Roles.OPERATOR)` as well as
+  `@Authorize(transaction.create)`, and RBAC runs first — `AuthorizeInterceptor` is a CDI
+  interceptor at `@Priority(PLATFORM_AFTER + 100)` while Quarkus's `@RolesAllowed` check runs at
+  platform-before priority — so no rego rule can admit a principal RBAC has already rejected. At
+  the inner layer, measured against the committed `transaction-opa-bundle`, the shared
+  `service-account-openbank-services` is allowed `transaction.create` with `ROLE_OPERATOR` and
+  denied with `ROLE_API`; the deployed realm template grants it `ROLE_API` only, but the
+  `keycloak-realm-drift` job's parity finding covers realm roles and explicitly not client-role
+  assignments, so the live role set is unresolved. Tracked in #10404. See the matching entry in
+  `docs/threat-models/openbank-transaction-service.md`.
+  **Risk class:** transport only — no new action, principal or role for this service; the new
+  material is the same private-CA client key already mounted for ledger-service, scoped read-only.
+  Rollback: drop `TRANSACTION_SERVICE_URL`, the second mount and the `transaction-authority` bucket.
 - **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `CatalogInterestProfileSynchronizer`
   now reaches `product-catalog.accounts.svc:8443` with the client certificate `interest-internal-tls` (the same client
   certificate #10397 introduced, mounted a second time at `/mnt/catalog-tls`)

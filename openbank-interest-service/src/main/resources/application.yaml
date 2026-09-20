@@ -287,8 +287,22 @@ mp:
           pem:
             certs: /mnt/ledger-tls/ca.crt
         protocols: TLSv1.3
+      # Same client certificate (one identity, one private CA), separate bucket per upstream so
+      # each one's paths name the service it authenticates to. #999 withholding-tax remittance.
+      transaction-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/transaction-tls/tls.crt
+              key: /mnt/transaction-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/transaction-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
       ledger-service:
         tls-configuration-name: ledger-authority
+      transaction-service:
+        tls-configuration-name: transaction-authority

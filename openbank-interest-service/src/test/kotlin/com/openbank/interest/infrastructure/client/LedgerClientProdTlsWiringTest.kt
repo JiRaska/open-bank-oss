@@ -51,7 +51,34 @@ class LedgerClientProdTlsWiringTest {
         assertThat(bucket["protocols"]).isEqualTo("TLSv1.3")
     }
 
+    @Test
+    fun `the transaction rest-client names a TLS bucket under prod`() {
+        val restClient = (quarkus()["rest-client"] as Map<*, *>)["transaction-service"] as Map<*, *>
+        assertThat(restClient["tls-configuration-name"]).isEqualTo(TRANSACTION_BUCKET)
+    }
+
+    /**
+     * The two buckets share one client certificate (one identity, one private CA) but must not
+     * share a mount path: each bucket's paths name the upstream it authenticates to, and a
+     * copy-paste that left `transaction-authority` pointing at `/mnt/ledger-tls` would work in the
+     * cluster today and silently stop being self-describing the moment the identities diverge.
+     */
+    @Test
+    fun `the transaction bucket is defined and points at its own mount, not the ledger one`() {
+        val bucket = (quarkus()["tls"] as Map<*, *>)[TRANSACTION_BUCKET] as Map<*, *>
+
+        val client = ((bucket["key-store"] as Map<*, *>)["pem"] as Map<*, *>)["client"] as Map<*, *>
+        assertThat(client["cert"]).isEqualTo("/mnt/transaction-tls/tls.crt")
+        assertThat(client["key"]).isEqualTo("/mnt/transaction-tls/tls.key")
+
+        val trust = (bucket["trust-store"] as Map<*, *>)["pem"] as Map<*, *>
+        assertThat(trust["certs"]).isEqualTo("/mnt/transaction-tls/ca.crt")
+
+        assertThat(bucket["protocols"]).isEqualTo("TLSv1.3")
+    }
+
     private companion object {
         const val BUCKET = "ledger-authority"
+        const val TRANSACTION_BUCKET = "transaction-authority"
     }
 }

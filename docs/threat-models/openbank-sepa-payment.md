@@ -382,3 +382,13 @@ simply stops existing).
   template metadata plus a preview render. **Risk class:** confidentiality of the rendered payment
   confirmation in transit, now protected by mutual TLS rather than plaintext. Rollback: drop
   `DOCUMENT_SERVICE_URL` and the `document-tls` volume.
+
+- **2026-09-20** — **No boundary change for this service** (second shared-manifest attribution; see
+  the entry above for the mechanism). This PR adds transaction-service's private-CA mTLS listener
+  (8443) to the co-tenant transaction-service Rollout in
+  `openbank-infra/gitops/components/payments/payments-services.yaml`, and the regenerated
+  `network-policies.yaml` gains an `interest` + 8443 ingress rule scoped to
+  `transaction-service-ingress-allow-list`. sepa-payment's own Rollout, ports, identity, privilege
+  and rest-clients are byte-identical to `main`, and its own ingress allow-list is unchanged — the
+  policy file is shared per component directory, not per workload. **Risk class:** none for this
+  service. Nothing to roll back here.

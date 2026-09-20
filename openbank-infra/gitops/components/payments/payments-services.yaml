@@ -58,9 +58,27 @@ spec:
           ports:
             - name: http
               containerPort: 8102
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: interest-service's
+            # withholding-tax remittance leg). HTTP/8102 stays for existing callers (customer-edge,
+            # account, statement, sdd, lending, standing-order, agent, mcp) until their own reviewed
+            # migrations; same shape as account-service's and ledger-service's 8443 listeners.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://transaction-db-rw.payments.svc:5432/openbank_transactions
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -173,6 +191,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -266,6 +287,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: transaction-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -326,6 +351,9 @@ spec:
     - name: http
       port: 8102
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # Canary service — Rollouts controller updates selector to canary replica set.
 apiVersion: v1
@@ -344,6 +372,9 @@ spec:
     - name: http
       port: 8102
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # ─────────────────────────────────────────────────────────────────────────────
 # sepa-payment  (port 8115)
