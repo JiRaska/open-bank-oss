@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.7](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.6...interest-service-v0.20.7) (2026-09-20)
+
+
+### Bug Fixes
+
+* **interest:** recover capitalization claims stranded by a failed ledger post ([#10470](https://github.com/JiRaska/open-bank-oss/issues/10470)) ([d7a5f44](https://github.com/JiRaska/open-bank-oss/commit/d7a5f44f2cc55f992d9ffbd5dd3a330ea5889398))
+
 ## [0.20.6](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.5...interest-service-v0.20.6) (2026-09-20)
 
 
