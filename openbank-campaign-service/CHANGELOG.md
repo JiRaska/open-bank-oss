@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/v0.40.0...v0.40.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **product-catalog:** add an mTLS listener and point interest + lending at it ([#10398](https://github.com/JiRaska/open-bank-oss/issues/10398)) ([ccd9996](https://github.com/JiRaska/open-bank-oss/commit/ccd99962d9624f596701c660c033454e649a0939))
+
 ## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/v0.39.0...v0.40.0) (2026-09-13)
 
 
