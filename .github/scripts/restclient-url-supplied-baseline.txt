@@ -5,8 +5,6 @@
 openbank-agent-service: quarkus.rest-client.communication-service.url falls back to localhost and gitops never sets COMMUNICATION_SERVICE_URL
 openbank-copilot-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
 openbank-copilot-service: quarkus.rest-client.communication-service.url falls back to localhost and gitops never sets COMMUNICATION_SERVICE_URL
-openbank-copilot-service: quarkus.rest-client.consent-service.url falls back to localhost and gitops never sets CONSENT_SERVICE_URL
 openbank-interest-service: quarkus.rest-client.transaction-service.url falls back to localhost and gitops never sets TRANSACTION_SERVICE_URL
 openbank-lending-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
-openbank-lending-service: quarkus.rest-client.consent-service.url falls back to localhost and gitops never sets CONSENT_SERVICE_URL
 openbank-transaction-service: quarkus.rest-client.fx-service.url falls back to localhost and gitops never sets FX_SERVICE_URL

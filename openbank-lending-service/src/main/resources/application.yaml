@@ -281,9 +281,21 @@ lending:
           pem:
             certs: /mnt/catalog-tls/ca.crt
         protocols: TLSv1.3
+      consent-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
+      consent-service:
+        tls-configuration-name: consent-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}

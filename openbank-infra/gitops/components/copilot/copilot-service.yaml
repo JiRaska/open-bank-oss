@@ -199,6 +199,14 @@ spec:
             # READ tools call the customer edge AS the customer (bearer propagated, ADR-0089 D5).
             - name: CUSTOMER_EDGE_URL
               value: http://customer-edge.customer-edge.svc:8128
+            # CreditAiLevelResolver (behind CreditAffordabilityTool) reads consent-service. Without
+            # this the app default (localhost:8107) was dialled inside this pod and every consent
+            # check failed (#10383). consent-service's private-CA mTLS listener (8443, client auth
+            # REQUIRED); client cert copilot-internal-tls, %prod TLS bucket consent-authority. The
+            # matching EGRESS rule is in networkpolicy-copilot-egress.yaml — this pod is egress
+            # default-deny, so the URL alone would still be dropped.
+            - name: CONSENT_SERVICE_URL
+              value: https://consent-service.consent.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://tempo.observability.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -266,6 +274,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: consent-tls
+              mountPath: /mnt/consent-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -364,6 +375,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: consent-tls
+          secret:
+            secretName: copilot-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

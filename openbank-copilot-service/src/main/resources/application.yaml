@@ -264,3 +264,23 @@ authz:
   kafka:
     bootstrap:
       servers: localhost:9092
+"%prod":
+  quarkus:
+    # CreditAiLevelResolver calls consent-service. Production uses a named TLS bucket over
+    # consent-service's private-CA mTLS listener (8443, client auth REQUIRED). Local/test
+    # fixtures speak plain HTTP, so this stays under %prod: the client certificate only
+    # exists in the cluster.
+    tls:
+      consent-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      consent-service:
+        tls-configuration-name: consent-authority

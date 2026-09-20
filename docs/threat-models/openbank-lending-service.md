@@ -748,3 +748,11 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
   movement. **Risk class:** confidentiality and integrity of product/offering data in transit, now
   protected by mutual TLS rather than plaintext. Rollback: drop `PRODUCT_CATALOG_URL` and the
   `catalog-tls` volume.
+
+- **2026-09-20** — **New outbound edge: consent-service over private-CA mTLS (8443).** `RestCreditOffersConsentAdapter`
+  now reaches `consent-service.consent.svc:8443` with the client certificate `lending-internal-tls` (`%prod` TLS
+  bucket `consent-authority`, TLSv1.3). Previously `CONSENT_SERVICE_URL` was unset in gitops and the
+  client dialled `localhost:8107` inside this pod, so the consent check never left the process
+  (#10383). The call is a read of `consent.validate` state only; no mutation, no new principal,
+  no money movement. **Risk class:** confidentiality of consent state in transit, now protected by
+  mutual TLS rather than plaintext. Rollback: drop `CONSENT_SERVICE_URL` and the `consent-tls` volume.

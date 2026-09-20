@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.0...sepa-payment-v0.14.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.3...sepa-payment-v0.14.0) (2026-09-14)
 
 
