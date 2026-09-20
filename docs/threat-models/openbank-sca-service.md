@@ -174,3 +174,20 @@ is the **authentication assurance gate** for payments and consent — defeating 
   path, not its integrity. No new trust boundary: the check runs before a challenge exists, on the
   same authenticated `initiate` call, against a caller-supplied enum the service already validated.
   Rollback: revert the commit; TOTP goes back to silently minting a dead challenge.
+
+- **2026-09-20** — **New inbound edge: a parallel private-CA mTLS listener (8443, client auth
+  REQUIRED, TLSv1.3; server cert `sca-service-internal-tls`), the same shape as account-service's and
+  document-service's.** HTTP/8110 stays for existing callers (document-service, consent-service).
+  Note the two certificates in this namespace are different objects: `sca-internal-tls` is this
+  service's CLIENT certificate for its read of party-service; `sca-service-internal-tls` is the new
+  SERVER certificate. The only caller on 8443 is account-service's `SavingsProposalService`
+  (`GET /api/v1/sca/challenges/{id}`, `POST /{id}/consume`) as the shared
+  `service-account-openbank-services`. Both methods are
+  `@RolesAllowed("ROLE_API","ROLE_OPERATOR","ROLE_ADMIN")` + `@Authorize("scaChallenge.read" /
+  "scaChallenge.consume")`, and `sca_rest_ext.rego`'s `service-sca-shared-client-m2m` rule already
+  admits that principal for both — no policy change. Before this, account-service had no
+  `SCA_SERVICE_URL` and dialled localhost, so the edge existed in code but never reached this
+  service, and its client sent no bearer at all (both fixed together, #10383). **Risk class:**
+  integrity of challenge consumption — a consume is state-changing, so the caller is now both
+  mutually authenticated at the transport and identified by an M2M token at the application layer,
+  where previously it was neither. Rollback: drop the listener env and account-service's env var.
