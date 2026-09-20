@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.0...transaction-service-v1.24.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **fx:** give fx-service an mTLS listener and point transaction-service's rate lookup at it ([#10401](https://github.com/JiRaska/open-bank-oss/issues/10401)) ([2523bfc](https://github.com/JiRaska/open-bank-oss/commit/2523bfccbc3f99843553973c26c06f04fc5eb8ee))
+
 ## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.23.0...transaction-service-v1.24.0) (2026-09-14)
 
 

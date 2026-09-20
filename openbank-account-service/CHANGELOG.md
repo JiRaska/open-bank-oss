@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.1...account-service-v0.31.0) (2026-09-20)
+
+
+### Features
+
+* **account:** open the business current account when a business party activates ([#10374](https://github.com/JiRaska/open-bank-oss/issues/10374)) ([e204c40](https://github.com/JiRaska/open-bank-oss/commit/e204c405f782ed0820e546eb6925fd8e89fa42be))
+
 ## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.0...account-service-v0.30.1) (2026-09-20)
 
 

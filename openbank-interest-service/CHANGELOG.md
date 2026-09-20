@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.6](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.5...interest-service-v0.20.6) (2026-09-20)
+
+
+### Bug Fixes
+
+* **transaction:** give transaction-service an mTLS listener and wire interest's remittance leg to it ([#10399](https://github.com/JiRaska/open-bank-oss/issues/10399)) ([54af76e](https://github.com/JiRaska/open-bank-oss/commit/54af76ea5f2a1a6701e3938c5229448f538bbf30))
+
 ## [0.20.5](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.4...interest-service-v0.20.5) (2026-09-20)
 
 
