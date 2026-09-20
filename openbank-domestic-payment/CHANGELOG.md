@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.0...domestic-payment-v0.21.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.1...domestic-payment-v0.21.0) (2026-09-14)
 
 
