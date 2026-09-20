@@ -118,6 +118,18 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   coroutine test runner.
 - **`openbank.outbox.dispatch-enabled` defaults to `false`.** Any service with an outbox entity must
   set it `true` in `application.yaml`, or events never dispatch (no error, `attempt_count` stays 0).
+- **After changing an INTERFACE, an incremental `:test` is not evidence — Gradle will not recompile
+  the anonymous implementations that no longer satisfy it.** Adding one member to
+  `CapitalizeInterestUseCase` broke both `object : CapitalizeInterestUseCase` stubs in
+  `InterestWorkflowLivenessTest`, and **every local run stayed green**: the test file had not
+  changed, so the incremental compiler left it alone and `:test` passed against a stale class file
+  while the interface beneath it had grown an abstract member. CI builds clean and failed
+  `compileTestKotlin` on the first try. Re-run `:<svc>:build --rerun-tasks` after any interface
+  change — it is the only local invocation that reproduces what CI does, and it costs ~90 s. Same
+  hazard as the constructor/`lateinit` note under Flyway ("the constructor or field shape of any
+  class a test instantiates by hand"), reached from the other side: there the test changes and the
+  class does not, here the interface changes and the test does not. Both are invisible until
+  something compiles from scratch.
 - **CDI wiring isn't validated by `ktlintCheck` + unit tests.** Add `:svc:quarkusBuild` to your
   pre-push gate; ArC/CDI failures only surface there.
 - **Panache reactive `persist()` on an application-assigned `@Id` is INSERT-only — use `merge` for
