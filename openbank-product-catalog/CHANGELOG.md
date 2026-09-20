@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.5...product-catalog-v0.18.6) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.4...product-catalog-v0.18.5) (2026-09-13)
 
 
