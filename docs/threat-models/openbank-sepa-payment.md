@@ -392,3 +392,10 @@ simply stops existing).
   and rest-clients are byte-identical to `main`, and its own ingress allow-list is unchanged — the
   policy file is shared per component directory, not per workload. **Risk class:** none for this
   service. Nothing to roll back here.
+
+- **2026-09-20** — **No boundary change for this service** (third shared-manifest attribution; see
+  the entries above for the mechanism). This PR adds transaction-service's CLIENT certificate for
+  its outbound fx-service call — a `fx-tls` volume and mount on the co-tenant transaction-service
+  Rollout in `openbank-infra/gitops/components/payments/payments-services.yaml`, plus
+  `FX_SERVICE_URL`. sepa-payment's own Rollout, ports, identity, privilege and rest-clients are
+  byte-identical to `main`. **Risk class:** none for this service. Nothing to roll back here.

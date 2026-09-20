@@ -231,3 +231,24 @@ authz:
   # runbook is reviewed, not bundled with the wiring itself.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # The cross-currency rate lookup reads fx-service. Production uses a named TLS bucket over
+    # fx-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
+    # aml-service, notification-service and clearing-service. The cert here is the CLIENT identity
+    # (transaction-internal-tls), NOT this service's own 8443 server cert. Local/test fixtures speak
+    # plain HTTP, so this stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      fx-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/fx-tls/tls.crt
+              key: /mnt/fx-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/fx-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      fx-service:
+        tls-configuration-name: fx-authority
