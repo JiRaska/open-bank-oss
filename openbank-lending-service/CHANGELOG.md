@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.4...lending-service-v0.33.5) (2026-09-20)
+
+
+### Bug Fixes
+
+* **consent:** add an mTLS listener and point lending + copilot at it ([#10400](https://github.com/JiRaska/open-bank-oss/issues/10400)) ([4de039d](https://github.com/JiRaska/open-bank-oss/commit/4de039d0fdb285b79df402ec3e68aa71b5524112))
+
 ## [0.33.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.3...lending-service-v0.33.4) (2026-09-17)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.0...copilot-service-v0.17.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **consent:** add an mTLS listener and point lending + copilot at it ([#10400](https://github.com/JiRaska/open-bank-oss/issues/10400)) ([4de039d](https://github.com/JiRaska/open-bank-oss/commit/4de039d0fdb285b79df402ec3e68aa71b5524112))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.16.0...copilot-service-v0.17.0) (2026-09-13)
 
 
