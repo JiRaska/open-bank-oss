@@ -722,6 +722,33 @@ fire from *outside* it, so they stay here:
   after. One command; it is knowing to run it that costs. Most exposed: JSON/YAML maps every
   service registers itself in — the release manifest, `gates.yaml`, `rules.yaml` lists,
   `event-contract-baseline.txt`.
+- **The UNION resolution has the opposite failure to a whole-file take, and it compiles or parses
+  often enough to reach CI.** Resolving an append-only conflict by keeping both sides is right for
+  a change log and wrong the moment the other side EDITED your text rather than appending next to
+  it. Three in one merge on 2026-09-20, all from the same mechanical resolver: a threat-model
+  paragraph `main` had rewritten came back as both versions spliced into one garbled sentence; an
+  add/add on a test file emitted **two** `companion object` blocks, which at least failed to
+  compile; and an `application.yaml` gained a second `rest-client:` key under the same mapping —
+  which parses, is legal YAML, and silently drops everything but the last of the duplicated key
+  (the SmallRye/SnakeYAML trap above), so the union deleted the very TLS bucket the PR existed to
+  add. Union REMOVALS freely (a line either side deleted stays deleted, which is what a shrinking
+  baseline wants); union ADDITIONS only after checking the other side did not edit the same lines.
+  Then diff the merged result against what you merged into — `git diff origin/main --name-only` —
+  and open every file whose presence you cannot explain: the domestic-payment file was in that list
+  for no reason this PR could account for, and that is what exposed all three.
+- **A diff-scoped gate must be re-run AFTER the commit, because its subject is the commit.** Same
+  merge: `check-threat-model-diff.py --base origin/main` was run against a working tree, read exit
+  0, and was believed — then the commit landed and CI failed it. Nothing had regressed; the tree
+  the green described no longer existed, because the fix that ran between them (reverting a
+  threat-model file to `main`'s content) is exactly what removed it from the diff the gate reads.
+  A file that becomes IDENTICAL to main leaves the changed set, so its paired change — here a
+  shared `payments-services.yaml` hunk — is suddenly unaccompanied. Generalises to every gate
+  keyed on "changed files": the working tree is not the diff.
+- **An advisory gate prints its finding and exits 0, so `echo $?` reads clean on a real defect.**
+  `check-duplicate-yaml-keys.sh` DID report the duplicated `rest-client:` key above, on stdout,
+  while returning 0 and a trailing `ADVISORY mode — not failing the build`. Checking the status
+  instead of the output turned a caught defect into an uncaught one. For any advisory gate, grep
+  the OUTPUT for findings; the exit code answers a different question.
 - **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
   before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
   time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
