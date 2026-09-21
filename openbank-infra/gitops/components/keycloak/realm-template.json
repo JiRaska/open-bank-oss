@@ -254,6 +254,25 @@
       "secret": "__EDGE_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-interest",
+      "name": "OpenBank Interest Service",
+      "description": "Per-service M2M client for interest-service's ledger capitalization posts (issue #10486). Holds ROLE_API only; ledger.create is granted by identity in ledger_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__INTEREST_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "name": "Grafana (observability single pane)",
       "enabled": true,
@@ -495,6 +514,14 @@
       "username": "service-account-openbank-services",
       "enabled": true,
       "serviceAccountClientId": "openbank-services",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-interest",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-interest",
       "realmRoles": [
         "ROLE_API"
       ]

@@ -85,6 +85,16 @@ spec:
                   name: interest-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # #10486: interest's OWN client (openbank-interest) for the ledger post only — the
+            # named oidc-client `ledger`. optional: false so an unseeded Vault entry is a loud
+            # CreateContainerConfigError, never a silently empty credential (see
+            # oidc-externalsecret.yaml).
+            - name: OIDC_LEDGER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: interest-service-ledger-oidc
+                  key: OIDC_LEDGER_CLIENT_SECRET
+                  optional: false
             # ADR-0033 §D capitalization credit leg. Without this the rest-client fell back to
             # application.yaml's http://localhost:8101 inside this pod, so every capitalization
             # journal was a connection refused — the file's own comment already said a deployment

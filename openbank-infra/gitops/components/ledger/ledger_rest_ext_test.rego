@@ -147,3 +147,53 @@ test_extension_is_loaded if {
 	"operator-ledger-write" in rest.allowed_reasons with input as {"principal": operator, "action": "ledger.replay"}
 		with data.rules as rules_mock
 }
+
+# --- #10486: interest-service's own machine identity (ROLE_API only) ---
+# The identity carries ROLE_API and nothing else, exactly as the realm template grants it. The
+# matrix mock grants ROLE_OPERATOR only, so no role-based reason can admit these principals: the
+# identity rule is the whole grant, and everything else must deny.
+
+interest_m2m := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+
+# Any OTHER service account holding ROLE_API. LedgerResource.postJournal now admits ROLE_API at the
+# RBAC layer, so OPA is the only thing between this principal and a book-of-record write.
+other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+
+no_role := {"type": "HUMAN", "id": "u-nobody", "roles": []}
+
+test_interest_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": interest_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-interest-ledger-post" in rest.allowed_reasons with input as {"principal": interest_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_interest_may_not_perform_any_other_ledger_action if {
+	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		rest.allow == false with input as {"principal": interest_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_interest_may_not_create_a_transaction if {
+	rest.allow == false with input as {"principal": interest_m2m, "action": "transaction.create"}
+		with data.rules as rules_mock
+}
+
+# The must-DENY that proves the RBAC widening stays narrow: remove the principal.id line from
+# service-interest-ledger-post and this goes red.
+test_other_role_api_service_account_may_not_create if {
+	rest.allow == false with input as {"principal": other_role_api_sa, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_no_role_principal_may_not_create if {
+	rest.allow == false with input as {"principal": no_role, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_interest_identity_rule_does_not_admit_the_shared_client if {
+	not "service-interest-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}

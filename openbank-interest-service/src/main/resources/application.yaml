@@ -57,6 +57,19 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486: the ledger capitalization post (ledger.create) no longer rides the shared
+    # openbank-services principal. LedgerRestClient selects this NAMED client via
+    # @OidcClientFilter("ledger"), so its token's principal is service-account-openbank-interest
+    # (ROLE_API only), which ledger_rest_ext.rego grants ledger.create and nothing else. Every
+    # other rest-client above/below still uses the default (shared) client until its own edge
+    # is migrated. The secret is this client's own, never the shared one.
+    ledger:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-interest
+      credentials:
+        secret: ${OIDC_LEDGER_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}

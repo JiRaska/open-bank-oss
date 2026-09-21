@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "260e59d339834f99"
+    openbank.tech/policy-checksum: "ac2a1f955c07fdfe"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -737,6 +737,21 @@ data:
     allowed_reasons contains "service-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
+    	input.action == "ledger.create"
+    }
+
+    # #10486 step 1 — interest-service's OWN machine identity. Its capitalization journal (DEBIT
+    # interest expense / CREDIT deposit-control / CREDIT withholding-tax payable) is posted by
+    # LedgerRestClient through the named oidc-client `ledger`, i.e. Keycloak client
+    # `openbank-interest`, whose service account carries ROLE_API only. This rule is the ONLY
+    # thing that lets that principal write: exactly ledger.create, nothing else (no reverse, no
+    # trigger/replay/approve/close.draft). LedgerResource.postJournal admits ROLE_API at the RBAC
+    # layer for this caller; every OTHER ROLE_API holder still reaches OPA and is denied here unless
+    # its own identity rule fires — the identity gate is what keeps that RBAC widening narrow
+    # (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
+    allowed_reasons contains "service-interest-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-interest"
     	input.action == "ledger.create"
     }
 
