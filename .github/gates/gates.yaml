@@ -2512,6 +2512,7 @@ gates:
       got connection refused and the rollout stalled. No unit test or @QuarkusTest sees %prod.
     review_after: '2027-03-21'
     min_subjects: 40
+    budget_seconds: 15
     selftest_inputs: [".github/scripts/check-mtls-keeps-http-port.py"]
     selftest: |
       python3 .github/scripts/check-mtls-keeps-http-port.py --self-test
