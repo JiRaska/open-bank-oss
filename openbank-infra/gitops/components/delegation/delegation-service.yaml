@@ -146,6 +146,15 @@ spec:
                 secretKeyRef:
                   name: delegation-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 6: delegation-service's OWN Keycloak client (openbank-delegation, ROLE_API only) for the
+            # party eligibility and card ownership reads - the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: delegation-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
             # dependency: without it the ReactiveRedisDataSource bean is inactive and the
             # app dies with InactiveBeanException.

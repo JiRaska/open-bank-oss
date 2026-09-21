@@ -124,6 +124,7 @@ survives in it.
    DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
    TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
    ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
+   COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -310,6 +311,20 @@ reads onto the named client they already have (`ledger` and `m2m`), so nothing i
 | `openbank-billing` | `keycloak/billing-service` | `billing-service-m2m-oidc` (billing) | `BILLING_CLIENT_SECRET` |
 | `openbank-document` | `keycloak/document-service` | `document-service-m2m-oidc` (documents) | `DOCUMENT_CLIENT_SECRET` |
 | `openbank-party` | `keycloak/party-service` | `party-service-m2m-oidc` (party) | `PARTY_CLIENT_SECRET` |
+
+### Batch 6 (RBAC-only reads: credit profile, incentive offer, pid party, cards)
+
+Same recipe, same script, three more clients. lending-service and party-service move their reads onto
+the named `m2m` client they already have, so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-copilot` | `keycloak/copilot-service` | `copilot-service-m2m-oidc` (platform) | `COPILOT_CLIENT_SECRET` |
+| `openbank-campaign` | `keycloak/campaign-service` | `campaign-service-m2m-oidc` (campaign) | `CAMPAIGN_CLIENT_SECRET` |
+| `openbank-delegation` | `keycloak/delegation-service` | `delegation-service-m2m-oidc` (delegation) | `DELEGATION_CLIENT_SECRET` |
+
+analytics-sink and incentive-service run no OPA sidecar, so their endpoints admit the named callers
+through a Kotlin named-caller check rather than an `@Authorize` rule.
 
 ## What this does NOT fix
 

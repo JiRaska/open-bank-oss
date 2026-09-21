@@ -8,8 +8,10 @@ import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.ReservationStatus
 import com.openbank.incentive.domain.StackingPolicy
 import jakarta.annotation.security.RolesAllowed
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
+import jakarta.inject.Inject
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -66,15 +68,25 @@ data class ReservationResponse(
 class IncentiveResource(private val application: IncentiveApplication, private val identity: JsonWebToken) {
     private fun actor() = identity.name
 
+    @Inject
+    lateinit var securityIdentity: SecurityIdentity
+
     @GET
     @Path("/offers")
     suspend fun listPublished(): Response = Response.ok(mapOf("items" to application.listPublishedOffers())).build()
 
+    // #10486 batch 6: ROLE_API admits campaign-service's OWN machine principal once the shared
+    // openbank-services client loses ROLE_OPERATOR. ROLE_API is held by every service account and this
+    // service has no OPA sidecar, so [requireNamedOfferReader] narrows it to the named callers.
     @GET
     @Path("/offers/{id}")
-    suspend fun getOffer(@PathParam("id") id: UUID): Response = application.findOffer(id)
-        ?.let { Response.ok(it).build() }
-        ?: Response.status(Response.Status.NOT_FOUND).build()
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API")
+    suspend fun getOffer(@PathParam("id") id: UUID): Response {
+        requireNamedOfferReader(securityIdentity)
+        return application.findOffer(id)
+            ?.let { Response.ok(it).build() }
+            ?: Response.status(Response.Status.NOT_FOUND).build()
+    }
 
     @POST
     @Path("/offers")

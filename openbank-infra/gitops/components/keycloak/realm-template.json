@@ -597,6 +597,63 @@
       "secret": "__PARTY_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-copilot",
+      "name": "OpenBank Copilot Service",
+      "description": "Per-service M2M client for copilot-service's credit-profile read (analytics-sink) (issue #10486). Holds ROLE_API only; analytics-sink admits it by name.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__COPILOT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-campaign",
+      "name": "OpenBank Campaign Service",
+      "description": "Per-service M2M client for campaign-service's incentive offer read (issue #10486). Holds ROLE_API only; incentive-service admits it by name.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__CAMPAIGN_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-delegation",
+      "name": "OpenBank Delegation Service",
+      "description": "Per-service M2M client for delegation-service's party eligibility and card ownership reads (pid party.read, card.read) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__DELEGATION_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "name": "Grafana (observability single pane)",
       "enabled": true,
@@ -982,6 +1039,30 @@
       "username": "service-account-openbank-party",
       "enabled": true,
       "serviceAccountClientId": "openbank-party",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-copilot",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-copilot",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-campaign",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-campaign",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-delegation",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-delegation",
       "realmRoles": [
         "ROLE_API"
       ]

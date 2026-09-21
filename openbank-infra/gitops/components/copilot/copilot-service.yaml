@@ -108,6 +108,19 @@ spec:
                   # credential this security-relevant, not a quiet 401 from consent-service/
                   # analytics-sink.
                   optional: false
+            # #10486 batch 6: copilot-service's OWN Keycloak client (openbank-copilot, ROLE_API only) for the
+            # credit-profile read - the named oidc-client `m2m`. optional: false so an unseeded Vault entry is a
+            # loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
+            # The named client's issuer: the machine realm, NOT QUARKUS_OIDC_AUTH_SERVER_URL below (that is
+            # the customer realm this pod validates inbound tokens against).
+            - name: OIDC_M2M_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
             # Postgres conversation history (#3710). The CNPG operator injects
             # copilot-db-app with PG_USER/PG_PASSWORD; REACTIVE_URL and JDBC_URL resolve them.
             #

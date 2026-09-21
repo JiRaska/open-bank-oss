@@ -82,6 +82,7 @@ quarkus:
     # longer ride the shared openbank-services principal. AccountServiceRestClient and
     # TransactionServiceRestClient select this NAMED client (@OidcClientFilter("m2m")), so their principal
     # is service-account-openbank-party (ROLE_API only), granted by identity upstream.
+    # #10486 batch 6: CardServiceRestClient (the Art. 15 card list, card-issuance card.list) too.
     m2m:
       auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
       client-id: openbank-party
