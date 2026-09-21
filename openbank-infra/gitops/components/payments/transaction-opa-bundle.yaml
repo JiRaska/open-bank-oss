@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: transaction-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "eb626d0eaabbb0d2"
+    openbank.tech/policy-checksum: "265d0ab823a1c8ad"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -685,6 +685,50 @@ data:
     		"transaction.search",
     		"transaction.read",
     	}
+    }
+
+    # #10486 batch 1 — per-service machine identities. Each caller below now mints its bearer from
+    # its OWN Keycloak client (named oidc-client `m2m`), whose service account holds realm role
+    # ROLE_API only. The matrix grants ROLE_API nothing, and operator-transaction-write above needs
+    # ROLE_OPERATOR/ROLE_ADMIN, so the rule for a principal is its WHOLE grant here: the narrowest
+    # action that caller's live code path actually invokes, and nothing else.
+    # TransactionResource.initiateTransaction admits ROLE_API at the RBAC layer for these callers
+    # (RBAC runs before OPA); every OTHER ROLE_API holder reaches OPA and is denied unless its own
+    # identity rule fires (transaction_rest_ext_test.rego: test_other_role_api_sa_may_not_create).
+    #   account-service        TransactionServiceRestClient.initiate      welcome-bonus credit
+    #   sdd-service            TransactionServiceClient.initiateTransaction SDD collection settlement
+    #   standing-order-service TransactionServiceClient.initiate          DOMESTIC/INTERNAL execution
+    #   lending-service        TransactionServiceRestClient.initiate      borrower credit / debit
+    #   sepa-payment           TransactionServiceClient.initiateTransaction SCT settlement leg
+    #   sepa-payment           TransactionServiceClient.reverseTransaction  R-transaction return
+    allowed_reasons contains "service-account-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-account"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-sdd-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-sdd"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-standing-order-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-standing-order"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-lending-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-lending"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-sepa-payment-transaction-write" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-sepa-payment"
+    	input.action in {"transaction.create", "transaction.reverse"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

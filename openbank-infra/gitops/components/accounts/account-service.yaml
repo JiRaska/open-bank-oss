@@ -140,6 +140,16 @@ spec:
                 secretKeyRef:
                   name: account-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: account's OWN Keycloak client (openbank-account, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: account-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Balance-service in-cluster URL (default is localhost:8103 which fails in k8s).
             - name: BALANCE_SERVICE_URL
               value: http://balance-service.balances.svc:8103

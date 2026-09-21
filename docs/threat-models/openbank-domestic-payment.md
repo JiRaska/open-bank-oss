@@ -510,3 +510,11 @@ not change any existing request's outcome until explicitly flipped.
   Rollout in `openbank-infra/gitops/components/payments/payments-services.yaml`, plus
   `FX_SERVICE_URL`. domestic-payment's own Rollout, ports, identity, privilege and rest-clients are
   byte-identical to `main`. **Risk class:** none for this service. Nothing to roll back here.
+
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution, same
+  mechanism as the entries above). #10486 batch 1 adds an `OIDC_M2M_CLIENT_SECRET` env ref to the
+  co-tenant sepa-payment, clearing-service and standing-order-service Rollouts in
+  `openbank-infra/gitops/components/payments/payments-services.yaml` and restamps the transaction
+  and sepa-payment policy checksums. domestic-payment still authenticates as the shared
+  `openbank-services` client; its Rollout, identity and rest-clients are byte-identical to `main`.
+  **Risk class:** none for this service. Nothing to roll back here.

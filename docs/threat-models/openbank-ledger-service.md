@@ -516,3 +516,4 @@ set) apply equally to the new `ledger.approval.decide` action.
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+- **2026-09-21** — **Two more per-service identities on `ledger.create` (#10486 batch 1).** `service-lending-ledger-post` (`service-account-openbank-lending`) and `service-clearing-ledger-post` (`service-account-openbank-clearing`), each gated on `input.principal.id` and on `ledger.create` alone — same shape as the interest rule. No RBAC change (postJournal already admits `ROLE_API` since step 1). Measured with `opa test`: both identities are DENIED reverse/trigger/replay/approve/close.draft, and neither rule admits the other, the interest client or the shared client; removing either `principal.id` line turns three must-deny tests red.

@@ -105,6 +105,16 @@ spec:
                 secretKeyRef:
                   name: lending-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: lending's OWN Keycloak client (openbank-lending, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: lending-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # NOT an activation switch. lending.ledger.backend is an @IfBuildProperty gate,
             # resolved at image AUGMENTATION and frozen: this env var cannot bind the real
             # adapter, and until #6057 it did not — the image shipped NoOpLedgerPostingPort,
