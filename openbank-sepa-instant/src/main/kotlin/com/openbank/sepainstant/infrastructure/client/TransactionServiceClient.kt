@@ -5,7 +5,7 @@
 package com.openbank.sepainstant.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -21,12 +21,14 @@ import java.util.UUID
 
 /**
  * RestClient binding to `openbank-transaction-service` (`POST /api/v1/transactions`).
- * Uses [OidcClientRequestReactiveFilter] for M2M token injection — identical pattern to
- * [AmlServiceClient]. Idempotent on the `Idempotency-Key` header.
+ * Uses the named oidc-client `m2m` (sepa-instant's own Keycloak client, #10486) for M2M token
+ * injection; [AmlServiceClient] still uses the shared default client. Idempotent on the `Idempotency-Key` header.
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-sepa-instant` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

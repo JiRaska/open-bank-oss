@@ -22,7 +22,8 @@ import org.yaml.snakeyaml.Yaml
  *  - `quarkus.oidc-client.ledger` must exist and name client `openbank-interest` with its own
  *    secret variable. A missing named client does not fail the build; it fails the first post.
  *
- * And the converse, which keeps this step narrow: the other rest-clients (transaction, account,
+ * Batch 2 moved [TransactionServiceClient] (the remittance leg, transaction.create) onto the same
+ * named client. The converse still keeps this narrow: the other rest-clients (account,
  * product-catalog) stay on the default client until their own edges are migrated.
  */
 class LedgerOidcClientIdentityWiringTest {
@@ -35,14 +36,20 @@ class LedgerOidcClientIdentityWiringTest {
     }
 
     @Test
-    fun `the ledger client selects the named oidc-client and not the default one`() {
-        val named = LedgerRestClient::class.java.getAnnotation(OidcClientFilter::class.java)
-        assertThat(named).describedAs("@OidcClientFilter on LedgerRestClient").isNotNull
-        assertThat(named.value).isEqualTo(LEDGER_CLIENT)
+    fun `the money-path clients select the named oidc-client and not the default one`() {
+        // #10486 batch 2: the withholding-tax remittance leg (transaction.create) joined the ledger post.
+        listOf(LedgerRestClient::class.java, TransactionServiceClient::class.java).forEach { client ->
+            val named = client.getAnnotation(OidcClientFilter::class.java)
+            assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
+            assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(LEDGER_CLIENT)
 
-        assertThat(providers(LedgerRestClient::class.java))
-            .describedAs("the default-client filter would re-attach the shared principal's token")
-            .doesNotContain(OidcClientRequestReactiveFilter::class.java)
+            assertThat(providers(client))
+                .describedAs(
+                    "%s: the default-client filter would re-attach the shared principal's token",
+                    client.simpleName,
+                )
+                .doesNotContain(OidcClientRequestReactiveFilter::class.java)
+        }
     }
 
     @Test
@@ -59,7 +66,7 @@ class LedgerOidcClientIdentityWiringTest {
     @Test
     fun `the default oidc-client stays the shared one for the not-yet-migrated edges`() {
         assertThat(oidcClient["client-id"]).isEqualTo("openbank-services")
-        listOf(TransactionServiceClient::class.java, AccountServiceClient::class.java, ProductCatalogClient::class.java)
+        listOf(AccountServiceClient::class.java, ProductCatalogClient::class.java)
             .forEach { client ->
                 assertThat(providers(client))
                     .describedAs("%s still uses the default (shared) client", client.simpleName)

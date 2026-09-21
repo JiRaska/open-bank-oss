@@ -153,3 +153,64 @@ test_extension_is_loaded if {
 	"operator-balance-write" in rest.allowed_reasons with input as {"principal": operator, "action": "balance.hold"}
 		with data.rules as rules_mock
 }
+
+# --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
+
+transaction_m2m := {"type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
+
+settlement_m2m := {"type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
+
+other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+
+balance_actions := {
+	"balance.read", "balance.hold", "balance.holdRelease", "balance.credit", "balance.debit",
+	"balance.initialize", "balance.reconciliation.read", "balance.reconciliation.run",
+	"balance.overdraftLimit", "balance.approval.decide",
+}
+
+test_transaction_may_hold_and_release_via_its_identity_rule if {
+	every action in {"balance.hold", "balance.holdRelease"} {
+		decision := rest.allow with input as {"principal": transaction_m2m, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"service-transaction-balance-hold" in rest.allowed_reasons with input as {"principal": transaction_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_settlement_may_debit_and_credit_via_its_identity_rule if {
+	every action in {"balance.debit", "balance.credit"} {
+		decision := rest.allow with input as {"principal": settlement_m2m, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"service-settlement-balance-move" in rest.allowed_reasons with input as {"principal": settlement_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_batch2_identities_denied_every_other_balance_action if {
+	every action in balance_actions - {"balance.hold", "balance.holdRelease"} {
+		rest.allow == false with input as {"principal": transaction_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+	every action in balance_actions - {"balance.debit", "balance.credit"} {
+		rest.allow == false with input as {"principal": settlement_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# BalanceResource admits ROLE_API on every write: OPA is the only control for any other ROLE_API
+# holder. Remove a principal.id line above and this goes red.
+test_other_role_api_sa_may_not_write if {
+	every action in {"balance.hold", "balance.holdRelease", "balance.debit", "balance.credit"} {
+		rest.allow == false with input as {"principal": other_role_api_sa, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_batch2_balance_rules_do_not_admit_the_shared_client if {
+	not "service-transaction-balance-hold" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "balance.hold"}
+		with data.rules as rules_mock
+	not "service-settlement-balance-move" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "balance.debit"}
+		with data.rules as rules_mock
+}

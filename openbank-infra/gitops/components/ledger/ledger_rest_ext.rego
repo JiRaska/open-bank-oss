@@ -190,6 +190,26 @@ allowed_reasons contains "service-clearing-ledger-post" if {
 	input.action == "ledger.create"
 }
 
+# #10486 batch 2 — transaction-service and settlement-service on their own identities.
+#   transaction-service (LedgerRestClient, named oidc-client `m2m`): postJournal on settlement and
+#     reverseJournal on a failed/compensated leg -> ledger.create + ledger.reverse. The ONLY
+#     per-service identity granted ledger.reverse; LedgerResource.reverseJournal admits ROLE_API
+#     at the RBAC layer for it and every other ROLE_API holder is denied here.
+#   settlement-service (LedgerRestClient, named oidc-client `m2m`): postJournal (the settlement
+#     workflow's booking activity) plus getJournalsByTransaction (LedgerJournalLookupAdapter's
+#     already-posted check) -> ledger.create + ledger.read. Never reverse.
+allowed_reasons contains "service-transaction-ledger-write" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-transaction"
+	input.action in {"ledger.create", "ledger.reverse"}
+}
+
+allowed_reasons contains "service-settlement-ledger-post" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-settlement"
+	input.action in {"ledger.create", "ledger.read"}
+}
+
 # Only transaction-service's client exposes a reverseJournal call. lending-service and
 # settlement-service have NO reverseJournal method on their ledger RestClients — granting
 # ledger.reverse to every caller sharing the openbank-services identity would open the one

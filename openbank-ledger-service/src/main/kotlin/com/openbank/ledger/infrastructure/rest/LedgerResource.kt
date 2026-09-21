@@ -178,7 +178,10 @@ class LedgerResource(
 
     @POST
     @Path("/{journalId}/reverse")
-    @RolesAllowed(Roles.OPERATOR)
+    // #10486 batch 2: ROLE_API admitted so transaction-service's own identity (ROLE_API only) reaches
+    // OPA; ledger_rest_ext.rego grants ledger.reverse to service-account-openbank-transaction ALONE
+    // and denies every other ROLE_API holder (test_other_role_api_sa_may_not_reverse_or_create).
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "ledger.reverse", resource = "#journalId")
     @Operation(summary = "Reverse a posted journal entry")
     suspend fun reverseJournal(@PathParam("journalId") journalId: UUID, request: ReverseJournalRequest): Response {
