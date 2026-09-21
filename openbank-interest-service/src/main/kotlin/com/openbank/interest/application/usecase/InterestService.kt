@@ -628,7 +628,11 @@ class InterestService(
                                     claimedPeriodTo,
                                     e.message,
                                 )
-                                capitalizationMetrics?.claimRecoveryFailed()
+                                if (e.isLedgerRejection()) {
+                                    capitalizationMetrics?.claimRecoveryRejected()
+                                } else {
+                                    capitalizationMetrics?.claimRecoveryFailed()
+                                }
                             }
                             .onFailure().recoverWithItem(0)
                     }
@@ -773,3 +777,6 @@ class InterestService(
         const val RATE_ACTIVE_ACCOUNT_INDEX = "ux_rate_active_account"
     }
 }
+
+private fun Throwable.isLedgerRejection(): Boolean =
+    generateSequence(this) { it.cause.takeIf { c -> c !== it } }.any { it is LedgerPostingRejectedException }
