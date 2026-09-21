@@ -44,7 +44,10 @@ class LedgerOidcClientIdentityWiringTest {
             assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(LEDGER_CLIENT)
 
             assertThat(providers(client))
-                .describedAs("%s: the default-client filter would re-attach the shared principal's token", client.simpleName)
+                .describedAs(
+                    "%s: the default-client filter would re-attach the shared principal's token",
+                    client.simpleName,
+                )
                 .doesNotContain(OidcClientRequestReactiveFilter::class.java)
         }
     }
