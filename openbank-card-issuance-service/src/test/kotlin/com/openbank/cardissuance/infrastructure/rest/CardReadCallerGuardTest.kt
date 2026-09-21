@@ -64,7 +64,7 @@ class CardReadCallerGuardTest {
         val methods = CardResource::class.java.declaredMethods
         val withApi = methods.filter { m ->
             m.getAnnotation(RolesAllowed::class.java)?.value?.contains("ROLE_API") == true
-        }.map { it.name }.toSet()
+        }.map { it.name.substringBefore("$") }.toSet()
         assertThat(withApi).isEqualTo(setOf("getCard", "listByParty"))
     }
 

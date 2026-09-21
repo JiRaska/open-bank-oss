@@ -62,7 +62,7 @@ class OfferReadCallerGuardTest {
         )
         assertThat(IncentiveResource::class.java.getAnnotation(RolesAllowed::class.java).value)
             .containsExactly("ROLE_OPERATOR")
-        methods.filter { it.name != "getOffer" }.forEach { m ->
+        methods.filter { it.name.substringBefore("$") != "getOffer" }.forEach { m ->
             m.getAnnotation(RolesAllowed::class.java)?.let {
                 assertThat(it.value).describedAs(m.name).doesNotContain("ROLE_API")
             }
