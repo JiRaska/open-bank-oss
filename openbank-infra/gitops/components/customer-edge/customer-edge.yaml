@@ -185,6 +185,11 @@ spec:
             # /api/v1/entities/{id}/signing/* in this environment.
             - name: BUSINESS_APPROVALS_ENFORCE
               value: "true"
+            # #10281 standing-order edit-by-replace, published to clients as X-Edge-Features. Turn on only
+            # once standing-order-service runs an image containing the atomic replace (#10543): an
+            # older one ignores replacesStandingOrderId and would create a second order.
+            - name: EDGE_FEATURE_STANDINGORDERS_REPLACE
+              value: "true"
             # ADR-0284: business onboarding proxy + the profile-switch mandate check (via party-service).
             - name: KYB_SERVICE_URL
               value: http://kyb-service.kyb.svc:8157
