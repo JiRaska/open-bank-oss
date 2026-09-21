@@ -2499,6 +2499,26 @@ gates:
     run: |
       python3 .github/scripts/check-configproperty-supplied.py --enforce
 
+  # Negative control: delete `insecure-requests: enabled` from ledger-service's %prod block
+  # and it exits 1 naming the file and profile; restore it and it exits 0 (66 subjects).
+  - id: mtls-keeps-http-port
+    name: "client-auth required keeps the plain-HTTP port (insecure-requests: enabled, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      With quarkus.http.ssl.client-auth=required Quarkus defaults insecure-requests to disabled
+      and removes the HTTP listener. #10441 baked client-auth into seven services' %prod profile;
+      the first image built from it listened on 8443 only, its tcp-socket :http readiness probe
+      got connection refused and the rollout stalled. No unit test or @QuarkusTest sees %prod.
+    review_after: '2027-03-21'
+    min_subjects: 40
+    budget_seconds: 15
+    selftest_inputs: [".github/scripts/check-mtls-keeps-http-port.py"]
+    selftest: |
+      python3 .github/scripts/check-mtls-keeps-http-port.py --self-test
+    run: |
+      python3 .github/scripts/check-mtls-keeps-http-port.py --enforce
+
   - id: restclient-url-supplied
     name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"
     group: kotlin

@@ -326,6 +326,11 @@ authz:
       # still baked into the image; `test` and `dev` simply never see it.
       ssl:
         client-auth: required
+      # Keep the plain-HTTP port. With client-auth REQUIRED, Quarkus defaults
+      # `insecure-requests` to `disabled` and drops the HTTP listener entirely, so the
+      # readiness probe and every in-cluster plaintext caller get `connection refused`.
+      # mTLS applies to the 8443 listener only. Runtime property; see #10441.
+      insecure-requests: enabled
     # SavingsProposalService's SCA approval calls sca-service. Production uses a named TLS bucket
     # over sca-service's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client certificate only exists in the cluster.
