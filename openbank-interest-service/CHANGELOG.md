@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.8](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.7...interest-service-v0.20.8) (2026-09-21)
+
+
+### Security
+
+* **interest:** post capitalization journals as its own M2M identity ([#10488](https://github.com/JiRaska/open-bank-oss/issues/10488)) ([c773897](https://github.com/JiRaska/open-bank-oss/commit/c7738978ade3265af13050fc54821454ca4113ba))
+
 ## [0.20.7](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.6...interest-service-v0.20.7) (2026-09-20)
 
 
