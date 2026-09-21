@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.1...ledger-service-v1.29.2) (2026-09-21)
+
+
+### Security
+
+* **interest:** post capitalization journals as its own M2M identity ([#10488](https://github.com/JiRaska/open-bank-oss/issues/10488)) ([c773897](https://github.com/JiRaska/open-bank-oss/commit/c7738978ade3265af13050fc54821454ca4113ba))
+
 ## [1.29.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.0...ledger-service-v1.29.1) (2026-09-20)
 
 
