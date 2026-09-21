@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "eb626d0eaabbb0d2" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "265d0ab823a1c8ad" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -427,7 +427,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8f1e4eac2bb8a0e7"
+        openbank.tech/policy-checksum: "149ee530d5ce49a1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -506,6 +506,16 @@ spec:
                 secretKeyRef:
                   name: sepa-payment-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: sepa-payment's OWN Keycloak client (openbank-sepa-payment, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-payment-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
             # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
             # path 500'd. Wire them to the in-cluster services (mirrors domestic-payment below).
@@ -1538,6 +1548,16 @@ spec:
                 secretKeyRef:
                   name: clearing-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: clearing's OWN Keycloak client (openbank-clearing, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clearing-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # ADR-0281 net-settlement journal posting. Without this the rest-client fell back to
             # application.yaml's http://localhost:8101 inside this pod, every POST /api/v1/journals
             # was a connection refused, and the net-settlement leg never reached the book of record.
@@ -1858,6 +1878,16 @@ spec:
                 secretKeyRef:
                   name: standing-order-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: standing-order's OWN Keycloak client (openbank-standing-order, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: standing-order-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # #889: initiate the real SEPA credit transfer for a due standing order.
             # Was `sepa-payment-service.payments.svc:8108` until #3966 — wrong on both halves.
             # The Service is `sepa-payment` (declared ~line 355 of this file) and it serves

@@ -119,6 +119,8 @@ survives in it.
    ADMINUI_CLIENT_SECRET=... ARGOCD_CLIENT_SECRET=... EDGE_CLIENT_SECRET=... \
    GLITCHTIP_CLIENT_SECRET=... GOALERT_CLIENT_SECRET=... MCP_OBO_CLIENT_SECRET=... \
    OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... INTEREST_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+   ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
+   SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -243,6 +245,32 @@ then `.../role-mappings/realm` lists exactly `ROLE_API` (plus `default-roles-ope
 and `kubectl -n interest get externalsecret interest-service-ledger-oidc` reports `SecretSynced`.
 The DR copy (the realm-import blob) picks the client up at the next reconcile above — pass the
 SAME value as `INTEREST_CLIENT_SECRET` to the render script, read from `keycloak/interest-service`.
+
+### Batch 1 (money-path writers)
+
+Six more clients follow the identical recipe, one per caller, each consumed by a named
+oidc-client `m2m` in that service. The owner provisions them in one pass with a generic,
+idempotent script kept outside this repo (it drives `kcadm` and `bao` with the owner's own
+credentials, so it is not a tracked artefact); it reads the client list from the committed
+template, skips a client or KV entry that already exists unless told to overwrite, moves each
+secret with `jq -j` (no trailing newline), and verifies the stored length equals Keycloak's and
+that each service account holds exactly `ROLE_API`. Same ordering rule as above: provision
+BEFORE the consuming PR syncs.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-account` | `keycloak/account-service` | `account-service-m2m-oidc` (accounts) | `ACCOUNT_CLIENT_SECRET` |
+| `openbank-sdd` | `keycloak/sdd-service` | `sdd-service-m2m-oidc` (sdd) | `SDD_CLIENT_SECRET` |
+| `openbank-standing-order` | `keycloak/standing-order-service` | `standing-order-m2m-oidc` (payments) | `STANDING_ORDER_CLIENT_SECRET` |
+| `openbank-sepa-payment` | `keycloak/sepa-payment` | `sepa-payment-m2m-oidc` (payments) | `SEPA_PAYMENT_CLIENT_SECRET` |
+| `openbank-lending` | `keycloak/lending-service` | `lending-service-m2m-oidc` (lending) | `LENDING_CLIENT_SECRET` |
+| `openbank-clearing` | `keycloak/clearing-service` | `clearing-service-m2m-oidc` (payments) | `CLEARING_CLIENT_SECRET` |
+
+Two traps already paid for on the interest client, both silent: a client created WITHOUT the
+`profile` scope issues tokens with no `preferred_username`, so the principal id falls back to the
+subject UUID and every identity-gated rego rule simply never matches (a 403, not an error); and
+a secret piped with `jq -r` carries a trailing newline into Vault, which Keycloak then rejects as
+a different secret (`unauthorized_client`). `jq -j`, then compare lengths.
 
 ## What this does NOT fix
 

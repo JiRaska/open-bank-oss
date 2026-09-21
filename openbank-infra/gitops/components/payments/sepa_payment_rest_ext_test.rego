@@ -95,3 +95,41 @@ test_shared_no_operator_rule_on_transition if {
 		with input as {"principal": shared, "action": "sepaPayment.transitionStatus"}
 		with data.rules as rules_mock
 }
+
+# --- #10486 batch 1: standing-order-service's own identity (ROLE_API only) ---
+
+standing_order_m2m := {"type": "HUMAN", "id": "service-account-openbank-standing-order", "roles": ["ROLE_API"]}
+
+other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+
+test_standing_order_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": standing_order_m2m, "action": "sepaPayment.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-standing-order-sepa-payment-create" in rest.allowed_reasons
+		with input as {"principal": standing_order_m2m, "action": "sepaPayment.create"}
+		with data.rules as rules_mock
+}
+
+test_standing_order_denied_every_other_sepa_payment_action if {
+	every action in {
+		"sepaPayment.read", "sepaPayment.list", "sepaPayment.handleReturn",
+		"sepaPayment.transitionStatus", "sepaPayment.approval.decide", "sepaPayment.approval.read",
+	} {
+		rest.allow == false with input as {"principal": standing_order_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# createPayment admits ROLE_API at the RBAC layer now: OPA is the only control for any other
+# ROLE_API holder. Remove the principal.id line from the rule and this goes red.
+test_other_role_api_sa_may_not_create if {
+	rest.allow == false with input as {"principal": other_role_api_sa, "action": "sepaPayment.create"}
+		with data.rules as rules_mock
+}
+
+test_standing_order_rule_does_not_admit_the_shared_client if {
+	not "service-standing-order-sepa-payment-create" in rest.allowed_reasons
+		with input as {"principal": shared, "action": "sepaPayment.create"}
+		with data.rules as rules_mock
+}

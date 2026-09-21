@@ -197,3 +197,47 @@ test_interest_identity_rule_does_not_admit_the_shared_client if {
 	not "service-interest-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
 		with data.rules as rules_mock
 }
+
+# --- #10486 batch 1: lending-service and clearing-service own identities (ROLE_API only) ---
+
+lending_m2m := {"type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_API"]}
+
+clearing_m2m := {"type": "HUMAN", "id": "service-account-openbank-clearing", "roles": ["ROLE_API"]}
+
+test_lending_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": lending_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-lending-ledger-post" in rest.allowed_reasons with input as {"principal": lending_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_clearing_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": clearing_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-clearing-ledger-post" in rest.allowed_reasons with input as {"principal": clearing_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_batch1_identities_may_not_perform_any_other_ledger_action if {
+	every p in [lending_m2m, clearing_m2m] {
+		every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+			rest.allow == false with input as {"principal": p, "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+# Each identity rule admits exactly its own principal — never another per-service client, never
+# the shared one. Remove a principal.id line and one of these goes red.
+test_batch1_identity_rules_do_not_cross_admit if {
+	not "service-lending-ledger-post" in rest.allowed_reasons with input as {"principal": clearing_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-clearing-ledger-post" in rest.allowed_reasons with input as {"principal": lending_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-lending-ledger-post" in rest.allowed_reasons with input as {"principal": interest_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-clearing-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}

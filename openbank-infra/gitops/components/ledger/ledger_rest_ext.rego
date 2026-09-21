@@ -173,6 +173,23 @@ allowed_reasons contains "service-interest-ledger-post" if {
 	input.action == "ledger.create"
 }
 
+# #10486 batch 1 — per-service machine identities posting journals. Same shape as
+# service-interest-ledger-post above: each principal carries ROLE_API only, and its rule is its
+# WHOLE grant here — exactly ledger.create, never reverse/trigger/replay/approve/close.draft.
+#   lending-service  (LedgerRestClient, named oidc-client `m2m`): disbursement/repayment journals
+#   clearing-service (ClearingLedgerRestClient, named oidc-client `m2m`): ADR-0281 net settlement
+allowed_reasons contains "service-lending-ledger-post" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-lending"
+	input.action == "ledger.create"
+}
+
+allowed_reasons contains "service-clearing-ledger-post" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-clearing"
+	input.action == "ledger.create"
+}
+
 # Only transaction-service's client exposes a reverseJournal call. lending-service and
 # settlement-service have NO reverseJournal method on their ledger RestClients — granting
 # ledger.reverse to every caller sharing the openbank-services identity would open the one
