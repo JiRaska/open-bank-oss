@@ -521,6 +521,82 @@
       "secret": "__KYB_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-analytics-sink",
+      "name": "OpenBank Analytics Sink",
+      "description": "Per-service M2M client for analytics-sink's account-registry sweep (account.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__ANALYTICS_SINK_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-billing",
+      "name": "OpenBank Billing Service",
+      "description": "Per-service M2M client for billing-service's account reads (account.list, account.read) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__BILLING_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-document",
+      "name": "OpenBank Document Service",
+      "description": "Per-service M2M client for document-service's account lookup (account.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__DOCUMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-party",
+      "name": "OpenBank Party Service",
+      "description": "Per-service M2M client for party-service's GDPR Art. 15 account and transaction reads (account.list, transaction.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__PARTY_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "name": "Grafana (observability single pane)",
       "enabled": true,
@@ -874,6 +950,38 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-analytics-sink",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-analytics-sink",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-billing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-billing",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-document",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-document",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-party",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-party",
       "realmRoles": [
         "ROLE_API"
       ]

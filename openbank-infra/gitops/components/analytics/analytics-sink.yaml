@@ -100,6 +100,15 @@ spec:
                   name: analytics-sink-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: false
+            # #10486 batch 5: analytics-sink's OWN Keycloak client (openbank-analytics-sink, ROLE_API only)
+            # for the registry sweep's account list - the named oidc-client `m2m`. optional: false so an
+            # unseeded Vault entry is a loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-sink-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # account-service listens on 8100 (its Service exposes http:8100); 8102 is
             # transaction-service's port, and balance-service's manifest records what that
             # mistake cost there.

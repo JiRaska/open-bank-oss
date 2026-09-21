@@ -178,3 +178,14 @@ allowed_reasons contains "service-interest-transaction-create" if {
 	input.principal.id == "service-account-openbank-interest"
 	input.action == "transaction.create"
 }
+
+# #10486 batch 5 — per-service machine identities for the transaction READS that used to ride the
+# shared openbank-services principal's ROLE_OPERATOR (base operator-read-any). TransactionResource's
+# RBAC already admits ROLE_API on list/search/read, so OPA is the only thing between these reads and
+# every other ROLE_API service account: each rule is its principal's whole read grant.
+#   party-service TransactionServiceRestClient GET /transactions?accountId= (GDPR Art. 15) transaction.list
+allowed_reasons contains "service-party-transaction-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-party"
+	input.action == "transaction.list"
+}
