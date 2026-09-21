@@ -69,9 +69,19 @@ class InterestCapitalizationMetrics @Inject constructor(private val registryInst
         reg()?.counter(FAILED_COUNTER)?.increment()
     }
 
+    /**
+     * One stale claim the ledger REFUSED deterministically (a 4xx). Apart from [claimRecoveryFailed]
+     * because the remedy differs: a transient failure heals on a later sweep, a refusal never does
+     * and needs a person. Both leave the claim outstanding.
+     */
+    fun claimRecoveryRejected() {
+        reg()?.counter(REJECTED_COUNTER)?.increment()
+    }
+
     internal companion object {
         const val RECOVERED_COUNTER = "openbank.interest.capitalization.claims.recovered"
         const val FAILED_COUNTER = "openbank.interest.capitalization.claims.recovery.failed"
+        const val REJECTED_COUNTER = "openbank.interest.capitalization.claims.recovery.rejected"
         const val OUTSTANDING_GAUGE = "openbank.interest.capitalization.claims.outstanding"
     }
 }

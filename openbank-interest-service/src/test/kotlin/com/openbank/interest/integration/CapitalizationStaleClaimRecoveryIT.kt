@@ -8,6 +8,7 @@ import com.openbank.interest.application.port.out.InterestAccrualRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.interest.infrastructure.client.CapitalizationJournalFactory
 import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
@@ -164,6 +165,64 @@ class CapitalizationStaleClaimRecoveryIT {
             .hasSize(1)
         assertThat(journalsFor(accountId).single().idempotencyKey)
             .isEqualTo("interest-capitalization-$accountId-$PRODUCT-$claimedPeriod")
+    }
+
+    /**
+     * Sandbox's seventh pair (#10404). The claim was stranded for period 2026-09-01 and recovery
+     * re-sent it with `entryDate = 2026-09-01` — a day the ledger's accounting-day lock (ENFORCE)
+     * already held TIED_OUT — so every attempt drew the same 409 and no sweep could ever finish it.
+     * The six sibling pairs only succeeded because their period-end day (2026-08-01) had never been
+     * opened, which the lock does not refuse. The completion must book FORWARD into the open day,
+     * keep the period end as the value date and the key, and still produce exactly one journal.
+     */
+    @Test
+    fun `a stale claim whose period-end day is closed books forward, exactly once`() {
+        val accountId = UUID.randomUUID()
+        persistAccrual(accountId, "100.000000", LocalDate.of(2026, 7, 31))
+        ledger.failNextPost("connection refused: localhost:8101")
+        assertThatThrownBy { capitalizeOne(accountId, claimedPeriod) }.hasMessageContaining("connection refused")
+
+        // Every day before today has been tied out since — the state sandbox is in.
+        val today = LocalDate.now(CapitalizationJournalFactory.LEDGER_ZONE)
+        ledger.closeDaysThrough(today.minusDays(1))
+
+        capitalizeAll(laterTick)
+        capitalizeAll(laterTick.plusDays(1))
+
+        val journal = journalsFor(accountId).single()
+        assertThat(journal.idempotencyKey).isEqualTo("interest-capitalization-$accountId-$PRODUCT-$claimedPeriod")
+        assertThat(journal.entryDate).`as`("booked into the open day, not the closed period end").isEqualTo(today)
+        assertThat(journal.valueDate).`as`("the interest still belongs to the period end").isEqualTo(claimedPeriod)
+        assertThat(accrualsOf(accountId).map { it.status }).containsOnly(AccrualStatus.CAPITALIZED)
+    }
+
+    /**
+     * A refusal the ledger will repeat forever must not look like a transient failure, and must
+     * never be "resolved" by releasing the claim (a later period = a new key = a second journal).
+     */
+    @Test
+    fun `a deterministic ledger refusal is counted apart, keeps the claim and books nothing`() {
+        val accountId = UUID.randomUUID()
+        persistAccrual(accountId, "100.000000", LocalDate.of(2026, 7, 31))
+        ledger.failNextPost("connection refused: localhost:8101")
+        assertThatThrownBy { capitalizeOne(accountId, claimedPeriod) }.hasMessageContaining("connection refused")
+
+        // Every day refused, including today: nothing this caller can send will be accepted.
+        ledger.closeDaysThrough(LocalDate.now(CapitalizationJournalFactory.LEDGER_ZONE).plusYears(1))
+        val rejectedBefore = counter("openbank.interest.capitalization.claims.recovery.rejected")
+        val failedBefore = counter("openbank.interest.capitalization.claims.recovery.failed")
+
+        VertxContextSupport.subscribeAndAwait { service.recoverOutstandingClaims() }
+
+        assertThat(counter("openbank.interest.capitalization.claims.recovery.rejected"))
+            .`as`("the refusal is counted on its own metric")
+            .isGreaterThanOrEqualTo(rejectedBefore + 1.0)
+        assertThat(counter("openbank.interest.capitalization.claims.recovery.failed"))
+            .`as`("and not as a transient failure the next sweep would heal")
+            .isEqualTo(failedBefore)
+        assertThat(journalsFor(accountId)).isEmpty()
+        assertThat(accrualsOf(accountId).map { it.status }).containsOnly(AccrualStatus.CAPITALIZING)
+        assertThat(accrualsOf(accountId).map { it.claimedPeriodTo }).containsOnly(claimedPeriod)
     }
 
     /**
