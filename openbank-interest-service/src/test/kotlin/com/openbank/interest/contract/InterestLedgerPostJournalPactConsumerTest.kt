@@ -220,8 +220,7 @@ class InterestLedgerPostJournalPactConsumerTest {
      * `Money.of` will read it.
      */
     private fun bodyOf(posting: CapitalizationPosting): String =
-        // Booked on its own period end — the on-time path, where entry and value date coincide.
-        MAPPER.writeValueAsString(CapitalizationJournalFactory.buildRequest(posting, LedgerConfigFixture, PERIOD_TO))
+        MAPPER.writeValueAsString(CapitalizationJournalFactory.buildRequest(posting, LedgerConfigFixture))
 
     private companion object {
         private val WITHHELD_ACCOUNT_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")

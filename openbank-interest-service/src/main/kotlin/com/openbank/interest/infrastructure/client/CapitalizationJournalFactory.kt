@@ -85,6 +85,10 @@ object CapitalizationJournalFactory {
      * Neither date is part of the idempotency key, so a retry that straddles midnight still replays
      * onto the same journal: the ledger answers a known key before it looks at any date.
      */
+    /** The on-time journal: booked on its own period end, where entry and value date coincide. */
+    fun buildRequest(posting: CapitalizationPosting, config: InterestLedgerConfig): PostJournalRequest =
+        buildRequest(posting, config, posting.periodTo)
+
     fun buildRequest(
         posting: CapitalizationPosting,
         config: InterestLedgerConfig,

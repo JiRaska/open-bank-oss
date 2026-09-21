@@ -64,6 +64,22 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-09-21** — Ledger capitalization call: late booking and refusal handling (#10404). A
+  capitalization completed after its period end (the recovery sweep) sent `entryDate = periodTo`
+  into an accounting day the ledger's day lock (ADR-0207 D3, enforce) had closed, so the ledger
+  answered 409 on every attempt. `entryDate` is now `max(periodTo, today in Europe/Prague)` while
+  `valueDate` stays `periodTo`. That follows the ledger's own remedy (book late activity forward)
+  and does not get around the lock: the ledger still decides whether the day is open. The
+  idempotency key and `transactionId` are unchanged and independent of either date, so a replay
+  still returns the original journal and never books a second one. `LedgerCallGuard` no longer
+  retries a deterministic 4xx (except 408/429) and no longer counts it toward the circuit breaker
+  (`LedgerPostingRejectedException`, `abortOn` + `skipOn`). Before this, a single refused request
+  held the breaker open and blocked every other capitalization's post, an availability risk to
+  the money path. A refused claim is not released. It stays `CAPITALIZING` and is counted on
+  `openbank_interest_capitalization_claims_recovery_rejected_total`. There is no new caller,
+  endpoint, privilege or data flow, and the service still talks only to the same ledger client
+  under the same M2M identity.
+
 - **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0291, burn-down #8351).
   `accrue` and `rates` gained check-first replay on their natural keys (accrual: V12's
   `(account, date, product, currency)`; rate config: `(product, account, currency,
