@@ -39,13 +39,15 @@ class AmlCaseCreateCallerGuardTest {
 
     @Test
     fun `another service account holding ROLE_API is refused`() {
-        assertThatThrownBy { requireNamedMachineCaller(identity("service-account-openbank-mcp-service", "ROLE_API")) }
+        val other = identity("service-account-openbank-mcp-service", "ROLE_API")
+        assertThatThrownBy { requireNamedMachineCaller(other) }
             .isInstanceOf(ForbiddenException::class.java)
     }
 
     @Test
     fun `the shared client is refused once it holds ROLE_API only`() {
-        assertThatThrownBy { requireNamedMachineCaller(identity("service-account-openbank-services", "ROLE_API")) }
+        val shared = identity("service-account-openbank-services", "ROLE_API")
+        assertThatThrownBy { requireNamedMachineCaller(shared) }
             .isInstanceOf(ForbiddenException::class.java)
     }
 

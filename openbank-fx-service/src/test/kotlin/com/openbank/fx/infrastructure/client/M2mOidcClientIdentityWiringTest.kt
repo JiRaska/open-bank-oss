@@ -34,7 +34,8 @@ class M2mOidcClientIdentityWiringTest {
         val named = AmlServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
         assertThat(named).describedAs("@OidcClientFilter on AmlServiceClient").isNotNull
         assertThat(named.value).isEqualTo(M2M)
-        assertThat(AmlServiceClient::class.java.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java })
+        val providers = AmlServiceClient::class.java.getAnnotationsByType(RegisterProvider::class.java)
+        assertThat(providers.map { it.value.java })
             .describedAs("the default-client filter would re-attach the shared principal's token")
             .doesNotContain(OidcClientRequestReactiveFilter::class.java)
     }
