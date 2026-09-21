@@ -124,7 +124,13 @@ test_transaction_service_own_identity_has_no_grant_here if {
 
 # --- #10486 batch 5: per-service READ identities (ROLE_API only) ---
 
-read_grants := {"party": {"reason": "service-party-transaction-read", "actions": {"transaction.list"}}}
+read_grants := {
+	"party": {"reason": "service-party-transaction-read", "actions": {"transaction.list"}},
+	# #10486 batch 7
+	"statement": {"reason": "service-statement-transaction-search", "actions": {"transaction.search"}},
+	"agent": {"reason": "service-agent-transaction-read", "actions": {"transaction.list", "transaction.read"}},
+	"mcp": {"reason": "service-mcp-transaction-read", "actions": {"transaction.list"}},
+}
 
 all_read_actions := {"transaction.list", "transaction.read", "transaction.search"}
 

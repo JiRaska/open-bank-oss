@@ -654,6 +654,63 @@
       "secret": "__DELEGATION_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-agent",
+      "name": "OpenBank Agent Service",
+      "description": "Per-service M2M client for agent-service's charter-gated read tools (transaction.list/read, sctInstPayment.list/read) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__AGENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-mcp",
+      "name": "OpenBank MCP Service",
+      "description": "Per-service M2M client for mcp-service's charter-gated read ports (transaction.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__MCP_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-statement",
+      "name": "OpenBank Statement Service",
+      "description": "Per-service M2M client for statement-service's booked-entries search (transaction.search) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__STATEMENT_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "name": "Grafana (observability single pane)",
       "enabled": true,
@@ -1063,6 +1120,30 @@
       "username": "service-account-openbank-delegation",
       "enabled": true,
       "serviceAccountClientId": "openbank-delegation",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-agent",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-agent",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-mcp",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-mcp",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-statement",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-statement",
       "realmRoles": [
         "ROLE_API"
       ]

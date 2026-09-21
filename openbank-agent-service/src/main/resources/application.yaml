@@ -58,6 +58,17 @@ quarkus:
       type: client
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
+    # #10486 batch 7: the agent read tools whose upstream grant depended on the shared client's
+    # ROLE_OPERATOR (transactions, SCT Inst payments, interest accruals) mint from this NAMED client
+    # instead, so the upstream sees service-account-openbank-agent (ROLE_API only) and grants it only
+    # what an agents.yaml charter can reach (see the rego rules that name this principal).
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-agent
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   smallrye-openapi:
     path: /q/openapi
