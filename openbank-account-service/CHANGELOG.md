@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.2...account-service-v0.31.3) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
 ## [0.31.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.1...account-service-v0.31.2) (2026-09-21)
 
 

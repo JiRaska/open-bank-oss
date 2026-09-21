@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.6](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.5...lending-service-v0.33.6) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
 ## [0.33.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.4...lending-service-v0.33.5) (2026-09-20)
 
 

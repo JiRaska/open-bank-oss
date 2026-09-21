@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.5](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.4...standing-order-service-v0.16.5) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
 ## [0.16.4](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.3...standing-order-service-v0.16.4) (2026-09-13)
 
 
