@@ -7,11 +7,11 @@ import com.openbank.incentive.domain.OfferRef
 import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.ReservationStatus
 import com.openbank.incentive.domain.StackingPolicy
-import jakarta.annotation.security.RolesAllowed
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.GET
 import jakarta.inject.Inject
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
