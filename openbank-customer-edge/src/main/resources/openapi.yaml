@@ -5060,7 +5060,10 @@ components:
       additionalProperties: true
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE, STANDING_ORDER, SDD_MANDATE]}
+        kind:
+          type: string
+          description: Extensible (#10281 added STANDING_ORDER and SDD_MANDATE); treat an unknown kind as a generic request.
+          x-extensible-enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE, STANDING_ORDER, SDD_MANDATE]
         status:
           type: string
           description: >-
