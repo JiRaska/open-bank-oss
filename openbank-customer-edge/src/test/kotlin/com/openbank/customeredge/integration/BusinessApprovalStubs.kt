@@ -60,6 +60,8 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
             "openbank.edge.sepa-payment-service-url" to base,
             "openbank.edge.sepa-instant-service-url" to base,
             "openbank.edge.swift-service-url" to base,
+            "openbank.edge.standing-order-service-url" to base,
+            "openbank.edge.sdd-service-url" to base,
             "openbank.edge.business-approvals.enforce" to "true",
         )
     }

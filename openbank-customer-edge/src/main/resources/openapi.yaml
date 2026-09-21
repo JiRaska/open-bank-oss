@@ -22,7 +22,7 @@ info:
   # 1.69.0 -> 1.70.0: additive — GET /business/company (the acting-for company's register facts,
   # representatives, signing rule and accounts). SCA routes documented as the HUMAN's under
   # X-Acting-For (no shape change).
-  version: 1.71.0
+  version: 1.72.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1708,6 +1708,20 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to act for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
+        - name: X-SCA-Challenge-Id
+          in: header
+          required: false
+          description: >-
+            Required only when the company's signing policy holds the instruction (#10281): the
+            initiator's consumed PAYMENT_INITIATION challenge is the first signature.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       requestBody:
         required: true
@@ -1731,6 +1745,15 @@ paths:
                 startDate: {type: string, format: date, description: Defaults to today when omitted}
                 endDate: {type: string, format: date, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the order is banded by its per-execution amount. The initiator's SCA was consumed and
+            counts as the first signature, an approval request holds the exact standing order, and nothing
+            was created upstream. It is created when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Standing order created
           content:
@@ -1739,7 +1762,11 @@ paths:
         '400':
           description: Missing or malformed field
         '403':
-          description: Debit account does not belong to caller
+          description: Debit account does not belong to caller, or SCA missing/rejected on a held order
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            instruction is refused rather than created with a single signature.
 
   /standing-orders/{id}:
     delete:
@@ -2216,6 +2243,21 @@ paths:
       operationId: createSddMandate
       security:
         - customerOidc: [accounts:write]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to act for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
+        - name: X-SCA-Challenge-Id
+          in: header
+          required: false
+          description: >-
+            Required only when the company's signing policy holds the instruction (#10281): the
+            initiator's consumed PAYMENT_INITIATION challenge is the first signature.
+          schema: {type: string, format: uuid}
       requestBody:
         required: true
         content:
@@ -2230,12 +2272,25 @@ paths:
                 scheme: {type: string, enum: [CORE, B2B], default: CORE}
                 sequenceType: {type: string, enum: [OOFF, FRST, RCUR, FNAL], default: RCUR}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: a mandate has no maximum amount, so the strictest rule applies. The initiator's SCA was consumed and
+            counts as the first signature, an approval request holds the exact mandate, and nothing
+            was created upstream. It is created when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Mandate registered (idempotent on creditor identifier + UMR)
         '400':
           description: Missing accountId/creditorName/creditorIdentifier, or unresolvable debtor IBAN
         '403':
-          description: Account does not belong to caller
+          description: Account does not belong to caller, or SCA missing/rejected on a held mandate
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            instruction is refused rather than created with a single signature.
 
   /sdd/mandates/{id}/cancel:
     post:
@@ -5005,7 +5060,7 @@ components:
       additionalProperties: true
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE]}
+        kind: {type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE, STANDING_ORDER, SDD_MANDATE]}
         status:
           type: string
           description: >-

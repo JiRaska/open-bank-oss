@@ -105,6 +105,19 @@ openbank-sdd-service.
 
 ## 6. Change log
 
+- **2026-09-21** — Business multi-signature on creation (#10281, ADR-0312 addendum). A standing
+  order created under `X-Acting-For` for a legal entity is no longer created on one person's word:
+  customer-edge `createStandingOrder` asks delegation-service `signing/evaluate` (kind
+  `STANDING_ORDER`, banded by the per-execution amount, never the trusted-payee shortcut) and, when
+  more than one signature is required, holds the exact create body as an approval request (202)
+  instead of calling this service. The last co-signature releases it here once, through the
+  single-use `release-claim`, with `Idempotency-Key = approvalId`; the frozen body keeps the
+  `idempotencyKey` minted at hold time, so a replayed release cannot create a second order. No new
+  endpoint, caller or role on this service: the caller is still customer-edge, the body shape is
+  unchanged, and the party is still the entity. Residual: pause/resume/cancel stay
+  single-signature — none of them creates or enlarges an outflow. Proven by
+  `BusinessRecurringApprovalIT` (edge) and `BusinessSigningApiIT` (delegation-service).
+
 - **2026-09-06** — Create DTO rejects a non-positive amount at the trust boundary (#8351
   burn-down). `CreateStandingOrderRequest.amountMinorUnits` is a Kotlin primitive, so Jackson
   silently substitutes 0 when the field is omitted — an undocumented bypass that would have
