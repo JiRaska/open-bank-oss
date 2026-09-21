@@ -48,7 +48,9 @@ class CreditProfileCallerGuardTest {
 
     @Test
     fun `the shared client is refused once it holds ROLE_API only`() {
-        assertThatThrownBy { requireNamedCreditProfileCaller(identity("service-account-openbank-services", "ROLE_API")) }
+        assertThatThrownBy {
+            requireNamedCreditProfileCaller(identity("service-account-openbank-services", "ROLE_API"))
+        }
             .isInstanceOf(ForbiddenException::class.java)
     }
 
