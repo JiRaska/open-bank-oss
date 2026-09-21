@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-21838f19
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -842,7 +842,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-21838f19
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1202,7 +1202,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-21838f19
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2430,7 +2430,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-21838f19
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2868,7 +2868,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-21838f19
 
           imagePullPolicy: IfNotPresent
           ports:
