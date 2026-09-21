@@ -19,7 +19,7 @@ info:
   # 1.11.0 is the next free number. Read off live origin/main in the same turn as this edit —
   # a taken version is textually identical to a free one, so no merge could have caught it, and
   # the four-PR queue on this one spec is exactly the shape that keeps producing the collision.
-  version: 1.12.0
+  version: 1.11.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -42,7 +42,7 @@ paths:
       summary: Create a SEPA payment
       operationId: createSepaPayment
       security:
-        - bearerAuth: [ROLE_API, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
       parameters:
         - name: Idempotency-Key
           in: header
