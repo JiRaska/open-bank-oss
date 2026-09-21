@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.2...ledger-service-v1.29.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
 ## [1.29.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.1...ledger-service-v1.29.2) (2026-09-21)
 
 

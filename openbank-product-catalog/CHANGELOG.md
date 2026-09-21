@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.7](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.6...product-catalog-v0.18.7) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
 ## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.5...product-catalog-v0.18.6) (2026-09-20)
 
 

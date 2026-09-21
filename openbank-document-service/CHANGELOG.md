@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.1...document-service-v0.15.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.0...document-service-v0.15.1) (2026-09-20)
 
 
