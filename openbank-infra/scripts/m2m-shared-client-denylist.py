@@ -129,7 +129,7 @@ def norm(path: str) -> list[str]:
 
 def path_match(a: str, b: str) -> bool:
     x, y = norm(a), norm(b)
-    return len(x) == len(y) and all(p == q or "*" in (p, q) for p, q in zip(x, y))
+    return len(x) == len(y) and all(p == q or "*" in (p, q) for p, q in zip(x, y, strict=True))
 
 
 # ------------------------------------------------------------------ server side
@@ -413,7 +413,7 @@ def main() -> int:
             if c["client_id"] != SHARED:
                 continue
             tgt = target_module(client_url(m, c["configKey"] or ""), names) if c["configKey"] else None
-            def find(cands):
+            def find(cands, c=c):
                 return [e for n in cands for e in servers.get(n, [])
                         if e["verb"] == c["verb"] and path_match(e["path"], c["path"])]
 
@@ -430,10 +430,11 @@ def main() -> int:
             # Most specific first: a server literal matched by a client TEMPLATE segment
             # (`/transactions/pending` vs the client's `/transactions/{id}`) is the weakest match
             # and must lose to a server template in the same position.
-            def score(e):
+            def score(e, c=c):
+                # hits already passed path_match, so both paths have equal segment counts
                 s, cp = norm(e["path"]), norm(c["path"])
-                return (-sum(1 for p, q in zip(s, cp) if q == "*" and p != "*"),
-                        sum(1 for p, q in zip(s, cp) if p == q != "*"))
+                return (-sum(1 for p, q in zip(s, cp, strict=True) if q == "*" and p != "*"),
+                        sum(1 for p, q in zip(s, cp, strict=True) if p == q != "*"))
             hits.sort(key=score, reverse=True)
             row = dict(c, target=tgt)
             if not hits:
