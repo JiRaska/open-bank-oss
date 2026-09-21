@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.9](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.8...interest-service-v0.20.9) (2026-09-21)
+
+
+### Bug Fixes
+
+* **interest:** book late capitalizations forward and keep ledger 4xx out of the breaker ([#10487](https://github.com/JiRaska/open-bank-oss/issues/10487)) ([e669c00](https://github.com/JiRaska/open-bank-oss/commit/e669c001e6b83c3dc2c3b390fe8197314a78a1de))
+
 ## [0.20.8](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.7...interest-service-v0.20.8) (2026-09-21)
 
 
