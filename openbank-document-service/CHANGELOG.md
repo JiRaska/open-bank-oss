@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.2...document-service-v0.15.3) (2026-09-21)
+
+
+### Security
+
+* **document-service:** bump BouncyCastle to 1.85 for CVE-2026-8763 ([#10530](https://github.com/JiRaska/open-bank-oss/issues/10530)) ([6d6a6cc](https://github.com/JiRaska/open-bank-oss/commit/6d6a6ccb7e500d0ec7e7b13d93e36490c0bb5778))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.1...document-service-v0.15.2) (2026-09-21)
 
 
