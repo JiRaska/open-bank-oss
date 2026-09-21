@@ -483,6 +483,44 @@
       "secret": "__SETTLEMENT_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-fx",
+      "name": "OpenBank FX Service",
+      "description": "Per-service M2M client for fx-service's AML case open (amlCase.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__FX_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-kyb",
+      "name": "OpenBank KYB Service",
+      "description": "Per-service M2M client for kyb-service's entity-party create and mandate grant (party.create, party.mandate.grant) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__KYB_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "name": "Grafana (observability single pane)",
       "enabled": true,
@@ -820,6 +858,22 @@
       "username": "service-account-openbank-settlement",
       "enabled": true,
       "serviceAccountClientId": "openbank-settlement",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-fx",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-fx",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-kyb",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-kyb",
       "realmRoles": [
         "ROLE_API"
       ]

@@ -122,7 +122,7 @@ survives in it.
    ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
    SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
    DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
-   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... \
+   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -287,6 +287,16 @@ existing `openbank-interest` (named oidc-client `ledger`), so nothing is provisi
 | `openbank-swift` | `keycloak/swift-service` | `swift-service-m2m-oidc` (payments) | `SWIFT_CLIENT_SECRET` |
 | `openbank-transaction` | `keycloak/transaction-service` | `transaction-service-m2m-oidc` (payments) | `TRANSACTION_CLIENT_SECRET` |
 | `openbank-settlement` | `keycloak/settlement-service` | `settlement-service-m2m-oidc` (payments) | `SETTLEMENT_CLIENT_SECRET` |
+
+### Batch 3 (the remaining writers)
+
+Same recipe, same script, two more clients. domestic-payment, sepa-payment and sepa-instant move
+their AML case open onto the `m2m` client they already have, so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-fx` | `keycloak/fx-service` | `fx-service-m2m-oidc` (fx) | `FX_CLIENT_SECRET` |
+| `openbank-kyb` | `keycloak/kyb-service` | `kyb-service-m2m-oidc` (kyb) | `KYB_CLIENT_SECRET` |
 
 ## What this does NOT fix
 
