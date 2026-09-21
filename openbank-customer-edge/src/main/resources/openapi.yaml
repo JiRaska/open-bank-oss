@@ -1693,6 +1693,13 @@ paths:
       responses:
         '200':
           description: Raw standing-order-service passthrough
+          headers:
+            X-Edge-Features:
+              description: >-
+                Comma-separated feature flags live in this edge build (#10281); absent when none.
+                `standingorders.replace` — an edit may send `replacesStandingOrderId`. The app
+                reads it from the list it already loads and hides the one-call edit otherwise.
+              schema: {type: string, example: 'standingorders.replace'}
           content:
             application/json:
               schema:
@@ -1754,6 +1761,10 @@ paths:
                     held for signatures; a rejected or expired request leaves it untouched.
       responses:
         '202':
+          headers:
+            X-Edge-Features:
+              description: The edge's live feature flags (see the list operation); also sent on refusals.
+              schema: {type: string, example: 'standingorders.replace'}
           description: >-
             Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
             policy needs more than one signature: the order is banded by its per-execution amount. The initiator's SCA was consumed and
@@ -1764,13 +1775,28 @@ paths:
               schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Standing order created
+          headers:
+            X-Edge-Features:
+              description: >-
+                Comma-separated feature flags live in this edge build (#10281); absent when none.
+                `standingorders.replace` — an edit may send `replacesStandingOrderId`. The app
+                reads it from the list it already loads and hides the one-call edit otherwise.
+              schema: {type: string, example: 'standingorders.replace'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StandingOrder'}
         '400':
           description: Missing or malformed field
         '403':
+          headers:
+            X-Edge-Features:
+              description: The edge's live feature flags (see the list operation); also sent on refusals.
+              schema: {type: string, example: 'standingorders.replace'}
           description: Debit account does not belong to caller, or SCA missing/rejected on a held order
+        '501':
+          description: >-
+            `replacesStandingOrderId` sent while `standingorders.replace` is not live in this build
+            (`code: REPLACE_NOT_ENABLED`); nothing was created or cancelled.
         '503':
           description: >-
             Under X-Acting-For only: the company's signing policy could not be evaluated, so the

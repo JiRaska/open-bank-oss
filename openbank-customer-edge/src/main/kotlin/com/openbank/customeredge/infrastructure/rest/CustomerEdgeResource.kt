@@ -194,6 +194,10 @@ class CustomerEdgeResource(
     @Inject
     lateinit var businessApprovals: BusinessPaymentApprovals
 
+    /** Feature flags this build publishes (#10281); a resource built by hand in a test has none. */
+    @Inject
+    lateinit var edgeFeatures: EdgeFeatures
+
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
 
@@ -5155,6 +5159,13 @@ class CustomerEdgeResource(
     /** Null when the body names no replaced order, or names one of the caller's own (#10281). */
     private fun replacementRefusal(body: String, partyId: UUID): Response? {
         val raw = extractTextField(objectMapper, body, "replacesStandingOrderId") ?: return null
+        // Not live in this build: refuse rather than send a field an older standing-order-service
+        // would ignore, which would create a second order and cancel nothing (double debit).
+        if (!this::edgeFeatures.isInitialized || !edgeFeatures.replaceEnabled()) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED)
+                .entity("""{"error":"Standing-order replace is not enabled","code":"REPLACE_NOT_ENABLED"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
         val replaced = runCatching { UUID.fromString(raw) }.getOrNull()
             ?: return badRequest("Malformed replacesStandingOrderId")
         return if (ownsStandingOrder(replaced, partyId)) null else forbidden("Standing order does not belong to caller")

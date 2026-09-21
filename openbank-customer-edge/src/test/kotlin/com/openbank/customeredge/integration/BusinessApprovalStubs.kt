@@ -63,6 +63,7 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
             "openbank.edge.standing-order-service-url" to base,
             "openbank.edge.sdd-service-url" to base,
             "openbank.edge.business-approvals.enforce" to "true",
+            "openbank.edge.features.standingorders-replace" to "true",
         )
     }
 
