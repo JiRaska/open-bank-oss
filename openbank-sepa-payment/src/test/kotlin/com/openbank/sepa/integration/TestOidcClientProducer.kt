@@ -6,7 +6,6 @@ package com.openbank.sepa.integration
 
 import io.mockk.every
 import io.mockk.mockk
-import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.OidcClient
 import io.quarkus.oidc.client.Tokens
 import io.smallrye.mutiny.Uni
@@ -25,18 +24,6 @@ class TestOidcClientProducer {
     @ApplicationScoped
     fun oidcClient(): OidcClient {
         val tokens = mockk<Tokens> { every { accessToken } returns "it-test-token" }
-        return mockk { every { getTokens() } returns Uni.createFrom().item(tokens) }
-    }
-
-    /**
-     * #10486: the settlement and reversal legs to transaction-service resolve the NAMED client
-     * `m2m` (sepa-payment's own Keycloak identity), which the `%test` profile also disables.
-     */
-    @Produces
-    @ApplicationScoped
-    @NamedOidcClient("m2m")
-    fun m2mOidcClient(): OidcClient {
-        val tokens = mockk<Tokens> { every { accessToken } returns "it-test-m2m-token" }
         return mockk { every { getTokens() } returns Uni.createFrom().item(tokens) }
     }
 }
