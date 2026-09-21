@@ -117,6 +117,15 @@ openbank-sdd-service.
   unchanged, and the party is still the entity. Residual: pause/resume/cancel stay
   single-signature — none of them creates or enlarges an outflow. Proven by
   `BusinessRecurringApprovalIT` (edge) and `BusinessSigningApiIT` (delegation-service).
+  **Edit is an atomic replace.** An edit used to be create-then-cancel from the client, so a
+  held replacement released later would run alongside the original until someone cancelled it —
+  a double debit. `POST /api/v1/standing-orders` now takes `replacesStandingOrderId`:
+  `StandingOrderRepositoryImpl.replace` cancels the original with a conditional update (same party,
+  ACTIVE or PAUSED) and inserts the replacement in ONE transaction; a mismatch writes nothing
+  (422). A replay of the same `idempotencyKey` returns the order already created. The edge checks
+  the replaced order belongs to the caller before any signing. Proven by `StandingOrderReplaceIT`
+  (one ACTIVE order after replace, same `xmin` on both rows, replay no-op, refused replace
+  unchanged).
 
 - **2026-09-06** — Create DTO rejects a non-positive amount at the trust boundary (#8351
   burn-down). `CreateStandingOrderRequest.amountMinorUnits` is a Kotlin primitive, so Jackson

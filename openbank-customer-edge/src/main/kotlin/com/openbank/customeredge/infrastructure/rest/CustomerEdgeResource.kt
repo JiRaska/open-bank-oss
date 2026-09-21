@@ -1157,6 +1157,7 @@ class CustomerEdgeResource(
             extras = mapOf(
                 "frequency" to node.path("frequency").asText("").takeIf { it.isNotBlank() },
                 "startDate" to node.path("startDate").asText("").takeIf { it.isNotBlank() },
+                "replacesStandingOrderId" to node.path("replacesStandingOrderId").asText("").takeIf { it.isNotBlank() },
             ),
         )
     }
@@ -3486,6 +3487,9 @@ class CustomerEdgeResource(
         if (!ownsAccount(debit, customer.partyId)) {
             return forbidden("Debit account does not belong to caller")
         }
+        // An edit (#10281) names the order it replaces; standing-order-service swaps them in one
+        // transaction. The replaced order must be the caller's own — same guard as pause/cancel.
+        replacementRefusal(body, customer.partyId)?.let { return it }
         var enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
             ?: return badRequest("Malformed standing-order body")
         enriched = injectField(
@@ -5148,6 +5152,21 @@ class CustomerEdgeResource(
      * are party-unaware (id-only), so the edge resolves the order, confirms it belongs to the
      * JWT party (403 otherwise — no existence oracle), runs [action], and audits the outcome.
      */
+    /** Null when the body names no replaced order, or names one of the caller's own (#10281). */
+    private fun replacementRefusal(body: String, partyId: UUID): Response? {
+        val raw = extractTextField(objectMapper, body, "replacesStandingOrderId") ?: return null
+        val replaced = runCatching { UUID.fromString(raw) }.getOrNull()
+            ?: return badRequest("Malformed replacesStandingOrderId")
+        return if (ownsStandingOrder(replaced, partyId)) null else forbidden("Standing order does not belong to caller")
+    }
+
+    private fun ownsStandingOrder(id: UUID, partyId: UUID): Boolean {
+        val json = upstream.get("$standingOrderServiceUrl/api/v1/standing-orders/$id", partyId.toString())
+            .takeIf { it.statusInfo.family == Response.Status.Family.SUCCESSFUL }
+            ?.let { it.entity as? String } ?: return false
+        return extractTextField(objectMapper, json, "partyId") == partyId.toString()
+    }
+
     private fun standingOrderLifecycle(id: UUID, operation: String, action: (String) -> Response): Response {
         val customer = customer()
         val orderJson = upstream.get("$standingOrderServiceUrl/api/v1/standing-orders/$id", customer.partyId.toString())

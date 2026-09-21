@@ -7,6 +7,7 @@ package com.openbank.standingorder.infrastructure.persistence.repository
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
 import com.openbank.standingorder.domain.model.StandingOrder
+import com.openbank.standingorder.domain.model.StandingOrderStatus
 import com.openbank.standingorder.infrastructure.persistence.entity.StandingOrderEntity
 import com.openbank.standingorder.infrastructure.persistence.mapper.toDomain
 import com.openbank.standingorder.infrastructure.persistence.mapper.toEntity
@@ -15,6 +16,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -37,6 +39,28 @@ class StandingOrderRepositoryImpl :
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
     override suspend fun findByIdempotencyKey(key: String) =
         Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.toDomain()
+    override suspend fun replace(replacement: StandingOrder, replacedId: UUID, now: Instant): Boolean =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { s ->
+                s.createMutationQuery(
+                    "update StandingOrderEntity set status = :cancelled, updatedAt = :now " +
+                        "where id = :id and partyId = :party and status in :replaceable",
+                ).setParameter("cancelled", StandingOrderStatus.CANCELLED)
+                    .setParameter("now", now)
+                    .setParameter("id", replacedId)
+                    .setParameter("party", replacement.partyId)
+                    .setParameter("replaceable", listOf(StandingOrderStatus.ACTIVE, StandingOrderStatus.PAUSED))
+                    .executeUpdate()
+                    .flatMap { cancelled ->
+                        if (cancelled != 1) {
+                            io.smallrye.mutiny.Uni.createFrom().item(false)
+                        } else {
+                            persist(replacement.toEntity()).replaceWith(true)
+                        }
+                    }
+            }
+        }.awaitSuspending()
+
     override suspend fun listAllOrders() = Panache.withSession { listAll() }.awaitSuspending().map { it.toDomain() }
     override suspend fun findByPartyId(partyId: UUID) =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }

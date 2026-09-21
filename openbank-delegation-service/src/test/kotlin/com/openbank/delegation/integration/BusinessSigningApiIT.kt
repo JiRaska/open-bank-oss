@@ -428,6 +428,11 @@ class BusinessSigningApiIT {
 
         val signed = sign(id, bob, sca.approval(bob, id, created.getString("payloadSha256")))
         assertThat(signed.jsonPath().getString("status")).isEqualTo("APPROVED")
+        // Linked exactly like a payment: sca-service's literal is ...|1500.00|CZK|<IBAN>.
+        val link = sca.links.last()
+        assertThat(link.amount?.amount?.toPlainString()).isEqualTo("1500.00")
+        assertThat(link.amount?.currency).isEqualTo("CZK")
+        assertThat(link.creditorIban).isEqualTo(CREDITOR)
         val first = claim(id)
         assertThat(first.statusCode).isEqualTo(HTTP_OK)
         assertThat(first.jsonPath().getLong("payload.railRequest.amountMinorUnits")).isEqualTo(SO_MINOR)

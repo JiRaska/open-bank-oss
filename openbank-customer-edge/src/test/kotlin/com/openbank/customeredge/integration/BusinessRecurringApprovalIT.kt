@@ -35,6 +35,7 @@ private const val DETAIL = "$ENTITY/approval-requests/$APPROVAL"
 private const val SO_UPSTREAM = "/api/v1/standing-orders"
 private const val SDD_UPSTREAM = "/api/v1/sdd/mandates"
 private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
+private const val OLD_ORDER = "ffffffff-ffff-4fff-8fff-ffffffffffff"
 
 /**
  * #10281 gap: a standing order or an SDD mandate created under X-Acting-For is a recurring outflow
@@ -182,6 +183,58 @@ class BusinessRecurringApprovalIT {
 
         postStandingOrder() Then { statusCode(503) }
         assertThat(BusinessApprovalStubs.requests("POST", SO_UPSTREAM)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
+    }
+
+    private fun postEdit(replaces: String) = Given {
+        contentType("application/json")
+        header("X-Acting-For", COMPANY)
+        header("X-SCA-Challenge-Id", SCA)
+        body(
+            """{"debitAccountId":"$ACCOUNT","creditorIban":"$CREDITOR","creditorName":"Pronajímatel",""" +
+                """"amountMinorUnits":175000,"currency":"CZK","frequency":"MONTHLY","paymentType":"DOMESTIC",""" +
+                """"replacesStandingOrderId":"$replaces"}""",
+        )
+    } When {
+        post("/customer/v1/standing-orders")
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a held edit freezes the replaced order id and touches neither order until release`() {
+        stubHeld()
+        BusinessApprovalStubs.stub(
+            "GET",
+            "$SO_UPSTREAM/$OLD_ORDER",
+            body = """{"id":"$OLD_ORDER","partyId":"$COMPANY"}""",
+        )
+
+        postEdit(OLD_ORDER) Then { statusCode(202) }
+
+        val created = readJson(BusinessApprovalStubs.requests("POST", CREATE).single().body)
+        assertThat(created.path("payload").path("replacesStandingOrderId").asText()).isEqualTo(OLD_ORDER)
+        assertThat(created.path("payload").path("railRequest").path("replacesStandingOrderId").asText())
+            .isEqualTo(OLD_ORDER)
+        // Rejection or expiry never releases, so the old order is exactly as it was: no create,
+        // no cancel, nothing sent to standing-order-service beyond the ownership read.
+        assertThat(BusinessApprovalStubs.requests("POST", SO_UPSTREAM)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("DELETE", "$SO_UPSTREAM/$OLD_ORDER")).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `an edit naming another party's order is refused before any signing`() {
+        stubHeld()
+        BusinessApprovalStubs.stub(
+            "GET",
+            "$SO_UPSTREAM/$OLD_ORDER",
+            body = """{"id":"$OLD_ORDER","partyId":"$COSIGNER"}""",
+        )
+
+        postEdit(OLD_ORDER) Then { statusCode(403) }
+        assertThat(BusinessApprovalStubs.requests("POST", EVALUATE)).isEmpty()
         assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
     }
 

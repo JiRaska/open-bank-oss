@@ -1744,6 +1744,14 @@ paths:
                 remittanceInfo: {type: string, nullable: true}
                 startDate: {type: string, format: date, description: Defaults to today when omitted}
                 endDate: {type: string, format: date, nullable: true}
+                replacesStandingOrderId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >-
+                    Edit (#10281): the caller's own order this one replaces. standing-order-service
+                    creates the new order and cancels this one in ONE transaction — on release, when
+                    held for signatures; a rejected or expired request leaves it untouched.
       responses:
         '202':
           description: >-
