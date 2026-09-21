@@ -47,11 +47,12 @@ class LedgerSecurityContractTest {
     }
 
     @Test
-    fun `reversing a journal is restricted to operator`() {
-        // Deliberately NOT widened with postJournal (#10486): no per-service identity reverses.
+    fun `reversing a journal is restricted to operator and the identity-gated API caller`() {
+        // #10486 batch 2: ROLE_API reaches OPA, where ONLY transaction-service's own identity is
+        // granted ledger.reverse (ledger_rest_ext.rego). No viewer, no admin widening.
         assertThat(rolesOf("reverseJournal"))
             .describedAs("reverseJournal roles (book-of-record write)")
-            .containsExactlyInAnyOrder("ROLE_OPERATOR")
+            .containsExactlyInAnyOrder("ROLE_API", "ROLE_OPERATOR")
     }
 
     @Test

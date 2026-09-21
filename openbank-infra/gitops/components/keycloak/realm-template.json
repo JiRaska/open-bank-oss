@@ -387,6 +387,101 @@
       "secret": "__CLEARING_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-domestic-payment",
+      "name": "OpenBank Domestic Payment Service",
+      "description": "Per-service M2M client for domestic-payment's settlement booking (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__DOMESTIC_PAYMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-sepa-instant",
+      "name": "OpenBank SEPA Instant Service",
+      "description": "Per-service M2M client for sepa-instant's SCT Inst settlement booking (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SEPA_INSTANT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-swift",
+      "name": "OpenBank SWIFT Service",
+      "description": "Per-service M2M client for swift-service's MT103 settlement booking (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SWIFT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-transaction",
+      "name": "OpenBank Transaction Service",
+      "description": "Per-service M2M client for transaction-service's journal post/reverse and cover holds (ledger.create/reverse, balance.hold/holdRelease) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__TRANSACTION_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-settlement",
+      "name": "OpenBank Settlement Service",
+      "description": "Per-service M2M client for settlement-service's journal and balance legs (ledger.create/read, balance.debit/credit) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SETTLEMENT_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "name": "Grafana (observability single pane)",
       "enabled": true,
@@ -684,6 +779,46 @@
       "username": "service-account-openbank-clearing",
       "enabled": true,
       "serviceAccountClientId": "openbank-clearing",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-domestic-payment",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-domestic-payment",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-sepa-instant",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-sepa-instant",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-swift",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-swift",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-transaction",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-transaction",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-settlement",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-settlement",
       "realmRoles": [
         "ROLE_API"
       ]

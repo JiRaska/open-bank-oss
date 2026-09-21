@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: transaction-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "265d0ab823a1c8ad"
+    openbank.tech/policy-checksum: "40bac7b678565e4f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -729,6 +729,36 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-sepa-payment"
     	input.action in {"transaction.create", "transaction.reverse"}
+    }
+
+    # #10486 batch 2 — four more callers of initiateTransaction, same shape as batch 1 above: each
+    # principal carries ROLE_API only and its rule is its WHOLE grant here, transaction.create.
+    #   domestic-payment (SettlementAdapter, named OidcClient `m2m`)       domestic settlement booking
+    #   sepa-instant     (TransactionServiceClient, named oidc-client `m2m`) SCT Inst settlement booking
+    #   swift-service    (TransactionServiceClient, named oidc-client `m2m`) MT103 settlement booking
+    #   interest-service (TransactionServiceClient, named oidc-client `ledger`) withholding-tax remittance
+    allowed_reasons contains "service-domestic-payment-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-domestic-payment"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-sepa-instant-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-sepa-instant"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-swift-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-swift"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-interest-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-interest"
+    	input.action == "transaction.create"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

@@ -121,6 +121,8 @@ survives in it.
    OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... INTEREST_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
    ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
    SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
+   DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
+   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -271,6 +273,20 @@ Two traps already paid for on the interest client, both silent: a client created
 subject UUID and every identity-gated rego rule simply never matches (a 403, not an error); and
 a secret piped with `jq -r` carries a trailing newline into Vault, which Keycloak then rejects as
 a different secret (`unauthorized_client`). `jq -j`, then compare lengths.
+
+### Batch 2 (money-path writers, continued)
+
+Same recipe, same script, five more clients — all consumed in the `payments` namespace by the
+named oidc-client `m2m`. interest-service's remittance leg needs no new client: it reuses the
+existing `openbank-interest` (named oidc-client `ledger`), so nothing is provisioned for it.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-domestic-payment` | `keycloak/domestic-payment` | `domestic-payment-m2m-oidc` (payments) | `DOMESTIC_PAYMENT_CLIENT_SECRET` |
+| `openbank-sepa-instant` | `keycloak/sepa-instant` | `sepa-instant-m2m-oidc` (payments) | `SEPA_INSTANT_CLIENT_SECRET` |
+| `openbank-swift` | `keycloak/swift-service` | `swift-service-m2m-oidc` (payments) | `SWIFT_CLIENT_SECRET` |
+| `openbank-transaction` | `keycloak/transaction-service` | `transaction-service-m2m-oidc` (payments) | `TRANSACTION_CLIENT_SECRET` |
+| `openbank-settlement` | `keycloak/settlement-service` | `settlement-service-m2m-oidc` (payments) | `SETTLEMENT_CLIENT_SECRET` |
 
 ## What this does NOT fix
 
