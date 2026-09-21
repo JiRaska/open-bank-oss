@@ -249,3 +249,19 @@ money-path service, not adjacent.
   recovery is failing, not merely that a claim exists. A failed recovery logs at ERROR.
   Rollback: remove `claim-recovery-interval` handling / revert the commit; claims then simply
   remain stranded as before, which is the pre-change behaviour and loses nothing already recovered.
+- **2026-09-21** — **Own machine identity for the ledger post (#10486 step 1).** `LedgerRestClient`
+  now mints its bearer from the NAMED oidc-client `ledger` (`@OidcClientFilter("ledger")`),
+  Keycloak client `openbank-interest`, whose service account holds realm role `ROLE_API` only.
+  ledger-service grants that principal exactly `ledger.create` by identity
+  (`service-interest-ledger-post`); `ledger.reverse`, `transaction.create` and every other action
+  are denied to it (measured with `opa eval` on the ledger and transaction bundles). The other
+  rest-clients (transaction remittance, account directory, product-catalog) stay on the shared
+  `openbank-services` client until their own edges are migrated — asserted by
+  `LedgerOidcClientIdentityWiringTest`. **STRIDE-S:** a new credential. Its secret is created by
+  Keycloak in the live realm, stored by the owner at Vault KV `keycloak/interest-service`
+  (`client_secret`), projected by the `interest-service-ledger-oidc` ExternalSecret and never
+  seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod
+  loudly rather than posting with an empty credential. Compromise of this secret reaches
+  `ledger.create` only, against the shared secret's 54 money-path writes. **Repudiation improves:**
+  ledger's OPA decision reason and principal now name interest-service instead of "some caller on
+  the shared client". Rollback: revert the commit (the ledger client returns to the shared token).

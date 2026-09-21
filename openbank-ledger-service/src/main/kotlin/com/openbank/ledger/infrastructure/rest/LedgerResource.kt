@@ -141,7 +141,11 @@ class LedgerResource(
     }
 
     @POST
-    @RolesAllowed(Roles.OPERATOR)
+    // ROLE_API admits per-service M2M identities (#10486: interest-service's own client
+    // `openbank-interest` holds ROLE_API only). RBAC is the coarse gate; WHICH ROLE_API holder may
+    // post is decided by identity in ledger_rest_ext.rego, and any other ROLE_API principal is
+    // denied there (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "ledger.create", resource = "")
     @Operation(summary = "Post a balanced journal entry")
     suspend fun postJournal(

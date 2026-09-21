@@ -118,7 +118,7 @@ survives in it.
    ```sh
    ADMINUI_CLIENT_SECRET=... ARGOCD_CLIENT_SECRET=... EDGE_CLIENT_SECRET=... \
    GLITCHTIP_CLIENT_SECRET=... GOALERT_CLIENT_SECRET=... MCP_OBO_CLIENT_SECRET=... \
-   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... INTEREST_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -207,6 +207,42 @@ write happened is for the detector to say so.
 With both entries gone, the next role, client or user added to a template and not
 propagated to Vault is red on the following night's run — which is the property this
 whole exercise buys, and the thing neither of the two older comparisons can provide.
+
+## Per-service M2M client — adding one to the LIVE realm (#10486)
+
+A new confidential client in `realm-template.json` reaches **nothing** that runs: the template
+feeds no import (see Why), and `--import-realm` would skip an existing realm anyway. So each
+per-service client from #10486 (first: `openbank-interest`) is created in the live realm by the
+owner, with its secret generated **by Keycloak** and moved into Vault **without being printed**.
+Do this BEFORE the PR that consumes it syncs: the consumer's env ref is `optional: false`, so an
+unseeded entry holds the new pod in `CreateContainerConfigError`.
+
+Trusted shell, owner's own admin login (`kcadm.sh config credentials ...` inside the pod). Values
+below are for `openbank-interest`; the client representation is the template's own entry.
+
+```sh
+NS=iam; POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=keycloak -o name | head -1)
+KC="kubectl -n $NS exec -i $POD -- /opt/keycloak/bin/kcadm.sh"
+# 1. create the client from the committed template entry, WITHOUT its placeholder secret —
+#    Keycloak then generates one server-side.
+jq '.clients[] | select(.clientId=="openbank-interest") | del(.secret)' \
+  openbank-infra/gitops/components/keycloak/realm-template.json \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-interest --fields id --format csv --noquotes)
+# 2. the ONLY role its service account gets (template: realmRoles [ROLE_API])
+$KC add-roles -r openbank --uusername service-account-openbank-interest --rolename ROLE_API
+# 3. secret Keycloak -> Vault KV through a pipe; it never reaches the terminal or a file.
+#    `client_secret=-` reads the value from stdin. KV layout is ADR-0099's keycloak/<service>.
+$KC get clients/$ID/client-secret -r openbank | jq -r .value \
+  | bao kv put openbank/keycloak/interest-service client_id="$ID" client_secret=-
+```
+
+Verify without revealing: `$KC get users -r openbank -q username=service-account-openbank-interest`
+then `.../role-mappings/realm` lists exactly `ROLE_API` (plus `default-roles-openbank`);
+`kubectl -n interest annotate externalsecret interest-service-ledger-oidc force-sync="$(date +%s)" --overwrite`
+and `kubectl -n interest get externalsecret interest-service-ledger-oidc` reports `SecretSynced`.
+The DR copy (the realm-import blob) picks the client up at the next reconcile above — pass the
+SAME value as `INTEREST_CLIENT_SECRET` to the render script, read from `keycloak/interest-service`.
 
 ## What this does NOT fix
 
