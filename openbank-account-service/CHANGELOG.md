@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.1...account-service-v0.31.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
 ## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.0...account-service-v0.31.1) (2026-09-20)
 
 

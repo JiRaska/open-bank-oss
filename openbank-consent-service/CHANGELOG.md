@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.2...consent-service-v0.24.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
 ## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.1...consent-service-v0.24.2) (2026-09-20)
 
 
