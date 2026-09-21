@@ -405,7 +405,146 @@ class BusinessSigningApiIT {
         assertThat(evaluate().getInt("required")).isEqualTo(1)
     }
 
+    // ------------------------------------------------------------------ recurring outflows (#10281)
+
+    @Test
+    fun `a JOINT representative cannot set up a standing order alone - held, co-signed, released once`() {
+        register.joint(entity, 2, alice, bob)
+        val created = createRecurring(alice, standingOrderBody(alice, sca.initiator(alice)))
+        assertThat(created.getString("kind")).isEqualTo("STANDING_ORDER")
+        assertThat(created.getString("status")).isEqualTo("PENDING")
+        assertThat(created.getInt("required")).isEqualTo(2)
+        assertThat(created.getInt("collected")).isEqualTo(1)
+        val id = UUID.fromString(created.getString("id"))
+        val requested = JsonPath(outboxPayload(id, "APPROVAL_REQUESTED"))
+        assertThat(requested.getString("kind")).isEqualTo("STANDING_ORDER")
+        assertThat(requested.getString("amount")).isEqualTo("1500.00")
+
+        // Not releasable before the second signature.
+        assertThat(claim(id).jsonPath().getString("code")).isEqualTo("NOT_APPROVED")
+        // The initiator never counts twice.
+        val self = sign(id, alice, sca.approval(alice, id, created.getString("payloadSha256")))
+        assertThat(self.jsonPath().getString("code")).isEqualTo("ALREADY_SIGNED")
+
+        val signed = sign(id, bob, sca.approval(bob, id, created.getString("payloadSha256")))
+        assertThat(signed.jsonPath().getString("status")).isEqualTo("APPROVED")
+        val first = claim(id)
+        assertThat(first.statusCode).isEqualTo(HTTP_OK)
+        assertThat(first.jsonPath().getLong("payload.railRequest.amountMinorUnits")).isEqualTo(SO_MINOR)
+        val second = claim(id)
+        assertThat(second.statusCode).isEqualTo(HTTP_CONFLICT)
+        assertThat(second.jsonPath().getString("code")).isEqualTo("ALREADY_CLAIMED")
+    }
+
+    @Test
+    fun `a standing order is banded by its per-execution amount and never shortcut by a trusted payee`() {
+        register.joint(entity, 2, alice, bob)
+        seedPolicy(
+            """[{"maxAmount":{"amount":"1000","currency":"CZK"},"currency":"CZK","requiredSignatures":1},
+               {"requiredSignatures":2}]""",
+        )
+        trustPayee(CREDITOR)
+        assertThat(evaluate().getBoolean("trusted")).describedAs("a payment to it IS shortcut").isTrue()
+
+        val small = evaluateKind("STANDING_ORDER", "900.00")
+        assertThat(small.getInt("required")).isEqualTo(1)
+        val large = evaluateKind("STANDING_ORDER", "1500.00")
+        assertThat(large.getInt("required")).isEqualTo(2)
+        assertThat(large.getBoolean("trusted")).isFalse()
+    }
+
+    @Test
+    fun `an SDD mandate without a maximum takes the strictest rule, and its co-signature links no amount`() {
+        register.joint(entity, 2, alice, bob)
+        seedPolicy(
+            """[{"maxAmount":{"amount":"1000000","currency":"CZK"},"currency":"CZK","requiredSignatures":1},
+               {"requiredSignatures":2}]""",
+        )
+        assertThat(evaluateKind("SDD_MANDATE", null).getInt("required")).isEqualTo(2)
+
+        val created = createRecurring(alice, sddBody(alice, sca.initiator(alice)))
+        assertThat(created.getString("kind")).isEqualTo("SDD_MANDATE")
+        assertThat(created.getInt("required")).isEqualTo(2)
+        val id = UUID.fromString(created.getString("id"))
+        val summary = JsonPath(outboxPayload(id, "APPROVAL_REQUESTED"))
+        assertThat(summary.getString("kind")).isEqualTo("SDD_MANDATE")
+        assertThat(summary.getString("amount")).isNull()
+
+        val signed = sign(id, bob, sca.approval(bob, id, created.getString("payloadSha256")))
+        assertThat(signed.jsonPath().getString("status")).isEqualTo("APPROVED")
+        assertThat(sca.links.last().amount).describedAs("no amount to link").isNull()
+        assertThat(sca.links.last().creditorIban).isNull()
+        assertThat(claim(id).jsonPath().getString("payload.railRequest.umr")).isEqualTo("UMR-TEST0001")
+    }
+
+    @Test
+    fun `an unknown or administrative kind cannot be created as a held instruction`() {
+        register.joint(entity, 2, alice, bob)
+        val body = standingOrderBody(alice, sca.initiator(alice)).toMutableMap()
+        body["kind"] = "POLICY_CHANGE"
+        assertThat(post("/approval-requests", body).statusCode).isEqualTo(HTTP_BAD_REQUEST)
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private fun standingOrderBody(initiator: UUID, challenge: UUID) = mapOf(
+        "kind" to "STANDING_ORDER",
+        "initiatorSignature" to mapOf("partyId" to initiator, "scaChallengeId" to challenge),
+        "payload" to mapOf(
+            "rail" to "STANDING_ORDER",
+            "amount" to "1500.00",
+            "currency" to "CZK",
+            "creditorIban" to CREDITOR,
+            "creditorName" to "Pronajímatel",
+            "frequency" to "MONTHLY",
+            "railRequest" to mapOf("amountMinorUnits" to SO_MINOR, "currency" to "CZK", "creditorIban" to CREDITOR),
+        ),
+    )
+
+    private fun sddBody(initiator: UUID, challenge: UUID) = mapOf(
+        "kind" to "SDD_MANDATE",
+        "initiatorSignature" to mapOf("partyId" to initiator, "scaChallengeId" to challenge),
+        "payload" to mapOf(
+            "rail" to "SDD_MANDATE",
+            "creditorName" to "Energie a.s.",
+            "creditorIdentifier" to "CZ12ZZZ12345678",
+            "mandateReference" to "UMR-TEST0001",
+            "railRequest" to mapOf("umr" to "UMR-TEST0001", "creditorIdentifier" to "CZ12ZZZ12345678"),
+        ),
+    )
+
+    private fun createRecurring(initiator: UUID, body: Map<String, Any?>): JsonPath {
+        val response = post("/approval-requests", body)
+        assertThat(response.statusCode).describedAs(response.body.asString()).isEqualTo(HTTP_CREATED)
+        assertThat(response.jsonPath().getString("initiatorPartyId")).isEqualTo(initiator.toString())
+        return response.jsonPath()
+    }
+
+    private fun evaluateKind(kind: String, amount: String?): JsonPath = post(
+        "/signing/evaluate",
+        buildMap {
+            put("kind", kind)
+            put("rail", kind)
+            amount?.let {
+                put("amount", it)
+                put("currency", "CZK")
+            }
+            if (kind != "SDD_MANDATE") put("creditorIban", CREDITOR)
+        },
+    ).then().statusCode(HTTP_OK).extract().jsonPath()
+
+    private fun trustPayee(iban: String) = jdbc().use { c ->
+        c.prepareStatement(
+            "insert into trusted_payees (id, entity_party_id, iban, name, status, added_at, added_by_approval_id) " +
+                "values (?, ?, ?, 'Pronajímatel', 'ACTIVE', now(), ?)",
+        ).use {
+            it.setObject(1, UUID.randomUUID())
+            it.setObject(2, entity)
+            it.setString(3, iban)
+            it.setObject(4, UUID.randomUUID())
+            it.executeUpdate()
+        }
+    }
 
     /** Exactly the body customer-edge (#10314) sends. */
     private fun paymentBody(initiator: UUID, challenge: UUID, expiresInSeconds: Long? = null) = buildMap<String, Any?> {
@@ -505,7 +644,9 @@ class BusinessSigningApiIT {
         const val HTTP_OK = 200
         const val HTTP_CREATED = 201
         const val HTTP_ACCEPTED = 202
+        const val HTTP_BAD_REQUEST = 400
         const val HTTP_FORBIDDEN = 403
+        const val SO_MINOR = 150_000L
         const val HTTP_CONFLICT = 409
         const val SHA_LENGTH = 64
         const val RACERS = 8
