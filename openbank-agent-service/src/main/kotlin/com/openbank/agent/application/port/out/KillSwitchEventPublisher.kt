@@ -42,6 +42,7 @@ data class KillSwitchEvent(
     val occurredAt: Instant,
 ) {
     companion object {
+        const val EVENT_TYPE = "agent-kill-switch-event"
         const val SET = "agent.killswitch.set"
         const val CLEARED = "agent.killswitch.cleared"
     }

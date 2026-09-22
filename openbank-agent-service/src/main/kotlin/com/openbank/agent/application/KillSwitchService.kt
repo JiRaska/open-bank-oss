@@ -14,13 +14,13 @@ import com.openbank.agent.domain.control.HaltStatus
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Instant
-import java.util.UUID
 
 /**
  * Kill switch (ADR-0031 D7) — stops an agent without a redeploy. Two layers, runtime wins:
@@ -87,7 +87,7 @@ class KillSwitchService(
     private fun publish(scope: String, type: String, reason: String, setBy: String, at: Instant) {
         eventPublisher.publish(
             KillSwitchEvent(
-                eventId = UUID.randomUUID(),
+                eventId = Ids.newId(),
                 eventType = type,
                 aggregateId = scope,
                 reason = reason,
