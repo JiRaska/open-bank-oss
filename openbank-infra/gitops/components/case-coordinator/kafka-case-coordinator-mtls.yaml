@@ -38,6 +38,20 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Runtime kill-switch events: case-coordinator consumes `agent.killswitch.set` / `.cleared`
+      # emitted by agent-service and traps failures to its DLQ.
+      - resource:
+          type: topic
+          name: agent-kill-switch-events-in
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.case-coordinator.agent-kill-switch-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Phase 1 deploy uses SmallRye's fallback group id. A properties-file override is a
       # separate second deploy after the image containing the channel is live (SRMSG00071).
       - resource:
@@ -45,12 +59,6 @@ spec:
           name: case-coordinator-agent
           patternType: literal
         operations: [Read]
-        host: "*"
-      - resource:
-          type: topic
-          name: openbank.dlq.case-coordinator.agent-kill-switch-events-in
-          patternType: literal
-        operations: [Write, Describe]
         host: "*"
 ---
 # ── ExternalSecret: case-coordinator keystore ───────────────────────────────

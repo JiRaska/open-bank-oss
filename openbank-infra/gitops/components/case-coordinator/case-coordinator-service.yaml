@@ -101,6 +101,10 @@ spec:
               value: "openbank-cluster-kafka-bootstrap.messaging.svc:9093"
             - name: KAFKA_SECURITY_PROTOCOL
               value: SSL
+            # ADR-0244 D7: topic for agent-service kill-switch events. Must match the ACL in
+            # kafka-case-coordinator-mtls.yaml; the repo default is the legacy audit-events topic.
+            - name: AGENT_KILL_SWITCH_TOPIC
+              value: agent-kill-switch-events-in
             - name: KAFKA_SSL_KEYSTORE_LOCATION
               value: /mnt/kafka-keystore/user.p12
             - name: KAFKA_SSL_KEYSTORE_TYPE
