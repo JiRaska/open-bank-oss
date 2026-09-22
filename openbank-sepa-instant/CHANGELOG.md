@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.0...sepa-instant-v0.10.1) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.9.0...sepa-instant-v0.10.0) (2026-08-24)
 
 
