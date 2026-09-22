@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.248.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.1...admin-ui-v0.248.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** count only on-book loans as active and label originated principal honestly ([#10562](https://github.com/JiRaska/open-bank-oss/issues/10562)) ([cbababa](https://github.com/JiRaska/open-bank-oss/commit/cbababa897c5754bd3c170250c5b0ba42570e69f)), closes [#10561](https://github.com/JiRaska/open-bank-oss/issues/10561)
+* **admin-ui:** render lending currency codes and sum the whole-book principal ([#10559](https://github.com/JiRaska/open-bank-oss/issues/10559)) ([2a54e83](https://github.com/JiRaska/open-bank-oss/commit/2a54e83cb26c7c805a9dfa0f35abf398461b4c84)), closes [#10558](https://github.com/JiRaska/open-bank-oss/issues/10558)
+
 ## [0.248.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.0...admin-ui-v0.248.1) (2026-09-17)
 
 
