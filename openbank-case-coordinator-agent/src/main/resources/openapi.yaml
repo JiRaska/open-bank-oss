@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -104,7 +104,7 @@ paths:
         - name: status
           in: query
           required: false
-          description: Filter by case status (OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED)
+          description: Filter by case status (OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED, HALTED)
           schema:
             type: string
         - name: limit
@@ -218,6 +218,7 @@ components:
           type: string
         status:
           type: string
+          enum: [OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED, HALTED]
 
     OpenCaseRequest:
       type: object
@@ -332,6 +333,7 @@ components:
             - SIGNAL_INVOKED
             - SIGNAL_CONSUMED
             - CONTRIBUTION_PERSISTED
+            - CASE_HALTED
         atEpochMs:
           type: integer
           format: int64
