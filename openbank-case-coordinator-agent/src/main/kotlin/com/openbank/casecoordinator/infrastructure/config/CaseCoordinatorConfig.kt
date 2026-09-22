@@ -32,8 +32,8 @@ interface CaseCoordinatorConfig {
      * Case swarm settings (`openbank.case-coordinator.case.*`), mirroring
      * `agents.yaml: case_classes` for the pilot class incident-response (20 min wall clock,
      * 15 open cases, 40 contributions, 0.35 contested threshold). The capability lists mirror
-     * charter `case_capabilities` — today ONLY case-coordinator holds any; swarm join/contribute
-     * grants are deliberate follow-up charter work.
+     * charter `case_capabilities`. The bounded ADR-0271 shadow pilot adds rca-investigator to the
+     * swarm roster; OPA independently restricts it to incident-response SHADOW cases.
      */
     fun case(): CaseGroup
 

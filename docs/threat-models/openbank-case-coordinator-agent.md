@@ -1,7 +1,7 @@
 # Threat model — openbank-case-coordinator-agent collaboration
 
-Status: proposed for ADR-0271 / issue #6426. No authorization grant is live from this
-document alone.
+Status: approved for the bounded ADR-0271 shadow grant. This document alone grants nothing;
+the effective authorization is the intersection of agents.yaml and rules.yaml.
 
 ## Scope and assets
 
@@ -24,7 +24,7 @@ scope and remain unreachable.
 
 | Threat | Control | Required evidence |
 |---|---|---|
-| Caller impersonates `rca-investigator` | Bind the proved principal to the asserted id before policy evaluation; never authorize a body claim alone | denial integration test with another principal |
+| Caller impersonates `rca-investigator` | Bind the proved principal to the asserted id before policy evaluation; persist both identities and never authorize a body claim alone | denial integration test plus distinct-principal audit evidence |
 | Charter drift grants more than intended | OPA requires both charter capability and rules matrix match | OPA matrix tests and generated-data differential proof |
 | Pilot reaches money/AML/fraud cases | Server reads case class from persistence; matrix admits only `incident-response` | negative tests for every other class |
 | HITL proposal escapes shadow | Matrix requires `SHADOW`; startup preflight validates rollout id; shadow outcome never enters proposal topic | outbox absence integration test |

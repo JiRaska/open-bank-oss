@@ -78,7 +78,7 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
 
     fun listSignalEvidence(workflowId: String): List<CaseSignalEvidenceRow> = query(
         """
-        SELECT e.signal_id, e.agent_id, e.capability, e.stage, e.observed_at,
+        SELECT e.signal_id, e.agent_id, e.authenticated_principal, e.capability, e.stage, e.observed_at,
                e.rollout_id, e.policy_decision_id, e.policy_reason
         FROM case_signal_evidence e
         JOIN case_workflow w ON w.id = e.case_id
@@ -90,6 +90,7 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
             CaseSignalEvidenceRow(
                 signalId = rs.getObject("signal_id", UUID::class.java).toString(),
                 agentId = rs.getString("agent_id"),
+                authenticatedPrincipal = rs.getString("authenticated_principal"),
                 capability = rs.getString("capability"),
                 stage = rs.getString("stage"),
                 observedAtEpochMs = rs.getTimestamp("observed_at").toInstant().toEpochMilli(),

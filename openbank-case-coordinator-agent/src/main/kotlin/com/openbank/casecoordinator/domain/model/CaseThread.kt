@@ -49,6 +49,7 @@ data class ProposalEventRow(
 data class CaseSignalEvidenceRow(
     val signalId: String,
     val agentId: String,
+    val authenticatedPrincipal: String,
     val capability: String,
     val stage: String,
     val observedAtEpochMs: Long,
