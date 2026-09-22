@@ -96,6 +96,10 @@ spec:
             # before this transport, so a broker outage cannot lose the governance action.
             - name: AGENT_AUDIT_KAFKA_ENABLED
               value: "true"
+            # ADR-0244 D7: direct kill-switch set/clear events from agent-service to
+            # case-coordinator-agent (separate from the audit-audit outbox above).
+            - name: AGENT_KILL_SWITCH_KAFKA_ENABLED
+              value: "true"
             # Free OpenAI-compatible backend (Groq), reached through the in-cluster LiteLLM gateway
             # (ADR-0174/0175, #1919) — NOT api.groq.com directly. litellm-config maps this exact
             # model id to `groq/llama-3.3-70b-versatile`, so the model name is unchanged and this is

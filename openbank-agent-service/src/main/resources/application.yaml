@@ -420,3 +420,10 @@ mp:
         enabled: ${AGENT_AUDIT_KAFKA_ENABLED:false}
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      agent-kill-switch-events-out:
+        connector: smallrye-kafka
+        # ADR-0244 D7: case-coordinator-agent listens on this topic for runtime halt/resume.
+        topic: ${AGENT_KILL_SWITCH_TOPIC:agent-kill-switch-events-in}
+        enabled: ${AGENT_KILL_SWITCH_KAFKA_ENABLED:false}
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
