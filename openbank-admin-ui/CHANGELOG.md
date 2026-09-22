@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.250.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.249.0...admin-ui-v0.250.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** cancel cases on kill-switch halt ([#10572](https://github.com/JiRaska/open-bank-oss/issues/10572)) ([f8bff32](https://github.com/JiRaska/open-bank-oss/commit/f8bff32da82390aca2ac6605286fa1deaf1188f4))
+
 ## [0.249.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.2...admin-ui-v0.249.0) (2026-09-22)
 
 
