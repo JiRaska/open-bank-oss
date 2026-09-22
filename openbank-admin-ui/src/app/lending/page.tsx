@@ -33,6 +33,7 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { STATE_LABELS } from '@/components/lending/OriginationFlow'
 import { OriginationPipeline, type PipelineItem } from '@/components/lending/OriginationPipeline'
+import { currencyCode, type WireMoney } from '@/lib/lending/money'
 
 type Application = PipelineItem & { partyId: string }
 
@@ -51,7 +52,7 @@ type Loan = {
   id: string
   partyId: string
   status: string
-  principal?: { amount: number; currency: string }
+  principal?: WireMoney
   disbursedAt?: string
 }
 
@@ -152,8 +153,8 @@ export default function LendingPage() {
     return l ? (language === 'cs' ? l.cs : l.en) : s
   }
 
-  const fmt = (m?: { amount: number; currency: string }) =>
-    m ? `${m.amount.toLocaleString(numberLocale)} ${m.currency}` : '—'
+  const fmt = (m?: WireMoney) =>
+    m ? `${m.amount.toLocaleString(numberLocale)} ${currencyCode(m.currency) ?? ''}`.trim() : '—'
 
   const unknownHint = error
     ? t('nedostupné', 'unavailable')
@@ -168,9 +169,9 @@ export default function LendingPage() {
    *  half-real total is worse than an honestly capped one, because nothing on screen distinguishes
    *  them. */
   const kpi = useMemo(() => {
-    const ccy = loans[0]?.principal?.currency ?? applications[0]?.requestedAmount?.currency ?? 'CZK'
+    const ccy = currencyCode(loans[0]?.principal?.currency) ?? currencyCode(applications[0]?.requestedAmount?.currency) ?? 'CZK'
     const sumFor = (rows: StateSummary[], pick: (r: StateSummary) => MoneyTotal[] | undefined) =>
-      rows.flatMap(r => pick(r) ?? []).filter(m => m.currency === ccy).reduce((s, m) => s + m.amount, 0)
+      rows.flatMap(r => pick(r) ?? []).filter(m => currencyCode(m.currency) === ccy).reduce((s, m) => s + m.amount, 0)
 
     if (appSummary && loanSummary) {
       const openStates = appSummary.filter(r => !TERMINAL.has(r.status))
