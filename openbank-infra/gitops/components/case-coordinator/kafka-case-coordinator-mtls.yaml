@@ -1,7 +1,7 @@
 # Kafka mTLS identity + ACLs for case-coordinator-agent (ADR-0137 fleet gate, ADR-0244).
 #
-# case-coordinator-agent is producer-only: the transactional outbox (case_outbox) dispatches
-# the terminal HITL proposal of every case to `proposal-events`. No consumer side.
+# case-coordinator-agent produces terminal HITL proposals and consumes the strict agent-audit
+# stream only for kill-switch set/clear events (ADR-0244 D7).
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of
 # this service's Kafka traffic. The User resources live in `messaging` (where the Strimzi User
@@ -29,6 +29,26 @@ spec:
       - resource:
           type: topic
           name: proposal-events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.agent.audit.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Phase 1 deploy uses SmallRye's fallback group id. A properties-file override is a
+      # separate second deploy after the image containing the channel is live (SRMSG00071).
+      - resource:
+          type: group
+          name: case-coordinator-agent
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.case-coordinator.agent-kill-switch-events-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"
