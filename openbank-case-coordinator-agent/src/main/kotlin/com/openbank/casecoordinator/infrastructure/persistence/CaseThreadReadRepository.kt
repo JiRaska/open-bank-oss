@@ -26,12 +26,16 @@ import javax.sql.DataSource
 class CaseThreadReadRepository(private val dataSource: DataSource, private val objectMapper: ObjectMapper) {
 
     fun listCases(status: String?, limit: Int): List<CaseRow> {
-        val where = if (status == null) "" else " WHERE w.status = ?"
+        val (where, bindStatus) = when (status) {
+            null -> "" to null
+            "CLOSED" -> " WHERE w.status IN ('CLOSED','HALTED')" to null
+            else -> " WHERE w.status = ?" to status
+        }
         return query(
             CASE_SELECT + where + " ORDER BY w.opened_at DESC LIMIT ?",
             { ps ->
                 var p = P1
-                if (status != null) ps.setString(p++, status)
+                if (bindStatus != null) ps.setString(p++, bindStatus)
                 ps.setInt(p, limit)
             },
             { rs -> rs.toCaseRow() },
@@ -127,6 +131,8 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
         contributionCount = getInt("contribution_count"),
         budgetTokens = getInt("budget_tokens"),
         budgetContributions = getInt("budget_contributions"),
+        haltedAtEpochMs = getTimestamp("halted_at")?.toInstant()?.toEpochMilli(),
+        haltReason = getString("halt_reason"),
     )
 
     private fun ResultSet.toContributionRow(): ContributionRow {
@@ -149,7 +155,7 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
 
         const val CASE_SELECT = """
             SELECT w.workflow_id, w.case_class, w.delivery_mode, w.disposition_target, w.status,
-                   w.opened_at, w.deadline_at, w.contested_rate,
+                   w.opened_at, w.deadline_at, w.contested_rate, w.halted_at, w.halt_reason,
                    w.budget_tokens, w.budget_contributions,
                    (SELECT COUNT(*) FROM case_contribution c WHERE c.case_id = w.id) AS contribution_count
             FROM case_workflow w

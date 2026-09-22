@@ -34,6 +34,8 @@ scope and remain unreachable.
 | Rejected payload leaks through audit/logs | Audit only ids, capability, class/mode, decision and result; no summary/evidence content | log/audit payload test |
 | OPA outage silently permits | PDP and local gate fail closed for collaboration | unavailable-PDP denial test |
 | Participant synthesizes or mutates | No `case.synthesize`, `case.preempt`, money, write or operator capability in either matrix | charter/schema and OPA deny tests |
+| Kill-switch event is lost or falsely reported as applied | agent-service durably enqueues the audit event; case-coordinator ACKs only after Temporal reaches CANCELED and HALTED evidence commits | cancellation-order unit test + HALTED/no-outbox PostgreSQL IT |
+| Unrelated agent halt stops the pilot | consumer filters exact operations and cancellation service accepts only `*` or `rca-investigator` scopes | unrelated-scope negative test |
 
 ## Rollout and rollback
 

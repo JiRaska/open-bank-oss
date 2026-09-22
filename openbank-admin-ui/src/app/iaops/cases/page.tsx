@@ -26,6 +26,8 @@ interface CaseSummary {
   deadlineAtEpochMs: number
   contestedRate: number
   contributionCount: number
+  haltedAtEpochMs?: number
+  haltReason?: string
 }
 
 type ListEnvelope =
@@ -173,9 +175,12 @@ export default function IaopsCasesPage() {
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {cases.map((item) => {
-              const visual = statusVisual(item.status)
+              const halted = item.haltedAtEpochMs !== undefined
+              const visual = halted
+                ? { icon: TriangleAlert, fg: 'var(--warning-text)', bg: 'var(--warning-bg)' }
+                : statusVisual(item.status)
               const Icon = visual.icon
-              const presentation = caseStatusPresentation(item.status, language)
+              const presentation = caseStatusPresentation(item.status, language, halted)
               return (
                 <Link
                   key={item.caseId}

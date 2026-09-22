@@ -91,6 +91,11 @@ spec:
             # output into the HITL queue; charter-rate-limited to 48 runs/day (every 30 min).
             - name: AGENT_OVERSIGHT_ENABLED
               value: "true"
+            # ADR-0244 D7: durable kill-switch audit events are also the event-fed control
+            # projection consumed by case-coordinator. The local outbox acknowledges the DB row
+            # before this transport, so a broker outage cannot lose the governance action.
+            - name: AGENT_AUDIT_KAFKA_ENABLED
+              value: "true"
             # Free OpenAI-compatible backend (Groq), reached through the in-cluster LiteLLM gateway
             # (ADR-0174/0175, #1919) — NOT api.groq.com directly. litellm-config maps this exact
             # model id to `groq/llama-3.3-70b-versatile`, so the model name is unchanged and this is
