@@ -33,7 +33,7 @@ import { svcUrl } from '@/lib/services/bff'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { OriginationFlow, STATE_LABELS, type StepFact } from '@/components/lending/OriginationFlow'
-import { currencyCode, type WireMoney } from '@/lib/lending/money'
+import { currencyCode, formatMoney, type WireMoney } from '@/lib/lending/money'
 
 type Application = {
   id: string
@@ -143,8 +143,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
   const stateLabel = (s?: string) =>
     s ? (STATE_LABELS[s] ? (language === 'cs' ? STATE_LABELS[s].cs : STATE_LABELS[s].en) : s) : '—'
 
-  const money = (m?: WireMoney) =>
-    m ? `${m.amount.toLocaleString(numberLocale)} ${currencyCode(m.currency) ?? ''}`.trim() : '—'
+  const money = (m?: WireMoney) => (m ? formatMoney(m.amount, currencyCode(m.currency), numberLocale) : '—')
 
   return (
     <div>
