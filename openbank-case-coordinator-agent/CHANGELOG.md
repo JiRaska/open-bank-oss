@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.9.0...case-coordinator-agent-v0.10.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** cancel cases on kill-switch halt ([#10572](https://github.com/JiRaska/open-bank-oss/issues/10572)) ([f8bff32](https://github.com/JiRaska/open-bank-oss/commit/f8bff32da82390aca2ac6605286fa1deaf1188f4))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.8.1...case-coordinator-agent-v0.9.0) (2026-09-22)
 
 
