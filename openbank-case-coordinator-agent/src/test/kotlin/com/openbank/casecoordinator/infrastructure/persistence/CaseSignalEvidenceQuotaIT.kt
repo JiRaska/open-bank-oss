@@ -82,6 +82,7 @@ class CaseSignalEvidenceQuotaIT {
 
         assertThat(accepted).isEqualTo(MAX_SIGNALS)
         assertThat(storedAuthorizationCount()).isEqualTo(MAX_SIGNALS)
+        assertThat(storedAuthenticatedPrincipals()).containsOnly("operator-1")
     }
 
     private fun authorizationEvidence(attempt: Int) = CaseSignalEvidence(
@@ -105,6 +106,19 @@ class CaseSignalEvidenceQuotaIT {
             statement.executeQuery().use { result ->
                 result.next()
                 result.getInt(1)
+            }
+        }
+    }
+
+    private fun storedAuthenticatedPrincipals(): List<String> = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT authenticated_principal FROM case_signal_evidence WHERE case_id = ?",
+        ).use { statement ->
+            statement.setObject(1, CASE_UUID)
+            statement.executeQuery().use { result ->
+                buildList {
+                    while (result.next()) add(result.getString(1))
+                }
             }
         }
     }

@@ -328,7 +328,7 @@ agents:
   - id: rca-investigator
     plane: control
     model: deepseek-ai/DeepSeek-V3.2
-    charter: "On a firing alert, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0088). Read-only oversight — emits a finding, never acts."
+    charter: "On operator request, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0091). An authorized operator may record that finding in an incident-response SHADOW case; it never mutates banking state or auto-remediates."
     data_scope:
       read: [observability, audit]             # Prometheus / Loki / Tempo / Alertmanager + cluster state
       pii: masked
