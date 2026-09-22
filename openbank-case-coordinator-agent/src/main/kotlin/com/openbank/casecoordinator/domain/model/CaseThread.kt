@@ -23,6 +23,8 @@ data class CaseRow(
     val budgetTokens: Int,
     val budgetContributions: Int,
     val deliveryMode: String = "HITL",
+    val haltedAtEpochMs: Long? = null,
+    val haltReason: String? = null,
 )
 
 /** Raw `case_contribution` row (V1 + V3 columns). */
@@ -122,6 +124,8 @@ data class CaseSummary(
     val deadlineAtEpochMs: Long,
     val contestedRate: Double,
     val contributionCount: Int,
+    val haltedAtEpochMs: Long? = null,
+    val haltReason: String? = null,
 )
 
 /** Case detail with the full thread — `GET /api/v1/case-coordinator/cases/{caseId}`. */
@@ -143,4 +147,6 @@ data class CaseThread(
     val historySource: String,
     val retentionPolicy: String,
     val entries: List<ThreadEntry>,
+    val haltedAtEpochMs: Long? = null,
+    val haltReason: String? = null,
 )

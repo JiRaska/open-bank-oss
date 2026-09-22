@@ -365,7 +365,7 @@ components:
           format: uuid
         capability:
           type: string
-          enum: [case.join, case.contribute]
+          description: Granted capability string from the charter (e.g. case.join, case.contribute, case.halt). Kept as an unbounded string so new capabilities do not require a contract version bump.
         rolloutId:
           type: string
         runtimeEvidence:

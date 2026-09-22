@@ -5,12 +5,14 @@
 
 package com.openbank.casecoordinator.application
 
+import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseDeliveryMode
 import com.openbank.casecoordinator.infrastructure.config.CaseCoordinatorConfig
 import com.openbank.libs.temporal.TemporalConfig
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.temporal.api.common.v1.WorkflowExecution
 import io.temporal.api.workflowservice.v1.ListOpenWorkflowExecutionsResponse
 import io.temporal.api.workflowservice.v1.WorkflowServiceGrpc
@@ -46,6 +48,7 @@ class CaseOpenServiceTest {
     private val caseGroup = mockk<CaseCoordinatorConfig.CaseGroup>()
     private val clock = Clock.fixed(Instant.parse("2026-08-08T10:00:00Z"), ZoneOffset.UTC)
     private val untyped = mockk<WorkflowStub>()
+    private val killSwitchState = mockk<CaseKillSwitchStatePort>()
 
     private lateinit var service: CaseOpenService
 
@@ -67,6 +70,7 @@ class CaseOpenServiceTest {
         every { caseGroup.contestedRateThreshold() } returns 0.35
         every { caseGroup.maxContributions() } returns 40
         every { caseGroup.deliveryMode() } returns CaseDeliveryMode.HITL
+        every { killSwitchState.pilotHaltReason() } returns null
         every { workflowClient.options } returns WorkflowClientOptions.newBuilder().setNamespace("openbank").build()
         every { workflowClient.newUntypedWorkflowStub("CaseWorkflow", any()) } returns untyped
         every { untyped.start(any()) } returns WorkflowExecution.getDefaultInstance()
@@ -76,7 +80,7 @@ class CaseOpenServiceTest {
         every { stubs.blockingStub() } returns blocking
         every { blocking.listOpenWorkflowExecutions(any()) } returns
             ListOpenWorkflowExecutionsResponse.getDefaultInstance()
-        service = CaseOpenService(workflowClient, temporalConfig, gate, config, clock)
+        service = CaseOpenService(workflowClient, temporalConfig, gate, config, clock, killSwitchState)
     }
 
     private fun open(
@@ -90,6 +94,14 @@ class CaseOpenServiceTest {
         every { temporalConfig.enabled() } returns false
 
         assertThat(open()).isEqualTo(CaseOpenResult.Unavailable)
+    }
+
+    @Test
+    fun `active pilot kill switch denies before consuming quota or touching Temporal`() {
+        every { killSwitchState.pilotHaltReason() } returns "kill switch *: emergency"
+
+        assertThat(open()).isEqualTo(CaseOpenResult.Denied)
+        verify(exactly = 0) { untyped.start(any()) }
     }
 
     @Test

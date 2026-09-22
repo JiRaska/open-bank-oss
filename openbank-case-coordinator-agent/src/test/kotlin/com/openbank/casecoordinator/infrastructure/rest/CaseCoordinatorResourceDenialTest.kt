@@ -10,6 +10,7 @@ import com.openbank.casecoordinator.application.CaseOpenService
 import com.openbank.casecoordinator.application.CaseSignalAuthorizationResult
 import com.openbank.casecoordinator.application.CaseSignalAuthorizationService
 import com.openbank.casecoordinator.application.CaseThreadService
+import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.libs.temporal.TemporalConfig
 import io.mockk.every
 import io.mockk.mockk
@@ -34,6 +35,7 @@ class CaseCoordinatorResourceDenialTest {
     private val temporalConfig = mockk<TemporalConfig>()
     private val identity = mockk<SecurityIdentity>(relaxed = true)
     private val signalAuthorization = mockk<CaseSignalAuthorizationService>()
+    private val killSwitchState = mockk<CaseKillSwitchStatePort>()
 
     private val resource = CaseCoordinatorResource(
         openService,
@@ -43,6 +45,7 @@ class CaseCoordinatorResourceDenialTest {
         temporalConfig,
         identity,
         signalAuthorization,
+        killSwitchState,
     )
 
     @Test
@@ -52,6 +55,7 @@ class CaseCoordinatorResourceDenialTest {
         // this test is about the capability branch, and the asserted-identity branch now runs
         // first (#4834) and carries its own, differently-worded body.
         every { gate.permitsAssertedIdentity(any(), any()) } returns true
+        every { killSwitchState.pilotHaltReason() } returns null
         every { gate.canContribute(any()) } returns false
         io.mockk.coEvery { signalAuthorization.authorize(any(), any(), any(), any()) } returns
             CaseSignalAuthorizationResult.Denied

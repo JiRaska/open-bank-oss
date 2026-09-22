@@ -27,6 +27,7 @@ enum class CaseStatus {
     CONTESTED,
     SYNTHESIZED,
     CLOSED,
+    HALTED,
 }
 
 /** Delivery is explicit in the workflow input so replay cannot depend on mutable deployment config. */
@@ -83,7 +84,7 @@ data class Contribution(
     val authenticatedPrincipal: String = "legacy-unknown",
 )
 
-enum class CaseSignalEvidenceStage { AUTHORIZED, DENIED, INVOKED, CONSUMED, PERSISTED }
+enum class CaseSignalEvidenceStage { AUTHORIZED, DENIED, INVOKED, CONSUMED, PERSISTED, HALTED }
 
 /** Metadata-only collaboration evidence; summaries and evidence contents never enter this trail. */
 data class CaseSignalEvidence(

@@ -11,6 +11,7 @@ import com.openbank.casecoordinator.application.CaseOpenService
 import com.openbank.casecoordinator.application.CaseSignalAuthorizationResult
 import com.openbank.casecoordinator.application.CaseSignalAuthorizationService
 import com.openbank.casecoordinator.application.CaseThreadService
+import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.application.workflow.CaseWorkflow
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseSummary
@@ -50,6 +51,7 @@ class CaseCoordinatorResource(
     private val temporalConfig: TemporalConfig,
     private val identity: SecurityIdentity,
     private val signalAuthorization: CaseSignalAuthorizationService,
+    private val killSwitchState: CaseKillSwitchStatePort,
 ) {
 
     data class Status(val service: String, val status: String)
@@ -155,12 +157,15 @@ class CaseCoordinatorResource(
     @Path("/cases/{caseId}/signals")
     @Blocking
     @RolesAllowed("ROLE_ADMIN", "ROLE_OPERATOR")
+    // Boundary orchestration enumerates the closed signal vocabulary and its distinct HTTP outcomes.
+    @Suppress("CyclomaticComplexMethod")
     fun signal(@PathParam("caseId") caseId: String?, request: SignalRequest?): Response {
         val id = requireNotNull(caseId) { "caseId path parameter is required" }
         requireNotNull(request) { "request body is required" }
         val type = requireNotNull(request.type) { "type is required" }
         val agentId = requireNotNull(request.agentId) { "agentId is required" }
         val authenticatedPrincipal = identity.principal.name
+        if (killSwitchState.pilotHaltReason() != null) return pilotHaltedResponse()
         // Authorisation before availability, deliberately ahead of the Temporal check (#4834). The
         // claimed agentId is carried into the workflow as the AUTHOR of the contribution, which is
         // the guarantee ADR-0244 rests on — "who detected is never who coordinated" — so it must be
@@ -281,3 +286,6 @@ class CaseCoordinatorResource(
         val log: org.jboss.logging.Logger = org.jboss.logging.Logger.getLogger(CaseCoordinatorResource::class.java)
     }
 }
+
+private fun pilotHaltedResponse(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+    .entity(mapOf("error" to "incident-response shadow pilot is halted by governance")).build()
