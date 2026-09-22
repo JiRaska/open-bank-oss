@@ -38,7 +38,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match case-coordinator-opa-bundle's openbank.tech/policy-checksum (CI verifies).
-        openbank.tech/policy-checksum: "e7477333d70228ee"
+        openbank.tech/policy-checksum: "b088e22701be573d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -127,6 +127,13 @@ spec:
             # Rotate this ID for each distinct shadow rollout; startup then rechecks legacy runs.
             - name: CASE_COORDINATOR_CASE_SHADOW_ROLLOUT_ID
               value: incident-triage-shadow-2026-08-20
+            # ADR-0271 pilot: local fail-safe gate mirrors the charter grant. OPA remains the
+            # independent authority and additionally restricts class, SHADOW mode, rollout and
+            # the eight-signal quota. The operator bearer may assert only these two agent ids.
+            - name: CASE_COORDINATOR_CASE_SWARM_AGENTS
+              value: rca-investigator
+            - name: CASE_COORDINATOR_CASE_IDENTITY_BINDINGS
+              value: ROLE_ADMIN=case-coordinator,rca-investigator;ROLE_OPERATOR=case-coordinator,rca-investigator
             # LiteLLM virtual key (ESO case-coordinator-litellm; reuses KEY_AGENT_SERVICE
             # until a per-service virtual key is provisioned in Vault — a Vault admin action).
             - name: CASE_COORDINATOR_MODEL_API_KEY
@@ -141,9 +148,8 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # Policy decision point: the OPA sidecar in this pod (localhost:8181). The
-            # in-process CaseCapabilityGate is the enforcement layer today; the adapter
-            # querying this PDP is the tracked follow-up (issue #4187 scope note).
+            # Policy decision point: the collaboration PEP queries this OPA sidecar, then applies
+            # CaseCapabilityGate as an additional fail-safe local charter check (ADR-0271).
             - name: QUARKUS_REST_CLIENT_OPA_URL
               value: http://localhost:8181
           startupProbe:

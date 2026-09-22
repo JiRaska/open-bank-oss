@@ -37,8 +37,8 @@ import jakarta.ws.rs.core.Response
 /**
  * Case-coordinator REST surface (ADR-0244): case-open authority (D9), the signal ingress that
  * feeds a running CaseWorkflow, and the Phase 2 read API (#4185) projecting case history into the
- * ADR-0246 thread view. Every capability decision goes through the in-process CaseCapabilityGate
- * (D2); the OPA bundle evaluating the same decisions is Phase 4 scope.
+ * ADR-0246 thread view. Collaboration signals require both the OPA-backed policy decision and the
+ * in-process CaseCapabilityGate fail-safe (ADR-0271); neither layer can grant independently.
  */
 @Path("/api/v1/case-coordinator")
 @Produces(MediaType.APPLICATION_JSON)

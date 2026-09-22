@@ -279,7 +279,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0268](0268-sandbox-straight-through-aml-openbank-aml-auto-clear.md) | Sandbox straight-through AML: `openbank.aml.auto-clear` | Accepted | Shipped | aml-sanctions,compliance,onboarding | — |
 | [0269](0269-customer-facing-lending-pull-only-offer-surfacing.md) | Customer-facing lending: pull-only offer surfacing, one credit journey, priced only by the server | Proposed | Planned | lending,mobile-app,customer-edge,privacy-gdpr | openbank-app |
 | [0270](0270-relationship-termination-and-offboarding.md) | Bank-initiated relationship termination and customer offboarding | Proposed | Planned | onboarding,accounts,aml-sanctions,compliance | — |
-| [0271](0271-opa-gated-case-collaboration-shadow-pilot.md) | OPA-gated case collaboration shadow pilot | Proposed | Planned | ai-agents,governance,security,resilience | — |
+| [0271](0271-opa-gated-case-collaboration-shadow-pilot.md) | OPA-gated case collaboration shadow pilot | Accepted | Shipped | ai-agents,governance,security,resilience | — |
 | [0272](0272-merge-queue-for-main.md) | Merge queue for main | Rejected | N/A | ci,governance,release-versioning | — |
 | [0273](0273-unified-test-intelligence-evidence-and-admin-ui.md) | Unified test intelligence evidence and admin UI | Accepted | Partial | testing,admin-ui,governance,observability | — |
 | [0274](0274-authenticated-admin-ui-browser-rum.md) | Authenticated Admin UI browser RUM | Accepted | Partial | testing,observability,admin-ui,privacy-gdpr | — |

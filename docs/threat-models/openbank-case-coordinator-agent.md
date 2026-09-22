@@ -1,7 +1,7 @@
 # Threat model — openbank-case-coordinator-agent collaboration
 
-Status: proposed for ADR-0271 / issue #6426. No authorization grant is live from this
-document alone.
+Status: approved for the bounded ADR-0271 shadow grant. This document alone grants nothing;
+the effective authorization is the intersection of agents.yaml and rules.yaml.
 
 ## Scope and assets
 
