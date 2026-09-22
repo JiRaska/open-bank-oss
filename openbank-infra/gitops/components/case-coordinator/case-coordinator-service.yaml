@@ -74,12 +74,6 @@ spec:
               value: jdbc:postgresql://case-coordinator-db-rw.platform.svc:5432/openbank_casecoordinator
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: postgresql://case-coordinator-db-rw.platform.svc:5432/openbank_casecoordinator
-            # Authoritative messaging override mounted at /etc/quarkus-override. Required for
-            # dotted SmallRye keys (group.id, auto.offset.reset, dead-letter-queue.topic) on
-            # hyphenated channels — YAML flattening silently drops them; see transaction-service
-            # override pattern (#2945) and AGENTS.md Kafka dotted-key bullet.
-            - name: QUARKUS_CONFIG_LOCATIONS
-              value: /etc/quarkus-override
             - name: QUARKUS_DATASOURCE_USERNAME
               valueFrom: { secretKeyRef: { name: case-coordinator-db-app, key: username } }
             - name: QUARKUS_DATASOURCE_PASSWORD
@@ -184,9 +178,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: case-coordinator-msg-override
-              mountPath: /etc/quarkus-override
-              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -274,9 +265,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: case-coordinator-msg-override
-          configMap:
-            name: case-coordinator-msg-override
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
