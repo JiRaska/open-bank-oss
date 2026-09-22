@@ -17,10 +17,16 @@
 #   issued nameless edge tokens and 91 rego references to that principal would have gone dead.
 #
 # WHAT IT CHECKS
-#   Every `service-account-<x>` literal in a non-test `.rego` file must name a client that
+#   Every `service-account-<x>` literal in a non-test `.rego` file that is USED AS A PRINCIPAL
+#   IDENTITY must name a client that
 #   (a) exists in some realm template under
 #       openbank-infra/gitops/components/keycloak/*realm-template*.json, and
 #   (b) lists `profile` in that client's `defaultClientScopes`.
+#   "Used as a principal identity" means: compared with `input.principal.id` (`==`, `!=`, either
+#   operand order), a member of an `input.principal.id in {...}` set, or a member of a named
+#   identity-set constant (`NAME := {"service-account-..."}` / `[...]`). Comments and allow-REASON
+#   names (`allowed_reasons contains "service-account-transaction-create"`) are NOT principals and
+#   are ignored; the bare `startswith(id, "service-account-")` prefix has no client suffix.
 #   `_test.rego` files are excluded: their principals are fixtures (several name clients no
 #   realm has, by design, to prove a rule does NOT admit them).
 #
@@ -39,8 +45,42 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib  # noqa: E402
 
 REALM_GLOB = "openbank-infra/gitops/components/keycloak/*realm-template*.json"
-SA_RE = re.compile(r"service-account-([a-z0-9][a-z0-9-]*[a-z0-9])")
 SKIP_DIRS = {".git", "node_modules", "build", ".gradle"}
+SA_LIT = r'"service-account-([a-z0-9][a-z0-9-]*[a-z0-9])"'
+PID = r"(?:input\.)?principal\.id"
+# principal.id == "sa-x" / != , and the mirrored operand order
+CMP_RES = [re.compile(PID + r"\s*[!=]=\s*" + SA_LIT),
+           re.compile(SA_LIT + r"\s*[!=]=\s*" + PID)]
+# principal.id in {"sa-x", ...}  and  NAME := {"sa-x", ...} / [...]  (identity-set constants)
+SET_RES = [re.compile(PID + r"\s+in\s+[\[{]([^\]}]*)[\]}]"),
+           re.compile(r"^\s*[A-Za-z_]\w*\s*(?::=|=)\s*[\[{]([^\]}]*)[\]}]", re.MULTILINE)]
+LIT_RE = re.compile(SA_LIT)
+
+
+def strip_comments(text: str) -> str:
+    """Drop `# ...` comments, honouring `#` inside a string literal."""
+    out = []
+    for line in text.splitlines():
+        in_str, cut = False, len(line)
+        for i, ch in enumerate(line):
+            if ch == '"' and (i == 0 or line[i - 1] != "\\"):
+                in_str = not in_str
+            elif ch == "#" and not in_str:
+                cut = i
+                break
+        out.append(line[:cut])
+    return "\n".join(out)
+
+
+def principal_clients(text: str) -> set:
+    """clientIds the rego text uses as principal identities (never reasons or comments)."""
+    code, found = strip_comments(text), set()
+    for r in CMP_RES:
+        found.update(m.group(1) for m in r.finditer(code))
+    for r in SET_RES:
+        for m in r.finditer(code):
+            found.update(LIT_RE.findall(m.group(1)))
+    return found
 
 
 def rego_references(root: pathlib.Path) -> dict:
@@ -49,8 +89,8 @@ def rego_references(root: pathlib.Path) -> dict:
     for p in sorted(root.rglob("*.rego")):
         if p.name.endswith("_test.rego") or SKIP_DIRS & set(p.relative_to(root).parts):
             continue
-        for m in SA_RE.finditer(p.read_text()):
-            refs.setdefault(m.group(1), set()).add(str(p.relative_to(root)))
+        for c in principal_clients(p.read_text()):
+            refs.setdefault(c, set()).add(str(p.relative_to(root)))
     return {k: sorted(v) for k, v in refs.items()}
 
 
@@ -96,11 +136,37 @@ def self_test() -> int:
         if got != want:
             failed += 1
             print(f"::error::self-test FAILED: {name}: want {want} finding(s), got {got}")
-    m = SA_RE.findall('x == "service-account-openbank-edge"\nstartswith(id, "service-account-")')
-    if m != ["openbank-edge"]:
+    edge = 'input.principal.id == "service-account-openbank-edge"\n'
+    rego = {
+        "reason name is not a principal": (
+            'allowed_reasons contains "service-account-transaction-create" if {\n\tx\n}\n', set()),
+        "comment is not a principal": ("# service-account-openbank-edge\n", set()),
+        "prefix check has no client": ('startswith(input.principal.id, "service-account-")\n', set()),
+        "principal comparison": (edge, {"openbank-edge"}),
+        "negated comparison": (edge.replace("==", "!="), {"openbank-edge"}),
+        "mirrored comparison": ('"service-account-openbank-edge" == input.principal.id\n',
+                                {"openbank-edge"}),
+        "inline set": ('input.principal.id in {"service-account-a-b", "service-account-c-d"}\n',
+                       {"a-b", "c-d"}),
+        "identity-set constant": ('CALLERS := {\n"service-account-x-y",\n}\n', {"x-y"}),
+        "trailing comment": (edge.rstrip() + " # not service-account-zzz\n", {"openbank-edge"}),
+    }
+    total = len(cases) + len(rego) + 1
+    for name, (src, want) in rego.items():
+        got = principal_clients(src)
+        if got != want:
+            failed += 1
+            print(f"::error::self-test FAILED: {name}: want {sorted(want)}, got {sorted(got)}")
+    # end-to-end: a real principal whose client lacks `profile` MUST be flagged; a reason-name
+    # string naming no client must NOT be.
+    refs = {c: ["x.rego"] for c in principal_clients(
+        'input.principal.id == "service-account-openbank-nop"\n'
+        'allowed_reasons contains "service-account-transaction-create" if {true}\n')}
+    tpl = {"openbank-nop": [("t", ["openid", "roles"])]}
+    if set(refs) != {"openbank-nop"} or len(evaluate(refs, tpl)) != 1:
         failed += 1
-        print(f"::error::self-test FAILED: regex matched {m}")
-    print(f"self-test: {len(cases) + 1 - failed}/{len(cases) + 1} passed")
+        print("::error::self-test FAILED: principal-without-profile not flagged exactly once")
+    print(f"self-test: {total - failed}/{total} passed")
     return 1 if failed else 0
 
 
