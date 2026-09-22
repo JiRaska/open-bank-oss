@@ -104,7 +104,7 @@ paths:
         - name: status
           in: query
           required: false
-          description: Filter by case status (OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED, HALTED)
+          description: Filter by case status (OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED)
           schema:
             type: string
         - name: limit
@@ -218,7 +218,6 @@ components:
           type: string
         status:
           type: string
-          enum: [OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED, HALTED]
 
     OpenCaseRequest:
       type: object
@@ -308,6 +307,13 @@ components:
           type: number
         contributionCount:
           type: integer
+        haltedAtEpochMs:
+          type: integer
+          format: int64
+          description: Present when governance halted the workflow rather than the swarm closing it.
+        haltReason:
+          type: string
+          description: Operator-supplied governance reason for halting the workflow.
 
     CaseListResponse:
       type: object
@@ -333,7 +339,6 @@ components:
             - SIGNAL_INVOKED
             - SIGNAL_CONSUMED
             - CONTRIBUTION_PERSISTED
-            - CASE_HALTED
         atEpochMs:
           type: integer
           format: int64
@@ -478,6 +483,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ThreadEntry'
+        haltedAtEpochMs:
+          type: integer
+          format: int64
+          description: Present when governance halted the workflow rather than the swarm closing it.
+        haltReason:
+          type: string
+          description: Operator-supplied governance reason for halting the workflow.
 
     ErrorBody:
       type: object
