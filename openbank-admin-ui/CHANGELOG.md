@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.249.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.2...admin-ui-v0.249.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** start the governed RCA shadow pilot ([#10570](https://github.com/JiRaska/open-bank-oss/issues/10570)) ([e673381](https://github.com/JiRaska/open-bank-oss/commit/e673381d76b64d6968d0973046f45edc9671b96e))
+
 ## [0.248.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.1...admin-ui-v0.248.2) (2026-09-22)
 
 

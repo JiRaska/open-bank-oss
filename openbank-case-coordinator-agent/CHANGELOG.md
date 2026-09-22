@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.8.1...case-coordinator-agent-v0.9.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** start the governed RCA shadow pilot ([#10570](https://github.com/JiRaska/open-bank-oss/issues/10570)) ([e673381](https://github.com/JiRaska/open-bank-oss/commit/e673381d76b64d6968d0973046f45edc9671b96e))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.8.0...case-coordinator-agent-v0.8.1) (2026-09-13)
 
 
