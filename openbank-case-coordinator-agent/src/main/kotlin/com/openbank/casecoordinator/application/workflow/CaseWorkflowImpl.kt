@@ -103,6 +103,7 @@ class CaseWorkflowImpl : CaseWorkflow {
             "case.join",
             signal.rolloutId,
             Workflow.currentTimeMillis(),
+            signal.authenticatedPrincipal,
         )?.let(consumedSignals::add)
     }
 
@@ -115,6 +116,7 @@ class CaseWorkflowImpl : CaseWorkflow {
             draftVersion = draftVersion,
             signalId = signal.signalId,
             rolloutId = signal.rolloutId,
+            authenticatedPrincipal = signal.authenticatedPrincipal,
         )
         consumedEvidence(
             Workflow.getInfo().workflowId,
@@ -123,6 +125,7 @@ class CaseWorkflowImpl : CaseWorkflow {
             "case.contribute",
             signal.rolloutId,
             Workflow.currentTimeMillis(),
+            signal.authenticatedPrincipal,
         )?.let(consumedSignals::add)
         if (signal.contested) contestedCount++
     }
@@ -216,12 +219,14 @@ private fun consumedEvidence(
     capability: String,
     rolloutId: String,
     observedAtEpochMs: Long,
+    authenticatedPrincipal: String = "legacy-unknown",
 ): CaseSignalEvidence? {
     if (signalId.isBlank()) return null // Legacy histories predate ADR-0271 correlation ids.
     return CaseSignalEvidence(
         signalId = signalId,
         caseId = caseId,
         agentId = agentId,
+        authenticatedPrincipal = authenticatedPrincipal,
         capability = capability,
         stage = CaseSignalEvidenceStage.CONSUMED,
         observedAtEpochMs = observedAtEpochMs,

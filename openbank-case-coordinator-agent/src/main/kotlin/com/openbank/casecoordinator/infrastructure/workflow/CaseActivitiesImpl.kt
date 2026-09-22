@@ -165,6 +165,7 @@ class CaseActivitiesImpl(
                         signalId = contribution.signalId,
                         caseId = caseId,
                         agentId = contribution.agentId,
+                        authenticatedPrincipal = contribution.authenticatedPrincipal,
                         capability = "case.contribute",
                         stage = CaseSignalEvidenceStage.PERSISTED,
                         observedAtEpochMs = now.toInstant().toEpochMilli(),

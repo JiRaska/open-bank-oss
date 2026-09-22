@@ -160,6 +160,7 @@ class CaseCoordinatorResource(
         requireNotNull(request) { "request body is required" }
         val type = requireNotNull(request.type) { "type is required" }
         val agentId = requireNotNull(request.agentId) { "agentId is required" }
+        val authenticatedPrincipal = identity.principal.name
         // Authorisation before availability, deliberately ahead of the Temporal check (#4834). The
         // claimed agentId is carried into the workflow as the AUTHOR of the contribution, which is
         // the guarantee ADR-0244 rests on — "who detected is never who coordinated" — so it must be
@@ -173,7 +174,7 @@ class CaseCoordinatorResource(
             else -> throw IllegalArgumentException("unknown signal type '$type'")
         }
         val collaborationAuthorization = capability?.let {
-            when (val result = signalAuthorization.authorize(id, agentId, it)) {
+            when (val result = signalAuthorization.authorize(id, authenticatedPrincipal, agentId, it)) {
                 is CaseSignalAuthorizationResult.Authorized -> result
                 CaseSignalAuthorizationResult.Denied -> return Response.status(Response.Status.FORBIDDEN)
                     .entity(errorBody("signal '$type' denied for the requested agent")).build()
@@ -194,7 +195,7 @@ class CaseCoordinatorResource(
                 // it against the four known signal literals, so it is a bounded server-side value.
                 .entity(errorBody("signal '$type' denied for the requested agent")).build()
         }
-        return deliver(id, type, agentId, request, capability, collaborationAuthorization)
+        return deliver(id, type, agentId, request, capability, collaborationAuthorization, authenticatedPrincipal)
     }
 
     private fun capable(type: String, agentId: String): Boolean = when (type) {
@@ -212,6 +213,7 @@ class CaseCoordinatorResource(
         request: SignalRequest,
         capability: String?,
         authorization: CaseSignalAuthorizationResult.Authorized?,
+        authenticatedPrincipal: String,
     ): Response {
         val stub = workflowClient.newWorkflowStub(CaseWorkflow::class.java, id)
         return try {
@@ -222,6 +224,7 @@ class CaseCoordinatorResource(
                         request.role ?: "participant",
                         requireNotNull(authorization).signalId,
                         authorization.rolloutId,
+                        authenticatedPrincipal,
                     ),
                 )
                 "contribute" -> stub.contribute(
@@ -232,6 +235,7 @@ class CaseCoordinatorResource(
                         contested = request.contested ?: false,
                         signalId = requireNotNull(authorization).signalId,
                         rolloutId = authorization.rolloutId,
+                        authenticatedPrincipal = authenticatedPrincipal,
                     ),
                 )
                 "supersede" -> stub.supersede(
@@ -246,7 +250,7 @@ class CaseCoordinatorResource(
                 else -> stub.requestSynthesis(SynthesisRequest(agentId))
             }
             if (capability != null && authorization != null) {
-                signalAuthorization.recordInvoked(id, agentId, capability, authorization)
+                signalAuthorization.recordInvoked(id, agentId, capability, authorization, authenticatedPrincipal)
             }
             Response.accepted().build()
         } catch (e: WorkflowNotFoundException) {

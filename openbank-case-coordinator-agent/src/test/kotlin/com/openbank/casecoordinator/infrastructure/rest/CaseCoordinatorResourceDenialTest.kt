@@ -53,7 +53,7 @@ class CaseCoordinatorResourceDenialTest {
         // first (#4834) and carries its own, differently-worded body.
         every { gate.permitsAssertedIdentity(any(), any()) } returns true
         every { gate.canContribute(any()) } returns false
-        io.mockk.coEvery { signalAuthorization.authorize(any(), any(), any()) } returns
+        io.mockk.coEvery { signalAuthorization.authorize(any(), any(), any(), any()) } returns
             CaseSignalAuthorizationResult.Denied
 
         val marker = "spoofed-agent-DEADBEEF"

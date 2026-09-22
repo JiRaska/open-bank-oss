@@ -153,8 +153,9 @@ describe('POST /api/iaops/rca', () => {
         json: async () => ({ analysis: 'Repeated alert still points to the same worker.' }),
       })
       .mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'OPEN' }) })
       .mockResolvedValueOnce({ ok: true, status: 202 })
-      .mockResolvedValueOnce({ ok: true, status: 202 }))
+      )
 
     const { POST } = await import('@/app/api/iaops/rca/route')
     const res = await POST(makeReq({ ask: 'Repeated Temporal worker alert' }))
@@ -164,6 +165,36 @@ describe('POST /api/iaops/rca', () => {
     expect(body.shadowCase).toMatchObject({ recorded: true })
     expect(body.shadowCase.caseId).toMatch(/^case-incident-response-rca-[a-f0-9]{16}$/)
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not signal a historical closed case after duplicate open', async () => {
+    process.env.HOLMES_URL = 'http://holmes-mock'
+    process.env.CASE_COORDINATOR_URL = 'http://case-coordinator-mock'
+    vi.resetModules()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ analysis: 'Historical RCA.' }) })
+      .mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'CLOSED' }) }))
+
+    const { POST } = await import('@/app/api/iaops/rca/route')
+    const body = await (await POST(makeReq({ ask: 'A completed historical alert' }))).json()
+
+    expect(body.shadowCase).toEqual({ recorded: false, reason: 'case_closed' })
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3)
+  })
+
+  it('reports backend authorization denial distinctly from unavailability', async () => {
+    process.env.HOLMES_URL = 'http://holmes-mock'
+    process.env.CASE_COORDINATOR_URL = 'http://case-coordinator-mock'
+    vi.resetModules()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ analysis: 'Denied RCA.' }) })
+      .mockResolvedValueOnce({ ok: false, status: 403 }))
+
+    const { POST } = await import('@/app/api/iaops/rca/route')
+    const body = await (await POST(makeReq({ ask: 'An alert without a grant' }))).json()
+
+    expect(body.shadowCase).toEqual({ recorded: false, reason: 'not_authorized' })
   })
 
   it('does not open a case when a read-only demo user requests RCA', async () => {

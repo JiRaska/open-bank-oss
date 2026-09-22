@@ -149,6 +149,7 @@ class CaseThreadProjectionTest {
             CaseSignalEvidenceRow(
                 signalId = "11111111-1111-1111-1111-111111111111",
                 agentId = "rca-investigator",
+                authenticatedPrincipal = "operator-1",
                 capability = "case.contribute",
                 stage = "AUTHORIZED",
                 observedAtEpochMs = T0 + LATER_MS,
@@ -159,6 +160,7 @@ class CaseThreadProjectionTest {
             CaseSignalEvidenceRow(
                 signalId = "11111111-1111-1111-1111-111111111111",
                 agentId = "rca-investigator",
+                authenticatedPrincipal = "operator-1",
                 capability = "case.contribute",
                 stage = "CONSUMED",
                 observedAtEpochMs = T0 + 2 * LATER_MS,

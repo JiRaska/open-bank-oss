@@ -38,7 +38,12 @@ class CaseSignalAuthorizationService(
     private val auditPublisher: AuditEventPublisher,
 ) {
     private val clock: Clock = Clock.systemUTC()
-    fun authorize(caseId: String, agentId: String, capability: String): CaseSignalAuthorizationResult {
+    fun authorize(
+        caseId: String,
+        authenticatedPrincipal: String,
+        agentId: String,
+        capability: String,
+    ): CaseSignalAuthorizationResult {
         val context = evidenceRepository.findContext(caseId)
             ?: return CaseSignalAuthorizationResult.UnknownCase
         val signalId = Ids.randomId().toString()
@@ -52,7 +57,15 @@ class CaseSignalAuthorizationService(
                 ),
             )
         } catch (_: CaseCollaborationPolicyUnavailable) {
-            audit(caseId, agentId, capability, AuditResult.FAILURE, signalId, reason = "policy unavailable")
+            audit(
+                caseId,
+                authenticatedPrincipal,
+                agentId,
+                capability,
+                AuditResult.FAILURE,
+                signalId,
+                reason = "policy unavailable",
+            )
             return CaseSignalAuthorizationResult.PolicyUnavailable
         }
 
@@ -61,6 +74,7 @@ class CaseSignalAuthorizationService(
             signalId = signalId,
             caseId = caseId,
             agentId = agentId,
+            authenticatedPrincipal = authenticatedPrincipal,
             capability = capability,
             stage = CaseSignalEvidenceStage.AUTHORIZED,
             observedAtEpochMs = Instant.now(clock).toEpochMilli(),
@@ -73,11 +87,12 @@ class CaseSignalAuthorizationService(
         ) {
             evaluation = PolicyEvaluation(false, "per-case signal quota exhausted")
         }
-        return recordDecision(caseId, agentId, capability, signalId, decision, evaluation)
+        return recordDecision(caseId, authenticatedPrincipal, agentId, capability, signalId, decision, evaluation)
     }
 
     private fun recordDecision(
         caseId: String,
+        authenticatedPrincipal: String,
         agentId: String,
         capability: String,
         signalId: String,
@@ -95,6 +110,7 @@ class CaseSignalAuthorizationService(
                     signalId = signalId,
                     caseId = caseId,
                     agentId = agentId,
+                    authenticatedPrincipal = authenticatedPrincipal,
                     capability = capability,
                     stage = stage,
                     observedAtEpochMs = Instant.now(clock).toEpochMilli(),
@@ -106,6 +122,7 @@ class CaseSignalAuthorizationService(
         }
         audit(
             caseId,
+            authenticatedPrincipal,
             agentId,
             capability,
             if (evaluation.allowed) AuditResult.SUCCESS else AuditResult.DENIED,
@@ -146,12 +163,14 @@ class CaseSignalAuthorizationService(
         agentId: String,
         capability: String,
         authorization: CaseSignalAuthorizationResult.Authorized,
+        authenticatedPrincipal: String,
     ) {
         evidenceRepository.record(
             CaseSignalEvidence(
                 signalId = authorization.signalId,
                 caseId = caseId,
                 agentId = agentId,
+                authenticatedPrincipal = authenticatedPrincipal,
                 capability = capability,
                 stage = CaseSignalEvidenceStage.INVOKED,
                 observedAtEpochMs = Instant.now(clock).toEpochMilli(),
@@ -162,6 +181,7 @@ class CaseSignalAuthorizationService(
 
     private fun audit(
         caseId: String,
+        authenticatedPrincipal: String,
         agentId: String,
         capability: String,
         result: AuditResult,
@@ -173,8 +193,8 @@ class CaseSignalAuthorizationService(
         runBlocking {
             auditPublisher.publish(
                 AuditEvent(
-                    actorId = agentId,
-                    actorType = "AI_AGENT",
+                    actorId = authenticatedPrincipal,
+                    actorType = "HUMAN",
                     operation = capability,
                     resourceType = "agent-case",
                     resourceId = caseId,
@@ -184,6 +204,7 @@ class CaseSignalAuthorizationService(
                     channel = AuditChannel.API,
                     payload = mapOf(
                         "signal_id" to signalId,
+                        "asserted_agent_id" to agentId,
                         "policy_decision_id" to decisionId,
                         "rollout_id" to rolloutId,
                         "policy_reason" to reason,

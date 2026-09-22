@@ -88,6 +88,7 @@ class CaseSignalEvidenceQuotaIT {
         signalId = UUID.nameUUIDFromBytes("signal-$attempt".toByteArray(StandardCharsets.UTF_8)).toString(),
         caseId = CASE_ID,
         agentId = "rca-investigator",
+        authenticatedPrincipal = "operator-1",
         capability = "case.contribute",
         stage = CaseSignalEvidenceStage.AUTHORIZED,
         observedAtEpochMs = NOW.time,

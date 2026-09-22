@@ -46,7 +46,7 @@ function extractRca(body: unknown): string {
 
 type ShadowCaseResult =
   | { recorded: true; caseId: string }
-  | { recorded: false; reason: 'not_authorized' | 'unavailable' }
+  | { recorded: false; reason: 'not_authorized' | 'quota_exhausted' | 'case_closed' | 'unavailable' }
 
 async function alertFingerprint(ask: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ask.trim()))
@@ -81,26 +81,42 @@ async function recordShadowCase(
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
     })
+    if (opened.status === 403) return { recorded: false, reason: 'not_authorized' }
+    if (opened.status === 429) return { recorded: false, reason: 'quota_exhausted' }
     if (opened.status !== 201 && opened.status !== 409) {
       console.error('Shadow case open failed', { status: opened.status })
       return { recorded: false, reason: 'unavailable' }
     }
-    const caseId = opened.status === 201
+    const newlyOpened = opened.status === 201
+    const caseId = newlyOpened
       ? ((await opened.json().catch(() => null)) as { caseId?: string } | null)?.caseId
       : deterministicCaseId
     if (!caseId) return { recorded: false, reason: 'unavailable' }
 
     const signalUrl = `${caseCoordinatorBase()}/api/v1/case-coordinator/cases/${encodeURIComponent(caseId)}/signals`
-    const joined = await fetch(signalUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ type: 'join', agentId: 'rca-investigator', role: 'incident-investigator' }),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!joined.ok) {
-      console.error('Shadow case join failed', { status: joined.status })
-      return { recorded: false, reason: 'unavailable' }
+    if (!newlyOpened) {
+      const existing = await fetch(`${caseCoordinatorBase()}/api/v1/case-coordinator/cases/${encodeURIComponent(caseId)}`, {
+        headers,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (existing.status === 404) return { recorded: false, reason: 'case_closed' }
+      if (!existing.ok) return { recorded: false, reason: 'unavailable' }
+      const body = await existing.json().catch(() => null) as { status?: string } | null
+      if (!body || body.status === 'CLOSED') return { recorded: false, reason: 'case_closed' }
+    } else {
+      const joined = await fetch(signalUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ type: 'join', agentId: 'rca-investigator', role: 'incident-investigator' }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (joined.status === 403) return { recorded: false, reason: 'not_authorized' }
+      if (!joined.ok) {
+        console.error('Shadow case join failed', { status: joined.status })
+        return { recorded: false, reason: 'unavailable' }
+      }
     }
     const contributed = await fetch(signalUrl, {
       method: 'POST',
@@ -115,6 +131,7 @@ async function recordShadowCase(
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
     })
+    if (contributed.status === 403) return { recorded: false, reason: 'not_authorized' }
     if (!contributed.ok) {
       console.error('Shadow case contribution failed', { status: contributed.status })
       return { recorded: false, reason: 'unavailable' }
@@ -155,7 +172,7 @@ export async function POST(req: NextRequest) {
     }
     const raw = await upstream.json().catch(() => null)
     const rca = extractRca(raw)
-    const mayRecordCase = hasPermission(session.user.roles ?? [], 'agent:execute')
+    const mayRecordCase = (session.user.roles ?? []).some(role => role === 'ROLE_ADMIN' || role === 'ROLE_OPERATOR')
     const shadowCase: ShadowCaseResult = mayRecordCase && session.user.accessToken
       ? await recordShadowCase(ask, rca, session.user.accessToken)
       : { recorded: false, reason: 'not_authorized' }
