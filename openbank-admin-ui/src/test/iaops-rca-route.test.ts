@@ -22,10 +22,13 @@ function makeReq(body: unknown): NextRequest {
 afterEach(() => {
   vi.restoreAllMocks()
   delete process.env.HOLMES_URL
+  delete process.env.CASE_COORDINATOR_URL
 })
 
 beforeEach(() => {
-  vi.mocked(auth).mockResolvedValue({ user: { roles: ['ROLE_OPERATOR'] } } as never)
+  vi.mocked(auth).mockResolvedValue({
+    user: { roles: ['ROLE_OPERATOR'], accessToken: 'operator-token' },
+  } as never)
 })
 
 describe('POST /api/iaops/rca', () => {
@@ -71,22 +74,119 @@ describe('POST /api/iaops/rca', () => {
     expect(res.status).toBe(400)
   })
 
-  it('forwards ask to HolmesGPT and returns rca from analysis field', async () => {
+  it('forwards ask to HolmesGPT and records the RCA in a shadow case', async () => {
     process.env.HOLMES_URL = 'http://holmes-mock'
+    process.env.CASE_COORDINATOR_URL = 'http://case-coordinator-mock'
     vi.resetModules()
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ analysis: 'Pod OOMKilled due to memory leak in JVM heap.' }),
-    }))
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ analysis: 'Pod OOMKilled due to memory leak in JVM heap.' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ caseId: 'case-incident-response-alert-a1b2c3d4' }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 202 })
+      .mockResolvedValueOnce({ ok: true, status: 202 }))
     const { POST } = await import('@/app/api/iaops/rca/route')
     const res = await POST(makeReq({ ask: 'Why is transaction-service crashing?' }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.rca).toBe('Pod OOMKilled due to memory leak in JVM heap.')
+    expect(body.shadowCase).toEqual({
+      caseId: 'case-incident-response-alert-a1b2c3d4',
+      recorded: true,
+    })
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(
       'http://holmes-mock/api/chat',
       expect.objectContaining({ method: 'POST' }),
     )
+    expect(vi.mocked(fetch)).toHaveBeenNthCalledWith(
+      2,
+      'http://case-coordinator-mock/api/v1/case-coordinator/cases',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer operator-token' }),
+      }),
+    )
+    expect(vi.mocked(fetch)).toHaveBeenNthCalledWith(
+      4,
+      'http://case-coordinator-mock/api/v1/case-coordinator/cases/case-incident-response-alert-a1b2c3d4/signals',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('returns the RCA honestly when shadow-case recording fails', async () => {
+    process.env.HOLMES_URL = 'http://holmes-mock'
+    process.env.CASE_COORDINATOR_URL = 'http://case-coordinator-mock'
+    vi.mocked(auth).mockResolvedValue({
+      user: { roles: ['ROLE_OPERATOR'], accessToken: 'operator-token' },
+    } as never)
+    vi.resetModules()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ analysis: 'Temporal worker is unavailable.' }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 503 }))
+
+    const { POST } = await import('@/app/api/iaops/rca/route')
+    const res = await POST(makeReq({ ask: 'Why did the workflow worker disappear?' }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      rca: 'Temporal worker is unavailable.',
+      shadowCase: { recorded: false, reason: 'unavailable' },
+    })
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2)
+  })
+
+  it('reuses the deterministic case when the alert was already opened', async () => {
+    process.env.HOLMES_URL = 'http://holmes-mock'
+    process.env.CASE_COORDINATOR_URL = 'http://case-coordinator-mock'
+    vi.resetModules()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ analysis: 'Repeated alert still points to the same worker.' }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, status: 202 })
+      .mockResolvedValueOnce({ ok: true, status: 202 }))
+
+    const { POST } = await import('@/app/api/iaops/rca/route')
+    const res = await POST(makeReq({ ask: 'Repeated Temporal worker alert' }))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.shadowCase).toMatchObject({ recorded: true })
+    expect(body.shadowCase.caseId).toMatch(/^case-incident-response-rca-[a-f0-9]{16}$/)
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not open a case when a read-only demo user requests RCA', async () => {
+    process.env.HOLMES_URL = 'http://holmes-mock'
+    process.env.CASE_COORDINATOR_URL = 'http://case-coordinator-mock'
+    vi.mocked(auth).mockResolvedValue({
+      user: { roles: ['ROLE_DEMO'], accessToken: 'demo-token' },
+    } as never)
+    vi.resetModules()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ analysis: 'Read-only RCA result.' }),
+    }))
+
+    const { POST } = await import('@/app/api/iaops/rca/route')
+    const res = await POST(makeReq({ ask: 'Why is the service unavailable?' }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      rca: 'Read-only RCA result.',
+      shadowCase: { recorded: false, reason: 'not_authorized' },
+    })
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
   })
 
   it('extracts rca from response field as fallback', async () => {
