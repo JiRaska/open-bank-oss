@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.1...copilot-service-v0.17.2) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.0...copilot-service-v0.17.1) (2026-09-20)
 
 
