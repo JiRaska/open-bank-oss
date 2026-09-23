@@ -15,6 +15,7 @@ import com.openbank.casecoordinator.domain.model.CaseSignalEvidence
 import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceStage
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.Contribution
+import com.openbank.casecoordinator.infrastructure.observability.CaseCoordinatorMetricsService
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
@@ -38,6 +39,7 @@ class CaseActivitiesImpl(
     private val dataSource: DataSource,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
+    private val metrics: CaseCoordinatorMetricsService,
 ) : CaseSynthesisActivity,
     CaseProposalActivity,
     CaseProposalDeliveryActivity,
@@ -127,6 +129,7 @@ class CaseActivitiesImpl(
                 ps.executeUpdate()
             }
         }
+        metrics.recordCaseOpened(start.caseClass.name, start.deliveryMode.name)
     }
 
     override fun recordContributions(caseId: String, contributions: List<Contribution>) {

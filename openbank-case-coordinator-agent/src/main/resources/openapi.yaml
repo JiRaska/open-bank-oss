@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.6.0
+  version: 1.8.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -36,6 +36,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceStatus'
+
+  /api/v1/case-coordinator/kill-switch:
+    get:
+      tags: [Service]
+      summary: Active governance kill-switch scopes
+      operationId: getKillSwitchStatus
+      description: >-
+        Returns the currently active kill-switch scopes. When active, the shadow pilot cannot
+        receive new collaboration signals and running cases are being halted by governance.
+      responses:
+        '200':
+          description: Kill-switch status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KillSwitchStatus'
 
   /api/v1/case-coordinator/cases:
     post:
@@ -490,6 +506,28 @@ components:
         haltReason:
           type: string
           description: Operator-supplied governance reason for halting the workflow.
+
+    KillSwitchScope:
+      type: object
+      required: [scope, reason, setBy]
+      properties:
+        scope:
+          type: string
+        reason:
+          type: string
+        setBy:
+          type: string
+
+    KillSwitchStatus:
+      type: object
+      required: [active, scopes]
+      properties:
+        active:
+          type: boolean
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KillSwitchScope'
 
     ErrorBody:
       type: object
