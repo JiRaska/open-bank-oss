@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for copilot-service's mTLS calls to consent-service (8443, client auth
+# REQUIRED) — the CreditAiLevelResolver consent check behind CreditAffordabilityTool (#10383). Same
+# shape as notification-internal-tls: tls.crt/tls.key identify the caller, ca.crt trusts the upstream.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: copilot-internal-tls
+  namespace: platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: copilot-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: copilot-service.platform.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -5,7 +5,7 @@
 package com.openbank.swift.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -21,11 +21,14 @@ import java.util.UUID
 /**
  * REST client for `openbank-transaction-service` (ADR-0108): books the settled funds after the
  * scheme confirms ACSC for an MT103. OIDC service-to-service auth is propagated by
- * [OidcClientRequestReactiveFilter] — same pattern as [ClearingSimulatorClient].
+ * the named oidc-client `m2m` (swift's own Keycloak client, #10486); [ClearingSimulatorClient]
+ * still uses the shared default client.
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-swift` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/transactions")
 interface TransactionServiceClient {
     @POST

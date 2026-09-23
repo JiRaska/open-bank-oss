@@ -5,8 +5,8 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  # Additive recertification routes after organization grant authority.
-  version: 1.19.0
+  # Additive ADR-0312 business-signing routes (entity signing policy, trusted payees, approvals).
+  version: 1.20.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -14,6 +14,7 @@ tags:
   - name: Delegation portfolios
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
+  - name: Business signing
 paths:
   /api/v1/delegation-portfolios:
     post:
@@ -578,8 +579,344 @@ paths:
           description: >-
             The reservation was confirmed. Releasing settled money would re-open a ceiling the
             delegate has already spent through.
+  # ADR-0312 business payment signing. Internal: the caller is customer-edge's service account
+  # (OPA `edge-service-business-signing`). Every error body is `SigningError` with a stable `code`.
+  /api/v1/entities/{entityId}/signing/evaluate:
+    post:
+      tags: [Business signing]
+      summary: How many signatures a payment needs, and from whom
+      description: >-
+        Evaluates the effective policy (stored, or derived from the live register) against one
+        payment. A trusted payee lowers `required` to 1 — the initiator's own SCA — unless the amount
+        exceeds `trustedPayeeCap`. It is never an SCA exemption.
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningEvaluateRequest' }
+      responses:
+        '200':
+          description: The evaluation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningEvaluation' }
+        '400': { description: Missing or malformed field }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/signing-policy:
+    get:
+      tags: [Business signing]
+      summary: The effective signing policy
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      responses:
+        '200':
+          description: Stored policy, or the register-derived default (`isDerivedFromRegister`, version 0)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningPolicy' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+    put:
+      tags: [Business signing]
+      summary: Propose a policy change
+      description: >-
+        Creates a POLICY_CHANGE approval request needing the current policy's strictest round, in
+        AWAITING_INITIATOR until the initiator signs it (then PENDING, co-signers notified). The
+        policy changes only when that round completes; a change prepared against an older version
+        is refused as SUPERSEDED.
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningPolicyProposal' }
+      responses:
+        '202': { $ref: '#/components/responses/ApprovalAccepted' }
+        '400': { description: Invalid rules }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/signer-groups:
+    get:
+      tags: [Business signing]
+      summary: Named signer groups
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      responses:
+        '200':
+          description: The groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SignerGroup' }
+    post:
+      tags: [Business signing]
+      summary: Propose a signer-group create or edit (a POLICY_CHANGE approval request)
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignerGroupProposal' }
+      responses:
+        '202': { $ref: '#/components/responses/ApprovalAccepted' }
+        '400': { description: Invalid group }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/trusted-payees:
+    get:
+      tags: [Business signing]
+      summary: ACTIVE trusted payees
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      responses:
+        '200':
+          description: The payees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/TrustedPayee' }
+    post:
+      tags: [Business signing]
+      summary: Propose a trusted payee (PAYEE_ADD); trusted only once the full round completes
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrustedPayeeProposal' }
+      responses:
+        '202': { $ref: '#/components/responses/ApprovalAccepted' }
+        '400': { description: Invalid IBAN or name }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '409': { $ref: '#/components/responses/SigningConflict' }
+        '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/trusted-payees/{payeeId}:
+    delete:
+      tags: [Business signing]
+      summary: Propose removing a trusted payee (PAYEE_REMOVE)
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - name: payeeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: initiatorPartyId
+          in: query
+          required: false
+          description: Or in the body; one of the two is required.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                initiatorPartyId: { type: string, format: uuid }
+      responses:
+        '202': { $ref: '#/components/responses/ApprovalAccepted' }
+        '400': { description: initiatorPartyId missing }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '404': { description: No such active trusted payee }
+        '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/approval-requests:
+    post:
+      tags: [Business signing]
+      summary: Hold a payment for co-signature (kind PAYMENT)
+      description: >-
+        `payload` is the exact rail request body (minus secrets) and is frozen: its canonical JSON
+        SHA-256 is `payloadSha256`, which every co-signer's SCA is dynamically linked to. The
+        initiator's SCA challenge must already be consumed by customer-edge (payment initiation,
+        linked to amount/currency/creditor) and counts as the first signature.
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePaymentApproval' }
+      responses:
+        '201':
+          description: Created — PENDING, or APPROVED when one signature suffices
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+        '400': { description: Missing or malformed field }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+    get:
+      tags: [Business signing]
+      summary: Approval requests of the entity
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ApprovalStatus' }
+        - name: signer
+          in: query
+          required: false
+          description: Only requests this party may sign or initiated.
+          schema: { type: string, format: uuid }
+        - name: initiator
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Newest first, at most 200
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApprovalRequest' }
+        '400': { description: Unknown status }
+  /api/v1/entities/{entityId}/approval-requests/{approvalId}:
+    get:
+      tags: [Business signing]
+      summary: One approval request
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/ApprovalId'
+      responses:
+        '200':
+          description: The request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+        '404': { description: Not found for this entity }
+  /api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures:
+    post:
+      tags: [Business signing]
+      summary: Add a co-signature
+      description: >-
+        The signer must be eligible, hold an ACTIVE mandate right now (re-read from party-service),
+        not have signed already (the initiator never counts twice) and present an SCA challenge that
+        delegation-service consumes with the link `approvalRequestId + payloadSha256` (plus amount,
+        currency and creditor for a payment). Reaching `required` makes the request APPROVED; an
+        administrative change is applied in the same transaction.
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/ApprovalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalSignatureRequest' }
+      responses:
+        '200':
+          description: Signed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+        '400': { description: Missing field }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '404': { description: Not found for this entity }
+        '409': { $ref: '#/components/responses/SigningConflict' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/approval-requests/{approvalId}/rejection:
+    post:
+      tags: [Business signing]
+      summary: Reject a pending request
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/ApprovalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalRejectionRequest' }
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+        '403': { $ref: '#/components/responses/SigningForbidden' }
+        '404': { description: Not found for this entity }
+        '409': { $ref: '#/components/responses/SigningConflict' }
+  /api/v1/entities/{entityId}/approval-requests/{approvalId}/release-claim:
+    post:
+      tags: [Business signing]
+      summary: Single-use release claim of an APPROVED payment
+      description: >-
+        Atomic compare-and-set APPROVED → RELEASED. Exactly one caller receives the claim token and
+        the frozen payload; every other and every later claim answers 409. Signers' mandates are
+        re-checked live first — a round that no longer holds is refused (MANDATE_LAPSED). Post the
+        payload to the rail with `Idempotency-Key = approvalId`, then report `release-result`.
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/ApprovalId'
+      responses:
+        '200':
+          description: This caller won the claim
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseClaim' }
+        '404': { description: Not found for this entity }
+        '409': { $ref: '#/components/responses/SigningConflict' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/approval-requests/{approvalId}/release-result:
+    post:
+      tags: [Business signing]
+      summary: Record the rail's answer for a claimed payment
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/ApprovalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReleaseResult' }
+      responses:
+        '200':
+          description: Recorded (idempotent for the same result)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+        '400': { description: releaseRef missing on ok }
+        '404': { description: Not found for this entity }
+        '409': { $ref: '#/components/responses/SigningConflict' }
+  /api/v1/parties/{humanId}/approval-requests/pending:
+    get:
+      tags: [Business signing]
+      summary: Everything waiting for this human's signature, across every entity they may sign for now
+      parameters:
+        - name: humanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Grouped by entity, oldest expiry first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingApprovals' }
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+
 components:
   parameters:
+    EntityId:
+      name: entityId
+      in: path
+      required: true
+      description: The legal-entity party whose signing policy applies.
+      schema: { type: string, format: uuid }
     ApprovalId:
       name: approvalId
       in: path
@@ -622,6 +959,36 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+  responses:
+    ApprovalAccepted:
+      description: >-
+        An approval request was created in AWAITING_INITIATOR (collected 0, 15-minute expiry);
+        nothing changes until the initiator signs and the round completes
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApprovalRequest' }
+    SigningForbidden:
+      description: NOT_ELIGIBLE, MANDATE_NOT_ACTIVE, SCA_NOT_VERIFIED or SCA_NOT_LINKED
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SigningError' }
+    SigningConflict:
+      description: >-
+        ALREADY_SIGNED, NOT_PENDING, AWAITING_INITIATOR, EXPIRED, ALREADY_CLAIMED, NOT_APPROVED,
+        MANDATE_LAPSED, PAYEE_CHANGE_PENDING, SIGNER_GROUP_CHANGE_PENDING, SCA_CHALLENGE_USED and similar
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SigningError' }
+    SigningUnsatisfiable:
+      description: POLICY_UNSATISFIABLE — fewer distinct eligible signers than the policy needs
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SigningError' }
+    SigningUnavailable:
+      description: party-service or sca-service could not be read; fails closed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SigningError' }
   schemas:
     DelegationPortfolioRequest:
       type: object
@@ -998,3 +1365,230 @@ components:
         detail: { type: string }
         code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED] }
         error: { type: string }
+    SigningMoney:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+    SigningEvaluateRequest:
+      type: object
+      required: [amount, currency, creditorIban, rail]
+      properties:
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        creditorIban: { type: string }
+        rail: { type: string, description: 'DOMESTIC, SEPA, SEPA_INSTANT, SWIFT — informational' }
+    SigningEvaluation:
+      type: object
+      required: [required, eligibleSignerIds, trusted, ruleIndex, policyVersion, isDerivedFromRegister]
+      properties:
+        required: { type: integer, minimum: 1 }
+        eligibleSignerIds: { type: array, items: { type: string, format: uuid } }
+        mustIncludeGroupId: { type: string, nullable: true }
+        trusted: { type: boolean }
+        ruleIndex: { type: integer }
+        policyVersion: { type: integer }
+        isDerivedFromRegister: { type: boolean }
+    SigningRule:
+      type: object
+      required: [requiredSignatures]
+      description: >-
+        One amount band; first match in list order wins, bounds inclusive, a bound or band currency
+        different from the payment's never matches. No match falls back to the strictest rule.
+      properties:
+        minAmount: { $ref: '#/components/schemas/SigningMoney' }
+        maxAmount: { $ref: '#/components/schemas/SigningMoney' }
+        currency: { type: string, nullable: true }
+        requiredSignatures: { type: integer, minimum: 1, maximum: 10 }
+        groupId: { type: string, nullable: true, description: Only members of this group may sign }
+        mustIncludeGroupId: { type: string, nullable: true, description: At least one signer must be a member }
+    SigningPolicy:
+      type: object
+      required: [entityPartyId, version, rules, isDerivedFromRegister]
+      properties:
+        entityPartyId: { type: string, format: uuid }
+        version: { type: integer, minimum: 0 }
+        rules: { type: array, items: { $ref: '#/components/schemas/SigningRule' } }
+        trustedPayeeCap: { $ref: '#/components/schemas/SigningMoney' }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        updatedByApprovalId: { type: string, format: uuid, nullable: true }
+        isDerivedFromRegister: { type: boolean }
+    SigningPolicyProposal:
+      type: object
+      required: [initiatorPartyId, rules]
+      properties:
+        initiatorPartyId: { type: string, format: uuid }
+        rules: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/SigningRule' } }
+        trustedPayeeCap: { $ref: '#/components/schemas/SigningMoney' }
+    SignerGroup:
+      type: object
+      required: [id, name, memberPartyIds]
+      properties:
+        id: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' }
+        name: { type: string, maxLength: 120 }
+        memberPartyIds: { type: array, items: { type: string, format: uuid } }
+    SignerGroupProposal:
+      type: object
+      required: [initiatorPartyId, id, name, memberPartyIds]
+      properties:
+        initiatorPartyId: { type: string, format: uuid }
+        id: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' }
+        name: { type: string, maxLength: 120 }
+        memberPartyIds: { type: array, minItems: 1, items: { type: string, format: uuid } }
+    TrustedPayee:
+      type: object
+      required: [id, entityPartyId, iban, name, addedAt, addedByApprovalId, status]
+      properties:
+        id: { type: string, format: uuid }
+        entityPartyId: { type: string, format: uuid }
+        iban: { type: string, description: Normalised (no spaces, upper case) }
+        name: { type: string }
+        bic: { type: string, nullable: true }
+        addedAt: { type: string, format: date-time }
+        addedByApprovalId: { type: string, format: uuid }
+        status: { type: string, enum: [ACTIVE, REMOVED] }
+    TrustedPayeeProposal:
+      type: object
+      required: [initiatorPartyId, iban, name]
+      properties:
+        initiatorPartyId: { type: string, format: uuid }
+        iban: { type: string }
+        name: { type: string, maxLength: 140 }
+        bic: { type: string, nullable: true }
+    ApprovalSignatureRequest:
+      type: object
+      required: [partyId, scaChallengeId]
+      properties:
+        partyId: { type: string, format: uuid, description: The natural person signing — never the entity }
+        scaChallengeId: { type: string, format: uuid }
+    CreatePaymentApproval:
+      type: object
+      required: [payload, initiatorSignature]
+      properties:
+        kind: { type: string, enum: [PAYMENT] }
+        initiatorSignature: { $ref: '#/components/schemas/ApprovalSignatureRequest' }
+        payload:
+          type: object
+          required: [rail, amount, currency, creditorIban, railRequest]
+          additionalProperties: true
+          description: The frozen document. Its canonical JSON SHA-256 is payloadSha256.
+          properties:
+            rail: { type: string }
+            amount: { type: string, description: Decimal; a JSON number is accepted too }
+            currency: { type: string, minLength: 3, maxLength: 3 }
+            creditorIban: { type: string }
+            creditorName: { type: string, nullable: true }
+            reference: { type: string, nullable: true }
+            debtorAccountId: { type: string, nullable: true }
+            railRequest:
+              type: object
+              additionalProperties: true
+              description: The exact rail request body (minus secrets) the edge posts on release.
+        expiresInSeconds:
+          type: integer
+          minimum: 1
+          maximum: 259200
+          description: Defaults to 72 hours, which is also the maximum.
+    ApprovalRejectionRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+        reason: { type: string, maxLength: 500, nullable: true }
+    ReleaseClaim:
+      type: object
+      required: [claimToken, payload]
+      properties:
+        claimToken: { type: string, format: uuid }
+        payload: { type: object, additionalProperties: true }
+    ReleaseResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        releaseRef: { type: string, maxLength: 200, nullable: true, description: Required when ok }
+        error: { type: string, maxLength: 500, nullable: true }
+        claimToken: { type: string, format: uuid, nullable: true, description: When sent, must equal the winning claim }
+    ApprovalKind:
+      type: string
+      enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE]
+    ApprovalStatus:
+      type: string
+      enum: [AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED]
+      description: >-
+        AWAITING_INITIATOR — an administrative request its initiator has not signed yet: nobody is
+        notified, only the initiator may sign, and it expires silently after 15 minutes.
+    ApprovalRequest:
+      type: object
+      required: [id, entityPartyId, kind, status, payload, payloadSha256, policyVersion, required, collected,
+                 eligibleSignerIds, initiatorPartyId, signatures, expiresAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        entityPartyId: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/ApprovalKind' }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        payload: { type: object, additionalProperties: true, description: The frozen payload }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$', description: SHA-256 of the canonical JSON payload }
+        summary:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: For PAYMENT — amount, currency, creditorIban, creditorName, rail.
+        policyVersion: { type: integer }
+        required: { type: integer }
+        collected: { type: integer }
+        eligibleSignerIds: { type: array, items: { type: string, format: uuid } }
+        mustIncludeGroupId: { type: string, nullable: true }
+        initiatorPartyId: { type: string, format: uuid }
+        signatures:
+          type: array
+          items:
+            type: object
+            required: [partyId, scaChallengeId, at]
+            properties:
+              partyId: { type: string, format: uuid }
+              scaChallengeId: { type: string, format: uuid }
+              at: { type: string, format: date-time }
+        rejection:
+          type: object
+          nullable: true
+          properties:
+            partyId: { type: string, format: uuid, nullable: true, description: Null when the system refused it (SUPERSEDED) }
+            reason: { type: string, nullable: true }
+            at: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time, nullable: true }
+        releaseRef: { type: string, nullable: true }
+        releaseError: { type: string, nullable: true }
+    PendingApprovals:
+      type: object
+      required: [humanPartyId, total, entities, items]
+      properties:
+        humanPartyId: { type: string, format: uuid }
+        total: { type: integer }
+        entities:
+          type: array
+          items:
+            type: object
+            required: [entityPartyId, count, oldestExpiresAt]
+            properties:
+              entityPartyId: { type: string, format: uuid }
+              entityName: { type: string, nullable: true }
+              count: { type: integer }
+              oldestExpiresAt: { type: string, format: date-time }
+        items: { type: array, items: { $ref: '#/components/schemas/ApprovalRequest' } }
+    SigningError:
+      type: object
+      required: [status, error, code]
+      properties:
+        status: { type: integer }
+        error: { type: string }
+        code:
+          type: string
+          description: >-
+            Stable machine code — e.g. NOT_ELIGIBLE, MANDATE_NOT_ACTIVE, SCA_NOT_VERIFIED,
+            SCA_NOT_LINKED, ALREADY_SIGNED, NOT_PENDING, EXPIRED, ALREADY_CLAIMED, NOT_APPROVED,
+            MANDATE_LAPSED, POLICY_UNSATISFIABLE, PAYEE_ALREADY_TRUSTED, MANDATES_UNAVAILABLE,
+            SCA_UNAVAILABLE.

@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-f1fe3139
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}
@@ -85,6 +85,39 @@ spec:
                   name: interest-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # #10486: interest's OWN client (openbank-interest) for the ledger post only — the
+            # named oidc-client `ledger`. optional: false so an unseeded Vault entry is a loud
+            # CreateContainerConfigError, never a silently empty credential (see
+            # oidc-externalsecret.yaml).
+            - name: OIDC_LEDGER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: interest-service-ledger-oidc
+                  key: OIDC_LEDGER_CLIENT_SECRET
+                  optional: false
+            # ADR-0033 §D capitalization credit leg. Without this the rest-client fell back to
+            # application.yaml's http://localhost:8101 inside this pod, so every capitalization
+            # journal was a connection refused — the file's own comment already said a deployment
+            # MUST set this. ledger-service's private-CA mTLS listener (8443, client auth REQUIRED,
+            # client cert interest-internal-tls, %prod bucket ledger-authority). ledger.create for
+            # the shared openbank-services service account is already allowed by service-ledger-post
+            # in ledger_rest_ext.rego, so no policy change.
+            - name: LEDGER_SERVICE_URL
+              value: https://ledger-service.ledger.svc:8443
+            # #999 withholding-tax remittance leg: the accrued tax is booked to the finanční úřad
+            # through transaction-service. Without this the rest-client fell back to
+            # http://localhost:8102 inside this pod, so WithholdingRemittanceSettlementConsumer's
+            # POST /api/v1/transactions was a connection refused, retried three times and
+            # dead-lettered — a due tax remittance that never moved money. transaction-service's
+            # private-CA mTLS listener (8443, client auth REQUIRED, client cert
+            # interest-internal-tls, %prod bucket transaction-authority).
+            # TRANSPORT ONLY — authorization is NOT settled by this line. The route is
+            # @RolesAllowed(ROLE_OPERATOR) as well as @Authorize(transaction.create), and RBAC is
+            # the OUTER gate (AuthorizeInterceptor is a CDI interceptor at PLATFORM_AFTER+100),
+            # so OPA is not what decides this call. Whether the shared openbank-services token
+            # carries ROLE_OPERATOR in the live realm is unresolved — tracked in #10404.
+            - name: TRANSACTION_SERVICE_URL
+              value: https://transaction-service.payments.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -93,6 +126,14 @@ spec:
             # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
             - name: ACCOUNT_SERVICE_URL
               value: "http://account-service.accounts.svc:8100"
+            # CatalogInterestProfileSynchronizer, driven by CatalogInterestSnapshotScheduler,
+            # reads product-catalog on every tick. Without this the app default (localhost:8104)
+            # was dialled inside this pod and every sync failed (#10383). product-catalog's
+            # private-CA mTLS listener (8443, client auth REQUIRED); client cert
+            # interest-service-internal-tls, %prod TLS bucket catalog-authority. ASVS V9.1 forbids
+            # a new plaintext http:// value here.
+            - name: PRODUCT_CATALOG_URL
+              value: https://product-catalog.accounts.svc:8443
             # OPA sidecar enforced (ADR-0034 Phase 5, issue #3679). Advisory since the Phase-5
             # sidecar bootstrap (issue #938); coverage verified before the flip: all five
             # @Authorize actions (interest.list/read/create/delete/trigger) are granted to
@@ -108,6 +149,17 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           volumeMounts:
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
+              readOnly: true
+            - name: ledger-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
+            # Same interest-internal-tls Secret, mounted a second time: one client identity, one
+            # private CA, but each bucket's paths name the upstream it authenticates to.
+            - name: transaction-tls
+              mountPath: /mnt/transaction-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -180,6 +232,21 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
+        # One client certificate, mounted twice: interest-internal-tls (#10397) identifies
+        # interest-service to BOTH upstream listeners, which trust the one private CA. Each %prod
+        # TLS bucket names its own path, so the mounts stay readable next to the config.
+        - name: catalog-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
+        - name: ledger-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
+        - name: transaction-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

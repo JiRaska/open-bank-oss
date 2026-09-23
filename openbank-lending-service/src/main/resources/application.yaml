@@ -54,6 +54,18 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486: the borrower credit/debit (transaction.create) and the loan journals (ledger.create) no longer rides the shared openbank-services principal. The
+    # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
+    # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-lending
+    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
+    # stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-lending
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
     tls:
       verification: none
   rest-client:
@@ -266,6 +278,36 @@ lending:
 # separate block precisely so the offline story (dev, test, `./gradlew quarkusDev`) is unchanged:
 # only the shipped artifact posts to the real ledger and pays real borrowers.
 "%prod":
+  quarkus:
+    # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
+    # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
+    # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+      consent-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority
+      consent-service:
+        tls-configuration-name: consent-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}

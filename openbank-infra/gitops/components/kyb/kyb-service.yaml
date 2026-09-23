@@ -57,7 +57,7 @@ spec:
         - name: kyb-service
           # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-93cf8f7f
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-c2339eec
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8157 and management 8090 — both read off the service's own
@@ -155,6 +155,17 @@ spec:
                 secretKeyRef:
                   name: kyb-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 3: kyb-service's OWN Keycloak client (openbank-kyb, ROLE_API only) for
+            # the entity-party create + mandate grant (party.create, party.mandate.grant) - the
+            # named oidc-client `m2m`. optional: false so an unseeded Vault entry is a loud
+            # CreateContainerConfigError, never a silently empty credential. Run
+            # provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kyb-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
             # dependency: without it the ReactiveRedisDataSource bean is inactive and the
             # app dies with InactiveBeanException.

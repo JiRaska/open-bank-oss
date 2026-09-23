@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sdd-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-a42c5226
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -96,6 +96,16 @@ spec:
                   name: sdd-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # #10486: sdd's OWN Keycloak client (openbank-sdd, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sdd-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # #1000: book the debtor-side debit for an authorised collection.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102

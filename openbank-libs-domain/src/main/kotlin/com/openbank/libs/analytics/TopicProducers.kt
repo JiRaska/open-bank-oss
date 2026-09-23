@@ -73,6 +73,8 @@ object TopicProducers {
         // older lifecycle events do not yet, and resolve TOPIC through this row.
         "openbank.delegation.events" to "delegation-service",
         "openbank.delegation.spend-reservation-state" to "delegation-service",
+        // ADR-0312 business-signing lifecycle; its events also state sourceService themselves.
+        "openbank.delegation.approval-events" to "delegation-service",
         // Issue #6035: four more money-path producers were absent from all three places at once
         // (this table, application.yaml's topics list, and the audit KafkaUser's Read ACLs) --
         // found by .github/scripts/check-audit-money-path-subscription.py, which derives the set

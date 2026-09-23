@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.3...fx-service-v0.15.4) (2026-09-23)
+
+
+### Security
+
+* **fx:** admit ROLE_API on machine-read endpoints and add the final-step runbook ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 4) ([#10544](https://github.com/JiRaska/open-bank-oss/issues/10544)) ([3fb9575](https://github.com/JiRaska/open-bank-oss/commit/3fb9575e6c68d7a7670f2ead8a6b6909f1cffe54))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.2...fx-service-v0.15.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.1...fx-service-v0.15.2) (2026-09-13)
 
 

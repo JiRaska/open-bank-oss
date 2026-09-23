@@ -107,6 +107,27 @@ interface InterestAccrualRepository {
     fun findClaimedForCapitalization(accountId: UUID, productId: String): Uni<List<InterestAccrual>>
 
     /**
+     * Every outstanding capitalization claim in the system, as `(accountId, productId, claimedPeriodTo)`.
+     *
+     * This exists because the documented crash-recovery — "retry `capitalize(account, product, the
+     * claimed periodTo)` and the ledger collapses the replay" — was reachable only by an operator who
+     * already knew the claimed period. The one automatic caller, `capitalizeAll`, always passes
+     * *today*, so a claim held for any earlier period was refused by `inFlightClaimFailure` on every
+     * subsequent tick, forever, with a WARN nobody reads (#10404). Measured in sandbox: 124 accruals
+     * across 7 pairs stuck since 2026-08-01, every tick since refusing.
+     *
+     * Returning the claimed period is the whole point — recovery MUST re-post under the period the
+     * interrupted attempt froze, because the ledger idempotency key is derived from it. Completing
+     * the same accruals under a later period would mint a different key and post a SECOND journal,
+     * which is exactly what `inFlightClaimFailure` refuses to guess at.
+     *
+     * Note this finds pairs [findAccountsWithPendingCapitalization] cannot: that one selects on
+     * `status = 'ACCRUING'`, so a pair whose accruals are ALL claimed is invisible to it and would
+     * never be looked at again by anything.
+     */
+    fun findOutstandingCapitalizationClaims(): Uni<List<Triple<UUID, String, LocalDate>>>
+
+    /**
      * Claims [accrualIds] for the capitalization of [periodTo]: flips them `ACCRUING → CAPITALIZING`
      * and stamps `claimed_period_to`, in ONE status-guarded transaction of its own.
      *

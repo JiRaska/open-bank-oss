@@ -249,9 +249,466 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "openid",
+        "profile",
         "roles"
       ],
       "secret": "__EDGE_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-interest",
+      "name": "OpenBank Interest Service",
+      "description": "Per-service M2M client for interest-service's ledger capitalization posts (issue #10486). Holds ROLE_API only; ledger.create is granted by identity in ledger_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__INTEREST_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-account",
+      "name": "OpenBank Account Service",
+      "description": "Per-service M2M client for account-service's welcome-bonus credit (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__ACCOUNT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-sdd",
+      "name": "OpenBank SDD Service",
+      "description": "Per-service M2M client for sdd-service's collection settlement (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SDD_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-standing-order",
+      "name": "OpenBank Standing Order Service",
+      "description": "Per-service M2M client for standing-order execution (transaction.create, sepaPayment.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__STANDING_ORDER_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-sepa-payment",
+      "name": "OpenBank SEPA Payment Service",
+      "description": "Per-service M2M client for sepa-payment's settlement leg and R-transaction reversal (transaction.create, transaction.reverse) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SEPA_PAYMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-lending",
+      "name": "OpenBank Lending Service",
+      "description": "Per-service M2M client for lending's borrower credit/debit and loan journals (transaction.create, ledger.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__LENDING_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-clearing",
+      "name": "OpenBank Clearing Service",
+      "description": "Per-service M2M client for clearing's net-settlement journal (ledger.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__CLEARING_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-domestic-payment",
+      "name": "OpenBank Domestic Payment Service",
+      "description": "Per-service M2M client for domestic-payment's settlement booking (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__DOMESTIC_PAYMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-sepa-instant",
+      "name": "OpenBank SEPA Instant Service",
+      "description": "Per-service M2M client for sepa-instant's SCT Inst settlement booking (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SEPA_INSTANT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-swift",
+      "name": "OpenBank SWIFT Service",
+      "description": "Per-service M2M client for swift-service's MT103 settlement booking (transaction.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SWIFT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-transaction",
+      "name": "OpenBank Transaction Service",
+      "description": "Per-service M2M client for transaction-service's journal post/reverse and cover holds (ledger.create/reverse, balance.hold/holdRelease) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__TRANSACTION_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-settlement",
+      "name": "OpenBank Settlement Service",
+      "description": "Per-service M2M client for settlement-service's journal and balance legs (ledger.create/read, balance.debit/credit) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__SETTLEMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-fx",
+      "name": "OpenBank FX Service",
+      "description": "Per-service M2M client for fx-service's AML case open (amlCase.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__FX_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-kyb",
+      "name": "OpenBank KYB Service",
+      "description": "Per-service M2M client for kyb-service's entity-party create and mandate grant (party.create, party.mandate.grant) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__KYB_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-analytics-sink",
+      "name": "OpenBank Analytics Sink",
+      "description": "Per-service M2M client for analytics-sink's account-registry sweep (account.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__ANALYTICS_SINK_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-billing",
+      "name": "OpenBank Billing Service",
+      "description": "Per-service M2M client for billing-service's account reads (account.list, account.read) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__BILLING_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-document",
+      "name": "OpenBank Document Service",
+      "description": "Per-service M2M client for document-service's account lookup (account.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__DOCUMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-party",
+      "name": "OpenBank Party Service",
+      "description": "Per-service M2M client for party-service's GDPR Art. 15 account and transaction reads (account.list, transaction.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__PARTY_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-copilot",
+      "name": "OpenBank Copilot Service",
+      "description": "Per-service M2M client for copilot-service's credit-profile read (analytics-sink) (issue #10486). Holds ROLE_API only; analytics-sink admits it by name.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__COPILOT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-campaign",
+      "name": "OpenBank Campaign Service",
+      "description": "Per-service M2M client for campaign-service's incentive offer read (issue #10486). Holds ROLE_API only; incentive-service admits it by name.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__CAMPAIGN_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-delegation",
+      "name": "OpenBank Delegation Service",
+      "description": "Per-service M2M client for delegation-service's party eligibility and card ownership reads (pid party.read, card.read) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__DELEGATION_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-agent",
+      "name": "OpenBank Agent Service",
+      "description": "Per-service M2M client for agent-service's charter-gated read tools (transaction.list/read, sctInstPayment.list/read) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__AGENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-mcp",
+      "name": "OpenBank MCP Service",
+      "description": "Per-service M2M client for mcp-service's charter-gated read ports (transaction.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity upstream.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__MCP_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-statement",
+      "name": "OpenBank Statement Service",
+      "description": "Per-service M2M client for statement-service's booked-entries search (transaction.search) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__STATEMENT_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-grafana",
@@ -495,6 +952,198 @@
       "username": "service-account-openbank-services",
       "enabled": true,
       "serviceAccountClientId": "openbank-services",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-interest",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-interest",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-account",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-account",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-sdd",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-sdd",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-standing-order",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-standing-order",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-sepa-payment",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-sepa-payment",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-lending",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-lending",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-clearing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-clearing",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-domestic-payment",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-domestic-payment",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-sepa-instant",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-sepa-instant",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-swift",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-swift",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-transaction",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-transaction",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-settlement",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-settlement",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-fx",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-fx",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-kyb",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-analytics-sink",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-analytics-sink",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-billing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-billing",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-document",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-document",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-party",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-party",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-copilot",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-copilot",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-campaign",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-campaign",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-delegation",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-delegation",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-agent",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-agent",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-mcp",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-mcp",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-statement",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-statement",
       "realmRoles": [
         "ROLE_API"
       ]

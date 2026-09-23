@@ -107,6 +107,7 @@ class InterestWorkflowLivenessTest {
                 toDate: LocalDate,
             ): Uni<InterestCapitalization> = error("unused")
             override fun capitalizeAll(toDate: LocalDate): Uni<Int> = Uni.createFrom().item(3)
+            override fun recoverOutstandingClaims(): Uni<Int> = Uni.createFrom().item(0)
         }
         val scheduler = InterestCapitalizationScheduler(useCase, clock, metricsOver(registry))
 
@@ -141,6 +142,7 @@ class InterestWorkflowLivenessTest {
             ): Uni<InterestCapitalization> = error("unused")
             override fun capitalizeAll(toDate: LocalDate): Uni<Int> =
                 Uni.createFrom().failure(IllegalStateException("ledger down"))
+            override fun recoverOutstandingClaims(): Uni<Int> = Uni.createFrom().item(0)
         }
         val scheduler = InterestCapitalizationScheduler(useCase, clock, metricsOver(registry))
         scheduler.onStart(StartupEvent())
