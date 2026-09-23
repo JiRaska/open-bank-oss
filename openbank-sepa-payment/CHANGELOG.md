@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.2...sepa-payment-v0.14.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.1...sepa-payment-v0.14.2) (2026-09-21)
 
 
