@@ -17,7 +17,7 @@ spec:
             severity: warning
             team: platform
           annotations:
-            summary: "Case-coordinator kill-switch has been active for {{ $value }} minutes"
+            summary: "Case-coordinator kill-switch is active"
             description: "The {{ $labels.scope }} kill-switch was set and has remained active for more than 15 minutes."
         - alert: ShadowPilotHaltLatencySlo
           expr: |
@@ -25,14 +25,14 @@ spec:
               sum by (le, caseClass, deliveryMode) (
                 rate(openbank_casecoordinator_halt_latency_bucket[5m])
               )
-            ) > 240000
+            ) > 240
           for: 2m
           labels:
             severity: critical
             team: platform
           annotations:
             summary: "Shadow pilot halt latency exceeds the 240 s read-model SLO"
-            description: "p99 halt latency for {{ $labels.caseClass }}/{{ $labels.deliveryMode }} is {{ $value | humanizeDurationMs }}."
+            description: "p99 halt latency for {{ $labels.caseClass }}/{{ $labels.deliveryMode }} is {{ $value | humanizeDuration }}."
             subject_period: continuous
         - alert: ShadowPilotCasesStuck
           expr: |
