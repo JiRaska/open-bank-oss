@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.8](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.7...lending-service-v0.33.8) (2026-09-23)
+
+
+### Security
+
+* **fx:** admit ROLE_API on machine-read endpoints and add the final-step runbook ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 4) ([#10544](https://github.com/JiRaska/open-bank-oss/issues/10544)) ([3fb9575](https://github.com/JiRaska/open-bank-oss/commit/3fb9575e6c68d7a7670f2ead8a6b6909f1cffe54))
+
 ## [0.33.7](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.6...lending-service-v0.33.7) (2026-09-23)
 
 
