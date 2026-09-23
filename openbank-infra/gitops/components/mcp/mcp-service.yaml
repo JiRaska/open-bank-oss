@@ -117,6 +117,15 @@ spec:
                   name: mcp-service-secrets
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # #10486 batch 7: mcp-service's OWN Keycloak client (openbank-mcp, ROLE_API only) - the named
+            # oidc-client `m2m`. optional: false so an unseeded Vault entry is a loud CreateContainerConfigError.
+            # Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
           startupProbe:
             tcpSocket:
               port: management

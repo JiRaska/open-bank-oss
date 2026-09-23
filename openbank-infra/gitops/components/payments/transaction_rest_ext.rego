@@ -189,3 +189,30 @@ allowed_reasons contains "service-party-transaction-read" if {
 	input.principal.id == "service-account-openbank-party"
 	input.action == "transaction.list"
 }
+
+# #10486 batch 7 — three more read identities, same shape as the party rule above.
+#   statement-service TransactionRestClient.search GET /transactions/search (booked entries, ADR-0035) transaction.search
+#   agent-service     TransactionServiceClient      GET /transactions, /transactions/{id}              transaction.list, transaction.read
+#   mcp-service       TransactionServiceClient      GET /transactions?accountId=                       transaction.list
+# agent-service and mcp-service are AI-agent runtimes. Their machine identity reaches only what an
+# agents.yaml charter can already call: agent-service's list_transactions/get_transaction tools map
+# to query.ledger.readonly (compliance-officer, ui-assistant), mcp-service's list_transactions to
+# query.transaction.readonly (mcp-anonymous). The charter gate refuses every other agent before the
+# REST call is made; this rule is the upstream's half of the same boundary.
+allowed_reasons contains "service-statement-transaction-search" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-statement"
+	input.action == "transaction.search"
+}
+
+allowed_reasons contains "service-agent-transaction-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-agent"
+	input.action in {"transaction.list", "transaction.read"}
+}
+
+allowed_reasons contains "service-mcp-transaction-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-mcp"
+	input.action == "transaction.list"
+}

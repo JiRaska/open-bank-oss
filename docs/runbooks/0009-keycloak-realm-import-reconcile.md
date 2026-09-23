@@ -125,6 +125,7 @@ survives in it.
    TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
    ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
+   AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -325,6 +326,22 @@ the named `m2m` client they already have, so nothing is provisioned for them.
 
 analytics-sink and incentive-service run no OPA sidecar, so their endpoints admit the named callers
 through a Kotlin named-caller check rather than an `@Authorize` rule.
+
+### Batch 7 (AI-agent reads and the statement search)
+
+Same recipe, same script, three more clients.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-agent` | `keycloak/agent-service` | `agent-service-m2m-oidc` (platform) | `AGENT_CLIENT_SECRET` |
+| `openbank-mcp` | `keycloak/mcp-service` | `mcp-service-m2m-oidc` (platform) | `MCP_CLIENT_SECRET` |
+| `openbank-statement` | `keycloak/statement-service` | `statement-service-m2m-oidc` (statements) | `STATEMENT_CLIENT_SECRET` |
+
+The two AI-agent identities are granted only what an `agents.yaml` charter can already reach. An agent
+tool whose capability no charter holds (agent-service's interest tools, mcp-service's payment
+confirmation) moves to the agent's identity with **no** upstream grant, so it stays denied end to end.
+If a charter later gains that capability, add the upstream read rule in the same change;
+`AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
 
 ## What this does NOT fix
 

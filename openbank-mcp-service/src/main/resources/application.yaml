@@ -37,6 +37,17 @@ quarkus:
       type: client
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
+    # #10486 batch 7: the MCP read ports whose upstream grant depended on the shared client's
+    # ROLE_OPERATOR (transaction list, SEPA and domestic payment confirmation) mint from this NAMED client
+    # instead, so the upstream sees service-account-openbank-mcp (ROLE_API only) and grants it only what the
+    # mcp-anonymous charter can reach.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-mcp
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     # In-cluster ClusterIPs — same targets + ports agent-service's ServiceClients already use.
     account-service:

@@ -80,6 +80,15 @@ spec:
                   # pod; until the key is present the service token can't be minted and the
                   # read tools return 401 — no worse than before. Add the key + restart -> real data.
                   optional: true
+            # #10486 batch 7: agent-service's OWN Keycloak client (openbank-agent, ROLE_API only) for the read
+            # tools listed in application.yaml - the named oidc-client `m2m`. optional: false so an unseeded Vault
+            # entry is a loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # ADR-0080 P0 (pentest FIND-S4-05): enforce the policy gate. With the in-process
             # charter allow-list, a capability outside the ui-assistant charter (e.g. AML reads)
             # is denied locally — block makes that DENY actually stop the call. Allowed tools whose
