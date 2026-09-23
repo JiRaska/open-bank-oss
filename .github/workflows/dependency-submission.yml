@@ -209,7 +209,11 @@ jobs:
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
       - name: Test unresolved dependency rejection with Gradle
-        run: python3 .github/scripts/tests/test_dependency_resolution_guard.py
+        run: |
+          set -euo pipefail
+          # The test skips itself without this variable; here a skip would mean it never ran.
+          [ -n "${GITHUB_DEPENDENCY_GRAPH_SHA:-}" ] || { echo "::error::setup-gradle did not export GITHUB_DEPENDENCY_GRAPH_SHA; the resolution guard test cannot run."; exit 1; }
+          python3 .github/scripts/tests/test_dependency_resolution_guard.py
 
       # Bound retained Gradle resolution state to four modules per process. The
       # resolver rejects unresolved dependencies and records each intended project.

@@ -222,5 +222,76 @@ class BasisTests(unittest.TestCase):
         self.assertIn('"--paginate"', calls)
 
 
+DIFF_GH = """#!/usr/bin/env python3
+import os, sys
+calls = os.environ['CALLS']
+with open(calls, 'a') as out: out.write('gh\\n')
+n = sum(1 for _ in open(calls))
+case = os.environ['CASE']
+if case == 'transient' and n >= 2:
+    print('{}'); sys.exit(0)
+if case == 'quota':
+    print('gh: API rate limit exceeded for installation. (HTTP 403)', file=sys.stderr)
+else:
+    print('gh: HTTP 502: Bad Gateway', file=sys.stderr)
+sys.exit(1)
+"""
+
+
+class DiffApiWaitTests(unittest.TestCase):
+    def run_wait(self, case):
+        source = WORKFLOW.read_text()
+        block = source.split(
+            "      - name: Wait for dependency-diff API after a failed review\n", 1
+        )[1]
+        body = block.split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line)
+        script = textwrap.dedent("\n".join(lines))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "gh").write_text(DIFF_GH)
+            (root / "sleep").write_text('#!/bin/sh\necho "$1" >> "$SLEEPS"\n')
+            for stub in ("gh", "sleep"):
+                (root / stub).chmod(0o755)
+            calls, sleeps = root / "calls", root / "sleeps"
+            calls.touch()
+            sleeps.touch()
+            env = dict(
+                os.environ,
+                PATH=directory + os.pathsep + os.environ["PATH"],
+                CASE=case,
+                CALLS=str(calls),
+                SLEEPS=str(sleeps),
+                GITHUB_REPOSITORY="example/repo",
+                BASE_SHA="base",
+                HEAD_SHA="head",
+            )
+            result = subprocess.run(
+                ["bash", "-c", script], env=env, capture_output=True, text=True, timeout=10
+            )
+            return result, len(calls.read_text().splitlines()), len(sleeps.read_text().splitlines())
+
+    def test_exhausted_quota_fails_after_one_call_without_waiting(self):
+        result, calls, sleeps = self.run_wait("quota")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((calls, sleeps), (1, 0))
+        self.assertIn("installation API quota is exhausted", result.stdout)
+
+    def test_transient_failure_recovers_within_the_bounded_wait(self):
+        result, calls, sleeps = self.run_wait("transient")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual((calls, sleeps), (2, 1))
+
+    def test_persistent_non_quota_failure_stays_red_after_every_attempt(self):
+        result, calls, sleeps = self.run_wait("persistent")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((calls, sleeps), (6, 5))
+        self.assertIn("remained", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1336,6 +1336,7 @@ gates:
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
+      python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
   # a version.txt, and must be registered in release-please-config.json AND

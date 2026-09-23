@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[3]
 GUARD = ROOT / '.github/scripts/dependency-resolution-strict.init.gradle'
 
 
+# Needs the graph plugin setup-gradle injects; dependency-submission.yml runs it and fails
+# its step when that environment is absent, so this skip cannot hide a CI run.
+@unittest.skipUnless(os.environ.get('GITHUB_DEPENDENCY_GRAPH_SHA'), 'needs setup-gradle dependency-graph environment')
 class ResolutionGuardTests(unittest.TestCase):
     def run_case(self, case):
         with tempfile.TemporaryDirectory() as directory:
