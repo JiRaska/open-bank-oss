@@ -7,6 +7,7 @@ package com.openbank.party.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.party.application.port.out.PartyAccountGuardPort
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -31,7 +32,9 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 5: the account list (account.list) is minted by the NAMED oidc-client `m2m` -
+// Keycloak client `openbank-party` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

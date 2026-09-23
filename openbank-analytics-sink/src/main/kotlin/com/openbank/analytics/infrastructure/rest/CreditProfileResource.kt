@@ -7,6 +7,7 @@ package com.openbank.analytics.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.analytics.infrastructure.clickhouse.ClickHouseClient
 import com.openbank.libs.security.Roles
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -40,10 +41,10 @@ import java.util.UUID
  *
  * ## Access
  *
- * Internal service-to-service. `Roles.OPERATOR` is the role an M2M client-credentials token carries
- * in this fleet (the same one customer-edge presents to lending); the auditor and admin roles are
- * here for the reason ReconciliationResource carries them — this is the data a creditworthiness
- * decision was made on, so an auditor must be able to read it back.
+ * Internal service-to-service. Machine callers present their OWN Keycloak client (ROLE_API only,
+ * #10486) and are narrowed to [CREDIT_PROFILE_CALLERS] by [requireNamedCreditProfileCaller]; the
+ * operator, auditor and admin roles are here for the reason ReconciliationResource carries them —
+ * this is the data a creditworthiness decision was made on, so an auditor must be able to read it back.
  */
 @Path("/api/v1/analytics/credit-profile")
 @Produces(MediaType.APPLICATION_JSON)
@@ -53,10 +54,16 @@ class CreditProfileResource {
 
     @Inject lateinit var objectMapper: ObjectMapper
 
+    @Inject lateinit var securityIdentity: SecurityIdentity
+
     @GET
     @Path("/{partyId}")
-    @RolesAllowed(Roles.OPERATOR, Roles.AUDITOR, Roles.ADMIN)
+    // #10486 batch 6: ROLE_API admits copilot's and lending's OWN machine principals once the shared
+    // openbank-services client loses ROLE_OPERATOR. ROLE_API is held by every service account and this
+    // service has no OPA sidecar, so [requireNamedCreditProfileCaller] narrows it to the named callers.
+    @RolesAllowed(Roles.OPERATOR, Roles.AUDITOR, Roles.ADMIN, Roles.API)
     suspend fun profile(@PathParam("partyId") partyId: String): Response {
+        requireNamedCreditProfileCaller(securityIdentity)
         // The UUID parse IS the injection boundary — the value is interpolated into SQL below.
         // ClickHouse's HTTP interface takes the query as a string, so there is no bound-parameter
         // path to fall back on; a rejected non-UUID is the control, not a convenience.

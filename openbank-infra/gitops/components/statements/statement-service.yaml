@@ -54,7 +54,7 @@ spec:
           # Kyverno's verify-openbank-image-sbom-attestation policy blocked every pod
           # (Deployment stuck at 0/1) → the EoM close / Closings screen read "not
           # responding". sandbox-a407c3ae is the #706 main build with a valid attestation.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-76de9ef8
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -107,6 +107,15 @@ spec:
                 secretKeyRef:
                   name: statement-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 7: statement-service's OWN Keycloak client (openbank-statement, ROLE_API only) for the
+            # booked-entries search - the named oidc-client `m2m`. optional: false so an unseeded Vault entry is a
+            # loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: statement-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Cross-service reads over in-cluster http legs (ClusterIP DNS).
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102

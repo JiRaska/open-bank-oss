@@ -6,7 +6,7 @@ package com.openbank.copilot.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -28,7 +28,9 @@ import java.util.UUID
  * never agreed to have read, which is why the check lives in the tool and not in this client.
  */
 @RegisterRestClient(configKey = "analytics-sink")
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 6: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-copilot`
+// (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/analytics/credit-profile")
 @Produces(MediaType.APPLICATION_JSON)

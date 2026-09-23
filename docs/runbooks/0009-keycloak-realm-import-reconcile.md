@@ -122,7 +122,10 @@ survives in it.
    ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
    SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
    DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
-   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... \
+   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
+   ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
+   COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
+   AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -287,6 +290,58 @@ existing `openbank-interest` (named oidc-client `ledger`), so nothing is provisi
 | `openbank-swift` | `keycloak/swift-service` | `swift-service-m2m-oidc` (payments) | `SWIFT_CLIENT_SECRET` |
 | `openbank-transaction` | `keycloak/transaction-service` | `transaction-service-m2m-oidc` (payments) | `TRANSACTION_CLIENT_SECRET` |
 | `openbank-settlement` | `keycloak/settlement-service` | `settlement-service-m2m-oidc` (payments) | `SETTLEMENT_CLIENT_SECRET` |
+
+### Batch 3 (the remaining writers)
+
+Same recipe, same script, two more clients. domestic-payment, sepa-payment and sepa-instant move
+their AML case open onto the `m2m` client they already have, so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-fx` | `keycloak/fx-service` | `fx-service-m2m-oidc` (fx) | `FX_CLIENT_SECRET` |
+| `openbank-kyb` | `keycloak/kyb-service` | `kyb-service-m2m-oidc` (kyb) | `KYB_CLIENT_SECRET` |
+
+### Batch 5 (account and transaction reads)
+
+Same recipe, same script, four more clients. interest-service and lending-service move their account
+reads onto the named client they already have (`ledger` and `m2m`), so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-analytics-sink` | `keycloak/analytics-sink` | `analytics-sink-m2m-oidc` (analytics) | `ANALYTICS_SINK_CLIENT_SECRET` |
+| `openbank-billing` | `keycloak/billing-service` | `billing-service-m2m-oidc` (billing) | `BILLING_CLIENT_SECRET` |
+| `openbank-document` | `keycloak/document-service` | `document-service-m2m-oidc` (documents) | `DOCUMENT_CLIENT_SECRET` |
+| `openbank-party` | `keycloak/party-service` | `party-service-m2m-oidc` (party) | `PARTY_CLIENT_SECRET` |
+
+### Batch 6 (RBAC-only reads: credit profile, incentive offer, pid party, cards)
+
+Same recipe, same script, three more clients. lending-service and party-service move their reads onto
+the named `m2m` client they already have, so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-copilot` | `keycloak/copilot-service` | `copilot-service-m2m-oidc` (platform) | `COPILOT_CLIENT_SECRET` |
+| `openbank-campaign` | `keycloak/campaign-service` | `campaign-service-m2m-oidc` (campaign) | `CAMPAIGN_CLIENT_SECRET` |
+| `openbank-delegation` | `keycloak/delegation-service` | `delegation-service-m2m-oidc` (delegation) | `DELEGATION_CLIENT_SECRET` |
+
+analytics-sink and incentive-service run no OPA sidecar, so their endpoints admit the named callers
+through a Kotlin named-caller check rather than an `@Authorize` rule.
+
+### Batch 7 (AI-agent reads and the statement search)
+
+Same recipe, same script, three more clients.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-agent` | `keycloak/agent-service` | `agent-service-m2m-oidc` (platform) | `AGENT_CLIENT_SECRET` |
+| `openbank-mcp` | `keycloak/mcp-service` | `mcp-service-m2m-oidc` (platform) | `MCP_CLIENT_SECRET` |
+| `openbank-statement` | `keycloak/statement-service` | `statement-service-m2m-oidc` (statements) | `STATEMENT_CLIENT_SECRET` |
+
+The two AI-agent identities are granted only what an `agents.yaml` charter can already reach. An agent
+tool whose capability no charter holds (agent-service's interest tools, mcp-service's payment
+confirmation) moves to the agent's identity with **no** upstream grant, so it stays denied end to end.
+If a charter later gains that capability, add the upstream read rule in the same change;
+`AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
 
 ## What this does NOT fix
 

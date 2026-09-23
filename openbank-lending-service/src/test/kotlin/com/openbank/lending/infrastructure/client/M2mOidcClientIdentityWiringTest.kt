@@ -31,7 +31,14 @@ class M2mOidcClientIdentityWiringTest {
 
     @Test
     fun `the money-path rest-clients select the named m2m oidc-client and not the default one`() {
-        listOf(TransactionServiceRestClient::class.java, LedgerRestClient::class.java).forEach { client ->
+        // #10486 batch 5: the borrower account lookup (account.list) joined the money-path legs.
+        listOf(
+            TransactionServiceRestClient::class.java,
+            LedgerRestClient::class.java,
+            AccountServiceRestClient::class.java,
+            // #10486 batch 6: the credit-offer gate's credit-profile read (analytics-sink).
+            CreditProfileClient::class.java,
+        ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
             assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(M2M)
