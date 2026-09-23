@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 
 /**
- * #10486 batch 2: this service's money-path writes are made as its OWN principal,
+ * #10486 batch 2 (+ batch 3: the AML case open): this service's writes are made as its OWN principal,
  * `service-account-openbank-sepa-instant` (ROLE_API only), not the shared `openbank-services` one. Two
  * artefacts must agree and nothing at runtime says so when they do not: the rest-client / adapter
  * must select the NAMED oidc-client `m2m` (else the bearer is the shared principal's and the
@@ -31,7 +31,7 @@ class M2mOidcClientIdentityWiringTest {
 
     @Test
     fun `the money-path rest-clients select the named m2m oidc-client and not the default one`() {
-        listOf(TransactionServiceClient::class.java).forEach { client ->
+        listOf(TransactionServiceClient::class.java, AmlServiceClient::class.java).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
             assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(M2M)
@@ -46,7 +46,7 @@ class M2mOidcClientIdentityWiringTest {
 
     @Test
     fun `the not-yet-migrated rest-clients keep the default (shared) client`() {
-        listOf(AmlServiceClient::class.java, ClearingSimulatorClient::class.java).forEach { client ->
+        listOf(ClearingSimulatorClient::class.java).forEach { client ->
             assertThat(providers(client))
                 .describedAs("%s still uses the default (shared) client", client.simpleName)
                 .contains(OidcClientRequestReactiveFilter::class.java)

@@ -5,7 +5,10 @@
 package com.openbank.domestic.infrastructure.client
 
 import io.quarkus.oidc.client.NamedOidcClient
+import io.quarkus.oidc.client.filter.OidcClientFilter
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 
@@ -57,6 +60,19 @@ class M2mOidcClientIdentityWiringTest {
     @Test
     fun `the default client stays the shared one until the remaining edges migrate`() {
         assertThat(oidcClient["client-id"]).isEqualTo("openbank-services")
+    }
+
+    @Test
+    fun `the AML case open selects the named m2m oidc-client and not the default one`() {
+        // #10486 batch 3: aml-service admits ROLE_API on POST /aml/cases only for named callers.
+        val named = AmlServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
+        assertThat(named).describedAs("@OidcClientFilter on AmlServiceClient").isNotNull
+        assertThat(named.value).isEqualTo(M2M)
+        assertThat(
+            AmlServiceClient::class.java.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java },
+        )
+            .describedAs("the default-client filter would re-attach the shared principal's token")
+            .doesNotContain(OidcClientRequestReactiveFilter::class.java)
     }
 
     private companion object {

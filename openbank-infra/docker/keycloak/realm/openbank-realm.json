@@ -303,6 +303,40 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-fx",
+      "name": "OpenBank FX Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
+      "clientId": "openbank-kyb",
+      "name": "OpenBank KYB Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-admin-ui",
       "name": "OpenBank Admin UI",
       "enabled": true,
@@ -492,6 +526,22 @@
       "username": "service-account-openbank-settlement",
       "enabled": true,
       "serviceAccountClientId": "openbank-settlement",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-fx",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-fx",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-kyb",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-kyb",
       "realmRoles": [
         "ROLE_API"
       ]

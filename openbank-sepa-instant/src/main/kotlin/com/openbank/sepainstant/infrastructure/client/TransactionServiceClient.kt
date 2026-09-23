@@ -22,7 +22,7 @@ import java.util.UUID
 /**
  * RestClient binding to `openbank-transaction-service` (`POST /api/v1/transactions`).
  * Uses the named oidc-client `m2m` (sepa-instant's own Keycloak client, #10486) for M2M token
- * injection; [AmlServiceClient] still uses the shared default client. Idempotent on the `Idempotency-Key` header.
+ * injection; [AmlServiceClient] selects the same named client since #10486 batch 3. Idempotent on the `Idempotency-Key` header.
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
