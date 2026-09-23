@@ -48,6 +48,17 @@ class CompileCoverageTest(unittest.TestCase):
         )
         self.assertFalse(coverage.check(self.root, log)[0])
 
+    def test_reprinted_header_of_an_executed_compile_still_passes(self):
+        # Shape seen on run 35360885303: parallel output reprinted executed task headers.
+        log = (
+            "> Task :openbank-alpha-service:compileKotlin\n"
+            "> Task :openbank-beta-service:compileKotlin\n"
+            "w: some warning\n"
+            "> Task :openbank-alpha-service:compileKotlin\n"
+        )
+        valid, reason = coverage.check(self.root, log)
+        self.assertTrue(valid, reason)
+
 
 if __name__ == "__main__":
     unittest.main()

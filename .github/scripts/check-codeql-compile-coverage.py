@@ -32,7 +32,9 @@ def check(root: Path, log: str) -> tuple[bool, str]:
             observed.setdefault(match.group(1), []).append(match.group(2) or "executed")
 
     missing = sorted(expected - observed.keys())
-    untraced = sorted(module for module in expected & observed.keys() if observed[module] != ["executed"])
+    # Parallel Gradle reprints a task header when its warnings interleave, so one executed
+    # compile can appear more than once; any cached or skipped outcome still disqualifies it.
+    untraced = sorted(module for module in expected & observed.keys() if set(observed[module]) != {"executed"})
     if missing or untraced:
         def sample(values: list[str]) -> str:
             suffix = f" (+{len(values) - 8} more)" if len(values) > 8 else ""
