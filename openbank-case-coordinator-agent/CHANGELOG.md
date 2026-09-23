@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.10.1...case-coordinator-agent-v0.11.0) (2026-09-23)
+
+
+### Features
+
+* **case-coordinator:** P3 swarm guardrails ([#10662](https://github.com/JiRaska/open-bank-oss/issues/10662)) ([a386d82](https://github.com/JiRaska/open-bank-oss/commit/a386d82a79abadce9fa7ffd8a73b1d95fd5fc8e7))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.10.0...case-coordinator-agent-v0.10.1) (2026-09-22)
 
 
