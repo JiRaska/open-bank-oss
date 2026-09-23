@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle2, CircleDot, GitMerge, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, CircleDot, GitMerge, OctagonAlert, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -29,6 +29,8 @@ interface CaseSummary {
   haltedAtEpochMs?: number
   haltReason?: string
 }
+
+interface KillSwitchScope { scope: string; reason: string; setBy: string }
 
 type ListEnvelope =
   | { available: true; cases: CaseSummary[] }
@@ -56,12 +58,26 @@ export default function IaopsCasesPage() {
   const [cases, setCases] = useState<CaseSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [killSwitch, setKillSwitch] = useState<{ active: boolean; scopes: KillSwitchScope[] } | null>(null)
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = useCallback(
     (epochMs: number) => new Date(epochMs).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' }),
     [locale],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/iaops/kill-switch', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((body: unknown) => {
+        if (cancelled) return
+        const status = body as { active?: boolean; scopes?: KillSwitchScope[] }
+        setKillSwitch({ active: !!status.active, scopes: Array.isArray(status.scopes) ? status.scopes : [] })
+      })
+      .catch(() => setKillSwitch({ active: false, scopes: [] }))
+    return () => { cancelled = true }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -111,6 +127,41 @@ export default function IaopsCasesPage() {
         subtitle={t('Sdílené případy, ve kterých agenti koordinovaně přispívají do jednoho vlákna (Temporal CaseWorkflow, ADR-0244). Jen pro čtení.', 'Shared cases agents coordinate on in a single thread (Temporal CaseWorkflow, ADR-0244). Read-only.')}
         actions={<Link href="/iaops" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na IAOps', 'Back to IAOps')}</Link>}
       />
+
+      {killSwitch?.active && (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            marginBottom: '16px',
+            padding: '12px 16px',
+            borderRadius: '12px',
+            border: '1px solid var(--error-border, #dc3545)',
+            background: 'var(--error-bg, #fff0f0)',
+            color: 'var(--error-text, #c82333)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+          }}
+        >
+          <OctagonAlert size={20} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>
+              {t('Kill-switch aktivní', 'Kill switch active')}
+            </div>
+            <div style={{ fontSize: '12px', lineHeight: 1.45 }}>
+              {killSwitch.scopes.map((scope) => (
+                <div key={scope.scope}>
+                  <strong>{scope.scope}</strong>
+                  {' — '}
+                  {scope.reason}
+                  {scope.setBy && ` (${scope.setBy})`}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div role="group" aria-label={t('Filtrovat swarm cases podle stavu', 'Filter swarm cases by status')} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
         <button
