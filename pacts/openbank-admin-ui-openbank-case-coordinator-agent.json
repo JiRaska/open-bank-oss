@@ -120,6 +120,27 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "fetch kill-switch status without presenting any identity",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/case-coordinator/kill-switch"
+      },
+      "response": {
+        "body": {
+          "code": "UNAUTHORIZED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 401
+      }
     }
   ],
   "metadata": {

@@ -118,6 +118,24 @@ class CaseThreadPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = "openbank-admin-ui", provider = "openbank-case-coordinator-agent")
+    fun killSwitchStatusUnauthorizedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid identity is presented")
+        .uponReceiving("fetch kill-switch status without presenting any identity")
+        .path("/api/v1/case-coordinator/kill-switch")
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            """
+            {
+              "code": "UNAUTHORIZED"
+            }
+            """.trimIndent(),
+        )
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "caseListPact")
     fun `list open cases`(mockServer: MockServer) {
@@ -158,5 +176,14 @@ class CaseThreadPactConsumerTest {
 
         assertThat(body.getBoolean("active")).isFalse()
         assertThat(body.getList<Any>("scopes")).isEmpty()
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "killSwitchStatusUnauthorizedPact")
+    fun `fetch kill-switch status without identity returns 401`(mockServer: MockServer) {
+        given()
+            .`when`().get("${mockServer.getUrl()}/api/v1/case-coordinator/kill-switch")
+            .then()
+            .statusCode(401)
     }
 }
