@@ -76,6 +76,17 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486 batch 6: the party eligibility read (pid party.read) and the card ownership read
+    # (card-issuance card.read) no longer ride the shared openbank-services principal. PidServiceRestClient and
+    # CardIssuanceRestClient select this NAMED client (@OidcClientFilter("m2m")), so their principal is
+    # service-account-openbank-delegation (ROLE_API only), granted by identity upstream.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-delegation
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   smallrye-reactive-messaging:
     kafka:

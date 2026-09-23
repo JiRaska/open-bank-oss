@@ -82,6 +82,18 @@ quarkus:
       type: client
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
+    # #10486 batch 6: the credit-profile read (analytics-sink) no longer rides the shared
+    # openbank-services principal. CreditProfileReadClient selects this NAMED client (@OidcClientFilter("m2m")),
+    # so its principal is service-account-openbank-copilot (ROLE_API only), admitted by analytics-sink's
+    # named-caller check. Its issuer is set explicitly (OIDC_M2M_AUTH_SERVER_URL): QUARKUS_OIDC_AUTH_SERVER_URL
+    # is the CUSTOMER realm in this pod, and a machine client lives in the `openbank` realm.
+    m2m:
+      auth-server-url: ${OIDC_M2M_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-copilot
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   # READ tools call the customer edge (ADR-0065) AS the customer — the inbound bearer is propagated
   # (ADR-0089 D5); the edge is ROLE_CUSTOMER and enforces ownership, so the assistant only ever reaches

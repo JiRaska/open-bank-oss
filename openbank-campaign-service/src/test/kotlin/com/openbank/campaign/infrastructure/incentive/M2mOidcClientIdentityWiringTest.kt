@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.party.infrastructure.client
+package com.openbank.campaign.infrastructure.incentive
 
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -12,12 +12,12 @@ import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 
 /**
- * #10486 batch 5: party-service's GDPR Art. 15 aggregation reads accounts and transactions
- * (`account.list`, `transaction.list`) as its OWN principal, `service-account-openbank-party` (ROLE_API only).
+ * #10486 batch 6: campaign-service reads an incentive offer as its OWN principal,
+ * `service-account-openbank-campaign` (ROLE_API only), which incentive-service admits by name.
  * Two artefacts must agree and nothing at runtime says so when they do not: the rest-client must
  * select the NAMED oidc-client `m2m` (else the bearer is the shared `openbank-services` principal's,
  * which loses ROLE_OPERATOR in the final step and is then denied upstream), and
- * `quarkus.oidc-client.m2m` must exist with client `openbank-party` and its own secret variable (a
+ * `quarkus.oidc-client.m2m` must exist with client `openbank-campaign` and its own secret variable (a
  * missing named client fails the first call, not the build).
  */
 class M2mOidcClientIdentityWiringTest {
@@ -32,10 +32,7 @@ class M2mOidcClientIdentityWiringTest {
     @Test
     fun `the migrated rest-clients select the named oidc-client and not the default one`() {
         listOf(
-            AccountServiceRestClient::class.java,
-            TransactionServiceRestClient::class.java,
-            // #10486 batch 6: the GDPR Art. 15 card list (card-issuance card.list).
-            CardServiceRestClient::class.java,
+            IncentiveServiceClient::class.java,
         ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
@@ -50,9 +47,9 @@ class M2mOidcClientIdentityWiringTest {
     }
 
     @Test
-    fun `the named oidc-client authenticates as openbank-party with its own secret`() {
+    fun `the named oidc-client authenticates as openbank-campaign with its own secret`() {
         val named = oidcClient[NAMED] as Map<*, *>
-        assertThat(named["client-id"]).isEqualTo("openbank-party")
+        assertThat(named["client-id"]).isEqualTo("openbank-campaign")
         val secret = (named["credentials"] as Map<*, *>)["secret"] as String
         assertThat(secret).startsWith("\${OIDC_M2M_CLIENT_SECRET:")
         assertThat((named["grant"] as Map<*, *>)["type"]).isEqualTo("client")

@@ -36,6 +36,8 @@ class M2mOidcClientIdentityWiringTest {
             TransactionServiceRestClient::class.java,
             LedgerRestClient::class.java,
             AccountServiceRestClient::class.java,
+            // #10486 batch 6: the credit-offer gate's credit-profile read (analytics-sink).
+            CreditProfileClient::class.java,
         ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
