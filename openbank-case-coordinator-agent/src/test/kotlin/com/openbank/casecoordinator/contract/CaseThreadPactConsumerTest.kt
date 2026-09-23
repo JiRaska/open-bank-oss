@@ -100,6 +100,24 @@ class CaseThreadPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = "openbank-admin-ui", provider = "openbank-case-coordinator-agent")
+    fun killSwitchStatusPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .uponReceiving("fetch the active kill-switch status")
+        .path("/api/v1/case-coordinator/kill-switch")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            """
+            {
+              "active": false,
+              "scopes": []
+            }
+            """.trimIndent(),
+        )
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "caseListPact")
     fun `list open cases`(mockServer: MockServer) {
@@ -127,5 +145,18 @@ class CaseThreadPactConsumerTest {
         assertThat(body.getString("entries[1].actor")).isEqualTo("fraud-agent")
         assertThat(body.getBoolean("entries[1].contested")).isTrue()
         assertThat(body.getString("entries[2].type")).isEqualTo("PROPOSAL_EMITTED")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "killSwitchStatusPact")
+    fun `fetch kill-switch status`(mockServer: MockServer) {
+        val body = given()
+            .`when`().get("${mockServer.getUrl()}/api/v1/case-coordinator/kill-switch")
+            .then()
+            .statusCode(200)
+            .extract().jsonPath()
+
+        assertThat(body.getBoolean("active")).isFalse()
+        assertThat(body.getList<Any>("scopes")).isEmpty()
     }
 }

@@ -3,6 +3,7 @@
 
 package com.openbank.casecoordinator.infrastructure.persistence
 
+import com.openbank.casecoordinator.application.port.out.ActiveKillSwitch
 import com.openbank.casecoordinator.application.port.out.CancellableCase
 import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.application.port.out.KillSwitchCommand
@@ -79,6 +80,26 @@ class JdbcCaseKillSwitchStateAdapter(private val dataSource: DataSource) : CaseK
         ).use { statement ->
             statement.executeQuery().use { result ->
                 buildList { while (result.next()) add(CancellableCase(result.getString(1))) }
+            }
+        }
+    }
+
+    override fun activeScopes(): List<ActiveKillSwitch> = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT scope, reason, set_by FROM case_kill_switch WHERE removed_at IS NULL ORDER BY set_at",
+        ).use { statement ->
+            statement.executeQuery().use { result ->
+                buildList {
+                    while (result.next()) {
+                        add(
+                            ActiveKillSwitch(
+                                scope = result.getString("scope"),
+                                reason = result.getString("reason"),
+                                setBy = result.getString("set_by"),
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

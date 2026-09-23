@@ -7,6 +7,7 @@ import com.openbank.casecoordinator.application.port.out.CancellableCase
 import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.application.port.out.KillSwitchCommand
 import com.openbank.casecoordinator.application.port.out.TemporalCaseCancellationPort
+import com.openbank.casecoordinator.infrastructure.observability.CaseCoordinatorMetricsService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -17,7 +18,8 @@ import java.time.Instant
 class CaseKillSwitchCancellationServiceTest {
     private val state = mockk<CaseKillSwitchStatePort>(relaxed = true)
     private val temporal = mockk<TemporalCaseCancellationPort>(relaxed = true)
-    private val service = CaseKillSwitchCancellationService(state, temporal)
+    private val metrics = mockk<CaseCoordinatorMetricsService>(relaxed = true)
+    private val service = CaseKillSwitchCancellationService(state, temporal, metrics)
 
     @Test
     fun `global halt cancels every running pilot case then records no-action evidence`() {

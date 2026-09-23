@@ -16,12 +16,15 @@ data class KillSwitchCommand(
 
 data class CancellableCase(val workflowId: String)
 
+data class ActiveKillSwitch(val scope: String, val reason: String, val setBy: String)
+
 interface CaseKillSwitchStatePort {
     fun apply(command: KillSwitchCommand)
     fun clear(scope: String, clearedAt: Instant)
     fun pilotHaltReason(): String?
     fun cancellableCases(): List<CancellableCase>
     fun recordHalted(caseId: String, command: KillSwitchCommand)
+    fun activeScopes(): List<ActiveKillSwitch>
 }
 
 interface TemporalCaseCancellationPort {

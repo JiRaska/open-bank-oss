@@ -101,6 +101,25 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "fetch the active kill-switch status",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/case-coordinator/kill-switch"
+      },
+      "response": {
+        "body": {
+          "active": false,
+          "scopes": [
+
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {
