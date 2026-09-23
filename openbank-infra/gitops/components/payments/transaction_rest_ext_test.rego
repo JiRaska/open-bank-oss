@@ -121,3 +121,41 @@ test_transaction_service_own_identity_has_no_grant_here if {
 			with data.rules as rules_mock
 	}
 }
+
+# --- #10486 batch 5: per-service READ identities (ROLE_API only) ---
+
+read_grants := {"party": {"reason": "service-party-transaction-read", "actions": {"transaction.list"}}}
+
+all_read_actions := {"transaction.list", "transaction.read", "transaction.search"}
+
+test_each_read_identity_may_perform_its_granted_reads if {
+	every name, g in read_grants {
+		every action in g.actions {
+			decision := rest.allow with input as {"principal": sa(name), "action": action}
+				with data.rules as rules_mock
+			decision.allow == true
+			g.reason in rest.allowed_reasons with input as {"principal": sa(name), "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+test_each_read_identity_denied_every_other_action if {
+	every name, g in read_grants {
+		every action in (all_actions | all_read_actions) - g.actions {
+			rest.allow == false with input as {"principal": sa(name), "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+# Another ROLE_API service account, and the shared client once it holds ROLE_API only, are denied
+# every transaction read. Widen a read rule's principal.id to a prefix and this goes red.
+test_other_role_api_sa_denied_transaction_reads if {
+	every p in ["mcp-service", "services", "kyb"] {
+		every action in all_read_actions {
+			rest.allow == false with input as {"principal": sa(p), "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}

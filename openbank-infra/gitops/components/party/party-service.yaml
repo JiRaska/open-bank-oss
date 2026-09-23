@@ -92,6 +92,15 @@ spec:
                 secretKeyRef:
                   name: party-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 5: party-service's OWN Keycloak client (openbank-party, ROLE_API only) for the
+            # GDPR Art. 15 account and transaction reads - the named oidc-client `m2m`. optional: false so an
+            # unseeded Vault entry is a loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: party-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # GDPR Art. 15 aggregation hops (ADR-0118 §6). Declared here — not only in
             # application.yaml — because gen-network-policies.py derives the NetworkPolicy
             # edges from the env URLs a Deployment declares: without these two entries the

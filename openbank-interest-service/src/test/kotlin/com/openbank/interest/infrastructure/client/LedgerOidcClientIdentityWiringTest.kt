@@ -38,7 +38,12 @@ class LedgerOidcClientIdentityWiringTest {
     @Test
     fun `the money-path clients select the named oidc-client and not the default one`() {
         // #10486 batch 2: the withholding-tax remittance leg (transaction.create) joined the ledger post.
-        listOf(LedgerRestClient::class.java, TransactionServiceClient::class.java).forEach { client ->
+        // #10486 batch 5: the accrual run's account reads (account.list, account.read) joined too.
+        listOf(
+            LedgerRestClient::class.java,
+            TransactionServiceClient::class.java,
+            AccountServiceClient::class.java,
+        ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
             assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(LEDGER_CLIENT)
@@ -66,7 +71,7 @@ class LedgerOidcClientIdentityWiringTest {
     @Test
     fun `the default oidc-client stays the shared one for the not-yet-migrated edges`() {
         assertThat(oidcClient["client-id"]).isEqualTo("openbank-services")
-        listOf(AccountServiceClient::class.java, ProductCatalogClient::class.java)
+        listOf(ProductCatalogClient::class.java)
             .forEach { client ->
                 assertThat(providers(client))
                     .describedAs("%s still uses the default (shared) client", client.simpleName)

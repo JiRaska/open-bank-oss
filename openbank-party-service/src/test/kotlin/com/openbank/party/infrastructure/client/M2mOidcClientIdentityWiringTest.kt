@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.lending.infrastructure.client
+package com.openbank.party.infrastructure.client
 
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -12,13 +12,13 @@ import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 
 /**
- * #10486 batch 1: this service's money-path writes are made as its OWN principal,
- * `service-account-openbank-lending` (ROLE_API only), not the shared `openbank-services` one. Two
- * artefacts must agree and nothing at runtime says so when they do not: the rest-client / adapter
- * must select the NAMED oidc-client `m2m` (else the bearer is the shared principal's and the
- * upstream's identity rule never fires), and `quarkus.oidc-client.m2m` must exist with client
- * `openbank-lending` and its own secret variable (a missing named client fails the first call, not
- * the build).
+ * #10486 batch 5: party-service's GDPR Art. 15 aggregation reads accounts and transactions
+ * (`account.list`, `transaction.list`) as its OWN principal, `service-account-openbank-party` (ROLE_API only).
+ * Two artefacts must agree and nothing at runtime says so when they do not: the rest-client must
+ * select the NAMED oidc-client `m2m` (else the bearer is the shared `openbank-services` principal's,
+ * which loses ROLE_OPERATOR in the final step and is then denied upstream), and
+ * `quarkus.oidc-client.m2m` must exist with client `openbank-party` and its own secret variable (a
+ * missing named client fails the first call, not the build).
  */
 class M2mOidcClientIdentityWiringTest {
 
@@ -30,17 +30,15 @@ class M2mOidcClientIdentityWiringTest {
     }
 
     @Test
-    fun `the money-path rest-clients select the named m2m oidc-client and not the default one`() {
-        // #10486 batch 5: the borrower account lookup (account.list) joined the money-path legs.
+    fun `the migrated rest-clients select the named oidc-client and not the default one`() {
         listOf(
-            TransactionServiceRestClient::class.java,
-            LedgerRestClient::class.java,
             AccountServiceRestClient::class.java,
+            TransactionServiceRestClient::class.java,
         ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
-            assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(M2M)
-            assertThat(providers(client))
+            assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(NAMED)
+            assertThat(client.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java })
                 .describedAs(
                     "%s: the default-client filter would re-attach the shared principal's token",
                     client.simpleName,
@@ -49,16 +47,13 @@ class M2mOidcClientIdentityWiringTest {
         }
     }
 
-    private fun providers(type: Class<*>): List<Class<*>> =
-        type.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java }
-
     @Test
-    fun `the named m2m oidc-client authenticates as openbank-lending with its own secret`() {
-        val m2m = oidcClient[M2M] as Map<*, *>
-        assertThat(m2m["client-id"]).isEqualTo("openbank-lending")
-        val secret = (m2m["credentials"] as Map<*, *>)["secret"] as String
+    fun `the named oidc-client authenticates as openbank-party with its own secret`() {
+        val named = oidcClient[NAMED] as Map<*, *>
+        assertThat(named["client-id"]).isEqualTo("openbank-party")
+        val secret = (named["credentials"] as Map<*, *>)["secret"] as String
         assertThat(secret).startsWith("\${OIDC_M2M_CLIENT_SECRET:")
-        assertThat(((m2m["grant"] as Map<*, *>)["type"])).isEqualTo("client")
+        assertThat((named["grant"] as Map<*, *>)["type"]).isEqualTo("client")
     }
 
     @Test
@@ -67,6 +62,6 @@ class M2mOidcClientIdentityWiringTest {
     }
 
     private companion object {
-        const val M2M = "m2m"
+        const val NAMED = "m2m"
     }
 }

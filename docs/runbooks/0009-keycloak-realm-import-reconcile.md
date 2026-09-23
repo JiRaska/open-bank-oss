@@ -123,6 +123,7 @@ survives in it.
    SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
    DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
    TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
+   ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -297,6 +298,18 @@ their AML case open onto the `m2m` client they already have, so nothing is provi
 |---|---|---|---|
 | `openbank-fx` | `keycloak/fx-service` | `fx-service-m2m-oidc` (fx) | `FX_CLIENT_SECRET` |
 | `openbank-kyb` | `keycloak/kyb-service` | `kyb-service-m2m-oidc` (kyb) | `KYB_CLIENT_SECRET` |
+
+### Batch 5 (account and transaction reads)
+
+Same recipe, same script, four more clients. interest-service and lending-service move their account
+reads onto the named client they already have (`ledger` and `m2m`), so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-analytics-sink` | `keycloak/analytics-sink` | `analytics-sink-m2m-oidc` (analytics) | `ANALYTICS_SINK_CLIENT_SECRET` |
+| `openbank-billing` | `keycloak/billing-service` | `billing-service-m2m-oidc` (billing) | `BILLING_CLIENT_SECRET` |
+| `openbank-document` | `keycloak/document-service` | `document-service-m2m-oidc` (documents) | `DOCUMENT_CLIENT_SECRET` |
+| `openbank-party` | `keycloak/party-service` | `party-service-m2m-oidc` (party) | `PARTY_CLIENT_SECRET` |
 
 ## What this does NOT fix
 
