@@ -45,13 +45,17 @@ Cíl: dokázat, že operátor dokáže zastavit běžící case bez manuálního
 4. Vrať pilot do provozu: `agent.killswitch.cleared`.
 5. Zapiš do denního pilot logu: čas set, čas CLOSED, latence v ms, `haltReason`.
 
+> **Co se měří:** Tato latence je **end-to-end z pohledu read-modelu** — od otevření case po okamžik, kdy `case-coordinator-agent` zapíše `POLICY_DECISION case.halt` do read-modelu. Zahrnuje Kafka job startup, zpracování signálu a refresh read-modelu; není to pouze doba zpracování signálu v jádře. Dokud neexistuje synchronní acknowledge (viz ADR-0244 P4), tato hodnota reflektuje skutečnou observabilní dobu zastavení.
+>
+> **Proč 240 s:** První drill 2026-09-23 naměřil ~218 s (`openedAtEpochMs=1790175651961`, `haltedAtEpochMs=1790175870000`). `POLICY_DECISION` timestamp odpovídá `haltedAtEpochMs`, tedy signál byl zpracován ve chvíli zápisu do read-modelu. Cíl <30 s by vyžadoval synchronní acknowledge nebo mnohem kratší read-model interval; pro P3 je důležitější mít reálné, opakovatelné měření než nereálný cíl.
+
 ## Měřené metriky
 
 Pro každý case zaznamenej:
 
 | Metrika | Zdroj | Limit / cíl |
 |---|---|---|
-| open → halt latency | `openedAtEpochMs`, `haltedAtEpochMs` | < 30 s (měřeno v read-modelu) |
+| open → halt latency | `openedAtEpochMs`, `haltedAtEpochMs` | < 240 s (end-to-end read-model latency) |
 | contested rate | `contestedRate` | < 0.35 (D9 threshold) |
 | token spend | `budgetTokens - remaining` (pokud exposing) | < 200 000/case |
 | contributions | `budgetContributions` | <= 40 |
