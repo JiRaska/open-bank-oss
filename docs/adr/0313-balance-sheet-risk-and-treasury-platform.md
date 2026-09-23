@@ -122,9 +122,38 @@ treasury service. This ADR supersedes ADR-0185.
       and a draft validation report.
     - *Data-quality agent*: flags anomalies in the snapshot (missing rates, impossible maturities)
       before they reach a report.
-    - *Treasury assistant*: proposes overnight placement or funding from the liquidity forecast;
-      it never books a deal — booking is a human action in the treasury service.
+    - *Treasury agents* (see below).
     - *Copilot in admin-ui*: answers "why did LCR drop" over published results.
+
+12. **AI in the treasury service.** The treasury service is money-path, so the rule is stricter
+    than in the risk engine: an agent may *prepare* a deal ticket, never *book*, confirm or settle
+    one. Booking stays a human action with the four-eyes approval the service already requires;
+    the agent's MCP tools are read-only plus "draft ticket", enforced by its charter and the OPA
+    policy, not by prompt wording. Every draft carries its inputs and rationale into the audit
+    trail.
+    - *Cash-positioning agent*: each morning and intraday, forecasts the end-of-day position per
+      currency and nostro from payment flows, scheduled settlements and maturities, and drafts the
+      overnight placement or borrowing (interbank, ČNB deposit facility, repo) that closes the gap
+      within limits.
+    - *Payment-flow forecaster (ML)*: predicts intraday and daily inflows/outflows (salary days,
+      card settlement, SEPA cycles) feeding cash positioning and intraday liquidity; back-tested
+      daily against realised flows.
+    - *Minimum-reserve optimiser*: tracks the averaging period and proposes day-by-day holding so
+      the requirement is met without idle excess.
+    - *Execution / RFQ assistant*: compares quotes from simulated (later real) counterparties
+      against the curve and fair value, and flags off-market prices before a dealer accepts.
+    - *Hedge advisor*: from IRRBB and FX-position output, proposes hedge candidates (IRS, FX swap)
+      with the sensitivity each removes and its cost; also runs hedge-effectiveness tests.
+    - *Collateral optimiser*: proposes which eligible assets to pledge for repo or ČNB facilities,
+      cheapest-to-deliver within haircuts and encumbrance limits.
+    - *Nostro reconciliation agent*: matches statement lines (camt.053 / MT940) to expected flows,
+      explains breaks and drafts the investigation; unmatched items stay with a human.
+    - *Counterparty-monitoring agent*: watches news, ratings and spreads of interbank
+      counterparties and proposes limit reductions; changing a limit remains a human decision.
+    - *Market-briefing agent*: a daily brief (ČNB decisions, curve moves, the bank's positions and
+      limits utilisation) for the dealer and ALCO.
+    - *Deal surveillance*: flags unusual dealing (off-market prices, limit gaming, late bookings)
+      to compliance — a control on the humans, not a replacement for them.
 
 Delivery phases: (0) snapshot, cash-flow engine, curves; (1) IRRBB, LCR/NSFR, maturity ladder;
 (2) Pillar 1 standardised approach into COREP, limits; (3) treasury book — money market, nostro,
