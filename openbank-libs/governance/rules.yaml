@@ -3629,6 +3629,15 @@ autonomous_agent_prs:
   agent_branch_prefixes:
     - agent/
     - codex/
+    # Kilo Gas Town (a hosted multi-agent orchestrator, run outside this repo's harness).
+    # Its polecats push `gt/<agent>/<bead>`; a convoy opens its PR from
+    # `convoy/<slug>/<id>/head` (Kilo-Org/cloud: services/gastown container-dispatch.ts
+    # branchForAgent, Town.do.ts featureBranch). Listed so its PRs count against the WIP
+    # limit and meet the protected-path check. Its GitHub App login is deliberately NOT in
+    # agent_accounts yet: until the first real PR shows which login it uses, an unclassified
+    # bot fails this gate closed, which is the correct state for an unmeasured identity.
+    - gt/
+    - convoy/
   # High blast radius, not money-path by the list above.
   extra_protected_tokens:
     - payment

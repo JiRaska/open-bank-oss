@@ -39,6 +39,14 @@ class AdmissionTest(unittest.TestCase):
         self.assertIn('agent/', admission.load_prefixes())
         self.assertIn('codex/', admission.load_prefixes())
 
+    def test_gas_town_branch_shapes_are_counted(self):
+        # The shapes Gas Town actually creates, not the prefixes restated: a prefix that
+        # stopped matching them would leave its PRs outside the WIP limit and the guard.
+        prefixes = admission.load_prefixes()
+        pages = [[pr(1, 'gt/toast/abc12345'), pr(2, 'convoy/fix-login/0f3c9a1e/head'),
+                  pr(3, 'fix/gt-timeout'), pr(4, 'feat/convoy-ui')]]
+        self.assertEqual(admission.admit(pages, prefixes), (True, 2))
+
     def test_invalid_rules_fail_closed(self):
         import tempfile
         for content in ('{}', 'autonomous_agent_prs: {}', 'autonomous_agent_prs:\n  agent_branch_prefixes: []'):
