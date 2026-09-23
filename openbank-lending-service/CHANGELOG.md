@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.9](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.8...lending-service-v0.33.9) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
 ## [0.33.8](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.7...lending-service-v0.33.8) (2026-09-23)
 
 
