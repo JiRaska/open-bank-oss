@@ -193,7 +193,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0182](0182-ap2-agent-payment-mandate-verification-on-the-bank-side.md) | AP2 agent-payment mandate verification on the bank side | Proposed | Planned | payments,ai-agents,sca | — |
 | [0183](0183-pgvector-retrieval-augmentation-for-the-copilot-knowledge-base.md) | pgvector retrieval augmentation for the copilot knowledge base | Proposed | Planned | ai-agents,database,architecture | — |
 | [0184](0184-sepa-instant-credit-transfer-scheme-adoption.md) | SEPA Instant Credit Transfer scheme adoption | Accepted | Shipped | payments | — |
-| [0185](0185-treasury-and-liquidity-management-out-of-scope.md) | Treasury and liquidity management out of scope | Accepted | N/A | architecture | — |
+| [0185](0185-treasury-and-liquidity-management-out-of-scope.md) | Treasury and liquidity management out of scope | Superseded by [ADR-0313](0313-balance-sheet-risk-and-treasury-platform.md) | N/A | architecture | — |
 | [0186](0186-single-region-deployment-and-disaster-recovery-posture.md) | Single-region deployment and disaster-recovery posture | Accepted | Partial | resilience | — |
 | [0187](0187-psd3-psr-and-fida-forward-regulatory-position.md) | PSD3 / PSR and FIDA forward-regulatory position | Accepted | N/A | compliance | — |
 | [0188](0188-crypto-assets-mica-and-cbdc-out-of-scope.md) | Crypto-assets (MiCA) and CBDC out of scope | Accepted | N/A | architecture | — |
@@ -317,7 +317,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0309](0309-incident-business-impact-graph.md) | Incident business impact graph | Accepted | Partial | resilience,observability,admin-ui,privacy-gdpr | open-bank-oss |
 | [0310](0310-growth-lifecycle-referral-qualification-reward-settlement-loyalty-earn-benefit-application.md) | Growth lifecycle: referral qualification, reward settlement, loyalty earn and benefit application | Proposed | Planned | customer-edge,mobile-app,kafka,ledger | openbank-app |
 | [0312](0312-business-payment-signing-multi-signature-approval-and-trusted-payees.md) | Business payment signing: multi-signature approval and trusted payees | Proposed | Planned | payments,sca,authz,customer-edge | — |
-| [0313](0313-balance-sheet-risk-and-treasury-platform.md) | Balance-sheet risk, capital and treasury platform with forecasting, revaluation and AI agents | Proposed | Planned | architecture,regulatory-reporting,analytics,ai-agents | — |
+| [0313](0313-balance-sheet-risk-and-treasury-platform.md) | Balance-sheet risk, capital and treasury platform with forecasting, revaluation and AI agents | Accepted | Planned | architecture,regulatory-reporting,analytics,ai-agents | — |
 
 ## By tag
 

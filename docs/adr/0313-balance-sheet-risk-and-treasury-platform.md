@@ -1,9 +1,9 @@
 ---
 date: 2026-09-23
-decision-status: proposed
+decision-status: accepted
 delivery-status: planned
 authors: [Jiri Raska]
-supersedes: []
+supersedes: ["0185"]
 superseded-by: []
 delivery-repos: []
 tags: [architecture, regulatory-reporting, analytics, ai-agents]
@@ -60,8 +60,8 @@ its true cost of funds. The COREP templates already ship with nowhere for their 
 
 ## Decision
 
-We will bring balance-sheet risk, capital and treasury **into scope**. On acceptance this ADR
-supersedes ADR-0185; until then 0185 stands.
+We will bring balance-sheet risk, capital and treasury **into scope**, including a dedicated
+treasury service. This ADR supersedes ADR-0185.
 
 1. **A read-only risk engine, off the money path.** A new bounded context
    (`openbank-risk-engine`, split into ALM/liquidity and capital modules; hexagonal, ADR-0002)
@@ -175,5 +175,5 @@ minimum reserves, bond portfolio; (4) forecasting, FTP, Pillar 2, VaR, behaviour
 
 ## References
 
-- ADR-0185 (superseded on acceptance), ADR-0002, ADR-0022, ADR-0025, ADR-0028, ADR-0031,
+- ADR-0185 (superseded by this ADR), ADR-0002, ADR-0022, ADR-0025, ADR-0028, ADR-0031,
   ADR-0039, ADR-0046, ADR-0104, ADR-0142
