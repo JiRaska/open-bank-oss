@@ -111,6 +111,8 @@ class BasisTests(unittest.TestCase):
         self.assertIsNotNone(pattern)
         submitted_paths = [
             "openbank-ledger-service/build.gradle.kts",
+            "build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts",
+            "build-logic/settings.gradle.kts",
             "openbank-libs/gradle/libs.versions.toml",
             "settings.gradle.kts",
             "gradle/wrapper/gradle-wrapper.properties",
@@ -124,7 +126,7 @@ class BasisTests(unittest.TestCase):
             "  schedule:", 1
         )[0]
         trigger_patterns = re.findall(r'^\s+- "([^"]+)"$', submission, re.MULTILINE)
-        self.assertEqual(len(trigger_patterns), 9)
+        self.assertEqual(len(trigger_patterns), 10)
         for path in submitted_paths:
             with self.subTest(path=path):
                 self.assertTrue(

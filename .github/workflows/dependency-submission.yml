@@ -44,6 +44,7 @@ on:
     branches: [main]
     paths:
       - "**/build.gradle.kts"
+      - "build-logic/**"
       - "openbank-libs/gradle/libs.versions.toml"
       - "settings.gradle.kts"
       - "gradle/wrapper/**"
