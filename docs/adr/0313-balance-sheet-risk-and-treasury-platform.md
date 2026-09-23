@@ -24,9 +24,12 @@ What the platform has today (measured on `origin/main`, 2026-09-23):
 
 - **Revaluation** only of customer FX positions against the ČNB fixing (ADR-0025, ADR-0046).
 - **IFRS 9 staging** inside `openbank-lending-service` (ADR-0028), used for provisioning only.
-- **COREP rendering** in `openbank-finrep-service` (templates C 01.00, C 02.00, C 05.01) — with
-  nothing upstream that *computes* risk-weighted exposure amounts; the cells are placeholders for a
-  calculation that does not exist.
+- **COREP** in `openbank-finrep-service` (ADR-0097): only C 01.00 (own funds) is implemented,
+  derived from ledger capital accounts and reporting flagged data gaps where they carry no balance.
+  C 02.00 (own funds *requirements*) and every template needing risk-weighted exposure amounts are
+  explicitly out of that increment's scope — there is no RWA calculation anywhere in the fleet.
+- **Ledger general-ledger accounts** beyond customer positions: finrep already reads a capital
+  account range from the ledger, so the ledger is not purely a customer book today.
 - Contract-level data for every balance-sheet position — accounts, loans, deposits, interest
   terms, FX pockets — spread over the ledger, lending, interest, account and fx services, and
   published as events.
@@ -56,7 +59,8 @@ What is missing, grouped by function:
 
 Why now: the fleet has the data but cannot answer the three questions every bank's ALCO asks each
 month — *are we liquid, is our margin at risk, do we have enough capital* — nor price a product on
-its true cost of funds. The COREP templates already ship with nowhere for their numbers to come from.
+its true cost of funds. Own funds can be reported; own funds *requirements*, the denominator of
+every capital ratio, cannot.
 
 ## Decision
 
@@ -85,16 +89,19 @@ treasury service. This ADR supersedes ADR-0185.
    user-defined macro scenarios, projected over 12–36 months on a dynamic balance sheet whose new
    business comes from plan assumptions. Outputs: NII, EVE, LCR, NSFR, capital ratios.
 
-6. **Capital.** Pillar 1 standardised approach first, feeding real values into the existing COREP
-   templates in `openbank-finrep-service`; IRB only once there is history to estimate on. Pillar 2
-   economic capital by simulation with configurable confidence.
+6. **Capital.** Pillar 1 standardised approach first, feeding C 02.00 and the credit-risk
+   templates as new mappers in `openbank-finrep-service` under ADR-0097's flagged-data-gap rule;
+   IRB only once there is history to estimate on. Pillar 2 economic capital by simulation with configurable confidence.
 
 7. **A treasury book for the bank's own dealing.** A separate bounded context
    (`openbank-treasury-service`, money-path) records the bank's own deals — interbank overnight and
    term deposits, ČNB facilities, repo, FX forwards/swaps, IRS hedges, bond purchases — posts them
-   to the ledger in the bank's own accounts (distinct from customer positions, so ADR-0039's
-   golden-source role is preserved), and manages nostro/vostro reconciliation, minimum reserves and
-   collateral inventory. It carries the money-path obligations (two approvals, threat model).
+   to the ledger in dedicated general-ledger accounts through the ledger's normal posting API, and
+   manages nostro/vostro reconciliation, minimum reserves and collateral inventory. The ledger stays
+   the single golden source for all positions (ADR-0039); what ADR-0185 rightly ruled out, treasury
+   *logic* inside the ledger, stays out. The service is registered in
+   `rules.yaml: money_path_services` in the PR that creates it, with the obligations that brings
+   (two approvals, threat model).
    Real-market connectivity (dealing platforms, confirmations) stays external; the sandbox books
    against simulated counterparties, as payments do against the scheme simulator (ADR-0104).
 
@@ -112,8 +119,8 @@ treasury service. This ADR supersedes ADR-0185.
 11. **AI around the numbers, never producing them.** Every regulatory or accounting figure comes
     from the deterministic engine. AI works under ADR-0031 (charters, policy-gated MCP, human in
     the loop, AI-attributed audit):
-    - *Behavioural models (classical ML)* for prepayment, deposit decay and drawdown, on the ML
-      decisioning platform (ADR-0142) with champion/challenger, shadow mode and drift monitoring.
+    - *Behavioural models (classical ML)* for prepayment, deposit decay and drawdown, reusing the
+      model-serving port fraud-service already ships (ADR-0084), with champion/challenger, shadow mode and drift monitoring.
     - *Scenario agent*: turns a natural-language shock into a scenario definition, runs it, and
       explains the deltas; it proposes, a human approves.
     - *ALCO agent*: drafts the ALCO pack and explains movements from attribution output, not from
@@ -150,10 +157,22 @@ treasury service. This ADR supersedes ADR-0185.
       explains breaks and drafts the investigation; unmatched items stay with a human.
     - *Counterparty-monitoring agent*: watches news, ratings and spreads of interbank
       counterparties and proposes limit reductions; changing a limit remains a human decision.
+      News is untrusted input: this agent has no tool that writes anything but a proposal, so a
+      prompt-injected article can at worst produce a wrong proposal a human rejects.
     - *Market-briefing agent*: a daily brief (ČNB decisions, curve moves, the bank's positions and
       limits utilisation) for the dealer and ALCO.
     - *Deal surveillance*: flags unusual dealing (off-market prices, limit gaming, late bookings)
       to compliance — a control on the humans, not a replacement for them.
+
+13. **Synthetic numbers are labelled, never passed off.** ADR-0185's strongest argument was that
+    a plausible-but-meaningless LCR is worse than an honest absence. In the sandbox the balance
+    sheet is synthetic, so every published figure carries a `synthetic` / `non-regulatory` marker
+    that propagates into finrep output and the admin UI, in the same spirit as ADR-0097's flagged
+    data gaps. A figure without provenance is not rendered.
+
+14. **This is an umbrella decision.** It fixes scope, boundaries and the AI rule. The risk engine's
+    data model and the treasury service's domain each need their own ADR before the first code
+    PR, because each is larger than most existing bounded contexts.
 
 Delivery phases: (0) snapshot, cash-flow engine, curves; (1) IRRBB, LCR/NSFR, maturity ladder;
 (2) Pillar 1 standardised approach into COREP, limits; (3) treasury book — money market, nostro,
@@ -186,6 +205,11 @@ minimum reserves, bond portfolio; (4) forecasting, FTP, Pillar 2, VaR, behaviour
 - Behavioural and IRB models need history the sandbox lacks; early phases run on synthetic data
   from `openbank-simulation`, so model quality claims must be labelled as such.
 - Model risk management (inventory, validation, change control) becomes a standing obligation.
+- Simulation-based Pillar 2 and VaR are compute-heavy against a deliberate fleet capacity ceiling
+  (ADR-0173) and a batch runner pool that is declared but not provisioned (ADR-0277); phase 4
+  sizing must be measured, not assumed.
+- FTP makes the "read-only" engine indirectly price-setting: an FTP defect changes customer
+  rates. FTP curve publication therefore needs a human approval step, like any rate change.
 
 **Neutral**
 - Customer FX revaluation (ADR-0046) is unchanged.
@@ -205,4 +229,4 @@ minimum reserves, bond portfolio; (4) forecasting, FTP, Pillar 2, VaR, behaviour
 ## References
 
 - ADR-0185 (superseded by this ADR), ADR-0002, ADR-0022, ADR-0025, ADR-0028, ADR-0031,
-  ADR-0039, ADR-0046, ADR-0104, ADR-0142
+  ADR-0039, ADR-0046, ADR-0084, ADR-0097, ADR-0104, ADR-0173, ADR-0277
