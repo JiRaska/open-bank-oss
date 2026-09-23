@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.11](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.10...interest-service-v0.20.11) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
 ## [0.20.10](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.9...interest-service-v0.20.10) (2026-09-22)
 
 
