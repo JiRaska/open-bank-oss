@@ -33,6 +33,7 @@ spec:
           annotations:
             summary: "Shadow pilot halt latency exceeds the 240 s read-model SLO"
             description: "p99 halt latency for {{ $labels.caseClass }}/{{ $labels.deliveryMode }} is {{ $value | humanizeDurationMs }}."
+            subject_period: continuous
         - alert: ShadowPilotCasesStuck
           expr: |
             sum by (caseClass, deliveryMode) (openbank_casecoordinator_active_cases{status=~"OPEN|CONTESTED"}) > 0
