@@ -58,6 +58,16 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486 batch 5: the account lookup (account.list) no longer rides the shared openbank-services
+    # principal. AccountClient selects this NAMED client (@OidcClientFilter("m2m")), so its principal is
+    # service-account-openbank-document (ROLE_API only), granted by identity in account_rest_ext.rego.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-document
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     sca-service:
       url: ${SCA_SERVICE_URL:http://localhost:8121}

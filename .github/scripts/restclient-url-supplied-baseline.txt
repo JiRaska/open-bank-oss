@@ -2,7 +2,8 @@
 # Each line: a deployed service whose rest-client URL falls back to localhost and whose gitops
 # manifest does not set the env var. NOT triaged: each may be a live outage or a dead client.
 # Grade each against the deployed pod before calling it benign; delete the line when fixed.
-openbank-agent-service: quarkus.rest-client.communication-service.url falls back to localhost and gitops never sets COMMUNICATION_SERVICE_URL
+# analytics-sink (both lines below): triaged 2026-09-21 — the upstream exists (analytics/analytics-sink,
+# port 8134) but has no mTLS listener, and the deployed service account lacks the resource's role.
+# Both callers fail closed until then. Blocked on #10515.
 openbank-copilot-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
-openbank-copilot-service: quarkus.rest-client.communication-service.url falls back to localhost and gitops never sets COMMUNICATION_SERVICE_URL
 openbank-lending-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL

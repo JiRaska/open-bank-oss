@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.24.6](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.5...party-service-v0.24.6) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.24.5](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.4...party-service-v0.24.5) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.3...party-service-v0.24.4) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
 ## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.2...party-service-v0.24.3) (2026-09-21)
 
 

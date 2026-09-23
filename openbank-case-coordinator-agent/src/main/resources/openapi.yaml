@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -307,6 +307,13 @@ components:
           type: number
         contributionCount:
           type: integer
+        haltedAtEpochMs:
+          type: integer
+          format: int64
+          description: Present when governance halted the workflow rather than the swarm closing it.
+        haltReason:
+          type: string
+          description: Operator-supplied governance reason for halting the workflow.
 
     CaseListResponse:
       type: object
@@ -365,7 +372,7 @@ components:
           format: uuid
         capability:
           type: string
-          enum: [case.join, case.contribute]
+          description: Granted capability string from the charter (e.g. case.join, case.contribute, case.halt). Kept as an unbounded string so new capabilities do not require a contract version bump.
         rolloutId:
           type: string
         runtimeEvidence:
@@ -476,6 +483,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ThreadEntry'
+        haltedAtEpochMs:
+          type: integer
+          format: int64
+          description: Present when governance halted the workflow rather than the swarm closing it.
+        haltReason:
+          type: string
+          description: Operator-supplied governance reason for halting the workflow.
 
     ErrorBody:
       type: object

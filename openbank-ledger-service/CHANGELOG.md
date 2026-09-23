@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.4](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.3...ledger-service-v1.29.4) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
 ## [1.29.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.2...ledger-service-v1.29.3) (2026-09-21)
 
 

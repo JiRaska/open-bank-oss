@@ -4521,6 +4521,27 @@ gates:
     selftest_inputs: [".github/scripts/check-roles-allowed-realm.py"]
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # rego principal.id ⇒ the client issues `profile` (#10486). A rule keyed on
+  # `service-account-<client>` matches preferred_username, which a client_credentials token only
+  # carries via the `profile` default scope. openbank-edge lacked it in realm-template.json: the
+  # running realm happened to have it, so nothing failed, but a cold-started realm would have
+  # minted nameless edge tokens and ~90 identity-gated rules would never match. Falsified: red on
+  # origin/main at introduction (the edge gap), green after the template fix, and red again with
+  # `profile` removed from openbank-services. The LIVE realm is held to the same rule by the
+  # keycloak-realm-drift CronJob (--live-client-scopes). ENFORCED.
+  - id: rego-service-account-profile-scope
+    name: "rego service-account principal ⇒ client issues profile scope (#10486, enforced)"
+    group: security
+    mode: enforced
+    min_subjects: 2
+    budget_seconds: 30
+    rationale: "A rego rule keyed on a service-account principal name only matches if that client's tokens carry preferred_username, which Keycloak adds only via the profile default scope; a template without it cold-starts into policies that silently never match."
+    review_after: "2027-09-21"
+    selftest: python3 .github/scripts/check-rego-service-account-profile-scope.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-rego-service-account-profile-scope.py"]
+    run: |
+      python3 .github/scripts/check-rego-service-account-profile-scope.py
   # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
   # NEEDS can exist, this one whether the caller can present a token at all. An outbound client
   # annotated @RegisterProvider(OidcClientRequest*Filter) mints from `quarkus.oidc-client`, a

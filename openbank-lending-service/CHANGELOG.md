@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.33.9](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.8...lending-service-v0.33.9) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.33.8](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.7...lending-service-v0.33.8) (2026-09-23)
+
+
+### Security
+
+* **fx:** admit ROLE_API on machine-read endpoints and add the final-step runbook ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 4) ([#10544](https://github.com/JiRaska/open-bank-oss/issues/10544)) ([3fb9575](https://github.com/JiRaska/open-bank-oss/commit/3fb9575e6c68d7a7670f2ead8a6b6909f1cffe54))
+
+## [0.33.7](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.6...lending-service-v0.33.7) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
 ## [0.33.6](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.5...lending-service-v0.33.6) (2026-09-21)
 
 

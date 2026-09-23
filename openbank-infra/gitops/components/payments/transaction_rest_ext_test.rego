@@ -30,7 +30,7 @@ rules_mock := {
 
 sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
-# caller -> (reason, actions it may perform). The ONLY grants the batch-1 identities hold here.
+# caller -> (reason, actions it may perform). The ONLY grants the batch-1/2 identities hold here.
 grants := {
 	"account": {"reason": "service-account-transaction-create", "actions": {"transaction.create"}},
 	"sdd": {"reason": "service-sdd-transaction-create", "actions": {"transaction.create"}},
@@ -40,6 +40,11 @@ grants := {
 		"reason": "service-sepa-payment-transaction-write",
 		"actions": {"transaction.create", "transaction.reverse"},
 	},
+	# #10486 batch 2
+	"domestic-payment": {"reason": "service-domestic-payment-transaction-create", "actions": {"transaction.create"}},
+	"sepa-instant": {"reason": "service-sepa-instant-transaction-create", "actions": {"transaction.create"}},
+	"swift": {"reason": "service-swift-transaction-create", "actions": {"transaction.create"}},
+	"interest": {"reason": "service-interest-transaction-create", "actions": {"transaction.create"}},
 }
 
 all_actions := {
@@ -88,7 +93,10 @@ test_no_role_principal_may_not_create if {
 # No identity rule admits a principal other than its own (incl. the shared client).
 test_identity_rules_do_not_cross_admit if {
 	every name, g in grants {
-		every other in {"account", "sdd", "standing-order", "lending", "sepa-payment", "services", "interest"} - {name} {
+		every other in {
+			"account", "sdd", "standing-order", "lending", "sepa-payment", "services", "interest",
+			"domestic-payment", "sepa-instant", "swift", "transaction", "settlement", "clearing",
+		} - {name} {
 			not g.reason in rest.allowed_reasons with input as {"principal": sa(other), "action": "transaction.create"}
 				with data.rules as rules_mock
 		}
@@ -103,4 +111,57 @@ test_operator_path_unchanged if {
 	decision.allow == true
 	"operator-transaction-write" in rest.allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
 		with data.rules as rules_mock
+}
+
+# #10486 batch 2: transaction-service's OWN identity is a caller of ledger/balance, never of
+# itself — it must hold no grant here at all.
+test_transaction_service_own_identity_has_no_grant_here if {
+	every action in all_actions {
+		rest.allow == false with input as {"principal": sa("transaction"), "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# --- #10486 batch 5: per-service READ identities (ROLE_API only) ---
+
+read_grants := {
+	"party": {"reason": "service-party-transaction-read", "actions": {"transaction.list"}},
+	# #10486 batch 7
+	"statement": {"reason": "service-statement-transaction-search", "actions": {"transaction.search"}},
+	"agent": {"reason": "service-agent-transaction-read", "actions": {"transaction.list", "transaction.read"}},
+	"mcp": {"reason": "service-mcp-transaction-read", "actions": {"transaction.list"}},
+}
+
+all_read_actions := {"transaction.list", "transaction.read", "transaction.search"}
+
+test_each_read_identity_may_perform_its_granted_reads if {
+	every name, g in read_grants {
+		every action in g.actions {
+			decision := rest.allow with input as {"principal": sa(name), "action": action}
+				with data.rules as rules_mock
+			decision.allow == true
+			g.reason in rest.allowed_reasons with input as {"principal": sa(name), "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+test_each_read_identity_denied_every_other_action if {
+	every name, g in read_grants {
+		every action in (all_actions | all_read_actions) - g.actions {
+			rest.allow == false with input as {"principal": sa(name), "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+# Another ROLE_API service account, and the shared client once it holds ROLE_API only, are denied
+# every transaction read. Widen a read rule's principal.id to a prefix and this goes red.
+test_other_role_api_sa_denied_transaction_reads if {
+	every p in ["mcp-service", "services", "kyb"] {
+		every action in all_read_actions {
+			rest.allow == false with input as {"principal": sa(p), "action": action}
+				with data.rules as rules_mock
+		}
+	}
 }

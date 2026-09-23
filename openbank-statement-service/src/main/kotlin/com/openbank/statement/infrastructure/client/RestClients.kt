@@ -5,6 +5,7 @@ package com.openbank.statement.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -39,7 +40,9 @@ data class TransactionDto(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TransactionSearchResponse(val data: List<TransactionDto> = emptyList())
 
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: the booked-entries search (transaction.search) is minted by the NAMED oidc-client
+// `m2m` - Keycloak client `openbank-statement` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "transaction-api")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)

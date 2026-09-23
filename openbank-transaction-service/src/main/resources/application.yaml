@@ -55,6 +55,18 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486: the saga journal post/reverse (ledger.create / ledger.reverse) and the cover hold/release (balance.hold / balance.holdRelease) no longer rides the shared openbank-services principal. The
+    # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
+    # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-transaction
+    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
+    # stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-transaction
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
     tls:
       verification: none
 
