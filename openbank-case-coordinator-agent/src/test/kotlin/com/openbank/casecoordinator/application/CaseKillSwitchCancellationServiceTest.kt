@@ -15,6 +15,8 @@ import io.mockk.verifyOrder
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
+private val OPENED_AT = Instant.parse("2026-09-22T09:55:00Z")
+
 class CaseKillSwitchCancellationServiceTest {
     private val state = mockk<CaseKillSwitchStatePort>(relaxed = true)
     private val temporal = mockk<TemporalCaseCancellationPort>(relaxed = true)
@@ -23,7 +25,10 @@ class CaseKillSwitchCancellationServiceTest {
 
     @Test
     fun `global halt cancels every running pilot case then records no-action evidence`() {
-        every { state.cancellableCases() } returns listOf(CancellableCase("case-1"), CancellableCase("case-2"))
+        every { state.cancellableCases() } returns listOf(
+            CancellableCase("case-1", OPENED_AT),
+            CancellableCase("case-2", OPENED_AT),
+        )
         val command = command("*")
 
         service.handle(command)
@@ -32,8 +37,10 @@ class CaseKillSwitchCancellationServiceTest {
         verifyOrder {
             temporal.cancelAndAwait("case-1")
             state.recordHalted("case-1", command)
+            metrics.recordHaltLatency("INCIDENT_RESPONSE", "SHADOW", 300_000L)
             temporal.cancelAndAwait("case-2")
             state.recordHalted("case-2", command)
+            metrics.recordHaltLatency("INCIDENT_RESPONSE", "SHADOW", 300_000L)
         }
     }
 

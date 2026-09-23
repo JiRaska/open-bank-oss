@@ -8,17 +8,38 @@ import { auth } from '@/auth'
 export const dynamic = 'force-dynamic'
 
 interface KillSwitchScope { scope: string; reason: string; setBy: string }
-interface KillSwitchStatus { active: boolean; scopes: KillSwitchScope[] }
+
+interface KillSwitchStatus {
+  available: true
+  active: boolean
+  scopes: KillSwitchScope[]
+}
+
+interface KillSwitchUnavailable {
+  available: false
+  reason: 'not_deployed' | 'unreachable' | 'error'
+  active: false
+  scopes: []
+}
+
+type KillSwitchEnvelope = KillSwitchStatus | KillSwitchUnavailable
 
 function caseCoordinatorBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-case-coordinator-agent:8146'
   return (process.env.CASE_COORDINATOR_URL ?? 'http://localhost:8146').replace(/\/$/, '')
 }
 
+function unavailable(reason: KillSwitchUnavailable['reason']): NextResponse<KillSwitchUnavailable> {
+  return NextResponse.json(
+    { available: false, reason, active: false, scopes: [] },
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
+}
+
 export async function GET(_req: NextRequest) {
   const accessToken = (await auth())?.user?.accessToken
   if (!accessToken) {
-    return NextResponse.json({ active: false, scopes: [] as KillSwitchScope[] }, { status: 401 })
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
   try {
@@ -30,21 +51,22 @@ export async function GET(_req: NextRequest) {
       signal: ctrl.signal,
     })
     clearTimeout(timer)
+    if (res.status === 404) {
+      return unavailable('not_deployed')
+    }
     if (!res.ok) {
-      return NextResponse.json(
-        { active: false, scopes: [] as KillSwitchScope[] },
-        { headers: { 'Cache-Control': 'no-store' } },
-      )
+      return unavailable('error')
     }
     const body = (await res.json()) as Partial<KillSwitchStatus>
     return NextResponse.json(
-      { active: !!body.active, scopes: Array.isArray(body.scopes) ? body.scopes : [] },
+      {
+        available: true,
+        active: !!body.active,
+        scopes: Array.isArray(body.scopes) ? body.scopes : [],
+      } satisfies KillSwitchStatus,
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch {
-    return NextResponse.json(
-      { active: false, scopes: [] as KillSwitchScope[] },
-      { headers: { 'Cache-Control': 'no-store' } },
-    )
+    return unavailable('unreachable')
   }
 }

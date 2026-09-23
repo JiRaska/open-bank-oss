@@ -72,14 +72,23 @@ class JdbcCaseKillSwitchStateAdapter(private val dataSource: DataSource) : CaseK
     override fun cancellableCases(): List<CancellableCase> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
-            SELECT workflow_id FROM case_workflow
+            SELECT workflow_id, opened_at FROM case_workflow
             WHERE case_class = 'INCIDENT_RESPONSE' AND delivery_mode = 'SHADOW'
               AND status IN ('OPEN', 'CONVERGING', 'CONTESTED')
             ORDER BY opened_at
             """.trimIndent(),
         ).use { statement ->
             statement.executeQuery().use { result ->
-                buildList { while (result.next()) add(CancellableCase(result.getString(1))) }
+                buildList {
+                    while (result.next()) {
+                        add(
+                            CancellableCase(
+                                workflowId = result.getString(1),
+                                openedAt = result.getTimestamp(2).toInstant(),
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

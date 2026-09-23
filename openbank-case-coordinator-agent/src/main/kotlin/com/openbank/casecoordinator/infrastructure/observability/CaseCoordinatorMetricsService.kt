@@ -12,6 +12,7 @@ import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -22,7 +23,7 @@ class CaseCoordinatorMetricsService {
     lateinit var registry: MeterRegistry
 
     private lateinit var activeCasesGauge: MultiGauge
-    private val killSwitchActiveByScope = mutableMapOf<String, AtomicLong>()
+    private val killSwitchActiveByScope = ConcurrentHashMap<String, AtomicLong>()
 
     @PostConstruct
     fun init() {
@@ -64,12 +65,12 @@ class CaseCoordinatorMetricsService {
         ref.set(if (active) 1L else 0L)
     }
 
-    private val haltLatencyTimers = mutableMapOf<Pair<String, String>, Timer>()
+    private val haltLatencyTimers = ConcurrentHashMap<Pair<String, String>, Timer>()
 
     fun recordHaltLatency(caseClass: String, deliveryMode: String, latencyMs: Long) {
         val key = caseClass.lowercase() to deliveryMode.lowercase()
         val timer = haltLatencyTimers.computeIfAbsent(key) { (cc, dm) ->
-            Timer.builder("openbank.casecoordinator.halt_latency")
+            Timer.builder("openbank.casecoordinator.halt_latency_seconds")
                 .description("Time from kill-switch event to case halt confirmation")
                 .publishPercentiles(P50, P95, P99)
                 .publishPercentileHistogram()

@@ -37,21 +37,21 @@ tests:
   - interval: 1m
     name: "p99 halt latency above 240 s fires ShadowPilotHaltLatencySlo"
     input_series:
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="60.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="60.0"}'
         values: "0+0x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="120.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="120.0"}'
         values: "0+0x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="180.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="180.0"}'
         values: "0+0x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="240.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="240.0"}'
         values: "0+0x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="300.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="300.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="600.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="600.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="900.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="900.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="+Inf"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="+Inf"}'
         values: "100+100x20"
     alert_rule_test:
       - eval_time: 10m
@@ -70,21 +70,21 @@ tests:
   - interval: 1m
     name: "p99 halt latency below 240 s does NOT fire ShadowPilotHaltLatencySlo"
     input_series:
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="60.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="60.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="120.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="120.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="180.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="180.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="240.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="240.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="300.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="300.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="600.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="600.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="900.0"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="900.0"}'
         values: "100+100x20"
-      - series: 'openbank_casecoordinator_halt_latency_bucket{caseClass="incident",deliveryMode="shadow",le="+Inf"}'
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="+Inf"}'
         values: "100+100x20"
     alert_rule_test:
       - eval_time: 10m

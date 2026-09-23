@@ -116,13 +116,13 @@ data:
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": {
             "defaults": {
-              "unit": "ms",
+              "unit": "s",
               "custom": { "lineWidth": 1, "fillOpacity": 10 },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   { "color": "green", "value": null },
-                  { "color": "red", "value": 240000 }
+                  { "color": "red", "value": 240 }
                 ]
               }
             },
@@ -134,7 +134,7 @@ data:
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum by (le, caseClass, deliveryMode) (rate(openbank_casecoordinator_halt_latency_bucket[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, caseClass, deliveryMode) (rate(openbank_casecoordinator_halt_latency_seconds_bucket[5m])))",
               "legendFormat": "p99 {{caseClass}} / {{deliveryMode}}",
               "refId": "A"
             }

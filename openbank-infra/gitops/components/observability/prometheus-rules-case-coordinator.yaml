@@ -23,7 +23,7 @@ spec:
           expr: |
             histogram_quantile(0.99,
               sum by (le, caseClass, deliveryMode) (
-                rate(openbank_casecoordinator_halt_latency_bucket[5m])
+                rate(openbank_casecoordinator_halt_latency_seconds_bucket[5m])
               )
             ) > 240
           for: 2m

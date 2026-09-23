@@ -75,7 +75,7 @@ class CaseCoordinatorMetricsServiceTest {
         metrics.recordHaltLatency("INCIDENT_RESPONSE", "SHADOW", 218_000)
 
         val timer = registry.timer(
-            "openbank.casecoordinator.halt_latency",
+            "openbank.casecoordinator.halt_latency_seconds",
             "caseClass",
             "incident_response",
             "deliveryMode",

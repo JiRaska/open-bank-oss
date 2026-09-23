@@ -14,7 +14,7 @@ data class KillSwitchCommand(
     val occurredAt: Instant,
 )
 
-data class CancellableCase(val workflowId: String)
+data class CancellableCase(val workflowId: String, val openedAt: Instant)
 
 data class ActiveKillSwitch(val scope: String, val reason: String, val setBy: String)
 

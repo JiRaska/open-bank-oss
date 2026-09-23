@@ -35,6 +35,12 @@ class CaseKillSwitchCancellationService(
         state.cancellableCases().forEach { case ->
             temporal.cancelAndAwait(case.workflowId)
             state.recordHalted(case.workflowId, command)
+            recordHaltLatency(
+                caseClass = "INCIDENT_RESPONSE",
+                deliveryMode = "SHADOW",
+                openedAt = case.openedAt,
+                haltedAt = command.occurredAt,
+            )
         }
     }
 

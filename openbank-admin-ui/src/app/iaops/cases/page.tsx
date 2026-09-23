@@ -58,7 +58,7 @@ export default function IaopsCasesPage() {
   const [cases, setCases] = useState<CaseSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
-  const [killSwitch, setKillSwitch] = useState<{ active: boolean; scopes: KillSwitchScope[] } | null>(null)
+  const [killSwitch, setKillSwitch] = useState<{ active: boolean; scopes: KillSwitchScope[]; available: true } | null>(null)
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = useCallback(
@@ -72,10 +72,18 @@ export default function IaopsCasesPage() {
       .then((res) => res.json())
       .then((body: unknown) => {
         if (cancelled) return
-        const status = body as { active?: boolean; scopes?: KillSwitchScope[] }
-        setKillSwitch({ active: !!status.active, scopes: Array.isArray(status.scopes) ? status.scopes : [] })
+        const status = body as { available?: boolean; active?: boolean; scopes?: KillSwitchScope[] }
+        if (status.available === false) {
+          setKillSwitch(null)
+          return
+        }
+        setKillSwitch({
+          available: true,
+          active: !!status.active,
+          scopes: Array.isArray(status.scopes) ? status.scopes : [],
+        })
       })
-      .catch(() => setKillSwitch({ active: false, scopes: [] }))
+      .catch(() => setKillSwitch(null))
     return () => { cancelled = true }
   }, [])
 
