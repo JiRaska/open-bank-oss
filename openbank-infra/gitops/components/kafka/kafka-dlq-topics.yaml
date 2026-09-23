@@ -737,3 +737,21 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# openbank-notification-service :: channel `approval-events-in` (#10281, multi-signature approval
+# notifications). New channel, so nothing is parked anywhere to strand. Named explicitly in
+# openbank-notification-service/src/main/resources/application.yaml (nested form, issue #686);
+# Write granted in components/notifications/kafka-notification-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.notification.approval-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

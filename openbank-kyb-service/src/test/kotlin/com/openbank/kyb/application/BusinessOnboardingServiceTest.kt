@@ -740,9 +740,18 @@ class BusinessOnboardingServiceTest {
     private val demoAddress = RegisteredAddress("Ukázková 1", "Praha", "11000", "CZ")
 
     /** The same service, but with the REAL attestation service — no pre-confirmation. */
-    private fun withRealAttestation(): BusinessOnboardingService {
+    private fun withRealAttestation(secondJednatel: String? = null): BusinessOnboardingService {
         val clock = Clock.fixed(now, ZoneOffset.UTC)
-        val demo = DemoEntity(true, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", clock)
+        val demo = DemoEntity(
+            true,
+            "Oldřich Vaněk",
+            "Ukázková 1",
+            "Praha",
+            "11000",
+            "CZ",
+            Optional.ofNullable(secondJednatel),
+            clock,
+        )
         coEvery { registry.lookup(demoIco, null) } returns demo.extract()
         coEvery { parties.createEntityParty(any()) } returns entityParty
         val saved = mutableListOf<RepresentationAttestation>()
@@ -797,5 +806,14 @@ class BusinessOnboardingServiceTest {
         assertThatThrownBy {
             runBlocking { svc.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Nováková", null)) }
         }.isInstanceOf(InitiatorIdentityMismatchException::class.java)
+    }
+
+    @Test
+    fun `the two-jednatel demo is NOT auto-confirmed and needs two signatures once attested`(): Unit = runBlocking {
+        val svc = withRealAttestation(secondJednatel = "Jana Testová")
+        val started = svc.start(StartCaseCommand(IdentifierScheme.CZ_ICO, DemoEntity.ICO, initiator))
+        // A joint rule is exactly what the single-member shortcut must never confirm on its own.
+        assertThat(started.status).isNotEqualTo(CaseStatus.REGISTRY_VERIFIED)
+        assertThat(started.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
     }
 }

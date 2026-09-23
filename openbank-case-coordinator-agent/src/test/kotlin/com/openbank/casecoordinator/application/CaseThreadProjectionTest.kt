@@ -39,6 +39,39 @@ class CaseThreadProjectionTest {
     }
 
     @Test
+    fun `halted storage state remains visible without widening the v1 status enum`() {
+        val halted = caseRow.copy(
+            status = "HALTED",
+            haltedAtEpochMs = T0 + LATER_MS,
+            haltReason = "incident containment",
+        )
+        val evidence = CaseSignalEvidenceRow(
+            signalId = "22222222-2222-2222-2222-222222222222",
+            agentId = "rca-investigator",
+            authenticatedPrincipal = "admin-1",
+            capability = "case.halt",
+            stage = "HALTED",
+            observedAtEpochMs = T0 + LATER_MS,
+            rolloutId = null,
+            policyDecisionId = "22222222-2222-2222-2222-222222222222",
+            policyReason = "incident containment",
+        )
+
+        val summary = CaseThreadProjection.toSummary(halted)
+        val thread = CaseThreadProjection.project(halted, emptyList(), emptyList(), LOADED_AT, listOf(evidence))
+
+        assertThat(summary.status).isEqualTo("CLOSED")
+        assertThat(summary.haltedAtEpochMs).isEqualTo(T0 + LATER_MS)
+        assertThat(summary.haltReason).isEqualTo("incident containment")
+        assertThat(thread.status).isEqualTo("CLOSED")
+        assertThat(thread.haltedAtEpochMs).isEqualTo(T0 + LATER_MS)
+        assertThat(thread.haltReason).isEqualTo("incident containment")
+        assertThat(thread.entries.last().type).isEqualTo(ThreadEntryType.POLICY_DECISION)
+        assertThat(thread.entries.last().runtimeEvidence.stage).isEqualTo(RuntimeEvidenceStage.PERSISTED)
+        assertThat(thread.entries.last().capability).isEqualTo("case.halt")
+    }
+
+    @Test
     fun `a case with no contributions projects only the opened entry`() {
         val thread = CaseThreadProjection.project(caseRow, emptyList(), emptyList(), LOADED_AT)
 
@@ -149,6 +182,7 @@ class CaseThreadProjectionTest {
             CaseSignalEvidenceRow(
                 signalId = "11111111-1111-1111-1111-111111111111",
                 agentId = "rca-investigator",
+                authenticatedPrincipal = "operator-1",
                 capability = "case.contribute",
                 stage = "AUTHORIZED",
                 observedAtEpochMs = T0 + LATER_MS,
@@ -159,6 +193,7 @@ class CaseThreadProjectionTest {
             CaseSignalEvidenceRow(
                 signalId = "11111111-1111-1111-1111-111111111111",
                 agentId = "rca-investigator",
+                authenticatedPrincipal = "operator-1",
                 capability = "case.contribute",
                 stage = "CONSUMED",
                 observedAtEpochMs = T0 + 2 * LATER_MS,

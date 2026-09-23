@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.20.11](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.10...interest-service-v0.20.11) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
+## [0.20.10](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.9...interest-service-v0.20.10) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
+## [0.20.9](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.8...interest-service-v0.20.9) (2026-09-21)
+
+
+### Bug Fixes
+
+* **interest:** book late capitalizations forward and keep ledger 4xx out of the breaker ([#10487](https://github.com/JiRaska/open-bank-oss/issues/10487)) ([e669c00](https://github.com/JiRaska/open-bank-oss/commit/e669c001e6b83c3dc2c3b390fe8197314a78a1de))
+
+## [0.20.8](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.7...interest-service-v0.20.8) (2026-09-21)
+
+
+### Security
+
+* **interest:** post capitalization journals as its own M2M identity ([#10488](https://github.com/JiRaska/open-bank-oss/issues/10488)) ([c773897](https://github.com/JiRaska/open-bank-oss/commit/c7738978ade3265af13050fc54821454ca4113ba))
+
+## [0.20.7](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.6...interest-service-v0.20.7) (2026-09-20)
+
+
+### Bug Fixes
+
+* **interest:** recover capitalization claims stranded by a failed ledger post ([#10470](https://github.com/JiRaska/open-bank-oss/issues/10470)) ([d7a5f44](https://github.com/JiRaska/open-bank-oss/commit/d7a5f44f2cc55f992d9ffbd5dd3a330ea5889398))
+
+## [0.20.6](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.5...interest-service-v0.20.6) (2026-09-20)
+
+
+### Bug Fixes
+
+* **transaction:** give transaction-service an mTLS listener and wire interest's remittance leg to it ([#10399](https://github.com/JiRaska/open-bank-oss/issues/10399)) ([54af76e](https://github.com/JiRaska/open-bank-oss/commit/54af76ea5f2a1a6701e3938c5229448f538bbf30))
+
+## [0.20.5](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.4...interest-service-v0.20.5) (2026-09-20)
+
+
+### Bug Fixes
+
+* **consent:** add an mTLS listener and point lending + copilot at it ([#10400](https://github.com/JiRaska/open-bank-oss/issues/10400)) ([4de039d](https://github.com/JiRaska/open-bank-oss/commit/4de039d0fdb285b79df402ec3e68aa71b5524112))
+
+## [0.20.4](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.3...interest-service-v0.20.4) (2026-09-19)
+
+
+### Bug Fixes
+
+* **ledger:** give ledger an mTLS listener and point clearing + interest at it ([#10397](https://github.com/JiRaska/open-bank-oss/issues/10397)) ([4e21311](https://github.com/JiRaska/open-bank-oss/commit/4e21311eac1a431c3670d0f4c86ccb38d762e3ba))
+
 ## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.2...interest-service-v0.20.3) (2026-09-13)
 
 

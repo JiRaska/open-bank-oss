@@ -1,7 +1,7 @@
 # Threat model — openbank-case-coordinator-agent collaboration
 
-Status: proposed for ADR-0271 / issue #6426. No authorization grant is live from this
-document alone.
+Status: approved for the bounded ADR-0271 shadow grant. This document alone grants nothing;
+the effective authorization is the intersection of agents.yaml and rules.yaml.
 
 ## Scope and assets
 
@@ -24,7 +24,7 @@ scope and remain unreachable.
 
 | Threat | Control | Required evidence |
 |---|---|---|
-| Caller impersonates `rca-investigator` | Bind the proved principal to the asserted id before policy evaluation; never authorize a body claim alone | denial integration test with another principal |
+| Caller impersonates `rca-investigator` | Bind the proved principal to the asserted id before policy evaluation; persist both identities and never authorize a body claim alone | denial integration test plus distinct-principal audit evidence |
 | Charter drift grants more than intended | OPA requires both charter capability and rules matrix match | OPA matrix tests and generated-data differential proof |
 | Pilot reaches money/AML/fraud cases | Server reads case class from persistence; matrix admits only `incident-response` | negative tests for every other class |
 | HITL proposal escapes shadow | Matrix requires `SHADOW`; startup preflight validates rollout id; shadow outcome never enters proposal topic | outbox absence integration test |
@@ -34,6 +34,8 @@ scope and remain unreachable.
 | Rejected payload leaks through audit/logs | Audit only ids, capability, class/mode, decision and result; no summary/evidence content | log/audit payload test |
 | OPA outage silently permits | PDP and local gate fail closed for collaboration | unavailable-PDP denial test |
 | Participant synthesizes or mutates | No `case.synthesize`, `case.preempt`, money, write or operator capability in either matrix | charter/schema and OPA deny tests |
+| Kill-switch event is lost or falsely reported as applied | agent-service durably enqueues the audit event; case-coordinator ACKs only after Temporal reaches CANCELED and HALTED evidence commits | cancellation-order unit test + HALTED/no-outbox PostgreSQL IT |
+| Unrelated agent halt stops the pilot | consumer filters exact operations and cancellation service accepts only `*` or `rca-investigator` scopes | unrelated-scope negative test |
 
 ## Rollout and rollback
 

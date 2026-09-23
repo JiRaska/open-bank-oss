@@ -140,3 +140,35 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   caller authenticates as the shared `openbank-services` M2M client like every other consumer of
   this endpoint. Rollback: revert the network-policy edge; the code-level call fails closed
   (`ContactPolicyGate`'s D5 fail-closed-on-port-failure) if it cannot reach consent-service.
+
+- **2026-09-20** — **New inbound edge: a parallel private-CA mTLS listener (8443, client auth REQUIRED,
+  TLSv1.3; server cert `consent-service-internal-tls`), the same shape as account-service's and
+  document-service's.** HTTP/8106 stays for existing callers (notification, psd2, customer-edge,
+  campaign, engagement, agent). The callers on 8443 are lending-service
+  (`RestCreditOffersConsentAdapter`, behind `CreditOfferEligibilityService`) and copilot-service
+  (`CreditAiLevelResolver`, behind `CreditAffordabilityTool`), both reading
+  `GET /api/v1/consents/party/{partyId}/grantee/{granteeId}/active` as the shared
+  `service-account-openbank-services`. That method is
+  `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_API")` + `@Authorize(action = "consent.validate")`,
+  and `consent_rest_ext.rego`'s `service-consent-m2m` rule already admits that principal for
+  `consent.validate` — no policy change. Before this neither caller had a `CONSENT_SERVICE_URL` in
+  gitops, so both dialled `localhost:8107` and the edge existed in code but never reached this
+  service (#10383). **Risk class:** confidentiality of consent state (whether a party has granted a
+  scope to a grantee) to a lending and an AI service; read-only, no new action, no mutation.
+  Rollback: drop the listener env and the two caller env vars.
+
+- **2026-09-20** — **Correction, and the fix: the 8443 listener's client-certificate validation was
+  declared but not in effect.** Earlier entries describe this listener as "client auth REQUIRED".
+  That posture was expressed only as the container env `QUARKUS_HTTP_SSL_CLIENT_AUTH`, and
+  `quarkus.http.ssl.client-auth` is a **build-time** property: Quarkus fixes it into the image at
+  build time and ignores a differing runtime value (it says so in the boot log). The deployed
+  listener therefore ran with the default, `none` — server-authenticated TLS, encrypted in transit,
+  but the caller's certificate was not demanded or validated. The transport-confidentiality claims in
+  the earlier entries hold; the caller-authentication half did not, and those entries should be read
+  with this one. Completed here by setting `quarkus.http.ssl.client-auth: required` in this service's
+  `application.yaml`, the file the image is built from, so the value is baked rather than injected;
+  the gitops env is kept in the same spelling so manifest and image cannot disagree. Every declared
+  caller of this listener already mounts a private-CA client certificate and names it on its
+  rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
+  restored to what the design always stated. Rollback: revert the property (and expect the listener
+  to return to server-only TLS).

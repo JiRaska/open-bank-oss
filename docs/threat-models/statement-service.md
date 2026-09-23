@@ -81,3 +81,11 @@ trust_boundary_diff_change`), which is why this document exists.
   (e.g. before the seed from the companion ADR-0248 work lands) — there is no boot-time check. This is
   consistent with how the four existing REST-client dependencies are treated (no boot-time reachability
   probe either) but is worth naming explicitly since it is a new, request-time-only failure mode.
+
+- **2026-09-20** — **New outbound edge: document-service over private-CA mTLS (8443).** `DocumentTemplateRestAdapter`
+  now reaches `document-service.documents.svc:8443` with the client certificate `statement-service-internal-tls`
+  (`%prod` TLS bucket `document-authority`, TLSv1.3). Previously `DOCUMENT_SERVICE_URL` was unset in
+  gitops and the client dialled `localhost:8143` inside this pod, so the render path never left the
+  process (#10383). No new inbound edge, no new principal, no money mutation: the call is a read of
+  template metadata plus a preview render. **Risk class:** confidentiality of the statement template read and preview in transit, now protected by mutual TLS rather than plaintext. Rollback: drop
+  `DOCUMENT_SERVICE_URL` and the `document-tls` volume.

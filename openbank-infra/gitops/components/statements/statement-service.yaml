@@ -54,7 +54,7 @@ spec:
           # Kyverno's verify-openbank-image-sbom-attestation policy blocked every pod
           # (Deployment stuck at 0/1) → the EoM close / Closings screen read "not
           # responding". sandbox-a407c3ae is the #706 main build with a valid attestation.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-76de9ef8
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -107,6 +107,15 @@ spec:
                 secretKeyRef:
                   name: statement-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 7: statement-service's OWN Keycloak client (openbank-statement, ROLE_API only) for the
+            # booked-entries search - the named oidc-client `m2m`. optional: false so an unseeded Vault entry is a
+            # loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: statement-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Cross-service reads over in-cluster http legs (ClusterIP DNS).
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
@@ -116,6 +125,13 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: PARTY_SERVICE_URL
               value: http://party-service.party.svc:8111
+            # DocumentTemplateRestAdapter reads document-service (rest-client key `document-api`).
+            # Without this the app default (localhost:8143) was dialled inside this pod and every
+            # template lookup failed. document-service's private-CA mTLS listener (8443, client auth
+            # REQUIRED); client cert below, %prod TLS bucket document-authority. ASVS V9.1 forbids a
+            # new plaintext http:// value here.
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -170,6 +186,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: document-tls
+              mountPath: /mnt/document-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -261,6 +280,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: document-tls
+          secret:
+            secretName: statement-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

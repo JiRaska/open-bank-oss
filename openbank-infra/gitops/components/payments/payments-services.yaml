@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "eb626d0eaabbb0d2" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "5f3b7731696b2428" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -53,14 +53,32 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-996d3918
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8102
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: interest-service's
+            # withholding-tax remittance leg). HTTP/8102 stays for existing callers (customer-edge,
+            # account, statement, sdd, lending, standing-order, agent, mcp) until their own reviewed
+            # migrations; same shape as account-service's and ledger-service's 8443 listeners.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://transaction-db-rw.payments.svc:5432/openbank_transactions
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -104,6 +122,16 @@ spec:
                 secretKeyRef:
                   name: transaction-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: transaction's OWN Keycloak client (openbank-transaction, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Redis for the four-eyes ApprovalStore (ADR-0155). Reuses the payments
             # namespace's existing shared Redis instance (redis.yaml), already used by
             # sepa-payment/domestic-payment/sepa-instant for idempotency.
@@ -123,6 +151,15 @@ spec:
               value: http://ledger-service.ledger.svc:8101
             - name: BALANCE_SERVICE_URL
               value: http://balance-service.balances.svc:8103
+            # Cross-currency rate lookup (FxRateClient). Without this the rest-client fell back to
+            # application.yaml's http://localhost:8119 inside this pod, so every
+            # GET /api/v1/fx/rates/{base}/{quote} was a connection refused. fx-service's private-CA
+            # mTLS listener (8443, client auth REQUIRED, CLIENT cert transaction-internal-tls —
+            # distinct from this service's own SERVER cert — %prod bucket fx-authority). fx.read for
+            # the shared openbank-services service account is already allowed by
+            # service-fx-shared-client-m2m in fx_rest_ext.rego, so no policy change.
+            - name: FX_SERVICE_URL
+              value: https://fx-service.fx.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -173,6 +210,14 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
+            # CLIENT identity for the outbound fx-service call — a different Secret from the
+            # server cert above, mounted at its own path so neither can be used as the other.
+            - name: fx-tls
+              mountPath: /mnt/fx-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -266,6 +311,14 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: transaction-service-internal-tls
+            optional: false
+        - name: fx-tls
+          secret:
+            secretName: transaction-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -326,6 +379,9 @@ spec:
     - name: http
       port: 8102
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # Canary service — Rollouts controller updates selector to canary replica set.
 apiVersion: v1
@@ -344,6 +400,9 @@ spec:
     - name: http
       port: 8102
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # ─────────────────────────────────────────────────────────────────────────────
 # sepa-payment  (port 8115)
@@ -378,7 +437,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8f1e4eac2bb8a0e7"
+        openbank.tech/policy-checksum: "149ee530d5ce49a1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -405,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-c2339eec
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -457,6 +516,16 @@ spec:
                 secretKeyRef:
                   name: sepa-payment-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: sepa-payment's OWN Keycloak client (openbank-sepa-payment, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-payment-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
             # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
             # path 500'd. Wire them to the in-cluster services (mirrors domestic-payment below).
@@ -515,6 +584,12 @@ spec:
             # debit in transaction-service then advance to COMPLETED. Same namespace.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # DocumentPreviewAdapter renders through document-service. Without this the app default
+            # (localhost:8143) was dialled inside this pod and every render failed. document-service's
+            # private-CA mTLS listener (8443, client auth REQUIRED); client cert below, %prod TLS
+            # bucket document-authority. ASVS V9.1 forbids a new plaintext http:// value here.
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
@@ -546,6 +621,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: document-tls
+              mountPath: /mnt/document-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -639,6 +717,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: document-tls
+          secret:
+            secretName: sepa-payment-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -760,7 +842,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-c2339eec
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -812,6 +894,16 @@ spec:
                 secretKeyRef:
                   name: domestic-payment-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: domestic-payment's OWN Keycloak client (openbank-domestic-payment, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: domestic-payment-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
             # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
             # path 500'd / held in RECEIVED. Wire them to the in-cluster services.
@@ -857,6 +949,12 @@ spec:
             # ADR-0108: book funds in transaction-service after scheme ACSC.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # PaymentConfirmationRenderAdapter renders through document-service. Without this the app default
+            # (localhost:8143) was dialled inside this pod and every render failed. document-service's
+            # private-CA mTLS listener (8443, client auth REQUIRED); client cert below, %prod TLS
+            # bucket document-authority. ASVS V9.1 forbids a new plaintext http:// value here.
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
@@ -888,6 +986,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: document-tls
+              mountPath: /mnt/document-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -979,6 +1080,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: document-tls
+          secret:
+            secretName: domestic-payment-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -1084,7 +1189,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a232482c65fc8ec7"
+        openbank.tech/policy-checksum: "a43932028a064316"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1097,7 +1202,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-76de9ef8
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1149,6 +1254,16 @@ spec:
                 secretKeyRef:
                   name: sepa-instant-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: sepa-instant's OWN Keycloak client (openbank-sepa-instant, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-instant-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1416,7 +1531,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-a42c5226
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1463,6 +1578,25 @@ spec:
                 secretKeyRef:
                   name: clearing-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: clearing's OWN Keycloak client (openbank-clearing, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clearing-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
+            # ADR-0281 net-settlement journal posting. Without this the rest-client fell back to
+            # application.yaml's http://localhost:8101 inside this pod, every POST /api/v1/journals
+            # was a connection refused, and the net-settlement leg never reached the book of record.
+            # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED, client cert
+            # clearing-internal-tls, %prod bucket ledger-authority). ledger.create for the shared
+            # openbank-services service account is already allowed by service-ledger-post in
+            # ledger_rest_ext.rego, so no policy change.
+            - name: LEDGER_SERVICE_URL
+              value: https://ledger-service.ledger.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1498,6 +1632,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: ledger-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -1588,6 +1725,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: ledger-tls
+          secret:
+            secretName: clearing-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -1714,7 +1855,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-a42c5226
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1767,6 +1908,16 @@ spec:
                 secretKeyRef:
                   name: standing-order-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: standing-order's OWN Keycloak client (openbank-standing-order, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: standing-order-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # #889: initiate the real SEPA credit transfer for a due standing order.
             # Was `sepa-payment-service.payments.svc:8108` until #3966 — wrong on both halves.
             # The Service is `sepa-payment` (declared ~line 355 of this file) and it serves
@@ -1982,7 +2133,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "064a3f00baba8e98"
+        openbank.tech/policy-checksum: "72f85e31a0c5c616"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1993,7 +2144,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-502c2a96
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2279,7 +2430,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-996d3918
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2325,6 +2476,16 @@ spec:
                 secretKeyRef:
                   name: settlement-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: settlement's OWN Keycloak client (openbank-settlement, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Downstream money-path dependencies (issue #3931). Until now this Rollout carried
             # NEITHER, so both rest-clients fell back to application.yaml's defaults — which
             # named `openbank-balance-service:8080` / `openbank-ledger-service:8080`, hostnames
@@ -2707,7 +2868,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-996d3918
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2759,6 +2920,16 @@ spec:
                 secretKeyRef:
                   name: swift-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486: swift's OWN Keycloak client (openbank-swift, ROLE_API only) for its
+            # money-path writes — the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError, never a silently empty
+            # credential. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: swift-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -3020,7 +3191,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-a42c5226
 
           imagePullPolicy: IfNotPresent
           ports:
