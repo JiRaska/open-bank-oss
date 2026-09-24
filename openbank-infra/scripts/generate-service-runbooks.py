@@ -28,6 +28,7 @@ import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -787,16 +788,22 @@ def self_test() -> int:
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
     # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
-    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
-    # automated sync while this exact distinction is under rollout review.
+    # that Argo has ever created a pod. Keep this regression case after incentive is activated:
+    # its real Application can change from manual to automated without deleting the test of the
+    # manual state. Only the sync decision is controlled; render still reads the real workload.
     if "incentive" in deployed:
-        incentive = render("incentive")
+        with patch(f"{__name__}.application_automated", return_value=False):
+            incentive = render("incentive")
         case("a manual-sync workload is explicitly live-unverified",
              says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
         case("a manual-sync workload does not present declared metrics as a live scrape",
              says(incentive, "live scrape status is unverified"))
         case("a separate management listener is used for health commands",
              "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
+        if application_automated("incentive") is True:
+            activated = render("incentive")
+            case("automated sync does not retain the manual-sync warning",
+                 "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED" not in activated)
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)
