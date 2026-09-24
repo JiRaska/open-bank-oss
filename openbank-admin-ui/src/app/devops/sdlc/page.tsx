@@ -167,7 +167,7 @@ const STAGES: Stage[] = [
     actions: {
       developer: { cs: 'Sleduji, že moje verze prošla až do cílového prostředí.', en: 'I follow my version all the way into the target environment.' },
       devops: { cs: 'Propaguji SHA tag, sleduji sync a při problému vracím deklarovaný stav.', en: 'I promote a SHA tag, observe sync, and restore declared state when needed.' },
-      business: { cs: 'Nasazení má vlastní schválení, historii a jednoznačný obsah.', en: 'A deployment has its own approval, history, and unambiguous contents.' },
+      business: { cs: 'Nasazení má vlastní GitOps PR, automatické kontroly a dohledatelnou historii.', en: 'A deployment has its own GitOps PR, automated checks, and a traceable history.' },
     },
   },
   {
