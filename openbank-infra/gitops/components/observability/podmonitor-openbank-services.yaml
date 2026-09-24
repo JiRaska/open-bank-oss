@@ -83,6 +83,7 @@ spec:
       - kyc
       - ledger
       - lending
+      - loyalty
       - kyb
       - notifications
       - onboarding
@@ -93,6 +94,7 @@ spec:
       - psd2
       - referral
       - release-steward
+      - risk
       - sanctions
       - sca
       - sdd

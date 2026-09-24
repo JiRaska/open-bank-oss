@@ -3,6 +3,7 @@
 
 package com.openbank.casecoordinator.infrastructure.persistence
 
+import com.openbank.casecoordinator.application.port.out.ActiveKillSwitch
 import com.openbank.casecoordinator.application.port.out.CancellableCase
 import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.application.port.out.KillSwitchCommand
@@ -71,14 +72,43 @@ class JdbcCaseKillSwitchStateAdapter(private val dataSource: DataSource) : CaseK
     override fun cancellableCases(): List<CancellableCase> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
-            SELECT workflow_id FROM case_workflow
+            SELECT workflow_id, opened_at FROM case_workflow
             WHERE case_class = 'INCIDENT_RESPONSE' AND delivery_mode = 'SHADOW'
               AND status IN ('OPEN', 'CONVERGING', 'CONTESTED')
             ORDER BY opened_at
             """.trimIndent(),
         ).use { statement ->
             statement.executeQuery().use { result ->
-                buildList { while (result.next()) add(CancellableCase(result.getString(1))) }
+                buildList {
+                    while (result.next()) {
+                        add(
+                            CancellableCase(
+                                workflowId = result.getString(1),
+                                openedAt = result.getTimestamp(2).toInstant(),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    override fun activeScopes(): List<ActiveKillSwitch> = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT scope, reason, set_by FROM case_kill_switch WHERE removed_at IS NULL ORDER BY set_at",
+        ).use { statement ->
+            statement.executeQuery().use { result ->
+                buildList {
+                    while (result.next()) {
+                        add(
+                            ActiveKillSwitch(
+                                scope = result.getString("scope"),
+                                reason = result.getString("reason"),
+                                setBy = result.getString("set_by"),
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

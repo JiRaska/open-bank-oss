@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "fc1c38b58e9323f3"
+        openbank.tech/policy-checksum: "47eea62cc20fec93"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,14 +50,36 @@ spec:
           type: RuntimeDefault
       containers:
         - name: lending-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-502c2a96
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-4a38162a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8126
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8086
           env:
+            # Parallel private-CA mTLS listener for east-west callers (#10618; first intended
+            # caller: risk-engine). HTTP/8126 stays for every existing caller and the probes;
+            # no caller moves in this change. Same shape as ledger-service's 8443 listener.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time value baked into this service's application.yaml
+            # (quarkus.http.ssl.client-auth). That property is BUILD TIME fixed, so this env can
+            # never set it — Quarkus ignores a differing runtime value and warns. It is kept, in
+            # the same spelling, so the manifest states the listener's posture and cannot silently
+            # disagree with the image.
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             # Datasource: JDBC leg (Hibernate ORM + Flyway) + reactive leg onto the
             # same CNPG primary. The lending namespace owns its own DB cluster,
             # isolated from the payments namespace (credit-risk migrations are
@@ -267,6 +289,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: consent-tls
               mountPath: /mnt/consent-tls
               readOnly: true
@@ -363,6 +388,12 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        # Server certificate for the 8443 listener (lending-service-internal-tls). Distinct from
+        # the client certificate below: a server cert carries the Service DNS names.
+        - name: internal-tls
+          secret:
+            secretName: lending-service-internal-tls
+            optional: false
         # Same client certificate as catalog-tls above (lending-internal-tls); both upstream
         # listeners trust the one private CA, mounted twice so each %prod TLS bucket names its own path.
         - name: consent-tls
@@ -432,6 +463,9 @@ spec:
     - name: http
       port: 8126
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -447,3 +481,6 @@ spec:
     - name: http
       port: 8126
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

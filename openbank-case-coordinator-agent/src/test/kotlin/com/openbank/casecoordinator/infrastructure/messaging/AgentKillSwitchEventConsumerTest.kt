@@ -5,6 +5,7 @@ package com.openbank.casecoordinator.infrastructure.messaging
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.casecoordinator.application.CaseKillSwitchCancellationService
+import com.openbank.casecoordinator.infrastructure.observability.CaseCoordinatorMetricsService
 import io.mockk.mockk
 import io.mockk.verify
 import org.eclipse.microprofile.reactive.messaging.Message
@@ -12,7 +13,8 @@ import org.junit.jupiter.api.Test
 
 class AgentKillSwitchEventConsumerTest {
     private val cancellation = mockk<CaseKillSwitchCancellationService>(relaxed = true)
-    private val consumer = AgentKillSwitchEventConsumer(jacksonObjectMapper(), cancellation)
+    private val metrics = mockk<CaseCoordinatorMetricsService>(relaxed = true)
+    private val consumer = AgentKillSwitchEventConsumer(jacksonObjectMapper(), cancellation, metrics)
 
     @Test
     fun `unrelated audit event is acknowledged without touching cancellation`() = kotlinx.coroutines.runBlocking {

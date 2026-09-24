@@ -63,7 +63,7 @@ spec:
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-502c2a96
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-161bed0b
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8126 and management 8090 — both read off the service's own
@@ -75,6 +75,10 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
             # application.yaml hardcodes localhost for both; these env vars override it,
             # since an env source outranks application.yaml in SmallRye's ordinal.

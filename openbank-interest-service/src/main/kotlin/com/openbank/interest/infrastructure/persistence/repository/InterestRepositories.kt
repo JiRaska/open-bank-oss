@@ -23,6 +23,7 @@ import jakarta.inject.Inject
 import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -31,10 +32,30 @@ import java.util.UUID
 class InterestRateConfigRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: InterestMapper,
+    private val clock: Clock,
 ) : InterestRateConfigRepository {
     @WithTransaction override fun save(config: InterestRateConfig): Uni<InterestRateConfig> {
         val e = mapper.toEntity(config)
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
+    }
+
+    @WithTransaction
+    override fun saveWithOutbox(config: InterestRateConfig, event: OutboxMessage): Uni<InterestRateConfig> {
+        val e = mapper.toEntity(config)
+        val outbox = event.toOutboxEntity(clock.instant())
+        return sf.withTransaction { s -> s.persist(e).chain { _ -> s.persist(outbox) }.map { mapper.toDomain(e) } }
+    }
+
+    @WithTransaction
+    override fun updateWithOutbox(config: InterestRateConfig, event: OutboxMessage): Uni<InterestRateConfig> {
+        val outbox = event.toOutboxEntity(clock.instant())
+        return sf.withTransaction { s ->
+            s.find(InterestRateConfigEntity::class.java, config.id).flatMap { e ->
+                e!!.active = config.active
+                e.updatedAt = config.updatedAt
+                s.persist(e).chain { _ -> s.persist(outbox) }.map { mapper.toDomain(e) }
+            }
+        }
     }
 
     @WithSession override fun findById(id: UUID): Uni<InterestRateConfig?> =
@@ -331,5 +352,22 @@ class InterestCapitalizationRepositoryImpl @Inject constructor(
                     }
                 }
         }
+    }
+}
+
+/** The outbox row for [this] message; shared so every writer fills the entity identically. */
+internal fun OutboxMessage.toOutboxEntity(updatedAt: Instant): InterestOutboxEntity {
+    val stamp = updatedAt
+    val m = this
+    return InterestOutboxEntity().apply {
+        eventId = m.eventId
+        synthetic = m.synthetic
+        aggregateId = m.aggregateId
+        eventType = m.eventType
+        payload = m.payload
+        status = OutboxStatus.PENDING.name
+        attemptCount = 0
+        createdAt = m.createdAt
+        this.updatedAt = stamp
     }
 }

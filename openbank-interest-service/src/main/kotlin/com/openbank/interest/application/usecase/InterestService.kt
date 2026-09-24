@@ -4,9 +4,29 @@
 
 package com.openbank.interest.application.usecase
 
-import com.openbank.interest.application.port.`in`.*
-import com.openbank.interest.application.port.out.*
-import com.openbank.interest.domain.model.*
+import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
+import com.openbank.interest.application.port.`in`.GetAccrualsUseCase
+import com.openbank.interest.application.port.`in`.ManageRateConfigUseCase
+import com.openbank.interest.application.port.out.AccountDirectoryPort
+import com.openbank.interest.application.port.out.AccountSnapshot
+import com.openbank.interest.application.port.out.CapitalizationPosting
+import com.openbank.interest.application.port.out.InterestAccrualRepository
+import com.openbank.interest.application.port.out.InterestCapitalizationRepository
+import com.openbank.interest.application.port.out.InterestRateConfigRepository
+import com.openbank.interest.application.port.out.LedgerPostingPort
+import com.openbank.interest.application.port.out.LedgerPostingRejectedException
+import com.openbank.interest.application.port.out.TaxProfilePort
+import com.openbank.interest.domain.event.InterestRateChanged
+import com.openbank.interest.domain.model.AccrualRequest
+import com.openbank.interest.domain.model.AccrualStatus
+import com.openbank.interest.domain.model.AccrualSummary
+import com.openbank.interest.domain.model.DayCount
+import com.openbank.interest.domain.model.InterestAccrual
+import com.openbank.interest.domain.model.InterestCapitalization
+import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.interest.domain.model.InterestRateType
+import com.openbank.interest.domain.model.RateConfigNotFoundException
 import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
@@ -711,12 +731,37 @@ class InterestService(
      * the endpoint actually sees (admin clients retry; they do not race themselves).
      */
     override fun createConfig(config: InterestRateConfig): Uni<InterestRateConfig> =
+        validateIndexTerms(config) ?: createValidConfig(config)
+
+    /**
+     * ADR-0314 D5: an index and a spread describe a VARIABLE rate only, and only as a pair — a
+     * spread with no index says nothing a repricer can use. The V17 CHECK constraint is the backstop;
+     * this turns the same rule into a 400 instead of a 500 from the flush.
+     */
+    private fun validateIndexTerms(config: InterestRateConfig): Uni<InterestRateConfig>? {
+        val hasIndex = config.rateIndex != null
+        val hasSpread = config.spread != null
+        val message = when {
+            hasIndex != hasSpread -> "rateIndex and spread must be set together"
+            hasIndex && config.rateType != InterestRateType.VARIABLE ->
+                "rateIndex and spread apply to VARIABLE rates only"
+            else -> return null
+        }
+        return Uni.createFrom().failure(IllegalArgumentException(message))
+    }
+
+    private fun createValidConfig(config: InterestRateConfig): Uni<InterestRateConfig> =
         configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
             .flatMap { existing ->
                 if (existing != null) {
                     Uni.createFrom().item(existing)
                 } else {
-                    configRepo.save(config).onFailure().recoverWithUni { e ->
+                    val event = InterestRateChanged.outboxMessage(
+                        config,
+                        InterestRateChanged.Change.CREATED,
+                        clock.instant(),
+                    )
+                    configRepo.saveWithOutbox(config, event).onFailure().recoverWithUni { e ->
                         // Only an account override can lose a unique race (ux_rate_active_account);
                         // the winner is whatever active override that account now has.
                         if (config.accountId == null || !e.isRateOverrideConflict()) {
@@ -746,7 +791,11 @@ class InterestService(
         if (config == null) {
             Uni.createFrom().failure(IllegalArgumentException("Config not found"))
         } else {
-            configRepo.update(config.copy(active = false, updatedAt = OffsetDateTime.now(clock)))
+            val deactivated = config.copy(active = false, updatedAt = OffsetDateTime.now(clock))
+            configRepo.updateWithOutbox(
+                deactivated,
+                InterestRateChanged.outboxMessage(deactivated, InterestRateChanged.Change.DEACTIVATED, clock.instant()),
+            )
         }
     }
 

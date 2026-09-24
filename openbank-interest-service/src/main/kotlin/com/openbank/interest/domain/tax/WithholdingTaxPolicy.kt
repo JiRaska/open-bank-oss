@@ -45,7 +45,7 @@ object WithholdingTaxPolicy {
         grossInterest: BigDecimal,
         currency: String,
         profile: TaxProfile,
-        @Suppress("UNUSED_PARAMETER") asOf: LocalDate
+        @Suppress("UNUSED_PARAMETER") asOf: LocalDate,
     ): WithholdingResult {
         // §E: only CZK-denominated interest is withheld in v1; foreign interest is flagged.
         if (!currency.equals(ASSESSMENT_CURRENCY, ignoreCase = true)) {
@@ -73,7 +73,7 @@ object WithholdingTaxPolicy {
             taxAmount = taxAmount,
             netAmount = netAmount,
             treatment = WithholdingTreatment.WITHHELD,
-            exemptCode = null
+            exemptCode = null,
         )
     }
 
@@ -86,16 +86,13 @@ object WithholdingTaxPolicy {
     }
 
     /** A no-withholding outcome: zero tax, credit gross, treatment + reason recorded. */
-    private fun passThrough(
-        grossInterest: BigDecimal,
-        treatment: WithholdingTreatment,
-        exemptCode: String?
-    ) = WithholdingResult(
-        taxableBase = BigDecimal.ZERO.setScale(TAX_SCALE),
-        rate = BigDecimal.ZERO.setScale(2),
-        taxAmount = BigDecimal.ZERO.setScale(TAX_SCALE),
-        netAmount = grossInterest,
-        treatment = treatment,
-        exemptCode = exemptCode
-    )
+    private fun passThrough(grossInterest: BigDecimal, treatment: WithholdingTreatment, exemptCode: String?) =
+        WithholdingResult(
+            taxableBase = BigDecimal.ZERO.setScale(TAX_SCALE),
+            rate = BigDecimal.ZERO.setScale(2),
+            taxAmount = BigDecimal.ZERO.setScale(TAX_SCALE),
+            netAmount = grossInterest,
+            treatment = treatment,
+            exemptCode = exemptCode,
+        )
 }

@@ -311,7 +311,10 @@ jobs:
           EOF
           existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
+            # Keep one current incident record instead of appending the same alarm on
+            # every main push while the producer is unhealthy. The issue timeline still
+            # records the edit; the body always points at the latest failed run.
+            gh issue edit "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
           else
             gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
               --label tech-debt --label "severity:high"

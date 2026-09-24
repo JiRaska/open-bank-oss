@@ -48,7 +48,7 @@ spec:
         - name: wealth-service
           # First build lands via auto-deploy on the merge that adds openbank-wealth-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-wealth-service:sandbox-a42c5226
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-wealth-service:sandbox-161bed0b
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8154 and management 8090 — both read off the service's own application.yaml
@@ -59,6 +59,10 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
             # application.yaml hardcodes localhost for both; these env vars override it, since an
             # env source outranks application.yaml in SmallRye's ordinal.

@@ -1,0 +1,46 @@
+# Kafka mTLS identity + ACLs for openbank-risk-engine (ADR-0137 Tier 2).
+#
+# risk-engine CONSUMES openbank.fx.fixing.published (fx-service's central-bank fixings, ADR-0314
+# D5) as group `risk-engine-fx-fixing`, and produces nothing — so there is no domain-topic Write
+# ACL. The one Write it holds is its own dead-letter topic: the consumer rethrows a failed write
+# and the channel's `failure-strategy: dead-letter-queue` parks the record there (#5745). Without
+# Write on that topic the DLQ send itself fails and the consumer wedges on the very failure it
+# was meant to park.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
+# service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same name in
+# `messaging`; ESO projection into `risk` is done by kafka-mtls-externalsecrets.yaml.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: risk-engine
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.fx.fixing.published
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: risk-engine-fx-fixing
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.risk-engine.fx-fixing-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
