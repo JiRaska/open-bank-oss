@@ -62,6 +62,11 @@ class CreditOfferEligibilityResource(private val eligibility: CreditOfferEligibi
 
     @GET
     @Path("/eligibility/{partyId}")
+    // #10486 batch 4: the campaign engine asks this as a MACHINE (shared openbank-services
+    // client). OPA already admits only that principal (`service-credit-offer-eligibility`,
+    // lending runs AUTHZ_ENFORCE=true); ROLE_API here stops the RBAC outer gate from depending on
+    // the shared client's ROLE_OPERATOR, which #10486 removes.
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "lending.creditOffer.eligibility", resource = "")
     @Operation(summary = "Whether an UNPROMPTED credit offer may be surfaced to this party")
     fun eligibility(@PathParam("partyId") partyId: UUID): Uni<Response> = CoroutineScope(Dispatchers.Unconfined).async {

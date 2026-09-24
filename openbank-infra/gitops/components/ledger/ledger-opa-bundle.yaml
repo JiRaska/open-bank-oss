@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "260e59d339834f99"
+    openbank.tech/policy-checksum: "c7a7521d3604a844"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -738,6 +738,58 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action == "ledger.create"
+    }
+
+    # #10486 step 1 — interest-service's OWN machine identity. Its capitalization journal (DEBIT
+    # interest expense / CREDIT deposit-control / CREDIT withholding-tax payable) is posted by
+    # LedgerRestClient through the named oidc-client `ledger`, i.e. Keycloak client
+    # `openbank-interest`, whose service account carries ROLE_API only. This rule is the ONLY
+    # thing that lets that principal write: exactly ledger.create, nothing else (no reverse, no
+    # trigger/replay/approve/close.draft). LedgerResource.postJournal admits ROLE_API at the RBAC
+    # layer for this caller; every OTHER ROLE_API holder still reaches OPA and is denied here unless
+    # its own identity rule fires — the identity gate is what keeps that RBAC widening narrow
+    # (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
+    allowed_reasons contains "service-interest-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-interest"
+    	input.action == "ledger.create"
+    }
+
+    # #10486 batch 1 — per-service machine identities posting journals. Same shape as
+    # service-interest-ledger-post above: each principal carries ROLE_API only, and its rule is its
+    # WHOLE grant here — exactly ledger.create, never reverse/trigger/replay/approve/close.draft.
+    #   lending-service  (LedgerRestClient, named oidc-client `m2m`): disbursement/repayment journals
+    #   clearing-service (ClearingLedgerRestClient, named oidc-client `m2m`): ADR-0281 net settlement
+    allowed_reasons contains "service-lending-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-lending"
+    	input.action == "ledger.create"
+    }
+
+    allowed_reasons contains "service-clearing-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-clearing"
+    	input.action == "ledger.create"
+    }
+
+    # #10486 batch 2 — transaction-service and settlement-service on their own identities.
+    #   transaction-service (LedgerRestClient, named oidc-client `m2m`): postJournal on settlement and
+    #     reverseJournal on a failed/compensated leg -> ledger.create + ledger.reverse. The ONLY
+    #     per-service identity granted ledger.reverse; LedgerResource.reverseJournal admits ROLE_API
+    #     at the RBAC layer for it and every other ROLE_API holder is denied here.
+    #   settlement-service (LedgerRestClient, named oidc-client `m2m`): postJournal (the settlement
+    #     workflow's booking activity) plus getJournalsByTransaction (LedgerJournalLookupAdapter's
+    #     already-posted check) -> ledger.create + ledger.read. Never reverse.
+    allowed_reasons contains "service-transaction-ledger-write" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-transaction"
+    	input.action in {"ledger.create", "ledger.reverse"}
+    }
+
+    allowed_reasons contains "service-settlement-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-settlement"
+    	input.action in {"ledger.create", "ledger.read"}
     }
 
     # Only transaction-service's client exposes a reverseJournal call. lending-service and

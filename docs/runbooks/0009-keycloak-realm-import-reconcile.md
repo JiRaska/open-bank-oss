@@ -118,7 +118,15 @@ survives in it.
    ```sh
    ADMINUI_CLIENT_SECRET=... ARGOCD_CLIENT_SECRET=... EDGE_CLIENT_SECRET=... \
    GLITCHTIP_CLIENT_SECRET=... GOALERT_CLIENT_SECRET=... MCP_OBO_CLIENT_SECRET=... \
-   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... INTEREST_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+   ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
+   SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
+   DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
+   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
+   ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
+   COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
+   AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
+   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -207,6 +215,176 @@ write happened is for the detector to say so.
 With both entries gone, the next role, client or user added to a template and not
 propagated to Vault is red on the following night's run — which is the property this
 whole exercise buys, and the thing neither of the two older comparisons can provide.
+
+## Per-service M2M client — adding one to the LIVE realm (#10486)
+
+A new confidential client in `realm-template.json` reaches **nothing** that runs: the template
+feeds no import (see Why), and `--import-realm` would skip an existing realm anyway. So each
+per-service client from #10486 (first: `openbank-interest`) is created in the live realm by the
+owner, with its secret generated **by Keycloak** and moved into Vault **without being printed**.
+Do this BEFORE the PR that consumes it syncs: the consumer's env ref is `optional: false`, so an
+unseeded entry holds the new pod in `CreateContainerConfigError`.
+
+Trusted shell, owner's own admin login (`kcadm.sh config credentials ...` inside the pod). Values
+below are for `openbank-interest`; the client representation is the template's own entry.
+
+```sh
+NS=iam; POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=keycloak -o name | head -1)
+KC="kubectl -n $NS exec -i $POD -- /opt/keycloak/bin/kcadm.sh"
+# 1. create the client from the committed template entry, WITHOUT its placeholder secret —
+#    Keycloak then generates one server-side.
+jq '.clients[] | select(.clientId=="openbank-interest") | del(.secret)' \
+  openbank-infra/gitops/components/keycloak/realm-template.json \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-interest --fields id --format csv --noquotes)
+# 2. the ONLY role its service account gets (template: realmRoles [ROLE_API])
+$KC add-roles -r openbank --uusername service-account-openbank-interest --rolename ROLE_API
+# 3. secret Keycloak -> Vault KV through a pipe; it never reaches the terminal or a file.
+#    `client_secret=-` reads the value from stdin. KV layout is ADR-0099's keycloak/<service>.
+$KC get clients/$ID/client-secret -r openbank | jq -r .value \
+  | bao kv put openbank/keycloak/interest-service client_id="$ID" client_secret=-
+```
+
+Verify without revealing: `$KC get users -r openbank -q username=service-account-openbank-interest`
+then `.../role-mappings/realm` lists exactly `ROLE_API` (plus `default-roles-openbank`);
+`kubectl -n interest annotate externalsecret interest-service-ledger-oidc force-sync="$(date +%s)" --overwrite`
+and `kubectl -n interest get externalsecret interest-service-ledger-oidc` reports `SecretSynced`.
+The DR copy (the realm-import blob) picks the client up at the next reconcile above — pass the
+SAME value as `INTEREST_CLIENT_SECRET` to the render script, read from `keycloak/interest-service`.
+
+### Batch 1 (money-path writers)
+
+Six more clients follow the identical recipe, one per caller, each consumed by a named
+oidc-client `m2m` in that service. The owner provisions them in one pass with a generic,
+idempotent script kept outside this repo (it drives `kcadm` and `bao` with the owner's own
+credentials, so it is not a tracked artefact); it reads the client list from the committed
+template, skips a client or KV entry that already exists unless told to overwrite, moves each
+secret with `jq -j` (no trailing newline), and verifies the stored length equals Keycloak's and
+that each service account holds exactly `ROLE_API`. Same ordering rule as above: provision
+BEFORE the consuming PR syncs.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-account` | `keycloak/account-service` | `account-service-m2m-oidc` (accounts) | `ACCOUNT_CLIENT_SECRET` |
+| `openbank-sdd` | `keycloak/sdd-service` | `sdd-service-m2m-oidc` (sdd) | `SDD_CLIENT_SECRET` |
+| `openbank-standing-order` | `keycloak/standing-order-service` | `standing-order-m2m-oidc` (payments) | `STANDING_ORDER_CLIENT_SECRET` |
+| `openbank-sepa-payment` | `keycloak/sepa-payment` | `sepa-payment-m2m-oidc` (payments) | `SEPA_PAYMENT_CLIENT_SECRET` |
+| `openbank-lending` | `keycloak/lending-service` | `lending-service-m2m-oidc` (lending) | `LENDING_CLIENT_SECRET` |
+| `openbank-clearing` | `keycloak/clearing-service` | `clearing-service-m2m-oidc` (payments) | `CLEARING_CLIENT_SECRET` |
+
+Two traps already paid for on the interest client, both silent: a client created WITHOUT the
+`profile` scope issues tokens with no `preferred_username`, so the principal id falls back to the
+subject UUID and every identity-gated rego rule simply never matches (a 403, not an error); and
+a secret piped with `jq -r` carries a trailing newline into Vault, which Keycloak then rejects as
+a different secret (`unauthorized_client`). `jq -j`, then compare lengths.
+
+### Batch 2 (money-path writers, continued)
+
+Same recipe, same script, five more clients — all consumed in the `payments` namespace by the
+named oidc-client `m2m`. interest-service's remittance leg needs no new client: it reuses the
+existing `openbank-interest` (named oidc-client `ledger`), so nothing is provisioned for it.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-domestic-payment` | `keycloak/domestic-payment` | `domestic-payment-m2m-oidc` (payments) | `DOMESTIC_PAYMENT_CLIENT_SECRET` |
+| `openbank-sepa-instant` | `keycloak/sepa-instant` | `sepa-instant-m2m-oidc` (payments) | `SEPA_INSTANT_CLIENT_SECRET` |
+| `openbank-swift` | `keycloak/swift-service` | `swift-service-m2m-oidc` (payments) | `SWIFT_CLIENT_SECRET` |
+| `openbank-transaction` | `keycloak/transaction-service` | `transaction-service-m2m-oidc` (payments) | `TRANSACTION_CLIENT_SECRET` |
+| `openbank-settlement` | `keycloak/settlement-service` | `settlement-service-m2m-oidc` (payments) | `SETTLEMENT_CLIENT_SECRET` |
+
+### Batch 3 (the remaining writers)
+
+Same recipe, same script, two more clients. domestic-payment, sepa-payment and sepa-instant move
+their AML case open onto the `m2m` client they already have, so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-fx` | `keycloak/fx-service` | `fx-service-m2m-oidc` (fx) | `FX_CLIENT_SECRET` |
+| `openbank-kyb` | `keycloak/kyb-service` | `kyb-service-m2m-oidc` (kyb) | `KYB_CLIENT_SECRET` |
+
+### Batch 5 (account and transaction reads)
+
+Same recipe, same script, four more clients. interest-service and lending-service move their account
+reads onto the named client they already have (`ledger` and `m2m`), so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-analytics-sink` | `keycloak/analytics-sink` | `analytics-sink-m2m-oidc` (analytics) | `ANALYTICS_SINK_CLIENT_SECRET` |
+| `openbank-billing` | `keycloak/billing-service` | `billing-service-m2m-oidc` (billing) | `BILLING_CLIENT_SECRET` |
+| `openbank-document` | `keycloak/document-service` | `document-service-m2m-oidc` (documents) | `DOCUMENT_CLIENT_SECRET` |
+| `openbank-party` | `keycloak/party-service` | `party-service-m2m-oidc` (party) | `PARTY_CLIENT_SECRET` |
+
+### Batch 6 (RBAC-only reads: credit profile, incentive offer, pid party, cards)
+
+Same recipe, same script, three more clients. lending-service and party-service move their reads onto
+the named `m2m` client they already have, so nothing is provisioned for them.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-copilot` | `keycloak/copilot-service` | `copilot-service-m2m-oidc` (platform) | `COPILOT_CLIENT_SECRET` |
+| `openbank-campaign` | `keycloak/campaign-service` | `campaign-service-m2m-oidc` (campaign) | `CAMPAIGN_CLIENT_SECRET` |
+| `openbank-delegation` | `keycloak/delegation-service` | `delegation-service-m2m-oidc` (delegation) | `DELEGATION_CLIENT_SECRET` |
+
+analytics-sink and incentive-service run no OPA sidecar, so their endpoints admit the named callers
+through a Kotlin named-caller check rather than an `@Authorize` rule.
+
+### Batch 7 (AI-agent reads and the statement search)
+
+Same recipe, same script, three more clients.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-agent` | `keycloak/agent-service` | `agent-service-m2m-oidc` (platform) | `AGENT_CLIENT_SECRET` |
+| `openbank-mcp` | `keycloak/mcp-service` | `mcp-service-m2m-oidc` (platform) | `MCP_CLIENT_SECRET` |
+| `openbank-statement` | `keycloak/statement-service` | `statement-service-m2m-oidc` (statements) | `STATEMENT_CLIENT_SECRET` |
+
+The two AI-agent identities are granted only what an `agents.yaml` charter can already reach. An agent
+tool whose capability no charter holds (agent-service's interest tools, mcp-service's payment
+confirmation) moves to the agent's identity with **no** upstream grant, so it stays denied end to end.
+If a charter later gains that capability, add the upstream read rule in the same change;
+`AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
+
+### Synthetic journey identity: Product Catalog read (#7324)
+
+One client, and it differs from the batches above in two ways: it holds **no realm role at all**
+(not `ROLE_API`), and its only grant is a **client scope** the live realm does not have yet.
+
+| Keycloak object | Source | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|---|
+| client scope `catalog:read` | `.clientScopes[]` entry in `realm-template.json` | none | none | none |
+| client `openbank-synthetic-catalog-read` | `.clients[]` entry in `realm-template.json` | `keycloak/synthetic-catalog-read` | `journey-product-catalog-read-oidc` (observability) | `SYNTHETIC_CATALOG_READ_CLIENT_SECRET` |
+
+Order matters: create the scope first, or the client's `defaultClientScopes` reference drops
+silently (Keycloak logs `Referenced client scope ... doesn't exist. Ignoring`) and the token
+carries an empty `scope`, so product-catalog answers 403.
+
+```sh
+T=openbank-infra/gitops/components/keycloak/realm-template.json
+# 1. the scope (not a realm default: only a client that lists it receives it)
+jq '.clientScopes[] | select(.name=="catalog:read")' "$T" | $KC create client-scopes -r openbank -f -
+# 2. the client, WITHOUT its placeholder secret; Keycloak generates one server-side
+jq '.clients[] | select(.clientId=="openbank-synthetic-catalog-read") | del(.secret)' "$T" \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-synthetic-catalog-read --fields id --format csv --noquotes)
+# 3. NO add-roles step. The service account must hold no realm role.
+# 4. secret Keycloak -> Vault KV through a pipe, never printed
+$KC get clients/$ID/client-secret -r openbank | jq -r .value \
+  | bao kv put openbank/keycloak/synthetic-catalog-read client_id=openbank-synthetic-catalog-read client_secret=-
+```
+
+Verify without revealing: `$KC get clients/$ID/default-client-scopes -r openbank` lists exactly
+`basic` and `catalog:read`; `.../users/<sa-id>/role-mappings/realm` holds no `ROLE_*` role;
+`kubectl -n observability annotate externalsecret journey-product-catalog-read-oidc force-sync="$(date +%s)" --overwrite`
+reports `SecretSynced`. Acceptance is the next scheduled Job exiting 0 with all three checks passing
+(200, JSON, array). Before the KV entry exists the CronJob still runs (its secret ref is
+`optional: true`) and fails red with `credential absent` in its log, never a crash loop.
+
+The template declares `clientScopes`, and a realm import that declares **any** client scope skips
+Keycloak's built-in defaults (`basic`, `roles`, `profile`, ...). The template therefore carries the
+full KC 26.6.3 default set plus `catalog:read`, and `defaultDefaultClientScopes` /
+`defaultOptionalClientScopes` as Keycloak creates them. Measured on a throwaway 26.6.3 import: every
+existing service-account client mints a token with the same claims as before. Re-check that after a
+Keycloak major upgrade changes its default scopes.
 
 ## What this does NOT fix
 

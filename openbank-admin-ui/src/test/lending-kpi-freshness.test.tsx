@@ -37,7 +37,7 @@ describe('Lending KPI freshness (#7918)', () => {
     await waitFor(() => expect(document.querySelectorAll('.stat-value').length).toBeGreaterThan(0))
     // No tile may claim a count, and no hint may claim a principal, while the load is in flight.
     expect(tiles()).not.toContain('0')
-    expect(hints().join(' ')).not.toMatch(/principal 0/)
+    expect(hints().join(' ')).not.toMatch(/originally lent/)
   })
 
   it('does not assert a zero exposure after the list endpoints fail', async () => {
@@ -48,7 +48,7 @@ describe('Lending KPI freshness (#7918)', () => {
     // simultaneously report a confident zero book.
     await waitFor(() => expect(screen.getByText(/unreachable/i)).toBeInTheDocument())
     expect(tiles()).not.toContain('0')
-    expect(hints().join(' ')).not.toMatch(/principal 0/)
+    expect(hints().join(' ')).not.toMatch(/originally lent/)
   })
 
   // THE CONTROL. A successful load that genuinely returns nothing is a real, knowable zero and
@@ -59,6 +59,6 @@ describe('Lending KPI freshness (#7918)', () => {
 
     await waitFor(() => expect(tiles()).toContain('0'))
     expect(screen.queryByText(/unreachable/i)).not.toBeInTheDocument()
-    expect(hints().join(' ')).toMatch(/principal 0/)
+    expect(hints().join(' ')).toMatch(/originally lent CZK\s0/)
   })
 })

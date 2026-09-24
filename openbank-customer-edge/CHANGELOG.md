@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.81.0...customer-edge-v0.82.0) (2026-09-19)
+
+
+### Features
+
+* **customer-edge:** hold business payments for co-signatures and add the signing routes ([#10314](https://github.com/JiRaska/open-bank-oss/issues/10314)) ([4903269](https://github.com/JiRaska/open-bank-oss/commit/490326932d39ee66208333680933c21a718826cd))
+
+## [0.81.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.80.0...customer-edge-v0.81.0) (2026-09-18)
+
+
+### Features
+
+* **customer-edge:** business company profile route; bind SCA to the human under X-Acting-For ([#10282](https://github.com/JiRaska/open-bank-oss/issues/10282)) ([df14838](https://github.com/JiRaska/open-bank-oss/commit/df14838aa40a2055f6127563f71a59d96aed43ce))
+
 ## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.79.0...customer-edge-v0.80.0) (2026-09-17)
 
 

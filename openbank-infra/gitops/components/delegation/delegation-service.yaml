@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4a8a405d13dda3db"
+        openbank.tech/policy-checksum: "68cc0fa612e127b5"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -63,7 +63,7 @@ spec:
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-161bed0b
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8126 and management 8090 — both read off the service's own
@@ -75,6 +75,10 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
             # application.yaml hardcodes localhost for both; these env vars override it,
             # since an env source outranks application.yaml in SmallRye's ordinal.
@@ -146,6 +150,15 @@ spec:
                 secretKeyRef:
                   name: delegation-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 6: delegation-service's OWN Keycloak client (openbank-delegation, ROLE_API only) for the
+            # party eligibility and card ownership reads - the named oidc-client `m2m`. optional: false so an unseeded
+            # Vault entry is a loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: delegation-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
             # dependency: without it the ReactiveRedisDataSource bean is inactive and the
             # app dies with InactiveBeanException.

@@ -80,7 +80,7 @@ class PartyServiceMergeTest {
         coEvery { service.accountGuard.findOpenAccounts(sourceId) } returns emptyList()
         val saved = slot<Party>()
         val eventSlot = slot<PartyEvent>()
-        coEvery { service.partyRepo.update(capture(saved), capture(eventSlot)) } answers { saved.captured }
+        stubModify(service.partyRepo, saved, eventSlot)
 
         val result = service.mergeParty(cmd())
 
@@ -109,7 +109,7 @@ class PartyServiceMergeTest {
             .isInstanceOf(PartyMergeRejectedException::class.java)
             .hasMessageContaining("CZ6508000000192000145399")
 
-        coVerify(exactly = 0) { service.partyRepo.update(any()) }
+        coVerify(exactly = 0) { service.partyRepo.modify(any(), any()) }
     }
 
     @Test
@@ -124,8 +124,7 @@ class PartyServiceMergeTest {
             .isInstanceOf(RuntimeException::class.java)
             .hasMessageContaining("connection refused")
 
-        coVerify(exactly = 0) { service.partyRepo.update(any()) }
-        coVerify(exactly = 0) { service.partyRepo.update(any(), any()) }
+        coVerify(exactly = 0) { service.partyRepo.modify(any(), any()) }
     }
 
     @Test
@@ -189,7 +188,7 @@ class PartyServiceMergeTest {
         coEvery { service.partyRepo.findById(sourceId) } returns merged
         val saved = slot<Party>()
         val eventSlot = slot<PartyEvent>()
-        coEvery { service.partyRepo.update(capture(saved), capture(eventSlot)) } answers { saved.captured }
+        stubModify(service.partyRepo, saved, eventSlot)
 
         service.updateKycStatus(sourceId, KycStatus.APPROVED)
 

@@ -3569,13 +3569,20 @@ pr_file_overlap:
     - "openbank-infra/gitops/"
 
 # ---------------------------------------------------------------------------
-# AGENT CASE COLLABORATION (ADR-0271 proposal; no live grants)
+# AGENT CASE COLLABORATION (ADR-0271 bounded shadow grant)
 #
 # This matrix is an independent authorization boundary, intersected with each
 # principal's agents.yaml case_capabilities by the case-coordinator-only OPA bundle.
-# Empty is intentional: the policy and PEP may be reviewed without silently creating
-# a production grant. Every entry requires a separate authorization review.
-agent_case_capability_matrix: []
+# Every entry requires a separate authorization review. The first grant is deliberately
+# restricted to the incident-response SHADOW rollout; HITL and every other class still deny.
+agent_case_capability_matrix:
+  - agent_id: rca-investigator
+    capabilities: [case.join, case.contribute]
+    case_class: INCIDENT_RESPONSE
+    delivery_mode: SHADOW
+    enabled: true
+    rollout_id: incident-triage-shadow-2026-08-20
+    max_signals_per_case: 8
 
 # ---------------------------------------------------------------------------
 # AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)

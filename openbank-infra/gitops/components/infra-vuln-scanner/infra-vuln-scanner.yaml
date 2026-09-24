@@ -263,15 +263,36 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           # Two-phase design:
-          #   init/scan  — anchore/grype image: discovers + scans each infra
+          #   init/fetch-grype + init/scan — grype binary run in alpine/k8s: scans each infra
           #                image, writes /results/infra-vulns.json.
           #   main/publish — alpine/k8s: publishes the JSON to the ConfigMap
           #                  via kubectl apply (no Grype dependency needed in
           #                  the publish container — least capability).
           initContainers:
+            # anchore/grype:<v> is FROM scratch: no /bin/sh, no python3, no
+            # kubectl, so the scan script below could never start there (runc:
+            # `exec: "/bin/sh": stat /bin/sh: no such file or directory`, every
+            # run since this CronJob existed). The `-debug` variant of the SAME
+            # release carries busybox, used only to copy the static grype binary
+            # into a shared emptyDir; the scan then runs in alpine/k8s, which
+            # has sh + python3 + kubectl.
+            # v0.94.0 could not load today's grype DB either (`unable to migrate:
+            # UNIQUE constraint failed: operating_systems...`, exit 1 on every
+            # image), so the version moves with the fix. Reproduced locally:
+            # v0.94.0 scans 0 images, v0.118.0 scans postgres + valkey.
+            - name: fetch-grype
+              image: docker.io/anchore/grype:v0.118.0-debug
+              command: ["/busybox/cp", "/grype", "/tools/grype"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
             - name: scan
-              image: docker.io/anchore/grype:v0.94.0
-              # Override entrypoint; the image defaults to running grype directly.
+              image: docker.io/alpine/k8s:1.34.1
               command: ["/bin/sh", "-ec"]
               securityContext:
                 allowPrivilegeEscalation: false
@@ -281,6 +302,8 @@ spec:
               env:
                 - name: HOME
                   value: /tmp
+                - name: PATH
+                  value: /tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
                 # Grype DB cache; must be writable (read-only root fs off for this
                 # container because grype writes its vuln DB to $HOME/.cache).
                 - name: GRYPE_DB_CACHE_DIR
@@ -400,6 +423,9 @@ spec:
                   mountPath: /results
                 - name: tmp
                   mountPath: /tmp
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
 
           containers:
             - name: publish
@@ -433,4 +459,6 @@ spec:
             - name: results
               emptyDir: {}
             - name: tmp
+              emptyDir: {}
+            - name: tools
               emptyDir: {}
