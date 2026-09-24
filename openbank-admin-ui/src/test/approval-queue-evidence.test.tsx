@@ -28,7 +28,7 @@ const proposal = {
 const sourceNames = [
   'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
   'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
-  'delegation', 'agent',
+  'delegation', 'agent', 'communication',
 ]
 const inbox = { items: [], sources: Object.fromEntries(sourceNames.map(name => [name, 'ok'])) }
 
@@ -55,6 +55,32 @@ describe('approval queue evidence contracts', () => {
     expect(parseApprovalInbox(inbox)).toEqual(inbox)
     expect(parseApprovalInbox({ items: [], sources: {} })).toBeNull()
     expect(parseApprovalInbox({ ...inbox, items: [{ id: 'x', domain: 'unknown', action: 'act', resourceId: null, maker: null, proposedAt: null }] })).toBeNull()
+  })
+
+  it('accepts the communication source and item returned by the federated BFF', () => {
+    const item = {
+      id: 'communication-approval-7', domain: 'communication', action: 'communication.publish',
+      resourceId: 'message-7', maker: 'operator@example.test', proposedAt: '2026-09-24T10:00:00Z',
+    }
+    expect(parseApprovalInbox({ ...inbox, items: [item] })).toEqual({ ...inbox, items: [item] })
+  })
+
+  it('shows a communication approval with its human maker and governed hand-off', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/agent/proposals')) return json([])
+      if (url.includes('/api/approvals/pending')) return json({ ...inbox, items: [{
+        id: 'communication-approval-7', domain: 'communication', action: 'communication.publish',
+        resourceId: 'message-7', maker: 'operator@example.test', proposedAt: '2026-09-24T10:00:00Z',
+      }] })
+      return json({ available: true, agents: [] })
+    }))
+    mount()
+
+    const row = await screen.findByTestId('domain-approval-communication:communication-approval-7')
+    expect(row).toHaveTextContent('communication.publish')
+    expect(row).toHaveTextContent('operator@example.test')
+    expect(row.querySelector('a[href="/approvals/communication"]')).not.toBeNull()
   })
 
   it('does not turn malformed agent evidence into a clear queue', async () => {
