@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey product-catalog-read → Keycloak (:8080), token endpoint only (issue #7324).
+#
+# The journey mints a client_credentials token for its own synthetic client before its one
+# catalog read. Today that edge is ALSO admitted by keycloak-allow-grafana-oidc, which opens
+# :8080 to the whole observability namespace for Grafana's back-channel. Relying on that would
+# make the journey's identity depend on an unrelated policy: tightening Grafana's rule to its
+# own pods would silently turn this journey red with a connect timeout. This rule names the
+# labelled one-shot k6 pod instead, so the edge is declared by what uses it.
+#
+# Same ownership shape as networkpolicy-product-catalog-synthetic-journey.yaml: it lives with
+# the observability component because that Application renders the CronJob, selects a target
+# in another namespace, and is hand-maintained (gen-network-policies.py derives edges from
+# Deployment env URLs and cannot see a CronJob). NetworkPolicies are additive; the generated
+# keycloak-ingress-allow-list is untouched.
+#
+# The journey namespace carries no egress policy, so no egress rule is needed on the caller
+# side. Removing this file rolls the edge back to whatever the Grafana rule still admits.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-ingress-synthetic-catalog-read-journey
+  namespace: iam
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: journey
+              openbank.tech/journey: product-catalog-read
+      ports:
+        - protocol: TCP
+          port: 8080

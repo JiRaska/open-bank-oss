@@ -194,6 +194,16 @@ not change any existing request's outcome until explicitly flipped.
   availability assertion, not an access-control bypass: Product Catalog still owns
   request handling, and removing the policy restores fail-closed connection denial.
 
+- **2026-09-24** — **New synthetic principal on that edge (#7324):** the same journey now
+  authenticates as the Keycloak client `openbank-synthetic-catalog-read`. It holds no realm
+  role (explicitly not `ROLE_API`, `fullScopeAllowed: false`); its only grant is the
+  `catalog:read` client scope, which `CatalogScopeRoleMapper` maps to `CATALOG_SCOPE_READ`, so it
+  reaches only product-catalog's read endpoints that admit that role (never author or publish) and no other
+  service. The secret is Keycloak-generated, stored at Vault KV `keycloak/synthetic-catalog-read`
+  and projected by an ExternalSecret only into the labelled journey pod; the script never logs
+  the secret, token or bodies. The added Keycloak ingress rule admits only that pod on `:8080`.
+  Rollback: disable the client in Keycloak; the journey then fails red on the token request.
+
 - **2026-08-26** — The operator approval inbox gains a bounded, read-only
   `GET /api/v1/accounts/approvals` edge. It exposes only the pending approval id, action,
   resource id, maker id and creation time to callers already holding `ROLE_OPERATOR` or
