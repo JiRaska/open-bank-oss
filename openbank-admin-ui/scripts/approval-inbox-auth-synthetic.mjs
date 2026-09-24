@@ -70,7 +70,7 @@ try {
   }
   if (response.status() !== 200) throw new Error(`approval inbox BFF returned HTTP ${response.status()}`)
   const payload = await response.json()
-  verifyApprovalInboxEvidence(payload, {
+  const item = verifyApprovalInboxEvidence(payload, {
     id, action: process.env.OPENBANK_APPROVAL_FIXTURE_ACTION,
     resourceId: process.env.OPENBANK_APPROVAL_FIXTURE_RESOURCE_ID,
     makerId: process.env.OPENBANK_APPROVAL_FIXTURE_MAKER_ID,
@@ -80,6 +80,14 @@ try {
   await row.waitFor({ state: 'visible', timeout: 10_000 })
   if (!await row.getByText(process.env.OPENBANK_APPROVAL_FIXTURE_ACTION, { exact: true }).isVisible()) {
     throw new Error('sandbox fixture was not rendered in the operator inbox')
+  }
+  const resource = row.getByTestId('approval-resource')
+  const maker = row.getByTestId('approval-maker')
+  const time = row.locator('time')
+  if (!await resource.isVisible() || !(await resource.textContent())?.includes(item.resourceId) ||
+      !await maker.isVisible() || !(await maker.textContent())?.includes(item.maker) ||
+      !await time.isVisible() || await time.getAttribute('datetime') !== item.proposedAt) {
+    throw new Error('provider audit context was not rendered unchanged in the operator inbox')
   }
   await writeApprovalReadEvidence(process.env.OPENBANK_APPROVAL_EVIDENCE_FILE, observedSha, id)
 } finally {

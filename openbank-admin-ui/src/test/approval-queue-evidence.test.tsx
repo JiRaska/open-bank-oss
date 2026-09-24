@@ -79,7 +79,9 @@ describe('approval queue evidence contracts', () => {
 
     const row = await screen.findByTestId('domain-approval-communication:communication-approval-7')
     expect(row).toHaveTextContent('communication.publish')
-    expect(row).toHaveTextContent('operator@example.test')
+    expect(row.querySelector('[data-testid="approval-resource"]')).toHaveTextContent('message-7')
+    expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('operator@example.test')
+    expect(row.querySelector('time[datetime="2026-09-24T10:00:00Z"]')).not.toBeNull()
     expect(row.querySelector('a[href="/approvals/communication"]')).not.toBeNull()
   })
 

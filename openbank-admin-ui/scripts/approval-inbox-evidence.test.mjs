@@ -22,7 +22,7 @@ const expected = () => ({
 })
 
 test('accepts the exact synthetic billing record', () => {
-  assert.doesNotThrow(() => verifyApprovalInboxEvidence(expected(), fixture))
+  assert.deepEqual(verifyApprovalInboxEvidence(expected(), fixture), expected().items[0])
 })
 
 for (const [name, mutate] of [

@@ -181,6 +181,9 @@ test.describe('approval workbench', () => {
     await expect(rows.nth(0)).toContainText(sanctionsApproval.action)
     await page.getByLabel(/^(Order|Pořadí)$/).selectOption('newest')
     await expect(rows.nth(0)).toContainText(billingApproval.action)
+    await expect(rows.nth(0).getByTestId('approval-resource')).toContainText(billingApproval.resourceId)
+    await expect(rows.nth(0).getByTestId('approval-maker')).toContainText(billingApproval.maker)
+    await expect(rows.nth(0).locator('time')).toHaveAttribute('datetime', billingApproval.proposedAt)
 
     await page.getByLabel(/^(Domain|Doména)$/).selectOption('sanctions')
     await expect(rows).toHaveCount(1)
