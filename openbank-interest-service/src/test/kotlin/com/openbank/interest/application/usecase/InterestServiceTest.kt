@@ -4,6 +4,7 @@
 
 package com.openbank.interest.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.interest.application.port.out.AccountDirectoryPort
 import com.openbank.interest.application.port.out.AccountPage
 import com.openbank.interest.application.port.out.AccountSnapshot
@@ -23,6 +24,7 @@ import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
 import com.openbank.interest.domain.model.InterestRateType
 import com.openbank.interest.domain.model.RateConfigNotFoundException
+import com.openbank.interest.domain.model.RateIndex
 import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.TaxResidency
 import com.openbank.interest.domain.tax.TaxpayerType
@@ -90,6 +92,9 @@ class InterestServiceTest {
      */
     private fun stubNoClaimOutstanding() {
         every { accrualRepo.findClaimedForCapitalization(any(), any()) } returns Uni.createFrom().item(emptyList())
+        // capitalizeAll now sweeps for claims a previous attempt stranded before doing new work
+        // (#10404). Nothing outstanding is the default for these tests.
+        every { accrualRepo.findOutstandingCapitalizationClaims() } returns Uni.createFrom().item(emptyList())
         every {
             accrualRepo.claimForCapitalization(
                 capture(claimIdsSlot),
@@ -268,6 +273,8 @@ class InterestServiceTest {
 
         assertThat(result).isEqualTo(config)
         verify(exactly = 0) { configRepo.save(any()) }
+        // A replay changed nothing, so it must announce nothing.
+        verify(exactly = 0) { configRepo.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -280,7 +287,10 @@ class InterestServiceTest {
         every {
             configRepo.findActiveTwin("SAVINGS", null, "EUR", LocalDate.of(2026, 1, 1))
         } returns Uni.createFrom().nullItem()
-        every { configRepo.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
+        val event = slot<OutboxMessage>()
+        every { configRepo.saveWithOutbox(capture(saved), capture(event)) } answers {
+            Uni.createFrom().item(firstArg<InterestRateConfig>())
+        }
 
         val result = service.createConfig(config).await().indefinitely()
 
@@ -290,7 +300,68 @@ class InterestServiceTest {
         assertThat(saved.captured.maxBalance).isEqualByComparingTo(BigDecimal("1000000.00"))
         assertThat(saved.captured.effectiveTo).isEqualTo(LocalDate.of(2026, 12, 31))
         assertThat(saved.captured.active).isTrue()
-        verify(exactly = 1) { configRepo.save(any()) }
+        // ADR-0314 D5: the config and its rate.changed event are one repository call — one transaction.
+        verify(exactly = 1) { configRepo.saveWithOutbox(config, any()) }
+        verify(exactly = 0) { configRepo.save(any()) }
+        assertThat(event.captured.eventType).isEqualTo("interest.rate.changed.v1")
+        assertThat(event.captured.aggregateId).isEqualTo(config.id)
+        val payload = ObjectMapper().readTree(event.captured.payload)
+        assertThat(payload["change"].asText()).isEqualTo("CREATED")
+        assertThat(payload["annualRate"].asText()).isEqualTo("0.04")
+        assertThat(payload["occurredAt"].asText()).isEqualTo(clock.instant().toString())
+    }
+
+    @Test
+    fun `createConfig rejects index terms that do not describe a VARIABLE rate`() {
+        val fixedWithIndex = sampleConfig(annualRate = BigDecimal("0.04"))
+            .copy(rateIndex = RateIndex.PRIBOR_3M, spread = BigDecimal("0.005"))
+        val indexWithoutSpread = sampleConfig(annualRate = BigDecimal("0.04"))
+            .copy(rateType = InterestRateType.VARIABLE, rateIndex = RateIndex.PRIBOR_3M)
+
+        listOf(fixedWithIndex, indexWithoutSpread).forEach { bad ->
+            assertThatThrownBy { service.createConfig(bad).await().indefinitely() }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        verify(exactly = 0) { configRepo.saveWithOutbox(any(), any()) }
+        verify(exactly = 0) { configRepo.findActiveTwin(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `createConfig accepts a VARIABLE rate with index and spread and puts both on the event`() {
+        val config = sampleConfig(annualRate = BigDecimal("0.04"))
+            .copy(rateType = InterestRateType.VARIABLE, rateIndex = RateIndex.CZEONIA, spread = BigDecimal("0.0025"))
+        every {
+            configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+        } returns Uni.createFrom().nullItem()
+        val event = slot<OutboxMessage>()
+        every { configRepo.saveWithOutbox(any(), capture(event)) } answers {
+            Uni.createFrom().item(firstArg<InterestRateConfig>())
+        }
+
+        service.createConfig(config).await().indefinitely()
+
+        val payload = ObjectMapper().readTree(event.captured.payload)
+        assertThat(payload["rateIndex"].asText()).isEqualTo("CZEONIA")
+        assertThat(payload["spread"].asText()).isEqualTo("0.0025")
+    }
+
+    @Test
+    fun `deactivateConfig writes the inactive config and a DEACTIVATED event together`() {
+        val config = sampleConfig(annualRate = BigDecimal("0.04"))
+        every { configRepo.findById(config.id) } returns Uni.createFrom().item(config)
+        val saved = slot<InterestRateConfig>()
+        val event = slot<OutboxMessage>()
+        every { configRepo.updateWithOutbox(capture(saved), capture(event)) } answers {
+            Uni.createFrom().item(firstArg<InterestRateConfig>())
+        }
+
+        service.deactivateConfig(config.id).await().indefinitely()
+
+        assertThat(saved.captured.active).isFalse()
+        verify(exactly = 0) { configRepo.update(any()) }
+        val payload = ObjectMapper().readTree(event.captured.payload)
+        assertThat(payload["change"].asText()).isEqualTo("DEACTIVATED")
+        assertThat(payload["active"].asBoolean()).isFalse()
     }
 
     @Test
@@ -307,7 +378,7 @@ class InterestServiceTest {
         every {
             configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
         } returns Uni.createFrom().nullItem()
-        every { configRepo.save(any()) } returns Uni.createFrom().failure(conflict)
+        every { configRepo.saveWithOutbox(any(), any()) } returns Uni.createFrom().failure(conflict)
         every {
             configRepo.findEffectiveRate(accountId, config.productId, LocalDate.now(clock), config.currency)
         } returns Uni.createFrom().item(config)
@@ -457,6 +528,7 @@ class InterestServiceTest {
     @Test
     fun `capitalizeAll returns 0 and does nothing when no pair is pending`() {
         val toDate = LocalDate.of(2026, 1, 20)
+        every { accrualRepo.findOutstandingCapitalizationClaims() } returns Uni.createFrom().item(emptyList())
         every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
             Uni.createFrom().item(emptyList())
 

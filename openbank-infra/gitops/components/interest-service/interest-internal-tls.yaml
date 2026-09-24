@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for interest-service's mTLS write to ledger-service (8443, client
+# auth REQUIRED) — the ADR-0033 §D capitalization credit leg. Same shape as aml-internal-tls and
+# notification-internal-tls: tls.crt/tls.key identify interest-service, ca.crt trusts ledger-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: interest-internal-tls
+  namespace: interest
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: interest-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: interest-service.interest.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

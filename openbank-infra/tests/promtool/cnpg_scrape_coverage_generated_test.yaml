@@ -90,6 +90,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
@@ -139,6 +141,8 @@ tests:
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
@@ -218,6 +222,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -241,6 +247,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -360,6 +368,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
@@ -409,6 +419,8 @@ tests:
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
@@ -488,6 +500,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -511,6 +525,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -606,6 +622,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
@@ -655,6 +673,8 @@ tests:
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
@@ -734,6 +754,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -757,6 +779,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -864,6 +888,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
@@ -913,6 +939,8 @@ tests:
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
@@ -990,6 +1018,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1013,6 +1043,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -1115,6 +1147,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
@@ -1164,6 +1198,8 @@ tests:
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
@@ -1241,6 +1277,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1264,6 +1302,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"

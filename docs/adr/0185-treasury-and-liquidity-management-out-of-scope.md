@@ -1,10 +1,10 @@
 ---
 date: 2026-07-23
-decision-status: accepted
+decision-status: superseded
 delivery-status: n-a
 authors: [Jiri Raska]
 supersedes: []
-superseded-by: []
+superseded-by: ["0313"]
 delivery-repos: []
 tags: [architecture]
 summary: "Bank treasury and liquidity management (funding, nostro/vostro, intraday liquidity, ALM) are deliberately out of scope; the ledger is the customer-position golden source, not a treasury book, and a real deployment adds treasury externally."

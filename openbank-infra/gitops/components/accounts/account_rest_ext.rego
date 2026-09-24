@@ -108,3 +108,52 @@ prohibited if {
 	}
 }
 
+# #10486 batch 5 — per-service machine identities for the account READS that used to ride the
+# shared openbank-services principal's ROLE_OPERATOR (base operator-read-any). Each caller now
+# mints its bearer from its OWN Keycloak client, whose service account holds realm role ROLE_API
+# only; AccountResource's RBAC already admits ROLE_API on these reads, so the rule for a principal
+# is its WHOLE grant here: the reads its live code path invokes and nothing else. Every other
+# ROLE_API holder is denied (account_rest_ext_test.rego: test_other_role_api_sa_denied_account_reads).
+#   analytics-sink   AccountRegistryClient    GET /accounts/active               account.list
+#   billing-service  AccountRestClient        GET /accounts/active, /accounts/{id} account.list, account.read
+#   interest-service AccountServiceClient     GET /accounts/active, /{id}/balance  account.list, account.read
+#   document-service AccountClient            GET /accounts?partyId=             account.list
+#   lending-service  AccountServiceRestClient GET /accounts?partyId=             account.list
+#   party-service    AccountServiceRestClient GET /accounts?partyId= (GDPR Art. 15) account.list
+# account.list is not narrowable by query parameter at this layer (`/accounts/active` is the whole
+# active book), so each grant is a real PII read and each identity is named individually.
+allowed_reasons contains "service-analytics-sink-account-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-analytics-sink"
+	input.action == "account.list"
+}
+
+allowed_reasons contains "service-billing-account-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-billing"
+	input.action in {"account.list", "account.read"}
+}
+
+allowed_reasons contains "service-interest-account-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-interest"
+	input.action in {"account.list", "account.read"}
+}
+
+allowed_reasons contains "service-document-account-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-document"
+	input.action == "account.list"
+}
+
+allowed_reasons contains "service-lending-account-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-lending"
+	input.action == "account.list"
+}
+
+allowed_reasons contains "service-party-account-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-party"
+	input.action == "account.list"
+}

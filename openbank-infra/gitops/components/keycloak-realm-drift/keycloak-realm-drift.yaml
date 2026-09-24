@@ -280,9 +280,32 @@ spec:
                           sa = get(f"/admin/realms/{realm}/clients/{c['id']}/service-account-user")
                       except Exception:
                           continue
-                      out[sa["username"]] = sorted(r["name"] for r in get(f"/admin/realms/{realm}/users/{sa['id']}/role-mappings/realm"))
+                      # #10486: the FULL mapping (realm + client), in the structured shape the
+                      # checker reads as "client roles captured". Realm-only was why a client
+                      # role on a service account could never be reported.
+                      rm = get(f"/admin/realms/{realm}/users/{sa['id']}/role-mappings")
+                      out[sa["username"]] = {
+                          "realmRoles": sorted(r["name"] for r in rm.get("realmMappings") or []),
+                          "clientRoles": {k: sorted(r["name"] for r in (v.get("mappings") or []))
+                                          for k, v in (rm.get("clientMappings") or {}).items()},
+                      }
                   json.dump(out, __import__("sys").stdout, indent=1, sort_keys=True)
                   CAPTURE
+                    # Default client scopes per client (#10486). principal.id reaches the policy
+                    # from preferred_username, which a client_credentials token carries only via
+                    # the `profile` scope — so a rego-referenced client without it mints nameless
+                    # tokens. Scope NAMES only; no secret-bearing field is read.
+                    REALM="${REALM}" TOKEN="${TOKEN}" KC_URL="${KC_URL}" python3 - <<'SCOPES' > "/work/${REALM}-client-scopes.json"
+                  import json, os, urllib.request
+                  realm, tok, url = os.environ["REALM"], os.environ["TOKEN"], os.environ["KC_URL"]
+                  def get(path):
+                      req = urllib.request.Request(f"{url}{path}", headers={"Authorization": f"Bearer {tok}"})
+                      return json.load(urllib.request.urlopen(req))
+                  builtin = {"account", "account-console", "admin-cli", "broker", "realm-management", "security-admin-console"}
+                  out = {c["clientId"]: sorted(s["name"] for s in get(f"/admin/realms/{realm}/clients/{c['id']}/default-client-scopes"))
+                         for c in json.load(open(f"/work/{realm}-clients.json")) if c.get("clientId") not in builtin}
+                  json.dump(out, __import__("sys").stdout, indent=1, sort_keys=True)
+                  SCOPES
                     python3 -c "import json;print('  %d principal(s) with role mappings' % len(json.load(open('/work/${REALM}-user-roles.json'))))"
                   done
 
@@ -305,6 +328,8 @@ spec:
                     --root /tmp/repo \
                     --live "openbank=/work/openbank-user-roles.json" \
                     --live "openbank-customers=/work/openbank-customers-user-roles.json" \
+                    --live-client-scopes "openbank=/work/openbank-client-scopes.json" \
+                    --live-client-scopes "openbank-customers=/work/openbank-customers-client-scopes.json" \
                     > /work/final-users.json 2> /work/findings-users.txt \
                     || echo "findings" > /work/findings
                   cat /work/findings-users.txt
@@ -366,13 +391,18 @@ spec:
                       "keycloak realm ROLE EXISTENCE + ROLE ASSIGNMENTS, template vs live; "
                       "plus ROLE/CLIENT/USER NAMES, template vs the import artifact (#3246)")
                   report["doesNotVerify"] = (
-                      "client-role assignments; group membership; secret VALUES in the import "
+                      "client-role assignments of HUMAN users (service accounts are checked, "
+                      "#10486); group membership; secret VALUES in the import "
                       "artifact (names only, deliberately — the artifact holds real credentials)")
                   findings = pathlib.Path("/work/findings.txt")
                   report["findings"] = findings.read_text().splitlines() if findings.is_file() else []
                   users_raw = pathlib.Path("/work/final-users.json")
                   raw_u = users_raw.read_text().strip() if users_raw.is_file() else ""
                   report["userRoleParity"] = json.loads(raw_u) if raw_u else {"captureFailed": True}
+                  # #10486: a top-level integer, so a dashboard or a future alert can key on it
+                  # without parsing findings text. Non-zero also fails the Job (::error::).
+                  report["privilegedServiceAccountDriftCount"] = report["userRoleParity"].get(
+                      "privilegedServiceAccountDriftCount")
                   uf = pathlib.Path("/work/findings-users.txt")
                   report["userRoleFindings"] = uf.read_text().splitlines() if uf.is_file() else []
                   imp = pathlib.Path("/work/final-import.json")

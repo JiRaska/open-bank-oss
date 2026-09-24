@@ -55,6 +55,18 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486: the saga journal post/reverse (ledger.create / ledger.reverse) and the cover hold/release (balance.hold / balance.holdRelease) no longer rides the shared openbank-services principal. The
+    # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
+    # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-transaction
+    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
+    # stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-transaction
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
     tls:
       verification: none
 
@@ -231,3 +243,24 @@ authz:
   # runbook is reviewed, not bundled with the wiring itself.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # The cross-currency rate lookup reads fx-service. Production uses a named TLS bucket over
+    # fx-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
+    # aml-service, notification-service and clearing-service. The cert here is the CLIENT identity
+    # (transaction-internal-tls), NOT this service's own 8443 server cert. Local/test fixtures speak
+    # plain HTTP, so this stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      fx-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/fx-tls/tls.crt
+              key: /mnt/fx-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/fx-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      fx-service:
+        tls-configuration-name: fx-authority

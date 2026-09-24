@@ -72,6 +72,15 @@ Symptoms: `DEVICE_ENROLLED` events not reaching `openbank.sca.challenge.event`; 
 ### Push/biometric challenges never complete
 Expected when no device decision was posted — **this is correct fail-closed behaviour** (ADR-0021), not a bug. Verify the enrolled device actually called `POST /challenges/{id}/decision` with a valid signature. A signature mismatch returns `401 InvalidDeviceAssertion`; check the device public key and that the signed payload matches `id|decision|amount|currency|creditorIban|reference`.
 
+### Entity-bound device credentials (#10281 item 1)
+Since this release `POST /parties/{partyId}/devices` answers `422` for a party that is not a natural person (register type other than `INDIVIDUAL`/`SOLE_TRADER`, or unknown) and `503` when party-service cannot answer. Rows enrolled to a company before that still exist and can still decide challenges raised for that company. Purge them as a reviewed change, never ad hoc:
+1. Dry run (read-only): `SCA_DSN=... PARTY_DSN=... python3 openbank-sca-service/scripts/purge_entity_bound_devices.py > inventory.json`. The output carries ids, party type, algorithm and enrolment time only.
+2. Attach `inventory.json` to a change record; a second person confirms each row is an entity-bound credential. Tell the affected people they must enrol their device again under their own profile.
+3. Apply with the reviewed size: `... --apply --expect-count <N> --archive purged.json`. The script refuses if the inventory changed since review, archives the rows first, and deletes them in one statement.
+4. Keep `purged.json` with the change record. Re-run the dry run: it must report `count: 0`.
+
+Signing payload for an `APPROVAL` challenge is its own canonical form: `id|decision|APPROVAL|approvalRequestId|payloadSha256`, plus `|amount|currency|creditorIban` for a payment (amount plain decimal with two fractional digits, currency upper-case, IBAN upper-case without spaces, hash lower-case).
+
 ### Redis unavailable
 OTP store, idempotency, and decision store fail. Challenges cannot be created/verified reliably; treat as a hard dependency outage and follow the platform Redis runbook. No durable data is lost (Postgres holds the challenge record).
 

@@ -331,6 +331,16 @@ channels:
       FxConversionExecuted:
         $ref: '#/components/messages/FxConversionExecuted'
 
+  fx-fixings:
+    address: openbank.fx.fixing.published
+    description: |
+      ČNB fixings, one event per ingestion run that stored new rates, committed with them
+      (ADR-0314 D5). `ce-type` = `fx.fixing.published.v1`. The authoritative contract is
+      `openbank-contracts/openbank-fx-service/asyncapi.yaml`.
+    messages:
+      FxFixingPublished:
+        $ref: '#/components/messages/FxFixingPublished'
+
   clearing-events:
     address: openbank.clearing.batch.event
     description: |
@@ -806,6 +816,14 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/FxConversionExecutedPayload'
+
+    FxFixingPublished:
+      name: FxFixingPublished
+      description: '`ce-type` = `fx.fixing.published.v1`. Full schema in the fx-service contract.'
+      contentType: application/json
+      payload:
+        type: object
+        required: [source, fixingDate, quoteCurrency, validFrom, validTo, rates, occurredAt]
 
     ClearingBatchSettled:
       name: ClearingBatchSettled

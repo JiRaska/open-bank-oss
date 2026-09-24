@@ -11,8 +11,16 @@ export interface CaseStatusPresentation {
 
 // A case status describes only the collaboration thread. In particular, it does
 // not establish delivery of a proposal or a human decision outside the thread.
-export function caseStatusPresentation(status: CaseStatus, language: 'cs' | 'en'): CaseStatusPresentation {
+export function caseStatusPresentation(status: CaseStatus, language: 'cs' | 'en', halted = false): CaseStatusPresentation {
   const cs = language === 'cs'
+  if (halted) {
+    return {
+      label: cs ? 'Zastaveno kill switchem' : 'Halted by kill switch',
+      detail: cs
+        ? 'Běh byl ukončen governance zásahem; nejde o verdikt swarmu.'
+        : 'The run ended through a governance intervention; this is not a swarm verdict.',
+    }
+  }
   switch (status) {
     case 'OPEN':
       return cs

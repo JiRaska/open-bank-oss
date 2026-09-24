@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-instant
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a232482c65fc8ec7"
+    openbank.tech/policy-checksum: "a43932028a064316"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -629,6 +629,21 @@ data:
     # an inbound return-equivalent flow) is wired up, add a narrowly-scoped SERVICE rule
     # mirroring gen-sepa-payment-opa-bundle.sh's service-sepa-payment-m2m pattern — scoped to
     # exactly the verified actions, never every sctInstPayment.* action.
+
+    # #10486 batch 7 — the first verified M2M caller, so the rule the note above asks for. agent-service's
+    # sepa_instant_list / sepa_instant_get / sepa_instant_list_by_debtor tools (SepaInstantServiceClient)
+    # used to reach these reads on the shared openbank-services principal's ROLE_OPERATOR (base
+    # operator-read-any). They now present service-account-openbank-agent (ROLE_API only), and this rule
+    # is that principal's whole grant here: the two read verbs, never create or recall. The tools map to
+    # query.payments.readonly, which only the compliance-officer charter holds; the agent gate refuses every
+    # other agent before the call is made. SctInstResource.getPayment admits ROLE_API at the RBAC layer for
+    # this caller (list/listByDebtor already did); OPA, enforced here, denies every other ROLE_API holder
+    # (sepa_instant_rest_ext_test.rego).
+    allowed_reasons contains "service-agent-sct-inst-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-agent"
+    	input.action in {"sctInstPayment.list", "sctInstPayment.read"}
+    }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.

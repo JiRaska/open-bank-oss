@@ -1,0 +1,36 @@
+# Risk domain: risk-engine + its single-owner CNPG Postgres + OIDC ExternalSecret + Kafka mTLS
+# identity + OPA bundle. risk-engine is the read-only balance-sheet risk engine (ADR-0313,
+# ADR-0314): it pulls the ledger trial balance and sub-ledger balances, stores a tied-out
+# contract-level snapshot and consumes FX fixings. Not money-path: it never writes the ledger.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: risk
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/risk
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: risk
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      # The OPA bundle ConfigMap approaches the ceiling client-side apply can carry (256 KB
+      # last-applied annotation). Server-side apply does not write that annotation at all.
+      # Gate: opa-bundle-apply-size (.github/scripts/check-opa-bundle-apply-size.py).
+      - ServerSideApply=true

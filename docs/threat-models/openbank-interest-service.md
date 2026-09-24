@@ -64,6 +64,23 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-09-24** — `interest.rate.changed.v1` and index terms (ADR-0314 D5, #10618). Every rate-config write (operator create, operator deactivate, catalog profile applied, catalog supersession cutting `effectiveTo`) now writes an outbox row in the SAME transaction, on the existing `openbank.interest.accrual.event` topic that audit-service already reads: no new topic, ACL, caller, endpoint or privilege. `InterestRateConfig` gains optional `rateIndex` (closed enum) and `spread`, accepted on the existing `POST /rates` under the existing `interest.create` authz; V17 adds the columns plus a CHECK that they appear only as a pair on VARIABLE rates, and the service rejects the same shapes as 400 first. **Tampering:** index terms do not change how accrual computes today — `annualRate` stays the rate applied — so a wrong index can mislead a downstream repricer but cannot move money here. **Info disclosure:** product rate terms, not personal data; the payload's `accountId` is set only for a per-account override and is an opaque id. **Repudiation:** outbox `event_id` plus the audit trail. Rollback: revert; V17 is additive, and dropping both columns is the down-migration.
+- **2026-09-21** — Ledger capitalization call: late booking and refusal handling (#10404). A
+  capitalization completed after its period end (the recovery sweep) sent `entryDate = periodTo`
+  into an accounting day the ledger's day lock (ADR-0207 D3, enforce) had closed, so the ledger
+  answered 409 on every attempt. `entryDate` is now `max(periodTo, today in Europe/Prague)` while
+  `valueDate` stays `periodTo`. That follows the ledger's own remedy (book late activity forward)
+  and does not get around the lock: the ledger still decides whether the day is open. The
+  idempotency key and `transactionId` are unchanged and independent of either date, so a replay
+  still returns the original journal and never books a second one. `LedgerCallGuard` no longer
+  retries a deterministic 4xx (except 408/429) and no longer counts it toward the circuit breaker
+  (`LedgerPostingRejectedException`, `abortOn` + `skipOn`). Before this, a single refused request
+  held the breaker open and blocked every other capitalization's post, an availability risk to
+  the money path. A refused claim is not released. It stays `CAPITALIZING` and is counted on
+  `openbank_interest_capitalization_claims_recovery_rejected_total`. There is no new caller,
+  endpoint, privilege or data flow, and the service still talks only to the same ledger client
+  under the same M2M identity.
+
 - **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0291, burn-down #8351).
   `accrue` and `rates` gained check-first replay on their natural keys (accrual: V12's
   `(account, date, product, currency)`; rate config: `(product, account, currency,
@@ -169,3 +186,101 @@ money-path service, not adjacent.
   downstream effect is that withholding tax is now actually assembled and remitted (the §38d statutory
   filing owner is decided separately in ADR-0180). Rollback: revert the commit (the scheduler stops).
 - **2026-07-18** — Initial lightweight threat model (ADR-0030 D2), added alongside `openbank-interest-service`'s addition to `money_path_services` (#1478).
+
+- **2026-09-20** — **New outbound edge: interest-service → ledger-service over ledger's new
+  private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; client cert
+  `interest-internal-tls`, `%prod` TLS bucket `ledger-authority`). The ADR-0033 §D capitalization
+  credit leg had no `LEDGER_SERVICE_URL` in this service's gitops manifest — the `application.yaml`
+  comment already warned that a deployment MUST set it — so `LedgerRestClient` dialled the fallback
+  `http://localhost:8101` inside its own pod and every capitalization journal (interest expense /
+  deposit-control pocket / withholding-tax payable) was a connection refused. The action
+  (`ledger.create`) and the identity (the shared `service-account-openbank-services` bearer) are
+  unchanged — `ledger_rest_ext.rego`'s `service-ledger-post` already admits them, so no policy
+  change. **Risk class:** integrity/availability of interest capitalization posting (a money-path
+  write that has never landed now lands); the new material is a private-CA client key mounted
+  read-only from a cert-manager Secret, scoped to this one upstream. No inbound surface, no new
+  role, no new data class. The separate `TRANSACTION_SERVICE_URL` gap (the withholding-tax
+  remittance leg) is NOT addressed here — it is its own change against transaction-service's own
+  listener. Rollback: drop the env var and the `%prod` bucket.
+
+- **2026-09-20** — **New outbound edge: interest-service → transaction-service over
+  transaction-service's new private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; the
+  existing `interest-internal-tls` client certificate, mounted a second time at
+  `/mnt/transaction-tls`, `%prod` TLS bucket `transaction-authority`). One client identity and one
+  private CA serve both upstreams; the separate bucket and mount path keep each one naming the
+  service it authenticates to. This closes the transport half of the #999 withholding-tax
+  remittance leg, whose `TransactionServiceClient` previously dialled `http://localhost:8102`
+  inside this pod — `POST /api/v1/transactions` was a connection refused, retried three times and
+  dead-lettered, so a due tax remittance never moved money.
+  **It does not close the authorization half, and OPA is not the gate that decides it.**
+  `POST /api/v1/transactions` carries `@RolesAllowed(Roles.OPERATOR)` as well as
+  `@Authorize(transaction.create)`, and RBAC runs first — `AuthorizeInterceptor` is a CDI
+  interceptor at `@Priority(PLATFORM_AFTER + 100)` while Quarkus's `@RolesAllowed` check runs at
+  platform-before priority — so no rego rule can admit a principal RBAC has already rejected. At
+  the inner layer, measured against the committed `transaction-opa-bundle`, the shared
+  `service-account-openbank-services` is allowed `transaction.create` with `ROLE_OPERATOR` and
+  denied with `ROLE_API`; the deployed realm template grants it `ROLE_API` only, but the
+  `keycloak-realm-drift` job's parity finding covers realm roles and explicitly not client-role
+  assignments, so the live role set is unresolved. Tracked in #10404. See the matching entry in
+  `docs/threat-models/openbank-transaction-service.md`.
+  **Risk class:** transport only — no new action, principal or role for this service; the new
+  material is the same private-CA client key already mounted for ledger-service, scoped read-only.
+  Rollback: drop `TRANSACTION_SERVICE_URL`, the second mount and the `transaction-authority` bucket.
+- **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `CatalogInterestProfileSynchronizer`
+  now reaches `product-catalog.accounts.svc:8443` with the client certificate `interest-internal-tls` (the same client
+  certificate #10397 introduced, mounted a second time at `/mnt/catalog-tls`)
+  (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in
+  gitops and the client dialled `localhost:8104` inside this pod, so the scheduled catalog snapshot never reached the catalog (#10383).
+  The calls are reads of the `/api/v2` catalog surface only; no mutation, no new principal, no money
+  movement. **Risk class:** confidentiality and integrity of product/offering data in transit, now
+  protected by mutual TLS rather than plaintext. Rollback: drop `PRODUCT_CATALOG_URL` and the
+  `catalog-tls` volume.
+
+- **2026-09-20** — **New scheduled job: capitalization-claim recovery** (`recoverStrandedClaims`,
+  every 15 min, `openbank.interest.claim-recovery-interval`). It completes capitalization claims a
+  previous attempt stranded, at **their own frozen period**, and starts no new capitalization.
+  **The defect it closes.** A claim is committed `ACCRUING → CAPITALIZING` in its own transaction
+  before the ledger post; if the post fails, the set stays claimed. `capitalize` documents the
+  recovery — retry at the claimed period, the ledger collapses the replay — but the only automatic
+  caller, `capitalizeAll`, always passes *today*, so a claim frozen for an earlier period took the
+  `inFlightClaimFailure` branch on every tick, forever. Sandbox had 124 accruals across 7 pairs
+  wedged since 2026-08-01, each tick refusing all 7 and logging `capitalized 0 pair(s)` — which
+  reads as "no work to do" (#10404). Interest that had been claimed for credit was never credited.
+  **Why completing and not releasing.** Releasing a stale claim back to `ACCRUING` and re-claiming
+  under a later period is the obvious "reclaim" shape and is a double-credit: the ledger idempotency
+  key is `(account, product, periodTo)`, so a later period mints a new key and books a SECOND
+  journal for accruals the first attempt may already have credited. Recovery therefore replays the
+  original period, which makes it idempotent by construction — same claimed set, same frozen tax
+  profile, same derived gross/net/tax, same key.
+  **Risk class:** integrity of interest credit — this *restores* money movement that was stuck
+  mid-credit; it does not create a new payment path, principal, role, endpoint or external edge. The
+  ledger call is the one `capitalize` already made, under the identity it already used. The new
+  exposure is timing: journals that would have waited for the monthly run are now posted within
+  15 minutes of a stranded claim being detected. Bounded by construction — the sweep can only touch
+  sets a previous attempt already claimed.
+  **Observability** (previously log-only, which is why this hid for seven weeks):
+  `openbank_interest_capitalization_claims_recovered_total`,
+  `openbank_interest_capitalization_claims_recovery_failed_total`, and the gauge
+  `openbank_interest_capitalization_claims_outstanding`. Alert on the gauge sustained above zero
+  across more than one sweep — recovery is meant to drive it to zero, so a persistent value means
+  recovery is failing, not merely that a claim exists. A failed recovery logs at ERROR.
+  Rollback: remove `claim-recovery-interval` handling / revert the commit; claims then simply
+  remain stranded as before, which is the pre-change behaviour and loses nothing already recovered.
+- **2026-09-21** — **Own machine identity for the ledger post (#10486 step 1).** `LedgerRestClient`
+  now mints its bearer from the NAMED oidc-client `ledger` (`@OidcClientFilter("ledger")`),
+  Keycloak client `openbank-interest`, whose service account holds realm role `ROLE_API` only.
+  ledger-service grants that principal exactly `ledger.create` by identity
+  (`service-interest-ledger-post`); `ledger.reverse`, `transaction.create` and every other action
+  are denied to it (measured with `opa eval` on the ledger and transaction bundles). The other
+  rest-clients (transaction remittance, account directory, product-catalog) stay on the shared
+  `openbank-services` client until their own edges are migrated — asserted by
+  `LedgerOidcClientIdentityWiringTest`. **STRIDE-S:** a new credential. Its secret is created by
+  Keycloak in the live realm, stored by the owner at Vault KV `keycloak/interest-service`
+  (`client_secret`), projected by the `interest-service-ledger-oidc` ExternalSecret and never
+  seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod
+  loudly rather than posting with an empty credential. Compromise of this secret reaches
+  `ledger.create` only, against the shared secret's 54 money-path writes. **Repudiation improves:**
+  ledger's OPA decision reason and principal now name interest-service instead of "some caller on
+  the shared client". Rollback: revert the commit (the ledger client returns to the shared token).
+- **2026-09-21** — **Remittance leg joins the existing own identity (#10486 batch 2).** `TransactionServiceClient` (the withholding-tax remittance debit, #999) now selects the NAMED oidc-client `ledger` — the same Keycloak client `openbank-interest` (`ROLE_API` only) the capitalization journal already uses — instead of the shared default. transaction-service grants that principal exactly `transaction.create` (`service-interest-transaction-create`). **No new credential, secret, ExternalSecret or env var:** the existing `OIDC_LEDGER_CLIENT_SECRET` is reused, so nothing needs provisioning for this service. The blast radius of the `openbank-interest` secret grows from `ledger.create` to `ledger.create` + `transaction.create`, still far short of the shared secret's 54 money-path writes. `AccountServiceClient` and `ProductCatalogClient` stay on the shared client (asserted by `LedgerOidcClientIdentityWiringTest`). Rollback: revert the commit.
+- **2026-09-21** — **Accrual-run account reads move to the service's own machine identity (#10486 batch 5).** `AccountServiceClient` (`GET /api/v1/accounts/active`, `GET /api/v1/accounts/{id}/balance`) now mints its bearer from the NAMED oidc-client `ledger`, Keycloak client `openbank-interest` (`ROLE_API` only), which its ledger and remittance legs already use. account-service grants it `account.list` and `account.read` (`service-interest-account-read`). **STRIDE-S/E:** no new credential; the existing secret now also reaches those two reads. **Repudiation improves:** the reads name this service. Rollback: revert the commit.

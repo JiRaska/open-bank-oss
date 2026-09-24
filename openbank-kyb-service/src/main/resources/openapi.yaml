@@ -5,7 +5,8 @@ info:
   # search (#9707); this is the next free minor as of live main.
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
-  version: 1.6.0
+  # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
+  version: 1.7.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -842,6 +843,20 @@ components:
         the register's own vocabulary verbatim.
       properties:
         fullName: { type: string }
+        sourceRecordRef:
+          type: [string, 'null']
+          description: >-
+            Companies House PSC record path scoped to this company. This identifies the source
+            observation, not the natural or legal person across companies. Null when absent or invalid.
+        registrationNumber:
+          type: [string, 'null']
+          description: >-
+            Corporate PSC registration number as filed by Companies House. Together with its
+            jurisdiction this is candidate identity evidence, not an automatic entity match.
+        countryRegistered:
+          type: [string, 'null']
+          description: >-
+            Filed jurisdiction of a corporate PSC. Null when absent, invalid or not corporate.
         dateOfBirth:
           type: string
           format: date

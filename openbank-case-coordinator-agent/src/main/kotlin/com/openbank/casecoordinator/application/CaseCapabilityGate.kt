@@ -12,9 +12,9 @@ import jakarta.enterprise.context.ApplicationScoped
  * In-process case capability gate (ADR-0244 D2/D3/D9), deny-by-default. Mirrors the charter's
  * `case_capabilities` in `agents.yaml`: only `case-coordinator` holds `case.open` /
  * `case.coordinate` / `case.synthesize` / `case.preempt`; swarm participants hold join/contribute
- * by being on the chartered roster. This is the fail-safe in-process layer (same role as
- * AgentPolicyGate in agent-service); the OPA bundle adapter that evaluates the same decisions
- * against `case.capabilities` input is Phase 4 scope.
+ * by being on the chartered roster. This remains the fail-safe in-process layer (same role as
+ * AgentPolicyGate in agent-service); ADR-0271 additionally requires the OPA decision, so neither
+ * the local roster nor the rules matrix can grant collaboration alone.
  */
 @ApplicationScoped
 class CaseCapabilityGate(private val config: CaseCoordinatorConfig) {
