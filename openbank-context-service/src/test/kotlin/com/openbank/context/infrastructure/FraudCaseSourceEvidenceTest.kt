@@ -35,6 +35,11 @@ class FraudCaseSourceEvidenceTest {
             .isInstanceOf(FraudCaseSourceUnavailable::class.java)
 
         every { client.evidence(id, bearer, "FRAUD_INVESTIGATION") } returns
+            Uni.createFrom().item(snapshot(id).copy(closedAt = Instant.parse("2026-09-18T00:00:00Z")))
+        assertThatThrownBy { runBlocking { source.read(id, bearer) } }
+            .isInstanceOf(FraudCaseSourceUnavailable::class.java)
+
+        every { client.evidence(id, bearer, "FRAUD_INVESTIGATION") } returns
             Uni.createFrom().item(snapshot(id).copy(status = "CLOSED_NO_FINDING"))
         assertThatThrownBy { runBlocking { source.read(id, bearer) } }
             .isInstanceOf(FraudCaseSourceUnavailable::class.java)

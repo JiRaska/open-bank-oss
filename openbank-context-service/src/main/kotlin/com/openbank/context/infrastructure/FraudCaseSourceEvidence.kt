@@ -87,7 +87,7 @@ class FraudCaseSourceEvidence(
             } catch (exception: Exception) {
                 throw FraudCaseSourceUnavailable(exception)
             }
-            val rightCaseAndState = snapshot?.caseId == caseId && snapshot.status == "OPEN"
+            val rightCaseAndState = snapshot?.caseId == caseId && snapshot.status == "OPEN" && snapshot.closedAt == null
             val complete = snapshot?.scoreId != null &&
                 snapshot.accountId != null &&
                 snapshot.revision != null &&
