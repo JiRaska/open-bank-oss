@@ -4,9 +4,9 @@
 package com.openbank.interest.domain.event
 
 import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.time.Instant
-import java.util.UUID
 
 /**
  * `interest.rate.changed.v1` (ADR-0314 D5): a rate configuration was created, deactivated, or had
@@ -36,7 +36,7 @@ object InterestRateChanged {
     }
 
     fun outboxMessage(config: InterestRateConfig, change: Change, occurredAt: Instant): OutboxMessage = OutboxMessage(
-        eventId = UUID.randomUUID(),
+        eventId = Ids.newId(),
         aggregateId = config.id,
         eventType = EVENT_TYPE,
         payload = payload(config, change, occurredAt),
