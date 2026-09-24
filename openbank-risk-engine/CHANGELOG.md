@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.3.0...risk-engine-v0.4.0) (2026-09-24)
+
+
+### Features
+
+* **risk-engine:** loans as contract-level instruments, with a read-only lending loan book (ADR-0314 D4) ([#10729](https://github.com/JiRaska/open-bank-oss/issues/10729)) ([5cee641](https://github.com/JiRaska/open-bank-oss/commit/5cee641635fcbd0d3cd1a8bada5021bdbcd60859))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.2.0...risk-engine-v0.3.0) (2026-09-24)
 
 
