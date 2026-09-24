@@ -60,7 +60,10 @@ quarkus:
 
   rest-client:
     ledger-service:
-      url: ${LEDGER_SERVICE_URL:http://ledger-service.ledger.svc:8101}
+      # Local default only. The in-cluster URL (ledger's mTLS listener, 8443) is declared in the
+      # gitops Deployment env, where gen-network-policies.py can see the edge; a cluster URL
+      # baked in here would be an edge that generator cannot see (network-policy-code-edges).
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
 
   smallrye-reactive-messaging:
     kafka:
