@@ -4,6 +4,9 @@
 
 package com.openbank.risk.application.port.out
 
+import com.openbank.risk.domain.curve.CurveIndex
+import com.openbank.risk.domain.curve.CurveSet
+import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.model.LedgerInputs
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.SnapshotRun
@@ -56,3 +59,12 @@ class SnapshotNotFoundException(id: UUID) : RuntimeException("snapshot run $id n
 /** An UNTIED run is stored and flagged, never rendered (ADR-0314 D3). */
 class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismatch>) :
     RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")
+
+interface CurveSetRepository {
+    /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
+    suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
+
+    suspend fun findById(id: UUID): CurveSet?
+}
+
+class CurveSetNotFoundException(id: UUID) : RuntimeException("curve set $id not found")

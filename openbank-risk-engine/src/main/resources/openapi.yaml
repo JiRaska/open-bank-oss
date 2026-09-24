@@ -2,7 +2,8 @@ openapi: 3.1.0
 info:
   title: OpenBank Risk Engine API
   # 1.0.0: first contract (ADR-0314 phase 0, issue #10618).
-  version: 1.0.0
+  # 1.1.0: curve sets and snapshot cash flows (ADR-0313 D4, ADR-0314 D6) — additive.
+  version: 1.1.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -12,6 +13,12 @@ info:
 
     Positions carry the trial-balance sign convention (`debit − credit`). Every run states its
     `provenance` — `synthetic` or `production` (ADR-0313 D13).
+
+    Curve sets are uploaded by operators as simple money-market quotes (tenors up to 1Y) and
+    bootstrapped into continuously-compounded zero curves (ACT/365F, linear on zero rates, flat
+    extrapolation). Cash flows are derived per request from a TIED_OUT run, a curve set and a
+    named, versioned behavioural model, and are never stored (ADR-0314 D6). Flow amounts are
+    signed from the bank's side: inflow positive, outflow negative.
 servers:
   - url: http://localhost:8159
 tags:
@@ -103,6 +110,98 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/cash-flows:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotCashFlows
+      summary: Bucketed cash flows and PV of a TIED_OUT run under a curve set
+      description: |
+        Phase 0 expands every SUB_LEDGER (customer deposit) position as a non-maturity deposit
+        under the behavioural model named in the response. GL_ACCOUNT positions are counted in
+        `notExpanded`, not dropped; loans are not in the snapshot yet. A currency with no
+        discounting curve in the set (CZK → CZEONIA, EUR → ESTR) is listed in `unpriced` with a
+        null `presentValue`, never valued at zero. The curve set must be as of the run's date.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: curveSetId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The run's derived cash flows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CashFlows'
+        '400':
+          description: Missing or malformed `curveSetId`, or a curve set for another as-of date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run or curve set
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/curve-sets:
+    post:
+      tags: [Risk]
+      operationId: createCurveSet
+      summary: Upload money-market quotes per index; they are bootstrapped and stored
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCurveSetRequest'
+      responses:
+        '201':
+          description: Curve set stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurveSet'
+        '400':
+          description: Missing or invalid field, unknown index, tenor beyond 1Y or duplicate tenor
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+
+  /api/v1/risk/curve-sets/{id}:
+    get:
+      tags: [Risk]
+      operationId: getCurveSet
+      summary: A stored curve set with its pillars and discount factors
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The curve set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurveSet'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such curve set
 
 components:
   securitySchemes:
@@ -226,3 +325,184 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Mismatch'
+
+    CurveIndex:
+      type: string
+      enum: [CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3M]
+
+    Quote:
+      type: object
+      required: [tenor, rate]
+      properties:
+        tenor:
+          type: string
+          description: ON, or <n>D (n ≤ 7), <n>W, <n>M (n ≤ 12), 1Y.
+          examples: [ON, 1W, 3M, 12M]
+        rate:
+          type: number
+          description: Simple money-market rate as a fraction (0.035 = 3.5 %).
+
+    CreateCurveSetRequest:
+      type: object
+      required: [asOf, provenance, source, curves]
+      properties:
+        asOf:
+          type: string
+          format: date
+        provenance:
+          type: string
+          enum: [synthetic, production]
+        source:
+          type: string
+          maxLength: 256
+        curves:
+          type: object
+          description: Quotes per curve index; keys are CurveIndex values.
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/Quote'
+
+    Pillar:
+      type: object
+      required: [date, zeroRate, discountFactor]
+      properties:
+        date:
+          type: string
+          format: date
+        zeroRate:
+          type: number
+          description: Continuously-compounded zero rate, ACT/365F.
+        discountFactor:
+          type: number
+
+    Curve:
+      type: object
+      required: [index, currency, pillars]
+      properties:
+        index:
+          $ref: '#/components/schemas/CurveIndex'
+        currency:
+          type: string
+        pillars:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pillar'
+
+    CurveSet:
+      type: object
+      required: [id, asOf, provenance, source, recordedAt, curves]
+      properties:
+        id:
+          type: string
+          format: uuid
+        asOf:
+          type: string
+          format: date
+        provenance:
+          type: string
+          enum: [synthetic, production]
+        source:
+          type: string
+        recordedAt:
+          type: string
+          format: date-time
+        curves:
+          type: array
+          items:
+            $ref: '#/components/schemas/Curve'
+
+    BehaviouralModel:
+      type: object
+      required: [id, version, coreRatio, coreRunoffYears, annualDepositRate]
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        coreRatio:
+          type: number
+        coreRunoffYears:
+          type: integer
+        annualDepositRate:
+          type: number
+
+    Bucket:
+      type: object
+      required: [bucket, amount]
+      properties:
+        bucket:
+          type: string
+          enum: [overnight, <1M, 1-3M, 3-6M, 6-12M, 1-2Y, 2-3Y, 3-5Y, 5-10Y, '>10Y']
+        amount:
+          type: number
+          description: Sum of flows in the bucket, bank-signed.
+
+    CurrencyCashFlows:
+      type: object
+      required: [currency, positions, priced, buckets, total]
+      properties:
+        currency:
+          type: string
+        discountIndex:
+          type: [string, 'null']
+        positions:
+          type: integer
+        priced:
+          type: boolean
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Bucket'
+        total:
+          type: number
+        presentValue:
+          type: [number, 'null']
+          description: Null when the curve set has no discounting curve for the currency.
+
+    CashFlows:
+      type: object
+      required:
+        - runId
+        - asOf
+        - provenance
+        - curveSetId
+        - curveSetProvenance
+        - model
+        - expandedPositions
+        - notExpanded
+        - notExpandedReason
+        - currencies
+        - unpriced
+      properties:
+        runId:
+          type: string
+          format: uuid
+        asOf:
+          type: string
+          format: date
+        provenance:
+          type: string
+          enum: [synthetic, production]
+        curveSetId:
+          type: string
+          format: uuid
+        curveSetProvenance:
+          type: string
+          enum: [synthetic, production]
+        model:
+          $ref: '#/components/schemas/BehaviouralModel'
+        expandedPositions:
+          type: integer
+        notExpanded:
+          type: integer
+        notExpandedReason:
+          type: string
+        currencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyCashFlows'
+        unpriced:
+          type: array
+          items:
+            type: string

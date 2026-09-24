@@ -7,6 +7,12 @@
 #   risk.snapshot.read    — GET  /snapshots/{id}, GET /snapshots/{id}/positions
 #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
 #   risk.snapshot.create  — POST /snapshots
+#   risk.curve-set.read   — GET  /curve-sets/{id}, and cash flows ride on risk.snapshot.read
+#                           (both granted by base rest.rego `operator-read-any`)
+#   risk.curve-set.create — POST /curve-sets: the market data every PV and projection is computed
+#                           from. Same rule as a snapshot: real staff only, never the shared
+#                           service-account, because a curve set is an INPUT to risk figures and
+#                           who supplied it must be a person.
 #
 # WHY NOT `rules.yaml: authz.role_action_matrix`. A line there is a grant to a MACHINE that no
 # policy can veto: the Keycloak service-accounts are classified HUMAN and hold ROLE_OPERATOR in at
@@ -27,4 +33,12 @@ allowed_reasons contains "operator-risk-snapshot-create" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "risk.snapshot.create"
+}
+
+allowed_reasons contains "operator-risk-curve-set-create" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "risk.curve-set.create"
 }
