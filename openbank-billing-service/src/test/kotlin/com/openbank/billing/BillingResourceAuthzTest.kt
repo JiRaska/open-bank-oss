@@ -27,6 +27,35 @@ import org.junit.jupiter.api.Test
 class BillingResourceAuthzTest {
 
     @Test
+    fun `unauthenticated approval queue read is rejected`() {
+        Given { this } When {
+            get("/api/v1/fees/approvals")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-billing", roles = ["ROLE_API"])
+    fun `service account cannot read the human approval queue`() {
+        Given { this } When {
+            get("/api/v1/fees/approvals")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "operator.approvals", roles = ["ROLE_OPERATOR"])
+    fun `human operator can read the approval queue`() {
+        Given { this } When {
+            get("/api/v1/fees/approvals")
+        } Then {
+            statusCode(200)
+        }
+    }
+
+    @Test
     fun `unauthenticated request to assess is rejected before authorization ever runs`() {
         Given { this } When {
             post("/api/v1/fees/assess?cycleId=c1&accountId=acc1&currency=CZK")
