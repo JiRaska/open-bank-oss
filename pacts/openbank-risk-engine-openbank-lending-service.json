@@ -4,6 +4,26 @@
   },
   "interactions": [
     {
+      "description": "GET the loan book with no identity is 401",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/lending/loan-book",
+        "query": {
+          "asOf": [
+            "2020-06-30"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "GET the loan book as of a date",
       "providerStates": [
         {

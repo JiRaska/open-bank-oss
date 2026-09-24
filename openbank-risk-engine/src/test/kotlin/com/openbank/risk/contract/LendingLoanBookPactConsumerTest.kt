@@ -101,6 +101,29 @@ class LendingLoanBookPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The negative case (ADR-0279 #3): without a bearer token lending must answer 401. A contract
+     * that only covers success stays green when the provider stops enforcing authz — and this read
+     * returns the whole loan book.
+     */
+    @Pact(consumer = "openbank-risk-engine", provider = "openbank-lending-service")
+    fun loanBookUnauthorizedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_IDENTITY)
+        .uponReceiving("GET the loan book with no identity is 401")
+        .path("/api/v1/lending/loan-book")
+        .query("asOf=2020-06-30")
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "loanBookUnauthorizedPact")
+    fun `the loan book is refused 401 to a caller with no identity`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).queryParam("asOf", "2020-06-30").get("/api/v1/lending/loan-book")
+            .then().statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "loanBookPact")
     fun `the engine parses lending's loan book into loan instruments`(mockServer: MockServer) {
@@ -125,5 +148,10 @@ class LendingLoanBookPactConsumerTest {
             contract.copy(outstandingPrincipal = contract.remainingInstallments.sumOf { it.principal }),
         )
         assertThat(instrument.kind).isEqualTo(InstrumentKind.AMORTISING_LOAN)
+    }
+
+    private companion object {
+        /** Must equal lending's `LoanBookPactState.NO_IDENTITY` — the provider keys on it. */
+        const val NO_IDENTITY = "no valid identity is presented"
     }
 }

@@ -3,7 +3,8 @@ info:
   title: OpenBank Risk Engine API
   # 1.0.0: first contract (ADR-0314 phase 0, issue #10618).
   # 1.1.0: curve sets and snapshot cash flows (ADR-0313 D4, ADR-0314 D6) — additive.
-  # 1.2.0: loans as contract-level instruments (ADR-0314 D4) — LOAN position kind, instrumentId,
+  # 1.2.0: loans as contract-level instruments (ADR-0314 D4) — LOAN position kind (Position.kind is
+  #        now declared x-extensible-enum: kinds grow with each contract source), instrumentId,
   #        GET .../instruments; cash flows now expand loans. Additive.
   version: 1.2.0
   description: |
@@ -316,7 +317,13 @@ components:
       properties:
         kind:
           type: string
-          enum: [SUB_LEDGER, GL_ACCOUNT, LOAN]
+          # x-extensible-enum, not enum: the position kinds GROW as ADR-0314 D4 brings contract
+          # sources in (LOAN now, treasury kinds with ADR-0315). A client must tolerate an unknown
+          # kind; declaring the set closed would make every new source a URL-major break.
+          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN]
+          description: >-
+            SUB_LEDGER (a customer balance on deposit control), GL_ACCOUNT (a GL account with no finer
+            breakdown) or LOAN (a loan from lending's loan book, ADR-0314 D4). The set grows.
         glAccountCode:
           type: [string, 'null']
         glAccountType:

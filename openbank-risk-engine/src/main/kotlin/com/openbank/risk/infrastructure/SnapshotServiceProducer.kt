@@ -34,14 +34,13 @@ class SnapshotServiceProducer {
     lateinit var provenance: String
 
     /**
-     * ADR-0314 D4: read lending's loan book into every snapshot. Off means Loans Receivable stays a
-     * GL-level position (the pre-D4 behaviour) — the switch exists because the deployed edge to
-     * lending needs an mTLS listener lending does not serve yet, and a snapshot that fails on
-     * every call is worse than one that says, by its positions, that loans were not read.
+     * `lendingEnabled` (`openbank.risk.lending.enabled`, ADR-0314 D4): read lending's loan book into
+     * every snapshot. Off means Loans Receivable stays a GL-level position (the pre-D4 behaviour) —
+     * the switch exists because the deployed edge to lending needs an mTLS listener lending does
+     * not serve yet, and a snapshot that fails on every call is worse than one that says, by its
+     * positions, that loans were not read. A producer-method parameter, not a field with a Kotlin
+     * default, so the configured value is what arrives (configproperty-kotlin-defaults).
      */
-    @ConfigProperty(name = "openbank.risk.lending.enabled", defaultValue = "true")
-    var lendingEnabled: Boolean = true
-
     @Produces
     @ApplicationScoped
     fun snapshotUseCase(
@@ -49,6 +48,7 @@ class SnapshotServiceProducer {
         lending: LendingPort,
         repository: SnapshotRepository,
         clock: Clock,
+        @ConfigProperty(name = "openbank.risk.lending.enabled", defaultValue = "true") lendingEnabled: Boolean,
     ): SnapshotUseCase =
         SnapshotService(ledger, repository, clock, Provenance.parse(provenance), lending.takeIf { lendingEnabled })
 

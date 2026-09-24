@@ -23,5 +23,11 @@ class FakeLendingPort : LendingPort {
     @Volatile
     var loans: List<LoanContract> = emptyList()
 
-    override suspend fun readLoanBook(asOf: LocalDate): List<LoanContract> = loans
+    /** How often the snapshot actually asked — lets a test prove the switched-off read is never made. */
+    val reads = java.util.concurrent.atomic.AtomicInteger()
+
+    override suspend fun readLoanBook(asOf: LocalDate): List<LoanContract> {
+        reads.incrementAndGet()
+        return loans
+    }
 }
