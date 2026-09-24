@@ -70,6 +70,11 @@ export function CustomerContextGraph({ evidence, partyName }: {
   )
   const visible = filtered.slice(0, MAX_VISIBLE)
   const selected = graph.nodes.find(node => node.id === selectedId) ?? null
+  const visibleIds = new Set(visible.map(node => node.id))
+  const visibleEdges = graph.edges.filter(edge =>
+    (edge.from === 'customer' || visibleIds.has(edge.from)) && visibleIds.has(edge.to),
+  )
+  const nodesById = new Map(graph.nodes.map(node => [node.id, node]))
   const positions = new Map(visible.map((node, index) => {
     const ring = index < 12 ? 0 : index < 30 ? 1 : 2
     const ringStart = ring === 0 ? 0 : ring === 1 ? 12 : 30
@@ -156,12 +161,12 @@ export function CustomerContextGraph({ evidence, partyName }: {
               <ellipse cx="400" cy="250" rx="355" ry="222" />
               <path d="M 400 20 V 480 M 25 250 H 775" />
             </g>
-            {graph.edges.map((edge, edgeIndex) => {
+            {visibleEdges.map((edge, edgeIndex) => {
               const from = edge.from === 'customer' ? { x: 400, y: 250 } : positions.get(edge.from)
               const to = edge.to === 'customer' ? { x: 400, y: 250 } : positions.get(edge.to)
               if (!from || !to) return null
               const connected = !focusId || focusId === edge.from || focusId === edge.to
-              const target = graph.nodes.find(node => node.id === (edge.to === 'customer' ? edge.from : edge.to))
+              const target = nodesById.get(edge.to === 'customer' ? edge.from : edge.to)
               const color = target ? NODE_COLORS[target.kind] : '#67e8f9'
               const pid = pathId('customer-graph-edge', edge.from, edge.to, edgeIndex)
               const d = `M ${from.x} ${from.y} L ${to.x} ${to.y}`
@@ -181,7 +186,7 @@ export function CustomerContextGraph({ evidence, partyName }: {
             {visible.map(node => {
               const pos = positions.get(node.id)!
               const active = selectedId === node.id
-              const related = !focusId || active || hoveredId === node.id || graph.edges.some(edge => (edge.from === focusId && edge.to === node.id) || (edge.to === focusId && edge.from === node.id))
+              const related = !focusId || active || hoveredId === node.id || visibleEdges.some(edge => (edge.from === focusId && edge.to === node.id) || (edge.to === focusId && edge.from === node.id))
               return <g key={node.id} role="button" tabIndex={0} aria-pressed={active}
                 aria-label={`${labels[node.kind]}: ${node.label}`} className={`${styles.node} ${related ? '' : styles.nodeMuted}`}
                 onClick={() => setSelectedId(node.id)} onKeyDown={event => {

@@ -433,15 +433,20 @@ export function buildCustomerGraph(
     }
   }
 
-  const consentIds = new Set<string>()
+  const consentObservations = new Map<string, Customer360Evidence['consents']>()
   for (const consent of evidence.consents) {
-    if (consentIds.has(consent.consentId)) continue
-    consentIds.add(consent.consentId)
-    const observations = evidence.consents.filter(item => item.consentId === consent.consentId)
-    const id = `consent:${consent.consentId}`
+    const observations = consentObservations.get(consent.consentId) ?? []
+    observations.push(consent)
+    consentObservations.set(consent.consentId, observations)
+  }
+  for (const [consentId, observations] of consentObservations) {
+    const id = `consent:${consentId}`
     nodes.push({
-      id, kind: 'consent', label: consent.consentId, source: 'analytics-sink',
-      facts: observations.slice(0, 10).flatMap(item => [`Projected state: ${item.status}`, `Scopes: ${item.scopes.join(', ') || '—'}`]),
+      id, kind: 'consent', label: consentId, source: 'analytics-sink',
+      facts: [
+        ...observations.slice(0, 10).flatMap(item => [`Projected state: ${item.status}`, `Scopes: ${item.scopes.join(', ') || '—'}`]),
+        `Projection newest event: ${evidence.asOf ?? 'unknown'} (not the consent event time)`,
+      ],
     })
     addEdge('customer', id, 'HAS_CONSENT')
   }

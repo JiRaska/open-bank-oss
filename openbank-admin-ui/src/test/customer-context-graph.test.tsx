@@ -121,6 +121,23 @@ describe('Customer context graph', () => {
     expect(result.truncated).toBe(true)
   })
 
+  it('labels projected consent freshness without claiming an effective consent time', () => {
+    const result = buildCustomerGraph({
+      ...evidence,
+      consents: [
+        { consentId: 'consent-alpha', status: 'ACTIVE', scopes: ['ACCOUNTS_READ'] },
+        { consentId: 'consent-alpha', status: 'REVOKED', scopes: ['ACCOUNTS_READ'] },
+      ],
+    }, {
+      accounts: [], cards: [], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: [], truncated: [],
+    })
+    const consent = result.nodes.filter(node => node.kind === 'consent')
+    expect(consent).toHaveLength(1)
+    expect(consent[0].facts).toContain('Projected state: REVOKED')
+    expect(consent[0].facts).toContain('Projection newest event: 2026-09-13 10:00:00.000 (not the consent event time)')
+  })
+
   it('keeps account links resolvable when referenced accounts exceed the display cap', () => {
     const result = buildCustomerGraph(evidence, {
       accounts: Array.from({ length: 51 }, (_, index) => ({ ...account, id: `account-${index}` })),
