@@ -25,6 +25,16 @@ describe('agent proposal identity enrichment', () => {
     })
   })
 
+  it('recognizes the Keycloak service-account form of a chartered agent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{
+      id: 'proposal-service-account', proposedBy: 'service-account-fraud-investigator', suggestedAction: 'fraud.review',
+    }]), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const { GET } = await import('@/app/api/agent/proposals/route')
+    const body = await (await GET(new NextRequest('http://localhost/api/agent/proposals'))).json()
+
+    expect(body[0].agent).toMatchObject({ id: 'service-account-fraud-investigator', icon: 'bot', charterKnown: true })
+  })
+
   it('does not mislabel an unknown human principal as a governed agent', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{
       id: 'proposal-2', proposedBy: 'alice@example.test', suggestedAction: 'agent.review',

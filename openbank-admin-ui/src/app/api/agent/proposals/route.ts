@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { loadAgentCharters } from '@/lib/governance/agentCharters'
+import { resolveAgentIdentity } from '@/lib/governance/agentIdentity'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,10 +41,9 @@ export async function GET(req: NextRequest) {
     const registry = await loadAgentCharters()
     // Without a readable registry we cannot classify an author as a human. Preserve the
     // upstream provenance so the UI can apply its conservative fallback (ADR-0080).
-    const charterIds = new Set(registry.agents.map(agent => agent.id))
     const enriched = Array.isArray(rows) ? rows.map(row => {
       const id = row.proposedBy ?? 'unknown'
-      const known = charterIds.has(id)
+      const known = resolveAgentIdentity(id, registry).status === 'chartered'
       if (!registry.available) return row
       return {
         ...row,
