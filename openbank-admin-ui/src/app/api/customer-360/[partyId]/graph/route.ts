@@ -19,14 +19,14 @@ const LIMITS = { accounts: 50, cards: 50, notifications: 30, lending: 30, aml: 3
 type Source = 'accounts' | 'cards' | 'notifications' | 'lending' | 'aml' | 'devices' | 'documents'
 type ReadResult = { source: Source; body: unknown; available: boolean }
 
-function sourceRowCount(source: Source, body: unknown): number {
-  if (source === 'accounts' && body && typeof body === 'object' && 'data' in body) {
-    return Array.isArray(body.data) ? body.data.length : 0
+function sourceRows(source: Source, body: unknown): unknown[] | null {
+  if (source === 'accounts') {
+    return body && typeof body === 'object' && 'data' in body && Array.isArray(body.data) ? body.data : null
   }
-  if ((source === 'notifications' || source === 'devices') && body && typeof body === 'object' && 'items' in body) {
-    return Array.isArray(body.items) ? body.items.length : 0
+  if (source === 'notifications' || source === 'devices') {
+    return body && typeof body === 'object' && 'items' in body && Array.isArray(body.items) ? body.items : null
   }
-  return Array.isArray(body) ? body.length : 0
+  return Array.isArray(body) ? body : null
 }
 
 async function boundedJson(response: Response): Promise<unknown> {
@@ -58,7 +58,8 @@ async function read(source: Source, url: string, authorization: string): Promise
       headers: { authorization }, cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS),
     })
     if (!response.ok) return { source, body: null, available: false }
-    return { source, body: await boundedJson(response), available: true }
+    const body = await boundedJson(response)
+    return { source, body, available: sourceRows(source, body) !== null }
   } catch {
     return { source, body: null, available: false }
   }
@@ -118,7 +119,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     devices: parsed.devices.slice(0, LIMITS.devices),
     documents: parsed.documents.slice(0, LIMITS.documents),
     unavailable: results.filter(result => !result.available).map(result => result.source),
-    truncated: results.filter(result => result.available && sourceRowCount(result.source, result.body) > LIMITS[result.source])
+    truncated: results.filter(result => result.available && sourceRows(result.source, result.body)!.length > LIMITS[result.source])
       .map(result => result.source),
     fetchedAt: new Date().toISOString(),
   }, { headers: { 'cache-control': 'private, no-store' } })
