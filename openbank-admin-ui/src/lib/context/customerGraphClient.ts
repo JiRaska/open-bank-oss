@@ -18,7 +18,10 @@ export function selectCustomerGraphFacts(partyId: string): Promise<LiveCustomerF
 }
 
 export function clearSelectedCustomerGraphFacts(partyId: string): void {
-  if (selected?.partyId === partyId) selected = null
+  if (selected?.partyId === partyId) {
+    selected = null
+    inflight.delete(partyId)
+  }
 }
 
 /** Shares one bounded BFF read across the graph and sibling Customer 360 panels mounted together. */
@@ -35,7 +38,9 @@ function requestCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> 
   }).then(async response => {
     if (!response.ok) throw new Error(String(response.status))
     return parseLiveCustomerFacts(await response.json())
-  }).finally(() => inflight.delete(partyId))
+  }).finally(() => {
+    if (inflight.get(partyId) === request) inflight.delete(partyId)
+  })
   inflight.set(partyId, request)
   return request
 }

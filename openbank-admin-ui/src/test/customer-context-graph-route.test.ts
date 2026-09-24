@@ -123,4 +123,26 @@ describe('Customer graph live overlay route', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     clearSelectedCustomerGraphFacts(selectedParty)
   })
+
+  it('does not reuse an in-flight snapshot after leaving a customer selection', async () => {
+    const selectedParty = '33333333-3333-4333-8333-333333333333'
+    const resolvers: Array<(value: Response) => void> = []
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolvers.push(resolve) }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { clearSelectedCustomerGraphFacts, loadCustomerGraphFacts, selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    const previous = selectCustomerGraphFacts(selectedParty)
+    clearSelectedCustomerGraphFacts(selectedParty)
+    const current = loadCustomerGraphFacts(selectedParty)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    resolvers[0](response({ accounts: [{ id: 'old-session-account' }], unavailable: [] }))
+    await previous
+    const secondPanel = loadCustomerGraphFacts(selectedParty)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    resolvers[1](response({ accounts: [{ id: 'current-session-account' }], unavailable: [] }))
+    const [currentFacts, secondPanelFacts] = await Promise.all([current, secondPanel])
+    expect(currentFacts.accounts.map(account => account.id)).toEqual(['current-session-account'])
+    expect(secondPanelFacts.accounts.map(account => account.id)).toEqual(['current-session-account'])
+  })
 })
