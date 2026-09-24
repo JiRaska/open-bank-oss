@@ -4,13 +4,14 @@
 import { chromium } from 'playwright'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
-import { verifyApprovalInboxEvidence } from './approval-inbox-evidence.mjs'
+import { verifyApprovalInboxEvidence, writeApprovalReadEvidence } from './approval-inbox-evidence.mjs'
 
 const required = [
   'OPENBANK_APPROVAL_SYNTHETIC_URL', 'OPENBANK_APPROVAL_STORAGE_STATE',
   'OPENBANK_APPROVAL_FIXTURE_ID', 'OPENBANK_APPROVAL_FIXTURE_ACTION',
   'OPENBANK_APPROVAL_FIXTURE_RESOURCE_ID', 'OPENBANK_APPROVAL_FIXTURE_MAKER_ID',
   'OPENBANK_APPROVAL_FIXTURE_CREATED_AT', 'ADMIN_UI_EXPECTED_BUILD_SHA',
+  'OPENBANK_APPROVAL_EVIDENCE_FILE',
 ]
 const missing = required.filter(name => !process.env[name]?.trim())
 if (missing.length) throw new Error(`authenticated approval probe requires ${missing.join(', ')}`)
@@ -80,11 +81,7 @@ try {
   if (!await row.getByText(process.env.OPENBANK_APPROVAL_FIXTURE_ACTION, { exact: true }).isVisible()) {
     throw new Error('sandbox fixture was not rendered in the operator inbox')
   }
-  console.log(JSON.stringify({
-    journey: 'approval-inbox-authenticated-read', result: 'passed',
-    buildSha: observedSha, fixtureId: id, source: 'billing',
-    assertions: ['operator-session', 'bff-200', 'provider-ok', 'mapping', 'rendered-row', 'read-only'],
-  }))
+  await writeApprovalReadEvidence(process.env.OPENBANK_APPROVAL_EVIDENCE_FILE, observedSha, id)
 } finally {
   await browser?.close()
 }
