@@ -79,6 +79,8 @@ dependencies {
 // was floored).
 configurations.all {
     resolutionStrategy {
+        // Kover 0.9.9's coverage reporter otherwise resolves vulnerable FreeMarker 2.3.32.
+        force("org.freemarker:freemarker:2.3.35")
         force("org.codehaus.plexus:plexus-utils:4.1.0")
         force("com.fasterxml.jackson.core:jackson-databind:2.22.2")
         force("com.fasterxml.jackson.core:jackson-core:2.22.2")
