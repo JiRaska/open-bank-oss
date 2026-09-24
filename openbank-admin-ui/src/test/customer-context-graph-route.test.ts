@@ -26,7 +26,10 @@ describe('Customer graph live overlay route', () => {
         id: 'account-1', accountNumber: 'CZ12', accountType: 'CURRENT', productId: 'product-1',
         currencyCode: 'CZK', status: 'ACTIVE', openedAt: '2026-01-01T00:00:00Z',
       }] })
-      if (url.includes(':8118/')) return response([{ id: 'card-1', accountId: 'account-1', status: 'BLOCKED' }])
+      if (url.includes(':8118/')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('51')
+        return response([{ id: 'card-1', accountId: 'account-1', status: 'BLOCKED' }])
+      }
       if (url.includes(':8112/') && url.includes('/notifications')) return response({ items: [{
         id: 'notification-1', channel: 'PUSH', template: 'SCA_APPROVAL', status: 'SENT',
         createdAt: '2026-01-02T00:00:00Z', recipient: 'secret@example.test', body: 'secret body',
@@ -50,7 +53,7 @@ describe('Customer graph live overlay route', () => {
     expect(result.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(7)
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
-      `http://card-issuance-service.payments.svc:8118/api/v1/cards/party/${PARTY}`,
+      `http://card-issuance-service.payments.svc:8118/api/v1/cards/party/${PARTY}?limit=51`,
     )
     expect(body.unavailable).toEqual([])
     expect(body.truncated).toEqual([])
