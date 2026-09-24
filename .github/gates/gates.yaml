@@ -3310,13 +3310,15 @@ gates:
   # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
   # released), same contract as check-pact-provider-replay.py above.
   - id: release-evidence-coverage
-    name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
+    name: "released packages have identities and complete evidence bundles (issue #7597, enforced)"
     group: supplychain
     mode: enforced
-    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    rationale: "Unmapped released packages and tags with missing SBOM/provenance/VEX/signature assets must be explicit failures rather than silent gaps."
     review_after: "2027-08-31"
     min_subjects: 60
-    selftest_inputs: [".github/scripts/check-release-evidence-coverage.py"]
+    selftest_inputs:
+      - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/workflows/release-please.yml"
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
     run: |
