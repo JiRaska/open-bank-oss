@@ -723,8 +723,13 @@ def specialized_evidence(
         failed = sum(1 for value in thresholds if value is True or (isinstance(value, dict) and value.get("ok") is False))
         detail = (performance_not_run_detail or "performance summary absent") if summary is None \
             else f"{len(thresholds)} threshold result(s), {failed} breached"
-        specialized.append({"kind": "performance", "state": "not-run" if summary is None else "failed" if failed else "passed",
-                            "source": str(summary_file), "detail": detail})
+        specialized.append({
+            "kind": "performance",
+            "state": "not-run" if summary is None else "failed" if failed else "passed",
+            "source": str(summary_file),
+            "detail": detail,
+            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if summary is not None else {}),
+        })
     if mutation_report:
         mutation_file = Path(mutation_report)
         if mutation_file.exists():
@@ -756,6 +761,7 @@ def specialized_evidence(
             "source": f"journey:{synthetic_journey}",
             "detail": "synthetic summary absent" if summary is None else
                       f"{len(thresholds)} threshold result(s), {failed} breached",
+            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if summary is not None else {}),
         })
     elif synthetic_journey:
         if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
@@ -1135,6 +1141,7 @@ def main() -> None:
             assert [item["lifecycle"] for item in observations(service) if item["resource"] == "valkey"] == ["started", "stopped"]
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
+            assert specialized[0]["thresholdResults"] == {"evaluated": 1, "breached": 1}
             assert "target 70%" in specialized[1]["detail"]
             rounded = specialized_evidence(None, str(rounded_mutation), mutation_threshold=63)
             assert rounded == [{
@@ -1144,7 +1151,11 @@ def main() -> None:
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
-            assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
+            assert synthetic == [{
+                "kind": "synthetic", "state": "failed", "source": "journey:public-edge",
+                "detail": "1 threshold result(s), 1 breached",
+                "thresholdResults": {"evaluated": 1, "breached": 1},
+            }]
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]])
             assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable"}]
             browser_vitals = service / "browser-vitals.json"
