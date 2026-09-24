@@ -40,9 +40,9 @@ import javax.xml.parsers.SAXParserFactory
  * Supported formats:
  *  - OFAC SDN     → sdn.xml (Treasury XML)               — SAX streaming, O(1) memory
  *  - EU_CONSOLIDATED → official EU FSF XML (first-party) by default; OpenSanctions CSV selectable
- *  - PEP_GLOBAL / UN / HM → OpenSanctions targets.simple.csv — BufferedReader streaming, batch upsert
+ *  - PEP_GLOBAL / UN / HM / CNB_DOMESTIC → OpenSanctions targets.simple.csv — BufferedReader streaming,
+ *    batch upsert (CNB_DOMESTIC is the Czech national list kept by MZV, mirrored as cz_national_sanctions)
  *  - FATF         → country-risk, not entity-based — skipped
- *  - CNB          → no machine-readable feed — seeded in Flyway V6
  *
  * Every import attempt returns a [ListImportResult] whose outcome is one of the
  * [ListImportOutcome] values — never an ambiguous count (issue #8362 / the #4348 rule: a
@@ -130,10 +130,13 @@ class SanctionsImportService(
             )
             SanctionsListType.FATF_HIGH_RISK ->
                 ListImportResult.skippedNotEntityBased("FATF is country-risk — no entity feed")
-            SanctionsListType.CNB_DOMESTIC ->
-                ListImportResult.skippedNotEntityBased(
-                    "CNB has no machine-readable feed — entries seeded via migration",
-                )
+            // Czech national sanctions list (MZV, Act No. 1/2023 Coll.; #10757). MZV publishes it as
+            // open data, but under a new dated filename per edition, so there is no stable URL to
+            // poll; the OpenSanctions mirror (cz_national_sanctions) is stable and refreshed daily.
+            // The enum key keeps its historical CNB_ name because it is part of the public API.
+            SanctionsListType.CNB_DOMESTIC -> importedOrEmpty(
+                importOpenSanctionsCsv(sourceUrl, listType, CZ_NATIONAL_PROGRAMS),
+            )
         }
     } catch (ex: Exception) {
         // Deliberately broad: any fetch/parse/store failure means the SAME thing to the
@@ -502,6 +505,7 @@ class SanctionsImportService(
             "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
 
         private val EU_PROGRAMS = listOf("EU-SANCTIONS")
+        private val CZ_NATIONAL_PROGRAMS = listOf("CZ-NATIONAL-SANCTIONS")
     }
 }
 
