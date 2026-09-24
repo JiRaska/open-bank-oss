@@ -160,6 +160,26 @@ authz:
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
+"%prod":
+  quarkus:
+    # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
+    # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
+    # this stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      ledger-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      ledger-service:
+        tls-configuration-name: ledger-authority
+
 "%dev":
   quarkus:
     log:

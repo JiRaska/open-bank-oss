@@ -100,8 +100,11 @@ spec:
             # label is a decision of this environment, not an inherited default.
             - name: OPENBANK_RISK_PROVENANCE
               value: synthetic
+            # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED); client cert
+            # risk-internal-tls, %prod TLS bucket ledger-authority. ASVS V9.1 forbids a new
+            # plaintext edge, so the legacy HTTP/8101 port is not used.
             - name: LEDGER_SERVICE_URL
-              value: http://ledger-service.ledger.svc:8101
+              value: https://ledger-service.ledger.svc:8443
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot (OIDC
             # defers discovery to the first request) — it just makes every authenticated call
             # fail later with `Name does not resolve`.
@@ -146,6 +149,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: ledger-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -230,6 +236,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: ledger-tls
+          secret:
+            secretName: risk-internal-tls
+            optional: false
         - name: kafka-keystore
           secret:
             secretName: risk-engine-kafka-keystore
