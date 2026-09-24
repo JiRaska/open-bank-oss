@@ -9,7 +9,7 @@ const required = [
   'OPENBANK_APPROVAL_SYNTHETIC_URL', 'OPENBANK_APPROVAL_STORAGE_STATE',
   'OPENBANK_APPROVAL_FIXTURE_ID', 'OPENBANK_APPROVAL_FIXTURE_ACTION',
   'OPENBANK_APPROVAL_FIXTURE_RESOURCE_ID', 'OPENBANK_APPROVAL_FIXTURE_MAKER_ID',
-  'ADMIN_UI_EXPECTED_BUILD_SHA',
+  'OPENBANK_APPROVAL_FIXTURE_CREATED_AT', 'ADMIN_UI_EXPECTED_BUILD_SHA',
 ]
 const missing = required.filter(name => !process.env[name]?.trim())
 if (missing.length) throw new Error(`authenticated approval probe requires ${missing.join(', ')}`)
@@ -42,6 +42,12 @@ try {
   browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({ storageState: state })
   const page = await context.newPage()
+  // The journey reads a real inbox. Even if the page changes, it must never
+  // approve, reject, post a fee, or cause any other mutation while probing.
+  await page.route('**/*', route => {
+    if (route.request().method() === 'GET' || route.request().method() === 'HEAD') return route.continue()
+    return route.abort('blockedbyclient')
+  })
   const attestation = await context.request.get(new URL('/.well-known/openbank-build-attestation', base).toString(), { timeout: 10_000 })
   if (!attestation.ok()) throw new Error('deployed build attestation unavailable')
   const attested = await attestation.json()
@@ -51,21 +57,23 @@ try {
     throw new Error('deployed build does not match requested source')
   }
 
-  const inboxResponse = page.waitForResponse(response =>
-    response.url() === new URL('/api/approvals/pending', base).toString(), { timeout: 25_000 })
-  await page.goto(new URL('/approvals', base).toString(), { waitUntil: 'domcontentloaded', timeout: 25_000 })
+  const [response] = await Promise.all([
+    page.waitForResponse(response =>
+      response.url() === new URL('/api/approvals/pending', base).toString(), { timeout: 25_000 }),
+    page.goto(new URL('/approvals', base).toString(), { waitUntil: 'domcontentloaded', timeout: 25_000 }),
+  ])
   const landed = new URL(page.url())
   if (landed.origin !== base.origin || landed.pathname !== '/approvals') {
     throw new Error('approved operator session did not reach approval inbox')
   }
-  const response = await inboxResponse
   if (response.status() !== 200) throw new Error(`approval inbox BFF returned HTTP ${response.status()}`)
   const payload = await response.json()
   if (payload?.sources?.billing !== 'ok') throw new Error('billing approval source did not answer successfully')
   const matches = payload.items?.filter(item => item.domain === 'billing' && item.id === id) ?? []
   if (matches.length !== 1 || matches[0].action !== process.env.OPENBANK_APPROVAL_FIXTURE_ACTION ||
       matches[0].resourceId !== process.env.OPENBANK_APPROVAL_FIXTURE_RESOURCE_ID ||
-      matches[0].maker !== process.env.OPENBANK_APPROVAL_FIXTURE_MAKER_ID) {
+      matches[0].maker !== process.env.OPENBANK_APPROVAL_FIXTURE_MAKER_ID ||
+      Date.parse(matches[0].proposedAt) !== Date.parse(process.env.OPENBANK_APPROVAL_FIXTURE_CREATED_AT)) {
     throw new Error('sandbox fixture did not traverse billing provider and approval inbox BFF unchanged')
   }
   const row = page.getByTestId(`domain-approval-billing:${id}`)
@@ -73,7 +81,11 @@ try {
   if (!await row.getByText(process.env.OPENBANK_APPROVAL_FIXTURE_ACTION, { exact: true }).isVisible()) {
     throw new Error('sandbox fixture was not rendered in the operator inbox')
   }
-  console.log('authenticated approval inbox: deployed build, provider, BFF and operator row verified (read-only)')
+  console.log(JSON.stringify({
+    journey: 'approval-inbox-authenticated-read', result: 'passed',
+    buildSha: observedSha, fixtureId: id, source: 'billing',
+    assertions: ['operator-session', 'bff-200', 'provider-ok', 'mapping', 'rendered-row', 'read-only'],
+  }))
 } finally {
   await browser?.close()
 }
