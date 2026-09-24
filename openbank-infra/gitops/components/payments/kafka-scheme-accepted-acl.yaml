@@ -524,6 +524,10 @@ rules:
       # ADR-0314: balance-sheet risk engine, FX fixing consumer, ns risk. Without this the
       # keystore ExternalSecret sits at SecretSyncedError and no pod is ever created (#2749).
       - risk-engine
+      # ADR-0282 / #9800: Lístek ledger outbox producer, ns loyalty (first ESO client there).
+      # Without this the keystore ExternalSecret sits at SecretSyncedError and no pod is ever
+      # created (#2749).
+      - loyalty-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
