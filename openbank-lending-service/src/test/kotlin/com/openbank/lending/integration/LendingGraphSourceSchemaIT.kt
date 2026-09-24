@@ -416,59 +416,65 @@ class LendingGraphSourceSchemaIT {
 
     @Test
     fun `guarantee requires a different checker and an approved prior revision for correction`() {
+        withRolledBackConnection { connection ->
+            val loanId = createLoanForGuarantee(connection)
+            val contractId = UUID.randomUUID()
+            val firstId = UUID.randomUUID()
+            val correctionId = UUID.randomUUID()
+            insertPendingGuarantee(connection, firstId, contractId, loanId, 1, null)
+            val beforeSelfDecision = connection.setSavepoint()
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """UPDATE lending_graph_guarantee SET status = 'APPROVED',
+                   decided_by = 'maker', decided_at = now() WHERE guarantee_id = ?""",
+                ).use { statement ->
+                    statement.setObject(1, firstId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("lending_graph_guarantee_decision")
+            connection.rollback(beforeSelfDecision)
+            val beforeUnapprovedCorrection = connection.setSavepoint()
+            assertThatThrownBy { insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId) }
+                .hasMessageContaining("guarantee correction must supersede the approved prior revision")
+            connection.rollback(beforeUnapprovedCorrection)
+
+            connection.prepareStatement(
+                """UPDATE lending_graph_guarantee SET status = 'APPROVED',
+               decided_by = 'checker', decided_at = now() WHERE guarantee_id = ?""",
+            ).use { statement ->
+                statement.setObject(1, firstId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            val beforeMutation = connection.setSavepoint()
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    "UPDATE lending_graph_guarantee SET cap_amount = 600 WHERE guarantee_id = ?",
+                ).use { statement ->
+                    statement.setObject(1, firstId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("immutable")
+            connection.rollback(beforeMutation)
+            insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId)
+            connection.prepareStatement(
+                "SELECT status, revision, supersedes_guarantee_id FROM lending_graph_guarantee WHERE guarantee_id = ?",
+            ).use { statement ->
+                statement.setObject(1, correctionId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString("status")).isEqualTo("PENDING")
+                    assertThat(rows.getLong("revision")).isEqualTo(2)
+                    assertThat(rows.getObject("supersedes_guarantee_id", UUID::class.java)).isEqualTo(firstId)
+                }
+            }
+        }
+    }
+
+    private fun withRolledBackConnection(block: (Connection) -> Unit) {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
-                val loanId = createLoanForGuarantee(connection)
-                val contractId = UUID.randomUUID()
-                val firstId = UUID.randomUUID()
-                val correctionId = UUID.randomUUID()
-                insertPendingGuarantee(connection, firstId, contractId, loanId, 1, null)
-                val beforeSelfDecision = connection.setSavepoint()
-                assertThatThrownBy {
-                    connection.prepareStatement(
-                        """UPDATE lending_graph_guarantee SET status = 'APPROVED',
-                       decided_by = 'maker', decided_at = now() WHERE guarantee_id = ?""",
-                    ).use { statement ->
-                        statement.setObject(1, firstId)
-                        statement.executeUpdate()
-                    }
-                }.hasMessageContaining("lending_graph_guarantee_decision")
-                connection.rollback(beforeSelfDecision)
-                val beforeUnapprovedCorrection = connection.setSavepoint()
-                assertThatThrownBy { insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId) }
-                    .hasMessageContaining("guarantee correction must supersede the approved prior revision")
-                connection.rollback(beforeUnapprovedCorrection)
-
-                connection.prepareStatement(
-                    """UPDATE lending_graph_guarantee SET status = 'APPROVED',
-                   decided_by = 'checker', decided_at = now() WHERE guarantee_id = ?""",
-                ).use { statement ->
-                    statement.setObject(1, firstId)
-                    assertThat(statement.executeUpdate()).isEqualTo(1)
-                }
-                val beforeMutation = connection.setSavepoint()
-                assertThatThrownBy {
-                    connection.prepareStatement(
-                        "UPDATE lending_graph_guarantee SET cap_amount = 600 WHERE guarantee_id = ?",
-                    ).use { statement ->
-                        statement.setObject(1, firstId)
-                        statement.executeUpdate()
-                    }
-                }.hasMessageContaining("immutable")
-                connection.rollback(beforeMutation)
-                insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId)
-                connection.prepareStatement(
-                    "SELECT status, revision, supersedes_guarantee_id FROM lending_graph_guarantee WHERE guarantee_id = ?",
-                ).use { statement ->
-                    statement.setObject(1, correctionId)
-                    statement.executeQuery().use { rows ->
-                        assertThat(rows.next()).isTrue()
-                        assertThat(rows.getString("status")).isEqualTo("PENDING")
-                        assertThat(rows.getLong("revision")).isEqualTo(2)
-                        assertThat(rows.getObject("supersedes_guarantee_id", UUID::class.java)).isEqualTo(firstId)
-                    }
-                }
+                block(connection)
             } finally {
                 connection.rollback()
             }
