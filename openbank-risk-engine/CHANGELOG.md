@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.2.0...risk-engine-v0.3.0) (2026-09-24)
+
+
+### Features
+
+* **risk-engine:** yield curves and the cash-flow engine (ADR-0314 D6) ([#10716](https://github.com/JiRaska/open-bank-oss/issues/10716)) ([21f26f9](https://github.com/JiRaska/open-bank-oss/commit/21f26f9ddd4a40cc2184276f21efbf7b1914dcb4))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.1.0...risk-engine-v0.2.0) (2026-09-24)
 
 
