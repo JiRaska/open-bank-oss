@@ -64,9 +64,8 @@ quarkus:
       # gitops Deployment env, where gen-network-policies.py can see the edge; a cluster URL
       # baked in here would be an edge that generator cannot see (network-policy-code-edges).
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
-    # ADR-0314 D4: lending's loan-book read. Local default only, as for ledger above. NOT yet in the
-    # gitops Deployment: lending serves no mTLS listener, and ASVS V9.1 forbids a new plaintext
-    # edge, so the deployed engine runs with openbank.risk.lending.enabled=false until it does.
+    # ADR-0314 D4: lending's loan-book read. Local default only, as for ledger above; the gitops
+    # Deployment points it at lending's private-CA mTLS listener (8443, #10732).
     lending-service:
       url: ${LENDING_SERVICE_URL:http://localhost:8126}
 
@@ -188,9 +187,24 @@ authz:
           pem:
             certs: /mnt/ledger-tls/ca.crt
         protocols: TLSv1.3
+      # lending-service's 8443 listener (#10732) requires a client certificate from the same
+      # private CA, so the same risk-internal-tls pair authenticates this engine to it. A bucket
+      # of its own so the two edges stay independently configurable.
+      lending-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       ledger-service:
         tls-configuration-name: ledger-authority
+      lending-service:
+        tls-configuration-name: lending-authority
 
 "%dev":
   quarkus:

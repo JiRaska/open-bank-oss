@@ -69,6 +69,7 @@ derived per request and never stored (ADR-0314 D6).
 
 ## Change log
 
+- **2026-09-24** — Loan-book read switched ON in the deployed sandbox (ADR-0314 D4, #10618). `LENDING_SERVICE_URL=https://lending-service.lending.svc:8443` over lending's private-CA mTLS listener (#10732), client auth with the existing `risk-internal-tls` pair in a dedicated `lending-authority` TLS bucket; `OPENBANK_RISK_LENDING_ENABLED=true`. New egress edge risk -> lending (the generated lending NetworkPolicy admits the `risk` namespace). The read stays a single GET authorised by OPA action `lending.book.read`; no write path. Loans Receivable now ties out per loan in sandbox runs, so a disagreement between lending and ledger surfaces as an UNTIED run — the intended signal, not a defect of this service. Rollback: set the env back to `false`.
 - **2026-09-24** — Loans as contract-level instruments (ADR-0314 D4, #10618). New outbound edge
   to lending-service's READ-ONLY `GET /api/v1/lending/loan-book` (trust boundary 5), off in the
   deployed sandbox until lending has an mTLS listener. New read `GET
