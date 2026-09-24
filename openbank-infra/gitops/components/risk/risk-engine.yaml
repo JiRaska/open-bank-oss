@@ -49,7 +49,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-risk-engine to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-000000000
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-a096988a
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8159 and management 8085 — both read off the service's own application.yaml
