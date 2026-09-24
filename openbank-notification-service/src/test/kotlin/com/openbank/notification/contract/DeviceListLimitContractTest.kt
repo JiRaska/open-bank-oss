@@ -4,10 +4,17 @@
 
 package com.openbank.notification.contract
 
+import com.openbank.notification.it.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusTest
+import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.util.UUID
 
+@QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class DeviceListLimitContractTest {
     @Test
     fun `device list documents its optional bounded read`() {
@@ -19,5 +26,16 @@ class DeviceListLimitContractTest {
         assertThat(version).isNotNull()
         assertThat(version!!.groupValues[1].toInt()).isEqualTo(1)
         assertThat(version.groupValues[2].toInt()).isGreaterThanOrEqualTo(10)
+    }
+
+    @Test
+    fun `anonymous device list is rejected with 401 before the source query`() {
+        given()
+            .queryParam("partyId", UUID.randomUUID())
+            .queryParam("limit", 21)
+            .`when`()
+            .get("/api/v1/devices")
+            .then()
+            .statusCode(401)
     }
 }
