@@ -146,7 +146,7 @@ class SecurityScannerServiceTest {
         serviceName: String,
         score: Int,
         reachable: Boolean,
-        findings: List<SecurityFinding>
+        findings: List<SecurityFinding>,
     ): ServiceScanResult = ServiceScanResult(
         serviceName = serviceName,
         serviceUrl = "http://localhost:8100",
