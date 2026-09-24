@@ -5,7 +5,8 @@
 
 The allow-lists are DERIVED, never hand-edited (house rule, ADR-0029/0074/0081):
 every cross-namespace call a service makes is already declared in its Deployment
-env (`http://<svc>.<ns>.svc:<port>`), every public path in an Ingress backend,
+env (`http://<svc>.<ns>.svc:<port>`) or a service-dependencies annotation for
+runtime-secret-discovered URLs, every public path in an Ingress backend,
 every Kafka client in its bootstrap URL. This script walks
 openbank-infra/gitops/components/, extracts those edges and emits one
 `network-policies.yaml` per component DIRECTORY (each is its own ArgoCD
@@ -293,6 +294,17 @@ def main():
         ns = meta.get("namespace")
 
         if kind in ("Deployment", "StatefulSet", "Rollout") and ns:
+            # A URL injected from a runtime Secret cannot be parsed from a tracked
+            # manifest. Declare its service identity without recording the hostname.
+            for dependency in (meta.get("annotations", {}) or {}).get("openbank.io/service-dependencies", "").split(","):
+                dependency = dependency.strip()
+                if not dependency:
+                    continue
+                if not re.fullmatch(r"[a-z0-9-]+/[a-z0-9-]+", dependency):
+                    raise ValueError(f"invalid service dependency on {path}: {dependency}")
+                callee_ns, svc = dependency.split("/", 1)
+                if callee_ns != ns:
+                    edges[(callee_ns, svc)].add(ns)
             tpl = doc.get("spec", {}).get("template", {}) or {}
             labels = (tpl.get("metadata", {}) or {}).get("labels", {}) or {}
             name = labels.get("app.kubernetes.io/name") or meta.get("name")

@@ -16,6 +16,9 @@ spec:
       - resource: { type: topic, name: openbank.dlq.context-service.kyb-ubo-observations, patternType: literal }
         operations: [Write, Describe]
         host: "*"
+      - resource: { type: topic, name: openbank.context.audit.commitments, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
       - resource: { type: topic, name: openbank.dispute.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
@@ -57,6 +60,24 @@ spec:
         host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.sepa-payment-events, patternType: literal }
         operations: [Write, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.delegation.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.delegation-history, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: group, name: openbank-context-service-authority-history, patternType: literal }
+        operations: [Read]
+        host: "*"
+      - resource: { type: topic, name: openbank.aml.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.aml-case-evidence, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: group, name: openbank-context-service-aml-case-evidence, patternType: literal }
+        operations: [Read]
         host: "*"
       - resource: { type: group, name: openbank-context-service, patternType: literal }
         operations: [Read]

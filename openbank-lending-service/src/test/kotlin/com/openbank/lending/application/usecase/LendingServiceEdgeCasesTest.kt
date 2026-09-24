@@ -280,6 +280,8 @@ class LendingServiceEdgeCasesTest {
 
         assertThat(service.getApplication(app.id).await().indefinitely()).isEqualTo(app)
         assertThat(service.listApplications(partyId).await().indefinitely()).containsExactly(app)
+        every { applications.findByParty(partyId, 31) } returns Uni.createFrom().item(listOf(app))
+        assertThat(service.listApplications(partyId, 31).await().indefinitely()).containsExactly(app)
     }
 
     // --- Disbursement --------------------------------------------------------------------------

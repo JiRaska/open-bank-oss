@@ -2,6 +2,9 @@
 package com.openbank.context.integration
 
 import com.openbank.context.infrastructure.AssignmentAdministrationService
+import com.openbank.context.infrastructure.ContextAuditCommitment
+import com.openbank.context.infrastructure.ContextReadAuditEntity
+import com.openbank.context.infrastructure.IncidentProjectionConsumer
 import com.openbank.context.infrastructure.MakerCheckerViolation
 import com.openbank.context.infrastructure.ProposeAssignmentRequest
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -25,8 +28,10 @@ import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasEntry
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 import jakarta.enterprise.inject.Any as AnyQualifier
@@ -45,13 +50,24 @@ class ContextApiIT {
     @Inject
     lateinit var assignmentAdministration: AssignmentAdministrationService
 
+    @Inject
+    lateinit var incidentProjection: IncidentProjectionConsumer
+
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `maker checker assignment grants access and revocation removes it immediately`() {
         val reference = "CMP-ACCESS-${UUID.randomUUID()}"
         val caseId = "case-access-${UUID.randomUUID()}"
         seedNode("complaint:$reference", "COMPLAINT", "Complaint $reference")
-        val request = ProposeAssignmentRequest(ACTOR, caseId, PURPOSE, null, Instant.now().plusSeconds(3600))
+        val request =
+            ProposeAssignmentRequest(
+                ACTOR,
+                caseId,
+                PURPOSE,
+                null,
+                Instant.now().plusSeconds(3600),
+                "complaint:$reference",
+            )
         val proposal = onVertxContext { assignmentAdministration.propose(request, "maker-1") }
         assertThat(proposal.status).isEqualTo("PENDING")
 
@@ -75,6 +91,7 @@ class ContextApiIT {
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    @Suppress("LongMethod")
     fun `complaint event is projected idempotently and becomes authorized graph evidence`() {
         val complaintId = UUID.randomUUID()
         val reference = "CMP-E2E-${UUID.randomUUID()}"
@@ -89,43 +106,51 @@ class ContextApiIT {
         val ledger = connector.source<String>("ledger-events-in")
         val clearing = connector.source<String>("clearing-events-in")
         val sepaReturns = connector.source<String>("sepa-payment-events-in")
+        val reversalId = UUID.randomUUID()
         listOf(source, payments, transactions, ledger, clearing, sepaReturns)
             .forEach { it.runOnVertxContext(true) }
 
-        source.send(payload)
-        source.send(payload)
+        repeat(2) { source.send(payload) }
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
-        source.send("""{"eventType":"dispute.opened","disputeId":"${UUID.randomUUID()}"}""")
-        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId)
+        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId, reversalId)
         sendPaymentLifecycle(payments, transactionId)
         val bookingTransactionId = UUID.randomUUID()
         val journalId = UUID.randomUUID()
+        val reversalJournalId = UUID.randomUUID()
         ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
+        ledger.send(ledgerPostedEvent(reversalJournalId, reversalId))
         transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
+        transactions.send(transactionReversalEvent(reversalId, bookingTransactionId))
         assertProjectionState(
             reference,
             transactionId,
             bookingTransactionId,
             journalId,
             clearingItemId,
+            reversalId,
             complaintId,
         )
+        awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$reversalId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$reversalJournalId", 1)
         val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
 
-        seedAssignment(CASE, PURPOSE)
+        seedAssignment(CASE, PURPOSE, "complaint:$reference")
         val response = given()
             .header("X-Investigation-Case-Id", CASE)
             .header("X-Investigation-Purpose", PURPOSE)
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
-            .body("nodes.size()", equalTo(12))
-            .body("edges.size()", equalTo(11))
+            .body("nodes.size()", equalTo(15))
+            .body("nodes.key", org.hamcrest.Matchers.hasItem("reversal-transaction:$reversalId"))
+            .body("nodes.key", org.hamcrest.Matchers.hasItem("booking-transaction:$reversalId"))
+            .body("edges.size()", equalTo(14))
             .body(
                 "edges.relation",
                 org.hamcrest.Matchers.hasItems(
                     "CREATED",
                     "SUBMITTED_TO",
                     "RETURNED_BY",
+                    "REVERSED_BY",
                     "BOOKING_REQUESTED",
                     "BOOKED_AS",
                     "SETTLED",
@@ -136,12 +161,27 @@ class ContextApiIT {
     }
 
     @Test
+    fun `older SEPA return without reversal ID retains return evidence without inventing an ID`() {
+        val paymentId = UUID.randomUUID()
+        val reversalId = UUID.randomUUID()
+        val payload = sepaReturnedEvent(paymentId, reversalId)
+            .replace("\"reversalTransactionId\":\"$reversalId\",", "")
+        val source = connector.source<String>("sepa-payment-events-in")
+        source.runOnVertxContext(true)
+
+        source.send(payload)
+
+        awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
+        assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isZero()
+    }
+
+    @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `complaint lens reads bounded evidence and records the authorized access`() {
         val reference = UUID.randomUUID().toString()
         val root = "complaint:$reference"
         val payment = "payment:${UUID.randomUUID()}"
-        seedAssignment(CASE, PURPOSE)
+        seedAssignment(CASE, PURPOSE, root)
         seedNode(root, "COMPLAINT", "Complaint $reference")
         seedNode(payment, "PAYMENT", "Payment evidence")
         seedEdge(root, payment, "TRACES")
@@ -156,8 +196,51 @@ class ContextApiIT {
             .body("edges.size()", equalTo(1))
 
         assertThat(auditDecisions(root)).containsExactly("ALLOWED")
+        assertThat(auditDecisions(root, null)).isEmpty()
+        assertThat(auditDecisions(root, "another-bank")).isEmpty()
+        assertThat(auditCommitments(root)).hasSize(1)
+        assertThat(auditCommitments(root).single()).matches("[0-9a-f]{64}")
+        assertThat(storedAuditCommitment(root)).isEqualTo(auditCommitments(root).single())
+        assertThat(auditCommitments(root, null)).isEmpty()
+        assertThat(auditCommitments(root, "another-bank")).isEmpty()
+        assertThat(disclosureRows(root)).hasSize(1)
+        assertThat(disclosureRows(root).single().first).isEqualTo(3)
+        assertThat(disclosureRows(root).single().second).contains("node:test:", "evidence:")
+        assertThat(disclosureRows(root, null)).isEmpty()
+        assertThat(disclosureRows(root, "another-bank")).isEmpty()
+        assertAuditEvidenceImmutable(root)
+    }
+
+    private fun assertAuditEvidenceImmutable(root: String) {
         assertThatThrownBy {
-            execute("DELETE FROM context_read_audit WHERE root_ref = ?", root)
+            withAuditScope("openbank-cz") { connection ->
+                connection.prepareStatement("DELETE FROM context_read_audit WHERE root_ref = ?").use {
+                    it.setString(1, root)
+                    it.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("context audit records are append-only")
+        assertThatThrownBy {
+            withAuditScope("openbank-cz") { connection ->
+                connection.prepareStatement(
+                    "DELETE FROM context_audit_commitment_outbox WHERE audit_id IN " +
+                        "(SELECT audit_id FROM context_read_audit WHERE root_ref = ?)",
+                ).use {
+                    it.setString(1, root)
+                    it.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("context audit records are append-only")
+        assertThatThrownBy {
+            withAuditScope("openbank-cz") { connection ->
+                connection.prepareStatement(
+                    "DELETE FROM context_disclosure_audit WHERE decision_audit_id IN " +
+                        "(SELECT audit_id FROM context_read_audit WHERE root_ref = ?)",
+                ).use {
+                    it.setString(1, root)
+                    it.executeUpdate()
+                }
+            }
         }.hasMessageContaining("context audit records are append-only")
     }
 
@@ -173,7 +256,7 @@ class ContextApiIT {
 
         awaitCount("context_projection_events", "aggregate_ref", "incident:$incidentId", 2)
         assertThat(count("context_edges", "from_key = ?", "incident:$incidentId")).isEqualTo(1)
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", "incident:$incidentId")
 
         val response = given()
             .header("X-Investigation-Case-Id", CASE)
@@ -185,6 +268,31 @@ class ContextApiIT {
             .extract().asString()
 
         assertThat(response).doesNotContain("ledger-service")
+        assertThat(disclosureRows("incident:$incidentId"))
+            .containsExactly(1 to "[\"incident:$incidentId:ICT_INCIDENT_STATUS_CHANGED:${version + 1}\"]")
+    }
+
+    @Test
+    fun `incident projection rejects conflicting replay of a recorded revision`() {
+        val incidentId = UUID.randomUUID()
+        val version = NOW.epochSecond * 1_000_000_000 + NOW.nano
+        val original = incidentEvent(incidentId, version, listOf("ledger-service"))
+        onVertxContext { incidentProjection.consume(original) }
+        onVertxContext { incidentProjection.consume(original) }
+
+        assertThatThrownBy {
+            onVertxContext {
+                incidentProjection.consume(incidentEvent(incidentId, version, listOf("payment-service")))
+            }
+        }.hasMessageContaining("conflicting ICT incident revision replay")
+        assertThatThrownBy {
+            onVertxContext {
+                incidentProjection.consume(
+                    original.replace("ICT_INCIDENT_STATUS_CHANGED", "ICT_INCIDENT_REPORTED"),
+                )
+            }
+        }.hasStackTraceContaining("idx_context_incident_revision_digest")
+        assertThat(count("context_edges", "from_key = ?", "incident:$incidentId")).isEqualTo(1)
     }
 
     @Test
@@ -192,7 +300,7 @@ class ContextApiIT {
     fun `incident lens exposes aggregate counts without affected identifiers`() {
         val reference = UUID.randomUUID().toString()
         val root = "incident:$reference"
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", root)
         seedNode(root, "INCIDENT", "Incident $reference", namespace = "INCIDENT")
         repeat(2) {
             val payment = "payment:${UUID.randomUUID()}"
@@ -218,7 +326,7 @@ class ContextApiIT {
     @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
     fun `authorized missing incident is explicitly unknown and audited`() {
         val reference = UUID.randomUUID().toString()
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", "incident:$reference")
         given()
             .header("X-Investigation-Case-Id", CASE)
             .header("X-Investigation-Purpose", "INCIDENT_IMPACT")
@@ -250,7 +358,7 @@ class ContextApiIT {
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `an assignment for another purpose cannot be replayed against the complaint lens`() {
         val reference = UUID.randomUUID().toString()
-        seedAssignment(CASE, "INCIDENT_IMPACT")
+        seedAssignment(CASE, "INCIDENT_IMPACT", "incident:${UUID.randomUUID()}")
         seedNode("complaint:$reference", "COMPLAINT", "Complaint $reference")
 
         given()
@@ -291,16 +399,18 @@ class ContextApiIT {
             .then().statusCode(403)
     }
 
-    private fun seedAssignment(caseId: String, purpose: String) = execute(
+    private fun seedAssignment(caseId: String, purpose: String, root: String) = execute(
         """INSERT INTO context_case_assignments
-            (assignment_id, bank_scope, principal_id, case_id, purpose, valid_from, valid_to, created_at)
-            VALUES (?, 'openbank-cz', ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (bank_scope, principal_id, case_id, purpose, valid_from) DO NOTHING
+            (assignment_id, bank_scope, principal_id, case_id, purpose, root_ref, valid_from, valid_to, created_at)
+            VALUES (?, 'openbank-cz', ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (bank_scope, principal_id, case_id, purpose, valid_from)
+            DO UPDATE SET root_ref = EXCLUDED.root_ref
         """.trimIndent(),
         UUID.randomUUID(),
         ACTOR,
         caseId,
         purpose,
+        root,
         NOW.minusSeconds(3600),
         NOW.plusSeconds(3600),
         NOW,
@@ -331,14 +441,99 @@ class ContextApiIT {
         UUID.randomUUID(), namespace, from, to, relation, "evidence:${UUID.randomUUID()}", NOW.minusSeconds(60), NOW,
     )
 
-    private fun auditDecisions(root: String): List<String> = connection().use { connection ->
+    private fun auditDecisions(root: String, bankScope: String? = "openbank-cz"): List<String> =
+        withAuditScope(bankScope) { connection ->
+            connection.prepareStatement(
+                "SELECT decision FROM context_read_audit WHERE principal_id = ? AND root_ref = ? ORDER BY occurred_at",
+            ).use { statement ->
+                statement.setString(1, ACTOR)
+                statement.setString(2, root)
+                statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.getString(1)) } }
+            }
+        }
+
+    private fun auditCommitments(root: String, bankScope: String? = "openbank-cz"): List<String> =
+        withAuditScope(bankScope) { connection ->
+            connection.prepareStatement(
+                """SELECT o.commitment FROM context_audit_commitment_outbox o
+                   JOIN context_read_audit a ON a.audit_id = o.audit_id
+                   WHERE a.principal_id = ? AND a.root_ref = ? AND o.status = 'PENDING'
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, ACTOR)
+                statement.setString(2, root)
+                statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.getString(1)) } }
+            }
+        }
+
+    private fun disclosureRows(root: String, bankScope: String? = "openbank-cz"): List<Pair<Int, String>> =
+        withAuditScope(bankScope) { connection ->
+            connection.prepareStatement(
+                """SELECT d.evidence_count, d.evidence_refs_json FROM context_disclosure_audit d
+                   JOIN context_read_audit a ON a.audit_id = d.decision_audit_id
+                   WHERE a.principal_id = ? AND a.root_ref = ? AND a.decision = 'ALLOWED'
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, ACTOR)
+                statement.setString(2, root)
+                statement.executeQuery().use { rows ->
+                    buildList { while (rows.next()) add(rows.getInt(1) to rows.getString(2)) }
+                }
+            }
+        }
+
+    private fun storedAuditCommitment(root: String): String = withAuditScope("openbank-cz") { connection ->
         connection.prepareStatement(
-            "SELECT decision FROM context_read_audit WHERE principal_id = ? AND root_ref = ? ORDER BY occurred_at",
+            "SELECT * FROM context_read_audit WHERE principal_id = ? AND root_ref = ?",
         ).use { statement ->
             statement.setString(1, ACTOR)
             statement.setString(2, root)
-            statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.getString(1)) } }
+            statement.executeQuery().use { rows ->
+                check(rows.next())
+                ContextAuditCommitment.of(
+                    ContextReadAuditEntity().apply {
+                        id = rows.getObject("audit_id", UUID::class.java)
+                        bankScope = rows.getString("bank_scope")
+                        principalId = rows.getString("principal_id")
+                        caseId = rows.getString("case_id")
+                        purpose = rows.getString("purpose")
+                        action = rows.getString("action")
+                        rootRef = rows.getString("root_ref")
+                        decision = rows.getString("decision")
+                        policyVersion = rows.getString("policy_version")
+                        reasonCode = rows.getString("reason_code")
+                        occurredAt = rows.getObject("occurred_at", OffsetDateTime::class.java).toInstant()
+                        effectiveAt = rows.getObject("effective_at", OffsetDateTime::class.java)?.toInstant()
+                        knownAt = rows.getObject("known_at", OffsetDateTime::class.java)?.toInstant()
+                    },
+                )
+            }
         }
+    }
+
+    private fun <T> withAuditScope(scope: String?, action: (Connection) -> T): T = connection().use { connection ->
+        connection.createStatement().use { statement ->
+            statement.execute(
+                """DO $$ BEGIN
+                   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'context_read_audit_test') THEN
+                     CREATE ROLE context_read_audit_test NOLOGIN;
+                   END IF;
+                   END $$
+                """.trimIndent(),
+            )
+            statement.execute("GRANT SELECT, DELETE ON context_read_audit TO context_read_audit_test")
+            statement.execute("GRANT SELECT, DELETE ON context_audit_commitment_outbox TO context_read_audit_test")
+            statement.execute("GRANT SELECT, DELETE ON context_disclosure_audit TO context_read_audit_test")
+        }
+        connection.autoCommit = false
+        connection.createStatement().use { it.execute("SET LOCAL ROLE context_read_audit_test") }
+        if (scope != null) {
+            connection.prepareStatement("SELECT set_config('openbank.bank_scope', ?, true)").use {
+                it.setString(1, scope)
+                it.executeQuery().close()
+            }
+        }
+        action(connection)
     }
 
     private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
@@ -422,9 +617,10 @@ class ContextApiIT {
         clearing: InMemorySource<String>,
         sepaReturns: InMemorySource<String>,
         paymentId: UUID,
+        reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
         clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
-        sepaReturns.send(sepaReturnedEvent(paymentId))
+        sepaReturns.send(sepaReturnedEvent(paymentId, reversalId))
     }
 
     private fun seedUnrelatedComplaint(paymentId: UUID): String =
@@ -440,6 +636,7 @@ class ContextApiIT {
         bookingTransactionId: UUID,
         journalId: UUID,
         clearingItemId: UUID,
+        reversalId: UUID,
         complaintId: UUID,
     ) {
         awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
@@ -448,6 +645,7 @@ class ContextApiIT {
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$clearingItemId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
+        assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isEqualTo(1)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
         assertThat(count("context_nodes", "node_key = ?", "complaint:$reference")).isEqualTo(1)
         assertThat(count("context_edges", "from_key = ?", "complaint:$reference")).isEqualTo(3)
@@ -463,6 +661,11 @@ class ContextApiIT {
             """"aggregateId":"$transactionId","version":0,"originatingPaymentId":"$paymentId",""" +
             """"occurredAt":"${NOW.minusSeconds(2)}"}"""
 
+    private fun transactionReversalEvent(reversalId: UUID, originalId: UUID): String =
+        """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+            """"aggregateId":"$reversalId","version":0,"type":"REVERSAL","reversalOf":"$originalId",""" +
+            """"occurredAt":"${NOW.minusSeconds(1)}"}"""
+
     private fun ledgerPostedEvent(journalId: UUID, transactionId: UUID): String =
         """{"eventType":"JournalPosted","sourceService":"ledger-service","aggregateId":"$journalId",""" +
             """"version":0,"transactionId":"$transactionId","entryDate":"2026-09-13",""" +
@@ -473,9 +676,10 @@ class ContextApiIT {
             """"itemId":"$itemId","batchId":"$batchId","paymentId":"$paymentId","version":2,""" +
             """"status":"SETTLED","occurredAt":"${NOW.minusSeconds(2)}"}"""
 
-    private fun sepaReturnedEvent(paymentId: UUID): String =
+    private fun sepaReturnedEvent(paymentId: UUID, reversalId: UUID): String =
         """{"eventType":"sepa.payment.returned","sourceService":"sepa-payment","paymentId":"$paymentId",""" +
             """"version":4,"returnReasonCode":"AC04","reversalPerformed":true,""" +
+            """"reversalTransactionId":"$reversalId",""" +
             """"occurredAt":"${NOW.minusSeconds(1)}"}"""
 
     private fun execute(sql: String, vararg values: Any) = connection().use { connection ->
@@ -505,6 +709,8 @@ class ContextApiIT {
 
 class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
+        "aml-case-evidence-in",
+        "delegation-history-in",
         "dispute-events-in",
         "ict-incident-events-in",
         "domestic-payment-events-in",

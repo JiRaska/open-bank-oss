@@ -47,6 +47,7 @@ import java.util.UUID
 @QuarkusTestResource(LendingSummaryIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class LendingSummaryIT {
+    private val graphParty = UUID.randomUUID()
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
@@ -59,9 +60,9 @@ class LendingSummaryIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private fun applyFor(amount: String, currency: String) {
+    private fun applyFor(amount: String, currency: String, partyId: UUID = UUID.randomUUID()) {
         val body = """
-            {"partyId":"${UUID.randomUUID()}","requestedAmount":{"amount":"$amount","currency":{"code":"$currency"}},
+            {"partyId":"$partyId","requestedAmount":{"amount":"$amount","currency":{"code":"$currency"}},
             "nominalAnnualRate":0.05,"termPeriods":12,"firstDueDate":"${LocalDate.now().plusMonths(1)}"}
         """.trimIndent()
         Given {
@@ -142,6 +143,50 @@ class LendingSummaryIT {
             get("/api/v1/lending/applications/summary")
         } Then {
             statusCode(403)
+        }
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "summary-it-proposer", roles = ["ROLE_LENDING_OFFICER"])
+    fun `5 - seed one party with more applications than the graph requests`() {
+        repeat(3) { applyFor("10000.00", "CZK", graphParty) }
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "summary-it-reader", roles = ["ROLE_CREDIT_RISK"])
+    fun `6 - application list limit is enforced by the source endpoint`() {
+        val limited = Given {
+            queryParam("partyId", graphParty.toString())
+            queryParam("limit", 1)
+        } When {
+            get("/api/v1/lending/applications")
+        } Then {
+            statusCode(200)
+        } Extract {
+            this
+        }
+        assertThat(limited.jsonPath().getList<Any>("$")).hasSize(1)
+
+        val legacy = Given {
+            queryParam("partyId", graphParty.toString())
+        } When {
+            get("/api/v1/lending/applications")
+        } Then {
+            statusCode(200)
+        } Extract {
+            this
+        }
+        assertThat(legacy.jsonPath().getList<Any>("$")).hasSize(3)
+
+        Given {
+            queryParam("partyId", graphParty.toString())
+            queryParam("limit", 0)
+        } When {
+            get("/api/v1/lending/applications")
+        } Then {
+            statusCode(400)
         }
     }
 }
