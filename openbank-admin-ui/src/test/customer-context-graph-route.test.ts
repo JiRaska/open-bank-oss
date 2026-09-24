@@ -145,4 +145,26 @@ describe('Customer graph live overlay route', () => {
     expect(currentFacts.accounts.map(account => account.id)).toEqual(['current-session-account'])
     expect(secondPanelFacts.accounts.map(account => account.id)).toEqual(['current-session-account'])
   })
+
+  it('starts a new read when the operator rapidly revisits a customer', async () => {
+    const firstParty = '44444444-4444-4444-8444-444444444444'
+    const secondParty = '55555555-5555-4555-8555-555555555555'
+    const resolvers: Array<(value: Response) => void> = []
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolvers.push(resolve) }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { clearSelectedCustomerGraphFacts, selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    const oldFirst = selectCustomerGraphFacts(firstParty)
+    const middle = selectCustomerGraphFacts(secondParty)
+    const currentFirst = selectCustomerGraphFacts(firstParty)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    resolvers[0](response({ accounts: [{ id: 'old' }] }))
+    resolvers[1](response({ accounts: [] }))
+    resolvers[2](response({ accounts: [{ id: 'current' }] }))
+    const [oldFacts, , currentFacts] = await Promise.all([oldFirst, middle, currentFirst])
+    expect(oldFacts.accounts.map(account => account.id)).toEqual(['old'])
+    expect(currentFacts.accounts.map(account => account.id)).toEqual(['current'])
+    clearSelectedCustomerGraphFacts(firstParty)
+  })
 })

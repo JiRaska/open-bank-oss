@@ -8,6 +8,7 @@ let selected: { partyId: string; facts: Promise<LiveCustomerFacts> } | null = nu
 /** Starts and retains one live snapshot for the party currently selected on Customer 360. */
 export function selectCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> {
   if (selected?.partyId === partyId) return selected.facts
+  if (selected) inflight.delete(selected.partyId)
   selected = null
   const facts = requestCustomerGraphFacts(partyId)
   selected = { partyId, facts }
@@ -18,10 +19,8 @@ export function selectCustomerGraphFacts(partyId: string): Promise<LiveCustomerF
 }
 
 export function clearSelectedCustomerGraphFacts(partyId: string): void {
-  if (selected?.partyId === partyId) {
-    selected = null
-    inflight.delete(partyId)
-  }
+  if (selected?.partyId === partyId) selected = null
+  inflight.delete(partyId)
 }
 
 /** Shares one bounded BFF read across the graph and sibling Customer 360 panels mounted together. */
