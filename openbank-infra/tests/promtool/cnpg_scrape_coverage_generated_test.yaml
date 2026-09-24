@@ -140,6 +140,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -241,6 +243,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -410,6 +414,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -511,6 +517,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -656,6 +664,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -757,6 +767,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -914,6 +926,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -1013,6 +1027,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -1165,6 +1181,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -1264,6 +1282,8 @@ tests:
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"

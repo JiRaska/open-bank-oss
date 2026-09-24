@@ -93,6 +93,7 @@ spec:
       - psd2
       - referral
       - release-steward
+      - risk
       - sanctions
       - sca
       - sdd

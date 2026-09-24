@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.risk.application.port.out
+
+import com.openbank.risk.domain.model.LedgerInputs
+import com.openbank.risk.domain.model.Position
+import com.openbank.risk.domain.model.SnapshotRun
+import com.openbank.risk.domain.model.TieOutMismatch
+import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+
+/** Reads the two ledger views a snapshot is built from. */
+interface LedgerPort {
+    suspend fun read(asOf: LocalDate): LedgerInputs
+}
+
+interface SnapshotRepository {
+    suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun?
+
+    suspend fun findById(id: UUID): SnapshotRun?
+
+    /**
+     * Stores the run and its positions in ONE transaction, idempotently on (asOf, inputHash).
+     * Returns the run that is stored afterwards — [run] itself, or the one a concurrent request
+     * committed first under the same natural key.
+     */
+    suspend fun saveIfAbsent(run: SnapshotRun, positions: List<Position>): SnapshotRun
+
+    suspend fun findPositions(runId: UUID): List<Position>
+}
+
+/** One currency rate from a published central-bank fixing (ADR-0314 D5). */
+data class FxFixingRate(
+    val source: String,
+    val fixingDate: LocalDate,
+    val currency: String,
+    val quoteCurrency: String,
+    val ratePerUnit: BigDecimal,
+    val rateId: UUID,
+    val validFrom: Instant,
+    val validTo: Instant,
+    val receivedAt: Instant,
+)
+
+interface FxFixingRepository {
+    /** Inserts each rate unless (source, fixingDate, currency) exists. Returns how many were new. */
+    suspend fun insertIfAbsent(rates: List<FxFixingRate>): Int
+}
+
+class SnapshotNotFoundException(id: UUID) : RuntimeException("snapshot run $id not found")
+
+/** An UNTIED run is stored and flagged, never rendered (ADR-0314 D3). */
+class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismatch>) :
+    RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")

@@ -521,6 +521,9 @@ rules:
       - wealth-service
       # ADR-0303: complaint and ICT-incident projection consumer, ns context.
       - context-service
+      # ADR-0314: balance-sheet risk engine, FX fixing consumer, ns risk. Without this the
+      # keystore ExternalSecret sits at SecretSyncedError and no pod is ever created (#2749).
+      - risk-engine
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
