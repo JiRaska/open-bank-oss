@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.1...sanctions-service-v0.13.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **sanctions:** keep multi-line quoted CSV fields in one record ([#10735](https://github.com/JiRaska/open-bank-oss/issues/10735)) ([b810036](https://github.com/JiRaska/open-bank-oss/commit/b8100369f96e18a1a86bc6525654316723bcef1f)), closes [#10734](https://github.com/JiRaska/open-bank-oss/issues/10734)
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.0...sanctions-service-v0.13.1) (2026-09-24)
 
 

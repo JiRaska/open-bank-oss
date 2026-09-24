@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.4.0...risk-engine-v0.5.0) (2026-09-24)
+
+
+### Features
+
+* **risk-engine:** read lending's loan book over mTLS in the sandbox ([#10741](https://github.com/JiRaska/open-bank-oss/issues/10741)) ([2bb2dc0](https://github.com/JiRaska/open-bank-oss/commit/2bb2dc03564a7d8827ca2c39a5667730b13a310b)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.3.0...risk-engine-v0.4.0) (2026-09-24)
 
 
