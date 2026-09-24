@@ -199,8 +199,8 @@ export default function ApprovalsPage() {
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
-        title={t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
-        subtitle={t('Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.', 'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.')}
+        title={t('Fronta schvalování', 'Approval inbox')}
+        subtitle={t('Doménové žádosti kontrolujte zde a rozhodněte v příslušné službě. Návrhy AI agentů vyžadují schválení člověkem odlišným od autora.', 'Review domain requests here and decide them in their governed service. AI agent proposals require approval by a human other than the author.')}
         actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading}
           aria-label={t('Obnovit schvalovací frontu', 'Refresh approval queue')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
@@ -216,7 +216,7 @@ export default function ApprovalsPage() {
       {/* ADR-0227 D2/D4: domain maker-checker queues, federated. Read-only here — disposal
           belongs to the governed per-domain flows (money-path adds SCA). */}
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
-        {t('Doménová schvalování (money-path)', 'Domain approvals (money-path)')} ({domainApprovalItems.length})
+        {t('Doménová schvalování', 'Domain approvals')} ({domainApprovalItems.length})
       </div>
       {domainLoadFailed && (
         <div className="card" role="alert" style={{
