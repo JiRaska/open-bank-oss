@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.251.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.250.0...admin-ui-v0.251.0) (2026-09-23)
+
+
+### Features
+
+* **case-coordinator:** P3 swarm guardrails ([#10662](https://github.com/JiRaska/open-bank-oss/issues/10662)) ([a386d82](https://github.com/JiRaska/open-bank-oss/commit/a386d82a79abadce9fa7ffd8a73b1d95fd5fc8e7))
+
 ## [0.250.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.249.0...admin-ui-v0.250.0) (2026-09-22)
 
 
