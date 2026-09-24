@@ -1,6 +1,6 @@
 ---
 date: 2026-09-24
-decision-status: proposed
+decision-status: accepted
 delivery-status: planned
 authors: [Jiri Raska]
 supersedes: []

@@ -318,8 +318,8 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0310](0310-growth-lifecycle-referral-qualification-reward-settlement-loyalty-earn-benefit-application.md) | Growth lifecycle: referral qualification, reward settlement, loyalty earn and benefit application | Proposed | Planned | customer-edge,mobile-app,kafka,ledger | openbank-app |
 | [0312](0312-business-payment-signing-multi-signature-approval-and-trusted-payees.md) | Business payment signing: multi-signature approval and trusted payees | Proposed | Planned | payments,sca,authz,customer-edge | — |
 | [0313](0313-balance-sheet-risk-and-treasury-platform.md) | Balance-sheet risk, capital and treasury platform with forecasting, revaluation and AI agents | Accepted | Planned | architecture,regulatory-reporting,analytics,ai-agents | — |
-| [0314](0314-risk-engine-balance-sheet-snapshot-and-cash-flow-model.md) | Risk engine: balance-sheet snapshot and cash-flow data model | Proposed | Planned | architecture,analytics,database,regulatory-reporting | — |
-| [0315](0315-treasury-service-domain.md) | Treasury service domain: deals, GL posting, nostro and minimum reserves | Proposed | Planned | architecture,ledger,accounting-close,ai-agents | — |
+| [0314](0314-risk-engine-balance-sheet-snapshot-and-cash-flow-model.md) | Risk engine: balance-sheet snapshot and cash-flow data model | Accepted | Planned | architecture,analytics,database,regulatory-reporting | — |
+| [0315](0315-treasury-service-domain.md) | Treasury service domain: deals, GL posting, nostro and minimum reserves | Accepted | Planned | architecture,ledger,accounting-close,ai-agents | — |
 
 ## By tag
 
