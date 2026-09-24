@@ -19,6 +19,16 @@ const LIMITS = { accounts: 50, cards: 50, notifications: 30, lending: 30, aml: 3
 type Source = 'accounts' | 'cards' | 'notifications' | 'lending' | 'aml' | 'devices' | 'documents'
 type ReadResult = { source: Source; body: unknown; available: boolean }
 
+function sourceRowCount(source: Source, body: unknown): number {
+  if (source === 'accounts' && body && typeof body === 'object' && 'data' in body) {
+    return Array.isArray(body.data) ? body.data.length : 0
+  }
+  if ((source === 'notifications' || source === 'devices') && body && typeof body === 'object' && 'items' in body) {
+    return Array.isArray(body.items) ? body.items.length : 0
+  }
+  return Array.isArray(body) ? body.length : 0
+}
+
 async function boundedJson(response: Response): Promise<unknown> {
   const reader = response.body?.getReader()
   if (!reader) throw new Error('Missing graph source body')
@@ -108,7 +118,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     devices: parsed.devices.slice(0, LIMITS.devices),
     documents: parsed.documents.slice(0, LIMITS.documents),
     unavailable: results.filter(result => !result.available).map(result => result.source),
-    truncated: (Object.keys(parsed) as Source[]).filter(source => parsed[source].length > LIMITS[source]),
+    truncated: results.filter(result => result.available && sourceRowCount(result.source, result.body) > LIMITS[result.source])
+      .map(result => result.source),
     fetchedAt: new Date().toISOString(),
   }, { headers: { 'cache-control': 'private, no-store' } })
 }

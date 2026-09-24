@@ -100,6 +100,29 @@ describe('Customer graph live overlay route', () => {
     expect(await result.json()).toMatchObject({ accounts: [], unavailable: ['accounts'] })
   })
 
+  it('marks a source truncated when its extra row cannot be projected', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) {
+        return response([
+          ...Array.from({ length: 50 }, (_, index) => ({ id: `card-${index}`, accountId: 'account-1' })),
+          { accountId: 'account-1' },
+        ])
+      }
+      if (url.includes(':8100/')) return response({ data: [] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    const body = await result.json()
+    expect(body.cards).toHaveLength(50)
+    expect(body).toMatchObject({
+      cards: expect.arrayContaining([expect.objectContaining({ id: 'card-0', accountId: 'account-1' })]),
+      truncated: ['cards'],
+    })
+  })
+
   it('denies unauthenticated access before any source call', async () => {
     authMock.mockResolvedValue(null)
     const fetchMock = vi.fn()
