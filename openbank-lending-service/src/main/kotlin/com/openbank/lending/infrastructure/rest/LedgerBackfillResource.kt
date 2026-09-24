@@ -42,7 +42,6 @@ import java.util.UUID
  */
 @Path("/api/v1/lending/ledger-backfill")
 @Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Ledger Backfill", description = "Four-eyes back-posting of loan GL history that never reached the ledger")
 @RolesAllowed("ROLE_ADMIN")
 class LedgerBackfillResource(private val backfill: LedgerBackfillService, private val identity: SecurityIdentity) {
@@ -61,6 +60,7 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
 
     @POST
     @Path("/requests")
+    @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "lending.ledgerBackfill.propose", resource = "")
     @Operation(summary = "Propose a backfill (maker); binds the approval to the plan hash")
     fun propose(request: ProposeBackfillRequest?): Uni<Response> = guarded {
@@ -71,6 +71,7 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
 
     @POST
     @Path("/requests/{id}/decide")
+    @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "lending.ledgerBackfill.decide", resource = "#id")
     @Operation(summary = "Approve or reject a backfill request (checker, must differ from the maker)")
     fun decide(@PathParam("id") id: UUID, request: DecideBackfillRequest?): Uni<Response> = guarded {

@@ -10,7 +10,7 @@ info:
   # one and nothing in a merge can tell them apart.
   # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
-  version: 1.25.0
+  version: 1.26.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -1016,6 +1016,120 @@ paths:
                 items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/ledger-backfill/plan:
+    get:
+      tags: [Lending]
+      operationId: planLedgerBackfill
+      summary: "Dry-run of the one-off ledger backfill (#10746): exact journal set, GL totals, tie-out. Writes nothing."
+      parameters:
+        - name: cutoverDate
+          in: query
+          required: true
+          description: Accounting day the journals are booked into (today or later); original dates travel as valueDate.
+          schema: { type: string, format: date }
+        - name: disbursedBefore
+          in: query
+          required: true
+          description: Only loans disbursed strictly before this date are in scope.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillPlanResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/ledger-backfill/requests:
+    post:
+      tags: [Lending]
+      operationId: proposeLedgerBackfill
+      summary: Propose a ledger backfill (maker); the approval binds to the plan hash
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cutoverDate, disbursedBefore]
+              properties:
+                cutoverDate: { type: string, format: date }
+                disbursedBefore: { type: string, format: date }
+      responses:
+        '201':
+          description: Proposal recorded, awaiting a different approver
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillRequestView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/ledger-backfill/requests/{id}/decide:
+    post:
+      tags: [Lending]
+      operationId: decideLedgerBackfill
+      summary: Approve or reject a ledger backfill request (checker, must differ from the maker)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillRequestView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The request was decided concurrently
+        '422':
+          description: Four-eyes violation (approver equals proposer)
+  /api/v1/lending/ledger-backfill/requests/{id}/execute:
+    post:
+      tags: [Lending]
+      operationId: executeLedgerBackfill
+      summary: Execute an APPROVED ledger backfill; without execute=true only returns the plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: execute
+          in: query
+          required: false
+          description: Must be true to post; anything else is a dry-run.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Plan (dry-run) or per-loan execution outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillExecutionResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Plan hash changed since approval, cut-over passed, or a run is already in progress
+        '422':
+          description: The request is not APPROVED
 
 components:
   securitySchemes:
@@ -1049,6 +1163,44 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    LedgerBackfillRequestView:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        state: { type: string, enum: [PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED] }
+        cutoverDate: { type: string, format: date }
+        planHash: { type: string }
+        loanCount: { type: integer }
+        legCount: { type: integer }
+        proposedBy: { type: string }
+        decidedBy: { type: string, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        executedBy: { type: string, nullable: true }
+        lastResult: { type: string, nullable: true }
+    LedgerBackfillGlTotal:
+      type: object
+      properties:
+        code: { type: string }
+        currency: { type: string }
+        debit: { type: number }
+        credit: { type: number }
+        net: { type: number }
+    LedgerBackfillPlanResponse:
+      type: object
+      properties:
+        plan: { type: object, additionalProperties: true }
+        executable: { type: boolean }
+        journalCount: { type: integer }
+        glTotals:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerBackfillGlTotal' }
+    LedgerBackfillExecutionResponse:
+      type: object
+      properties:
+        execution: { type: object, additionalProperties: true }
+        glTotals:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerBackfillGlTotal' }
     PackActivationView:
       type: object
       required:

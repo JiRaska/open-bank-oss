@@ -19,6 +19,10 @@
 #                                 handler + four_eyes.verbs, issue #621; PENDING until decided)
 #   lending.collateralDecide    — approve/reject a pending collateral registration (checker; must
 #                                 differ from the registrant)
+#   lending.ledgerBackfill.*    — one-off four-eyes ledger backfill (#10746): read (dry-run),
+#                                 propose (maker), decide (checker, must differ — enforced in
+#                                 LedgerBackfillService), execute. ROLE_ADMIN humans only; see the
+#                                 veto at the end of this file.
 #
 # Base rest.rego already grants: operator-read-any (OPERATOR/ADMIN on *.read/*.list),
 # compliance-read-any (*.read), party-self-service (reads where the JWT sub equals the
@@ -198,3 +202,19 @@ prohibited if {
 	}
 }
 
+
+# #10746: the ledger backfill re-posts GL history for loans whose journals never reached the ledger.
+# It books real journals, so it is narrower than the desk: ROLE_ADMIN humans only. `operator-lending-write`
+# above would otherwise admit ROLE_OPERATOR to any `lending.*`, and base operator-read-any would admit
+# the dry-run read to any operator — including the service accounts that carry ROLE_OPERATOR (and, in
+# some realms, the shared client). The veto closes every path at once: no service account, whatever
+# its roles, and no human without ROLE_ADMIN. maker != checker is enforced in LedgerBackfillService.
+prohibited if {
+	startswith(input.action, "lending.ledgerBackfill.")
+	startswith(input.principal.id, "service-account-")
+}
+
+prohibited if {
+	startswith(input.action, "lending.ledgerBackfill.")
+	not "ROLE_ADMIN" in input.principal.roles
+}

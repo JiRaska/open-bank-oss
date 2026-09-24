@@ -184,3 +184,56 @@ test_edge_denied_loan_book if {
 	not rest.allow with input as {"principal": edge, "action": "lending.book.read"}
 		with data.rules as rules_mock
 }
+
+# ── #10746: ledger backfill — ROLE_ADMIN humans only, every service account vetoed ───────────
+
+admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+
+shared_admin := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_ADMIN", "ROLE_OPERATOR"]}
+
+backfill_actions := [
+	"lending.ledgerBackfill.read",
+	"lending.ledgerBackfill.propose",
+	"lending.ledgerBackfill.decide",
+	"lending.ledgerBackfill.execute",
+]
+
+test_admin_may_run_every_backfill_action if {
+	every action in backfill_actions {
+		rest.allow with input as {"principal": admin, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_operator_denied_every_backfill_action if {
+	every action in backfill_actions {
+		not rest.allow with input as {"principal": operator, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_service_account_with_admin_role_denied_every_backfill_action if {
+	every action in backfill_actions {
+		not rest.allow with input as {"principal": shared_admin, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_edge_denied_backfill_execute if {
+	not rest.allow with input as {"principal": edge, "action": "lending.ledgerBackfill.execute"}
+		with data.rules as rules_mock
+}
+
+test_credit_risk_denied_backfill_decide if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "u-risk", "roles": ["ROLE_CREDIT_RISK"]},
+		"action": "lending.ledgerBackfill.decide",
+	}
+		with data.rules as rules_mock
+}
+
+# Control: the veto is scoped to the backfill; an admin's other lending writes are untouched.
+test_backfill_veto_does_not_touch_other_admin_writes if {
+	not rest.prohibited with input as {"principal": admin, "action": "lending.disburse"}
+		with data.rules as rules_mock
+}
