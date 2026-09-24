@@ -8,6 +8,7 @@ package com.openbank.agent.infrastructure.rest
 import com.openbank.agent.application.port.`in`.DecideProposalUseCase
 import com.openbank.agent.application.port.`in`.ProposalQueries
 import com.openbank.agent.domain.proposal.AgentProposal
+import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -40,6 +41,8 @@ class ProposalResource {
 
     @Inject lateinit var decisions: DecideProposalUseCase
 
+    @Inject lateinit var identity: SecurityIdentity
+
     data class ProposalDto(
         val id: String,
         val title: String,
@@ -55,6 +58,7 @@ class ProposalResource {
         val metadata: Map<String, String>,
     )
 
+    // Keep decidedBy for mixed-version clients; it is never an authority for the audit actor.
     data class DecisionRequest(val approve: Boolean, val decidedBy: String, val reason: String? = null)
 
     private fun AgentProposal.toDto() = ProposalDto(
@@ -84,8 +88,12 @@ class ProposalResource {
     fun decide(@PathParam("id") id: String, body: DecisionRequest): Response {
         val uuid = runCatching { UUID.fromString(id) }.getOrNull()
             ?: return Response.status(Response.Status.BAD_REQUEST).entity(mapOf("error" to "invalid id")).build()
+        val actor = identity.principal?.name?.takeIf { it.isNotBlank() }
+            ?: return Response.status(Response.Status.FORBIDDEN)
+                .entity(mapOf("error" to "authenticated principal required"))
+                .build()
         return try {
-            val updated = decisions.decide(uuid, body.approve, body.decidedBy, body.reason)
+            val updated = decisions.decide(uuid, body.approve, actor, body.reason)
                 ?: return Response.status(
                     Response.Status.NOT_FOUND,
                 ).entity(mapOf("error" to "proposal not found")).build()
