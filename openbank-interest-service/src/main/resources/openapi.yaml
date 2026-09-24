@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Interest Service API
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Interest accrual, capitalization, and rate configuration. Capitalization withholds Czech
     final tax on credit interest (§36/§38d ZDP, ADR-0033): CZK interest credited to a resident
@@ -466,6 +466,17 @@ components:
           enum: [FIXED, VARIABLE, TIERED]
         annualRate:
           type: number
+        rateIndex:
+          type: string
+          nullable: true
+          enum: [CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3M]
+          description: >-
+            VARIABLE rates only: the market index this rate follows (ADR-0314). Set together with
+            `spread` or not at all; anything else is rejected with 400.
+        spread:
+          type: number
+          nullable: true
+          description: VARIABLE rates only. Margin over `rateIndex`, a decimal fraction like `annualRate`.
         minBalance:
           type: number
         maxBalance:

@@ -83,6 +83,9 @@ openbank-lending-service POST /api/v1/lending/loans/{id}/termination/decide  # a
 openbank-lending-service POST /api/v1/lending/loans/{id}/termination/propose  # aggregate-state guard, verified — ADR-0297, burn-down #8351
 openbank-lending-service POST /api/v1/lending/loans/{id}/withdrawal  # aggregate-state guard, verified — ADR-0297, burn-down #8351
 openbank-lending-service POST /api/v1/lending/loans/{id}/writeoff  # aggregate-state guard, verified — ADR-0297, burn-down #8351
+openbank-lending-service POST /api/v1/lending/ledger-backfill/requests  # natural-key replay: a retry for the same plan hash returns the pending PROPOSED request (#10746)
+openbank-lending-service POST /api/v1/lending/ledger-backfill/requests/{id}/decide  # lifecycle/action endpoint on an addressed resource — conditional PROPOSED->decided update refuses a replay (#10746)
+openbank-lending-service POST /api/v1/lending/ledger-backfill/requests/{id}/execute  # every journal carries the live ledger idempotency reference; an EXECUTED request refuses a replay and a lease blocks concurrent runs (#10746)
 openbank-sanctions-service POST /api/v1/sanctions/lists/refresh-all  # creation POST with no idempotency key today — burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/lists/{listType}/refresh  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/review  # creation POST with no idempotency key today — burn-down #8351

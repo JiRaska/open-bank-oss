@@ -146,6 +146,12 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.fx.fixing.published
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.documents.document.event
           patternType: literal
         operations: [Read, Describe]

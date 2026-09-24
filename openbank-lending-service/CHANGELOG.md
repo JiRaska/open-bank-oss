@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.1...lending-service-v0.35.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **lending:** four-eyes ledger backfill for the 44 loans that never posted ([#10746](https://github.com/JiRaska/open-bank-oss/issues/10746)) ([#10765](https://github.com/JiRaska/open-bank-oss/issues/10765)) ([c86b350](https://github.com/JiRaska/open-bank-oss/commit/c86b350bf0531f429722988b93946307b1572512))
+
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.0...lending-service-v0.35.1) (2026-09-24)
+
+
+### Security
+
+* **lending:** open the east-west mTLS listener on 8443 ([#10732](https://github.com/JiRaska/open-bank-oss/issues/10732)) ([2741836](https://github.com/JiRaska/open-bank-oss/commit/274183675bf72f837a3df13e66b5739f4a632935)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.34.0...lending-service-v0.35.0) (2026-09-24)
+
+
+### Features
+
+* **risk-engine:** loans as contract-level instruments, with a read-only lending loan book (ADR-0314 D4) ([#10729](https://github.com/JiRaska/open-bank-oss/issues/10729)) ([5cee641](https://github.com/JiRaska/open-bank-oss/commit/5cee641635fcbd0d3cd1a8bada5021bdbcd60859))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.9...lending-service-v0.34.0) (2026-09-24)
+
+
+### Features
+
+* **lending:** record fixed or floating rate terms on loans ([#10693](https://github.com/JiRaska/open-bank-oss/issues/10693)) ([bd41c32](https://github.com/JiRaska/open-bank-oss/commit/bd41c3206138ecbc1255732736e818450e12ad08)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
 ## [0.33.9](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.8...lending-service-v0.33.9) (2026-09-23)
 
 

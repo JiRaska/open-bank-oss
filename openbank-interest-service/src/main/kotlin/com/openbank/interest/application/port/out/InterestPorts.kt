@@ -19,6 +19,12 @@ import java.util.UUID
 /** Outbound persistence port for interest rate configurations (reactive, Mutiny). */
 interface InterestRateConfigRepository {
     fun save(config: InterestRateConfig): Uni<InterestRateConfig>
+
+    /** [save] plus [event] into the outbox, in ONE transaction (ADR-0314 D5). */
+    fun saveWithOutbox(config: InterestRateConfig, event: OutboxMessage): Uni<InterestRateConfig>
+
+    /** [update] plus [event] into the outbox, in ONE transaction (ADR-0314 D5). */
+    fun updateWithOutbox(config: InterestRateConfig, event: OutboxMessage): Uni<InterestRateConfig>
     fun findById(id: UUID): Uni<InterestRateConfig?>
     fun findByProductId(productId: String): Uni<List<InterestRateConfig>>
     fun findAll(): Uni<List<InterestRateConfig>>

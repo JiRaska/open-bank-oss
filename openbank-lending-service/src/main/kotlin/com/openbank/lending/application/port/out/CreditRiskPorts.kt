@@ -26,6 +26,13 @@ data class LedgerPosting(
     val amount: Money,
     val kind: PostingKind,
     val accountingDate: java.time.LocalDate? = null,
+    /**
+     * The business date the event happened on, when it differs from the booking date. Null for every
+     * live posting (booked the day it happens, so value date == entry date). Set only by the ledger
+     * backfill (#10746), which books into the current open accounting day and carries the original
+     * event date here instead of back-dating into closed days.
+     */
+    val valueDate: java.time.LocalDate? = null,
 )
 
 /** Immutable internal command; the outbox retries this exact amount, key and accounting date. */

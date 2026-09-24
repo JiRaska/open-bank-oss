@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.11...interest-service-v0.21.0) (2026-09-24)
+
+
+### Features
+
+* **interest:** publish interest.rate.changed and accept index terms (ADR-0314 D5) ([#10690](https://github.com/JiRaska/open-bank-oss/issues/10690)) ([105af0d](https://github.com/JiRaska/open-bank-oss/commit/105af0d17728476997899d538d5ad152326abc16))
+
 ## [0.20.11](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.10...interest-service-v0.20.11) (2026-09-23)
 
 
