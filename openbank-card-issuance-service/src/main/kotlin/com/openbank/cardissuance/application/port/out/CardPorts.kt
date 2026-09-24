@@ -31,6 +31,7 @@ interface CardRepository {
     suspend fun findByAccountId(accountId: UUID): List<Card>
 
     suspend fun findByPartyId(partyId: UUID): List<Card>
+    suspend fun findByPartyId(partyId: UUID, limit: Int): List<Card>
 
     /**
      * Cards issued under a delegation grant (ADR-0249 D1). Drives D2's "revocation must bite":

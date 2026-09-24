@@ -10,7 +10,7 @@ info:
   # one and nothing in a merge can tell them apart.
   # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
-  version: 1.26.0
+  version: 1.27.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -74,6 +74,11 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          description: Return at most this many newest applications; omit for the legacy full list.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Applications for the party

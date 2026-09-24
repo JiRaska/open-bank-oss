@@ -159,10 +159,28 @@ test_context_complaint_read_allows_assigned_compliance_purpose if {
 	decision := rest.allow with input as {
 		"principal": {"id": "analyst-1", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "context.complaint.read",
-		"attributes": {"assignmentVerified": true, "purpose": "PAYMENT_COMPLAINT"},
+		"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": "PAYMENT_COMPLAINT"},
 	}
 		with data.openbank.bundle as bundle
 	decision.allow
+}
+
+test_context_complaint_read_denies_unscoped_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.complaint.read",
+		"attributes": {"assignmentVerified": true, "purpose": "PAYMENT_COMPLAINT"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_context_incident_read_denies_unscoped_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.incident.aggregate.read",
+		"attributes": {"assignmentVerified": true, "purpose": "INCIDENT_IMPACT"},
+	}
+		with data.openbank.bundle as bundle
 }
 
 test_context_incident_read_denies_service_account_even_with_assignment if {

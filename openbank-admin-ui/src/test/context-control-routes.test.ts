@@ -26,11 +26,27 @@ describe('context graph control BFFs', () => {
     const { POST } = await import('@/app/api/context/assignments/route')
     const request = new NextRequest('http://localhost/api/context/assignments', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ principalId: 'analyst-1', caseId: 'case-1', purpose: 'PAYMENT_COMPLAINT', validTo: '2026-09-14T10:00:00Z' }),
+      body: JSON.stringify({ principalId: 'analyst-1', caseId: 'case-1', purpose: 'PAYMENT_COMPLAINT', rootRef: 'complaint:CMP-42', validTo: '2026-09-14T10:00:00Z' }),
     })
     expect((await POST(request)).status).toBe(201)
     const [, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit]
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer admin-token')
+  })
+
+  it('rejects unscoped or mismatched incident and complaint assignments before forwarding', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
+    const { POST } = await import('@/app/api/context/assignments/route')
+    for (const [purpose, rootRef] of [
+      ['INCIDENT_IMPACT', undefined], ['INCIDENT_IMPACT', 'complaint:CMP-42'],
+      ['PAYMENT_COMPLAINT', undefined], ['PAYMENT_COMPLAINT', 'incident:11111111-1111-1111-1111-111111111111'],
+    ]) {
+      const request = new NextRequest('http://localhost/api/context/assignments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ principalId: 'operator-1', caseId: 'case-1', purpose, rootRef, validTo: '2026-09-14T10:00:00Z' }),
+      })
+      expect((await POST(request)).status).toBe(400)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('relays only aggregate incident impact and investigation headers', async () => {

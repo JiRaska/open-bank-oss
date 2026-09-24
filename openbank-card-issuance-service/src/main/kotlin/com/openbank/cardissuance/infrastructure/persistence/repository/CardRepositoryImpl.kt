@@ -56,6 +56,10 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
     override suspend fun findByPartyId(partyId: UUID): List<Card> =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findByPartyId(partyId: UUID, limit: Int): List<Card> = Panache.withSession {
+        find("partyId = ?1 order by createdAt desc, id desc", partyId).page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun findByDelegationGrantId(grantId: UUID): List<Card> =
         Panache.withSession { find("delegationGrantId", grantId).list() }.awaitSuspending().map { it.toDomain() }
 

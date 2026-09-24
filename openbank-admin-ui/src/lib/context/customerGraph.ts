@@ -12,6 +12,7 @@ export interface CustomerGraphNode {
   label: string
   source: string
   facts: string[]
+  href?: string
 }
 
 export interface CustomerGraphEdge {
@@ -25,6 +26,64 @@ export interface CustomerGraph {
   nodes: CustomerGraphNode[]
   edges: CustomerGraphEdge[]
   truncated: boolean
+}
+
+/** Keep an overview representative when one high-volume domain fills the visible node budget. */
+export function selectGraphOverview(nodes: CustomerGraphNode[], limit: number): CustomerGraphNode[] {
+  if (nodes.length <= limit) return nodes
+  const byKind = new Map<CustomerGraphKind, CustomerGraphNode[]>()
+  for (const node of nodes) {
+    const group = byKind.get(node.kind) ?? []
+    group.push(node)
+    byKind.set(node.kind, group)
+  }
+  const selected: CustomerGraphNode[] = []
+  const positions = new Map<CustomerGraphKind, number>()
+  while (selected.length < limit) {
+    let added = false
+    for (const [kind, group] of byKind) {
+      const index = positions.get(kind) ?? 0
+      if (index >= group.length) continue
+      selected.push(group[index])
+      positions.set(kind, index + 1)
+      added = true
+      if (selected.length === limit) break
+    }
+    if (!added) break
+  }
+  return selected
+}
+
+/** Add the shortest visible source chain for each match, up to two hops and within the UI budget. */
+export function selectGraphFocus(graph: CustomerGraph, matches: CustomerGraphNode[], limit: number): CustomerGraphNode[] {
+  const byId = new Map(graph.nodes.map(node => [node.id, node]))
+  const direct = new Set(graph.edges.filter(edge => edge.from === 'customer').map(edge => edge.to))
+  const parent = new Map<string, string>()
+  for (const edge of graph.edges) {
+    if (edge.from !== 'customer' && byId.has(edge.from) && !parent.has(edge.to)) parent.set(edge.to, edge.from)
+  }
+  const selected: CustomerGraphNode[] = []
+  const seen = new Set<string>()
+  for (const match of matches) {
+    if (seen.has(match.id)) continue
+    const chain: CustomerGraphNode[] = [match]
+    let current = match.id
+    while (!direct.has(current) && chain.length < 3) {
+      const parentId = parent.get(current)
+      if (!parentId || seen.has(parentId) || chain.some(node => node.id === parentId)) break
+      const parentNode = byId.get(parentId)
+      if (!parentNode) break
+      chain.unshift(parentNode)
+      current = parentId
+    }
+    const needed = chain.filter(node => !seen.has(node.id))
+    if (selected.length + needed.length > limit) break
+    for (const node of needed) {
+      selected.push(node)
+      seen.add(node.id)
+    }
+  }
+  return selected
 }
 
 export interface AccountFact {
@@ -288,9 +347,18 @@ export function buildCustomerGraph(
 
   const products = new Set<string>()
   const liveAccountIds = new Set(live.accounts.map(account => account.id))
+  const accountNodeIds = new Set<string>()
+  const ensureAccountReference = (accountId: string, source: string) => {
+    const id = `account:${accountId}`
+    if (accountNodeIds.has(id)) return id
+    accountNodeIds.add(id)
+    nodes.push({ id, kind: 'account', label: accountId, source, facts: [`Account reference: ${accountId}`] })
+    return id
+  }
   for (const accountId of evidence.accountIds) {
     if (liveAccountIds.has(accountId)) continue
     const id = `account:${accountId}`
+    accountNodeIds.add(id)
     nodes.push({
       id, kind: 'account', label: accountId, source: 'analytics-sink',
       facts: [`Projected account reference: ${accountId}`],
@@ -299,8 +367,10 @@ export function buildCustomerGraph(
   }
   for (const account of live.accounts.slice(0, 50)) {
     const id = `account:${account.id}`
+    accountNodeIds.add(id)
     nodes.push({
       id, kind: 'account', label: account.accountNumber || account.id, source: 'account-service',
+      href: recordHref('account', account.id),
       facts: [account.accountType, account.currencyCode, `Status: ${account.status}`, `Opened: ${account.openedAt}`],
     })
     addEdge('customer', id, 'OWNS')
@@ -314,6 +384,7 @@ export function buildCustomerGraph(
     const id = `card:${card.id}`
     nodes.push({
       id, kind: 'card', label: card.maskedPan || `${card.cardType} card`, source: 'card-issuance-service',
+      href: recordHref('card', card.id),
       facts: [
         [card.cardType, card.network].filter(Boolean).join(' · '),
         `Status: ${card.status}`,
@@ -323,7 +394,8 @@ export function buildCustomerGraph(
         ...(card.blockedReason ? [`Block reason: ${card.blockedReason}`] : []),
       ].filter(Boolean),
     })
-    addEdge(`account:${card.accountId}`, id, 'HAS_CARD')
+    if (card.accountId) addEdge(ensureAccountReference(card.accountId, 'card-issuance-service'), id, 'HAS_CARD')
+    else addEdge('customer', id, 'HAS_CARD')
     if (card.productCode) {
       products.add(card.productCode)
       addEdge(id, `product:${card.productCode}`, 'ISSUED_AS_PRODUCT')
@@ -356,6 +428,7 @@ export function buildCustomerGraph(
     const id = `application:${application.id}`
     nodes.push({
       id, kind: 'application', label: application.productKind || application.id, source: 'lending-service',
+      href: recordHref('application', application.id),
       facts: [`Status: ${application.status}`, `Created: ${application.createdAt}`],
     })
     addEdge('customer', id, 'APPLIED_FOR_CREDIT')
@@ -372,7 +445,7 @@ export function buildCustomerGraph(
       ],
     })
     addEdge('customer', id, 'SUBJECT_OF_AML_CASE')
-    if (amlCase.accountId) addEdge(`account:${amlCase.accountId}`, id, 'SCREENED_IN_CASE')
+    if (amlCase.accountId) addEdge(ensureAccountReference(amlCase.accountId, 'aml-service'), id, 'SCREENED_IN_CASE')
     if (amlCase.transactionId) {
       const transactionId = `domain-reference:transaction:${amlCase.transactionId}`
       if (!transactionReferences.has(transactionId)) {
@@ -422,15 +495,20 @@ export function buildCustomerGraph(
     }
   }
 
-  const consentIds = new Set<string>()
+  const consentObservations = new Map<string, Customer360Evidence['consents']>()
   for (const consent of evidence.consents) {
-    if (consentIds.has(consent.consentId)) continue
-    consentIds.add(consent.consentId)
-    const observations = evidence.consents.filter(item => item.consentId === consent.consentId)
-    const id = `consent:${consent.consentId}`
+    const observations = consentObservations.get(consent.consentId) ?? []
+    observations.push(consent)
+    consentObservations.set(consent.consentId, observations)
+  }
+  for (const [consentId, observations] of consentObservations) {
+    const id = `consent:${consentId}`
     nodes.push({
-      id, kind: 'consent', label: consent.consentId, source: 'analytics-sink',
-      facts: observations.slice(0, 10).flatMap(item => [`Projected state: ${item.status}`, `Scopes: ${item.scopes.join(', ') || '—'}`]),
+      id, kind: 'consent', label: consentId, source: 'analytics-sink',
+      facts: [
+        ...observations.slice(0, 10).flatMap(item => [`Projected state: ${item.status}`, `Scopes: ${item.scopes.join(', ') || '—'}`]),
+        `Projection newest event: ${evidence.asOf ?? 'unknown'} (not the consent event time)`,
+      ],
     })
     addEdge('customer', id, 'HAS_CONSENT')
   }
@@ -442,4 +520,13 @@ export function buildCustomerGraph(
       || live.lendingApplications.length > 30 || live.amlCases.length > 30 || live.devices.length > 20
       || live.documents.length > 30,
   }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function recordHref(kind: 'account' | 'card' | 'application', id: string): string | undefined {
+  if (!UUID_RE.test(id)) return undefined
+  if (kind === 'account') return `/accounts/${id}`
+  if (kind === 'card') return `/cards/${id}`
+  return `/lending/applications/${id}`
 }

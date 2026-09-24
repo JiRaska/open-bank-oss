@@ -93,12 +93,22 @@ prohibited if {
 
 prohibited if {
 	input.action == "context.complaint.read"
+	object.get(input.attributes, "rootScopeVerified", false) != true
+}
+
+prohibited if {
+	input.action == "context.complaint.read"
 	object.get(input.attributes, "purpose", "") != "PAYMENT_COMPLAINT"
 }
 
 prohibited if {
 	input.action == "context.incident.aggregate.read"
 	object.get(input.attributes, "assignmentVerified", false) != true
+}
+
+prohibited if {
+	input.action == "context.incident.aggregate.read"
+	object.get(input.attributes, "rootScopeVerified", false) != true
 }
 
 prohibited if {

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "da7a3867ae429be0"
+    openbank.tech/policy-checksum: "95dcbe7706ce3296"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -676,12 +676,22 @@ data:
 
     prohibited if {
         input.action == "context.complaint.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.complaint.read"
         object.get(input.attributes, "purpose", "") != "PAYMENT_COMPLAINT"
     }
 
     prohibited if {
         input.action == "context.incident.aggregate.read"
         object.get(input.attributes, "assignmentVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.incident.aggregate.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
     }
 
     prohibited if {

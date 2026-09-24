@@ -12,6 +12,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.hibernate.reactive.mutiny.Mutiny
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -44,7 +45,7 @@ class IncidentProjectionConsumer(
             val root = objectMapper.readTree(payload)
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected ICT incident event source" }
             require(root.long("schemaVersion") == SCHEMA_VERSION) { "unsupported ICT incident schemaVersion" }
-            val event = parse(root)
+            val event = parse(root, incidentDigest(payload))
             sessions.withTransaction { session, _ -> project(session, event) }
                 .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "projected").increment()
@@ -61,8 +62,10 @@ class IncidentProjectionConsumer(
     private fun project(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
         session,
         """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at,
+                 content_digest)
+                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt,
+                        :digest)
                 ON CONFLICT (bank_scope, event_key) DO NOTHING
         """.trimIndent(),
         mapOf(
@@ -73,16 +76,31 @@ class IncidentProjectionConsumer(
             "version" to event.sourceVersion,
             "occurredAt" to event.occurredAt,
             "processedAt" to clock.instant(),
+            "digest" to event.contentDigest,
         ),
     ).flatMap { inserted ->
         if (inserted == 0) {
-            Uni.createFrom().voidItem()
+            verifyReplay(session, event)
         } else {
             upsertIncident(session, event).flatMap { changed ->
                 if (changed == 0) Uni.createFrom().voidItem() else replaceAffectedServices(session, event)
             }
         }
     }
+
+    private fun verifyReplay(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> =
+        session.createNativeQuery(
+            "SELECT COALESCE(content_digest, '') FROM context_projection_events " +
+                "WHERE bank_scope = :bankScope AND event_key = :eventKey",
+            String::class.java,
+        ).setParameter("bankScope", bankScope).setParameter("eventKey", event.eventKey).singleResult.flatMap { stored ->
+            if (stored.isEmpty()) {
+                meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "legacy_digest_unavailable").increment()
+            } else {
+                require(stored == event.contentDigest) { "conflicting ICT incident revision replay" }
+            }
+            Uni.createFrom().voidItem()
+        }
 
     private fun upsertIncident(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Int> = upsertNode(
         session,
@@ -120,7 +138,7 @@ class IncidentProjectionConsumer(
                         WHERE context_edges.source_version < EXCLUDED.source_version
                     """.trimIndent(),
                     mapOf(
-                        "id" to stableId("$bankScope|$projectionGeneration|${event.rootKey}|$serviceKey"),
+                        "id" to incidentStableId("$bankScope|$projectionGeneration|${event.rootKey}|$serviceKey"),
                         "bankScope" to bankScope,
                         "generation" to projectionGeneration,
                         "root" to event.rootKey,
@@ -158,7 +176,7 @@ class IncidentProjectionConsumer(
             WHERE context_nodes.source_version < EXCLUDED.source_version
         """.trimIndent(),
         mapOf(
-            "id" to stableId("$bankScope|$projectionGeneration|$key"),
+            "id" to incidentStableId("$bankScope|$projectionGeneration|$key"),
             "key" to key,
             "bankScope" to bankScope,
             "generation" to projectionGeneration,
@@ -178,7 +196,7 @@ class IncidentProjectionConsumer(
         return query.executeUpdate()
     }
 
-    private fun parse(root: JsonNode): IncidentProjectionEvent {
+    private fun parse(root: JsonNode, contentDigest: String): IncidentProjectionEvent {
         val incident = root.path("incident")
         val id = incident.text("id")
         val compatibilityVersion = root.long("sourceVersion")
@@ -219,12 +237,12 @@ class IncidentProjectionConsumer(
             occurredAt,
             sourceVersion,
             eventType,
+            contentDigest,
         )
     }
 
     private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
     private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
-    private fun stableId(value: String): UUID = UUID.nameUUIDFromBytes(value.toByteArray(StandardCharsets.UTF_8))
 
     private companion object {
         const val SOURCE_SERVICE = "security-scanner"
@@ -243,6 +261,11 @@ class IncidentProjectionConsumer(
     }
 }
 
+private fun incidentDigest(payload: String): String = MessageDigest.getInstance("SHA-256")
+    .digest(payload.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+private fun incidentStableId(value: String): UUID = UUID.nameUUIDFromBytes(value.toByteArray(StandardCharsets.UTF_8))
+
 private data class IncidentProjectionEvent(
     val id: String,
     val severity: String,
@@ -252,6 +275,7 @@ private data class IncidentProjectionEvent(
     val occurredAt: Instant,
     val sourceVersion: Long,
     val eventType: String,
+    val contentDigest: String,
 ) {
     val rootKey = "incident:$id"
     val eventKey = "incident:$id:$eventType:$sourceVersion"

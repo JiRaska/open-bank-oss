@@ -14,6 +14,7 @@ import org.hibernate.reactive.mutiny.Mutiny
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
@@ -139,6 +140,11 @@ class AmlCaseHistoryRepository(
                 }.invoke { stored -> check(stored == hash) { "conflicting AML event identifier" } }
         }.bounded().awaitSuspending()
     }
+
+    /** PostgreSQL owns recordedAt; use its clock for an omitted knownAt cutoff. */
+    suspend fun databaseNow(): Instant = transaction { session ->
+        session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
+    }.bounded().awaitSuspending().toInstant()
 
     suspend fun history(
         id: UUID,
