@@ -34,10 +34,13 @@ describe('Customer graph live overlay route', () => {
         id: 'notification-1', channel: 'PUSH', template: 'SCA_APPROVAL', status: 'SENT',
         createdAt: '2026-01-02T00:00:00Z', recipient: 'secret@example.test', body: 'secret body',
       }] })
-      if (url.includes(':8112/') && url.includes('/devices')) return response({ items: [{
-        id: 'device-1', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-01-01T00:00:00Z',
-        token: 'must-not-leak', appInstance: 'must-not-leak',
-      }] })
+      if (url.includes(':8112/') && url.includes('/devices')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('21')
+        return response({ items: [{
+          id: 'device-1', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-01-01T00:00:00Z',
+          token: 'must-not-leak', appInstance: 'must-not-leak',
+        }] })
+      }
       if (url.includes(':8126/')) {
         expect(new URL(url).searchParams.get('limit')).toBe('31')
         return response([{ id: 'application-1', status: 'APPROVED', productKind: 'UNSECURED' }])
