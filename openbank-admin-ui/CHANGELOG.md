@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.251.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.0...admin-ui-v0.251.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** retain Test Intelligence runtime evidence ([a53e86b](https://github.com/JiRaska/open-bank-oss/commit/a53e86baa8c4496508e97994af6dcbe791c159ab)), closes [#6613](https://github.com/JiRaska/open-bank-oss/issues/6613)
+
 ## [0.251.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.250.0...admin-ui-v0.251.0) (2026-09-23)
 
 
