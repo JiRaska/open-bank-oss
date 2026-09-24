@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.0...sanctions-service-v0.13.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **sanctions:** report list size, not upserted-row delta, as entry count ([#10722](https://github.com/JiRaska/open-bank-oss/issues/10722)) ([550a6d6](https://github.com/JiRaska/open-bank-oss/commit/550a6d6c74c876bbc139837cfa44fefb0e1901fd)), closes [#10721](https://github.com/JiRaska/open-bank-oss/issues/10721)
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.12.0...sanctions-service-v0.13.0) (2026-09-13)
 
 
