@@ -4311,7 +4311,7 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 5   # one git diff + a regex over the PR body
+    budget_seconds: 20   # money-path only: bounded live GitHub read plus local diff
     rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
@@ -4322,10 +4322,9 @@ gates:
       # Editing the body to add the checklist (the documented remediation) only reached this
       # gate after an otherwise-pointless empty commit pushed to re-emit the event (measured
       # 2026-09-06 on #8934: body edited 11:45Z, run at 11:46Z still read the old body).
-      # The live body is the truth the gate means to check; the frozen one is the fallback
-      # when the API is unreachable. One contents-read API call per shard run.
-      LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
-      python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
+      # Read the live body only after the checker proves this PR touches a money path.
+      # The event body remains the fallback when the API is unavailable.
+      python3 .github/scripts/check-security-checklist.py --live-body --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
 
   # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
   # `gh pr create --body-file`, which never applies the template — so the section is absent by
