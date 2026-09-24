@@ -14,8 +14,10 @@ import com.openbank.lending.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
@@ -66,14 +68,31 @@ class LendingLoanBookPactProviderTest {
         context?.addStateChangeHandlers(this)
     }
 
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
+
+    /**
+     * The class-level `@TestSecurity` authenticates every request, which would turn the consumer's
+     * 401 interaction green-by-accident into a 200 mismatch — or, worse, hide a provider that stopped
+     * enforcing authz. For the negative state the test identity is cleared, so the request arrives
+     * anonymous, exactly as the consumer encoded it.
+     */
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        if (context?.interaction?.providerStates?.any { it.name == LoanBookPactState.NO_IDENTITY } == true) {
+            testIdentity.setTestIdentity(null)
+        }
         context?.verifyInteraction()
     }
 
     @State(LoanBookPactState.NAME)
     fun oneFixedLoan() = LoanBookPactState.seed()
+
+    @State(LoanBookPactState.NO_IDENTITY)
+    fun noIdentity() {
+        // Intentionally empty: the state IS the absence of an identity (see verifyPacts).
+    }
 }
 
 /**
@@ -91,6 +110,9 @@ class LendingLoanBookPactProviderTest {
  */
 object LoanBookPactState {
     const val NAME = "the loan book holds one active FIXED CZK loan with two remaining installments"
+
+    /** The negative-auth state: the request carries no identity and must be refused 401. */
+    const val NO_IDENTITY = "no valid identity is presented"
 
     private const val APP = "0190a4c0-0000-7000-8000-0000000a0001"
     private const val LOAN = "0190a4c0-0000-7000-8000-0000000b0001"

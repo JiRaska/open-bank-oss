@@ -13,7 +13,9 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.lending.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -46,12 +48,24 @@ class LendingLoanBookPactBrokerProviderTest {
         context?.addStateChangeHandlers(this)
     }
 
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
+
+    /** Same negative-auth handling as the folder twin: no identity for the 401 interaction. */
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        if (context?.interaction?.providerStates?.any { it.name == LoanBookPactState.NO_IDENTITY } == true) {
+            testIdentity.setTestIdentity(null)
+        }
         context?.verifyInteraction()
     }
 
     @State(LoanBookPactState.NAME)
     fun oneFixedLoan() = LoanBookPactState.seed()
+
+    @State(LoanBookPactState.NO_IDENTITY)
+    fun noIdentity() {
+        // Intentionally empty: the state IS the absence of an identity.
+    }
 }
