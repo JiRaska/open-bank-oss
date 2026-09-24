@@ -88,6 +88,18 @@ describe('Customer graph live overlay route', () => {
     expect(await result.json()).toMatchObject({ cards: [], unavailable: ['cards'] })
   })
 
+  it('keeps other graph sources available when one source exceeds the response budget', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8100/')) return response({ data: [], padding: 'x'.repeat(1024 * 1024) })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    expect(await result.json()).toMatchObject({ accounts: [], unavailable: ['accounts'] })
+  })
+
   it('denies unauthenticated access before any source call', async () => {
     authMock.mockResolvedValue(null)
     const fetchMock = vi.fn()

@@ -13,10 +13,34 @@ export const dynamic = 'force-dynamic'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TIMEOUT_MS = 5_000
+const MAX_SOURCE_BYTES = 1024 * 1024
 const LIMITS = { accounts: 50, cards: 50, notifications: 30, lending: 30, aml: 30, devices: 20, documents: 30 } as const
 
 type Source = 'accounts' | 'cards' | 'notifications' | 'lending' | 'aml' | 'devices' | 'documents'
 type ReadResult = { source: Source; body: unknown; available: boolean }
+
+async function boundedJson(response: Response): Promise<unknown> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('Missing graph source body')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_SOURCE_BYTES) throw new Error('Graph source response too large')
+      chunks.push(value)
+    }
+  } catch (error) {
+    void reader.cancel().catch(() => undefined)
+    throw error
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
+}
 
 async function read(source: Source, url: string, authorization: string): Promise<ReadResult> {
   try {
@@ -24,7 +48,7 @@ async function read(source: Source, url: string, authorization: string): Promise
       headers: { authorization }, cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS),
     })
     if (!response.ok) return { source, body: null, available: false }
-    return { source, body: await response.json(), available: true }
+    return { source, body: await boundedJson(response), available: true }
   } catch {
     return { source, body: null, available: false }
   }
