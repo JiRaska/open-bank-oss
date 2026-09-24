@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.0...lending-service-v0.35.1) (2026-09-24)
+
+
+### Security
+
+* **lending:** open the east-west mTLS listener on 8443 ([#10732](https://github.com/JiRaska/open-bank-oss/issues/10732)) ([2741836](https://github.com/JiRaska/open-bank-oss/commit/274183675bf72f837a3df13e66b5739f4a632935)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
 ## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.34.0...lending-service-v0.35.0) (2026-09-24)
 
 
