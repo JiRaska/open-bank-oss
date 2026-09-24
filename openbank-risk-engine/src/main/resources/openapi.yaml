@@ -1,0 +1,228 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Risk Engine API
+  # 1.0.0: first contract (ADR-0314 phase 0, issue #10618).
+  version: 1.0.0
+  description: |
+    Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
+    trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
+    contract-level positions and ties those out to the trial balance per (GL account, currency)
+    with zero tolerance. A run that does not tie out is stored and flagged but its positions are
+    never served (ADR-0314 D3).
+
+    Positions carry the trial-balance sign convention (`debit − credit`). Every run states its
+    `provenance` — `synthetic` or `production` (ADR-0313 D13).
+servers:
+  - url: http://localhost:8159
+tags:
+  - name: Risk
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/risk/snapshots:
+    post:
+      tags: [Risk]
+      operationId: createSnapshot
+      summary: Build (or replay) the balance-sheet snapshot for an as-of date
+      description: |
+        Idempotent on `(asOf, inputHash)`, where `inputHash` is the SHA-256 of a canonical,
+        order-independent serialisation of both ledger reads. The same ledger at the same as-of
+        returns the existing run with 200; changed ledger data at the same as-of creates a new run
+        (201) with a later `recordedAt`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSnapshotRequest'
+      responses:
+        '201':
+          description: New run stored (TIED_OUT or UNTIED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotRun'
+        '200':
+          description: Replay — the run already stored for this as-of and input hash
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotRun'
+        '400':
+          description: Missing or malformed `asOf`
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+
+  /api/v1/risk/snapshots/{id}:
+    get:
+      tags: [Risk]
+      operationId: getSnapshot
+      summary: Run manifest, including every tie-out mismatch
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotRun'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run
+
+  /api/v1/risk/snapshots/{id}/positions:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotPositions
+      summary: Positions of a TIED_OUT run
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run's positions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Positions'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run
+        '409':
+          description: The run is UNTIED; its positions are never served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreateSnapshotRequest:
+      type: object
+      required: [asOf]
+      properties:
+        asOf:
+          type: string
+          format: date
+
+    Mismatch:
+      type: object
+      required: [currency, ledgerNet, positionsNet, difference]
+      properties:
+        glAccountCode:
+          type: [string, 'null']
+          description: Null for positions that could not be mapped to any GL account.
+        currency:
+          type: string
+        ledgerNet:
+          type: number
+        positionsNet:
+          type: number
+        difference:
+          type: number
+          description: positionsNet − ledgerNet.
+
+    SnapshotRun:
+      type: object
+      required: [id, asOf, recordedAt, inputHash, provenance, status, positionCount, mismatchCount, mismatches]
+      properties:
+        id:
+          type: string
+          format: uuid
+        asOf:
+          type: string
+          format: date
+        recordedAt:
+          type: string
+          format: date-time
+        inputHash:
+          type: string
+          description: SHA-256 (lowercase hex) of the canonical ledger inputs.
+        provenance:
+          type: string
+          enum: [synthetic, production]
+        status:
+          type: string
+          enum: [TIED_OUT, UNTIED]
+        positionCount:
+          type: integer
+        mismatchCount:
+          type: integer
+        mismatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mismatch'
+
+    Position:
+      type: object
+      required: [kind, currency, amount]
+      properties:
+        kind:
+          type: string
+          enum: [SUB_LEDGER, GL_ACCOUNT]
+        glAccountCode:
+          type: [string, 'null']
+        glAccountType:
+          type: [string, 'null']
+        currency:
+          type: string
+        subAccountId:
+          type: [string, 'null']
+          format: uuid
+        amount:
+          type: number
+          description: Trial-balance sign convention, debit − credit.
+
+    Positions:
+      type: object
+      required: [runId, asOf, positions]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        asOf:
+          type: string
+          format: date
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Position'
+
+    Untied:
+      type: object
+      required: [error, runId, mismatches]
+      properties:
+        error:
+          type: string
+          const: UNTIED
+        runId:
+          type: string
+          format: uuid
+        mismatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mismatch'
