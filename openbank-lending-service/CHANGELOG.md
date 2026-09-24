@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.9...lending-service-v0.34.0) (2026-09-24)
+
+
+### Features
+
+* **lending:** record fixed or floating rate terms on loans ([#10693](https://github.com/JiRaska/open-bank-oss/issues/10693)) ([bd41c32](https://github.com/JiRaska/open-bank-oss/commit/bd41c3206138ecbc1255732736e818450e12ad08)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
 ## [0.33.9](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.8...lending-service-v0.33.9) (2026-09-23)
 
 
