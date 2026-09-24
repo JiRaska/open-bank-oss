@@ -53,6 +53,7 @@ object TopicProducers {
         "openbank.sanctions.screening.event" to "sanctions-service",
         "openbank.sepa.instant.events" to "sepa-instant",
         "openbank.fx.conversion.completed" to "fx-service",
+        "openbank.fx.fixing.published" to "fx-service",
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
         "openbank.lending.events" to "lending-service",
