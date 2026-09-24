@@ -93,5 +93,6 @@ interface SepaPaymentEventPublisher {
         actorType: String,
         correlationId: String?,
         reversalPerformed: Boolean,
+        reversalTransactionId: UUID?,
     ): String
 }

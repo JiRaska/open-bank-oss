@@ -26,16 +26,25 @@ describe('Customer graph live overlay route', () => {
         id: 'account-1', accountNumber: 'CZ12', accountType: 'CURRENT', productId: 'product-1',
         currencyCode: 'CZK', status: 'ACTIVE', openedAt: '2026-01-01T00:00:00Z',
       }] })
-      if (url.includes(':8118/')) return response([{ id: 'card-1', accountId: 'account-1', status: 'BLOCKED' }])
+      if (url.includes(':8118/')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('51')
+        return response([{ id: 'card-1', accountId: 'account-1', status: 'BLOCKED' }])
+      }
       if (url.includes(':8112/') && url.includes('/notifications')) return response({ items: [{
         id: 'notification-1', channel: 'PUSH', template: 'SCA_APPROVAL', status: 'SENT',
         createdAt: '2026-01-02T00:00:00Z', recipient: 'secret@example.test', body: 'secret body',
       }] })
-      if (url.includes(':8112/') && url.includes('/devices')) return response({ items: [{
-        id: 'device-1', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-01-01T00:00:00Z',
-        token: 'must-not-leak', appInstance: 'must-not-leak',
-      }] })
-      if (url.includes(':8126/')) return response([{ id: 'application-1', status: 'APPROVED', productKind: 'UNSECURED' }])
+      if (url.includes(':8112/') && url.includes('/devices')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('21')
+        return response({ items: [{
+          id: 'device-1', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-01-01T00:00:00Z',
+          token: 'must-not-leak', appInstance: 'must-not-leak',
+        }] })
+      }
+      if (url.includes(':8126/')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('31')
+        return response([{ id: 'application-1', status: 'APPROVED', productKind: 'UNSECURED' }])
+      }
       if (url.includes(':8117/')) return response([{ id: 'case-1', status: 'CLEARED', alertDetail: 'must-not-leak' }])
       if (url.includes(':8143/')) return response([{
         id: 'document-1', templateCode: 'AGREEMENT', status: 'GENERATED', storageKey: 'must-not-leak', sha256: 'must-not-leak',
@@ -106,6 +115,55 @@ describe('Customer graph live overlay route', () => {
     expect(body.truncated).toEqual(['cards', 'lending'])
   })
 
+
+  it('does not mistake a changed source envelope for an empty customer history', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) return response({ cards: [] })
+      if (url.includes(':8100/')) return response({ data: [] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    expect(await result.json()).toMatchObject({ cards: [], unavailable: ['cards'] })
+  })
+
+  it('keeps other graph sources available when one source exceeds the response budget', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8100/')) return response({ data: [], padding: 'x'.repeat(1024 * 1024) })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    expect(await result.json()).toMatchObject({ accounts: [], unavailable: ['accounts'] })
+  })
+
+  it('marks a source truncated when its extra row cannot be projected', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) {
+        return response([
+          ...Array.from({ length: 50 }, (_, index) => ({ id: `card-${index}`, accountId: 'account-1' })),
+          { accountId: 'account-1' },
+        ])
+      }
+      if (url.includes(':8100/')) return response({ data: [] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    const body = await result.json()
+    expect(body.cards).toHaveLength(50)
+    expect(body).toMatchObject({
+      cards: expect.arrayContaining([expect.objectContaining({ id: 'card-0', accountId: 'account-1' })]),
+      truncated: ['cards'],
+    })
+  })
+
   it('denies unauthenticated access before any source call', async () => {
     authMock.mockResolvedValue(null)
     const fetchMock = vi.fn()
@@ -149,5 +207,49 @@ describe('Customer graph live overlay route', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     clearSelectedCustomerGraphFacts(selectedParty)
+  })
+
+  it('does not reuse an in-flight snapshot after leaving a customer selection', async () => {
+    const selectedParty = '33333333-3333-4333-8333-333333333333'
+    const resolvers: Array<(value: Response) => void> = []
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolvers.push(resolve) }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { clearSelectedCustomerGraphFacts, loadCustomerGraphFacts, selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    const previous = selectCustomerGraphFacts(selectedParty)
+    clearSelectedCustomerGraphFacts(selectedParty)
+    const current = loadCustomerGraphFacts(selectedParty)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    resolvers[0](response({ accounts: [{ id: 'old-session-account' }], unavailable: [] }))
+    await previous
+    const secondPanel = loadCustomerGraphFacts(selectedParty)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    resolvers[1](response({ accounts: [{ id: 'current-session-account' }], unavailable: [] }))
+    const [currentFacts, secondPanelFacts] = await Promise.all([current, secondPanel])
+    expect(currentFacts.accounts.map(account => account.id)).toEqual(['current-session-account'])
+    expect(secondPanelFacts.accounts.map(account => account.id)).toEqual(['current-session-account'])
+  })
+
+  it('starts a new read when the operator rapidly revisits a customer', async () => {
+    const firstParty = '44444444-4444-4444-8444-444444444444'
+    const secondParty = '55555555-5555-4555-8555-555555555555'
+    const resolvers: Array<(value: Response) => void> = []
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolvers.push(resolve) }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { clearSelectedCustomerGraphFacts, selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    const oldFirst = selectCustomerGraphFacts(firstParty)
+    const middle = selectCustomerGraphFacts(secondParty)
+    const currentFirst = selectCustomerGraphFacts(firstParty)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    resolvers[0](response({ accounts: [{ id: 'old' }] }))
+    resolvers[1](response({ accounts: [] }))
+    resolvers[2](response({ accounts: [{ id: 'current' }] }))
+    const [oldFacts, , currentFacts] = await Promise.all([oldFirst, middle, currentFirst])
+    expect(oldFacts.accounts.map(account => account.id)).toEqual(['old'])
+    expect(currentFacts.accounts.map(account => account.id)).toEqual(['current'])
+    clearSelectedCustomerGraphFacts(firstParty)
   })
 })

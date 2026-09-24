@@ -6,6 +6,10 @@
 // stack with a synthetic assigned investigation and a populated projection. The response includes
 // policy and audit work; a rejected request or empty fixture is not a graph performance sample.
 // Never put tokens or case/root identifiers in k6 tags, output or a committed report.
+// Run CONTEXT_PERF_PROFILE=capacity on both isolated 1x and 10x annual-volume fixtures;
+// 10x refers to stored data, while the request rate stays at the planned 100 RPS.
+// For a reversal fixture, set CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID to require both
+// the source-backed reversal edge and a posted reversal journal in every successful sample.
 import http from "k6/http";
 import { check, fail } from "k6";
 import { Trend } from "k6/metrics";
@@ -13,31 +17,49 @@ import { Trend } from "k6/metrics";
 http.setResponseCallback(http.expectedStatuses(200));
 
 const lens = __ENV.CONTEXT_PERF_LENS;
+const profile = __ENV.CONTEXT_PERF_PROFILE || "smoke";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
+
+const scenarios = profile === "capacity" ? {
+  authorized_graph_reads: {
+    executor: "constant-arrival-rate",
+    rate: 100,
+    timeUnit: "1s",
+    duration: "5m",
+    preAllocatedVUs: 50,
+    maxVUs: 100,
+    gracefulStop: "10s",
+  },
+} : {
+  authorized_graph_reads: {
+    executor: "ramping-vus",
+    startVUs: 1,
+    stages: [
+      { duration: "30s", target: 5 },
+      { duration: "1m", target: 5 },
+      { duration: "30s", target: 0 },
+    ],
+    gracefulStop: "10s",
+  },
+};
 
 export const options = {
   // k6's default `url` system tag includes the path reference. Keep only non-identifying tags.
   systemTags: ["status", "method", "name", "check", "scenario", "expected_response"],
-  scenarios: {
-    authorized_graph_reads: {
-      executor: "ramping-vus",
-      startVUs: 1,
-      stages: [
-        { duration: "30s", target: 5 },
-        { duration: "1m", target: 5 },
-        { duration: "30s", target: 0 },
-      ],
-      gracefulStop: "10s",
-    },
-  },
+  scenarios,
   thresholds: {
     context_graph_read_ms: ["p(95)<300", "p(99)<1000"],
+    ...(profile === "capacity" ? { dropped_iterations: ["count==0"] } : {}),
     http_req_failed: ["rate==0"],
     checks: ["rate==1"],
   },
 };
 
 export function setup() {
+  if (!["smoke", "capacity"].includes(profile)) {
+    fail("CONTEXT_PERF_PROFILE must be smoke or capacity");
+  }
   const required = [
     "CONTEXT_PERF_URL",
     "CONTEXT_PERF_TOKEN",
@@ -58,6 +80,21 @@ export function setup() {
   if (__ENV.CONTEXT_PERF_REFERENCE.length > 200) fail("Context Graph root reference is too long");
   if (__ENV.CONTEXT_PERF_CASE_ID.length > 200 || __ENV.CONTEXT_PERF_PURPOSE.length > 80) {
     fail("Context Graph case or purpose exceeds the API limit");
+  }
+  if (lens === "kyb" && (!/^[1-9][0-9]*$/.test(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS || "") ||
+      Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) > 50)) {
+    fail("KYB baseline requires CONTEXT_PERF_MIN_KYB_REVISIONS between 1 and 50");
+  }
+  if (lens === "fraud-network") {
+    const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
+    if (!Number.isSafeInteger(assigned) || assigned < 2 || assigned > 10000 ||
+        !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID || "")) {
+      fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
+    }
+  }
+  if (lens === "complaint" && __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID &&
+      !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID)) {
+    fail("Complaint reversal fixture requires a synthetic reversal booking UUID");
   }
 }
 
@@ -104,9 +141,16 @@ export default function () {
     "graph fixture contains source evidence": () => {
       if (body === null) return false;
       if (lens === "complaint") {
-        return Array.isArray(body.nodes) && body.nodes.length > 0 && body.nodes.length <= 100 &&
-          Array.isArray(body.edges) && body.edges.length > 0 && body.edges.length <= 200 &&
-          typeof body.truncated === "boolean";
+        const reversal = __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID;
+        const reversalKey = `booking-transaction:${reversal}`;
+        const nodesBounded = Array.isArray(body.nodes) && body.nodes.length > 0 && body.nodes.length <= 100;
+        const edgesBounded = Array.isArray(body.edges) && body.edges.length > 0 && body.edges.length <= 200;
+        const reversalEvidence = !reversal || (nodesBounded && edgesBounded &&
+          body.nodes.some((node) => node.key === reversalKey) &&
+          body.edges.some((edge) => edge.to === reversalKey && edge.relation === "REVERSED_BY") &&
+          body.edges.some((edge) => edge.from === reversalKey && edge.relation === "BOOKED_AS")
+        );
+        return nodesBounded && edgesBounded && typeof body.truncated === "boolean" && reversalEvidence;
       }
       if (lens === "incident") {
         return body.projectionStatus === "AVAILABLE" && Number.isInteger(body.total) && body.total > 0;
@@ -117,34 +161,56 @@ export default function () {
       }
       if (lens === "kyb") {
         return body.root === `kyb-case:${__ENV.CONTEXT_PERF_REFERENCE}` &&
-          Array.isArray(body.observations) && body.observations.length > 0 &&
+          Array.isArray(body.observations) &&
+          body.observations.length >= Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) &&
           body.observations.length <= 50 && typeof body.truncated === "boolean" &&
           body.observations.every((item) => Number.isInteger(item.revision) && item.revision > 0 &&
-            /^[0-9a-f]{64}$/.test(item.sourceSha256));
+            /^[0-9a-f]{64}$/.test(item.sourceSha256)) &&
+          body.observations.every((item, index) => index === 0 ||
+            item.revision < body.observations[index - 1].revision);
       }
-      if (lens === "fraud-network") {
-        return hasFraudEvidence(body.root, __ENV.CONTEXT_PERF_REFERENCE) &&
-          Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
-          Number.isInteger(body.inspectedCandidates) && body.inspectedCandidates <= 4 &&
-          typeof body.candidateTruncated === "boolean" &&
-          body.related.every((item) => hasFraudEvidence(item.evidence) &&
-            Array.isArray(item.shared) && item.shared.length > 0 && item.shared.length <= 2 &&
-            item.shared.every((edge) =>
-              (edge.type === "ACCOUNT" && edge.sourceId === body.root.accountId && edge.sourceId === item.evidence.accountId) ||
-              (edge.type === "COUNTERPARTY" && edge.sourceId === body.root.counterpartyId && edge.sourceId === item.evidence.counterpartyId)));
-      }
+      if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
 }
 
+function hasFraudNetworkEvidence(body) {
+  const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
+  const expected = __ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID.toLowerCase();
+  if (!body || !hasFraudEvidence(body.root, __ENV.CONTEXT_PERF_REFERENCE) ||
+      !Array.isArray(body.related) || body.related.length < 1 || body.related.length > 4 ||
+      !Number.isInteger(body.inspectedCandidates) || body.inspectedCandidates < body.related.length ||
+      body.inspectedCandidates > 4 || body.comparedCandidates !== Math.min(assigned, 256) ||
+      typeof body.candidateTruncated !== "boolean" ||
+      (assigned > 256 && !body.candidateTruncated)) return false;
+  const seen = new Set([body.root.caseId.toLowerCase()]);
+  return body.related.every((item) => {
+    const evidence = item?.evidence;
+    if (!hasFraudEvidence(evidence) || seen.has(evidence.caseId.toLowerCase()) ||
+        !Array.isArray(item.shared) || item.shared.length < 1 || item.shared.length > 2) return false;
+    seen.add(evidence.caseId.toLowerCase());
+    const expectedShared = [
+      ...(body.root.accountId === evidence.accountId ? [{ type: "ACCOUNT", sourceId: body.root.accountId }] : []),
+      ...(body.root.counterpartyId !== null && body.root.counterpartyId === evidence.counterpartyId
+        ? [{ type: "COUNTERPARTY", sourceId: body.root.counterpartyId }] : []),
+    ];
+    return expectedShared.length > 0 && item.shared.length === expectedShared.length &&
+      item.shared.every((edge, index) => edge.type === expectedShared[index].type &&
+        edge.sourceId === expectedShared[index].sourceId);
+  }) && seen.has(expected);
+}
+
 function hasFraudEvidence(evidence, caseId) {
   return evidence !== null && typeof evidence === "object" &&
-    (!caseId || evidence.caseId === caseId) &&
-    evidence.status === "OPEN" &&
-    typeof evidence.scoreId === "string" && typeof evidence.accountId === "string" &&
-    Number.isInteger(evidence.revision) && evidence.revision > 0 &&
+    typeof evidence.caseId === "string" && UUID.test(evidence.caseId) &&
+    (!caseId || evidence.caseId.toLowerCase() === caseId.toLowerCase()) &&
+    typeof evidence.scoreId === "string" && UUID.test(evidence.scoreId) &&
+    typeof evidence.accountId === "string" && UUID.test(evidence.accountId) &&
+    (evidence.counterpartyId === null ||
+      (typeof evidence.counterpartyId === "string" && UUID.test(evidence.counterpartyId))) &&
+    evidence.status === "OPEN" && Number.isInteger(evidence.revision) && evidence.revision > 0 &&
     typeof evidence.openedAt === "string" && evidence.closedAt === null;
 }
 

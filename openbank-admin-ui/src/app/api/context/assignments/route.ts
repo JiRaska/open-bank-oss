@@ -49,7 +49,11 @@ function validProposal(value: unknown): value is Record<string, unknown> {
       ? typeof body.caseId === 'string' && AUTHORITY_UUID.test(body.caseId) &&
         typeof body.rootRef === 'string' && body.rootRef.startsWith('aml-case:') &&
         AUTHORITY_UUID.test(body.rootRef.slice(9)) && body.rootRef.slice(9).toLowerCase() === body.caseId.toLowerCase()
-      : body.rootRef == null
+      : body.purpose === 'INCIDENT_IMPACT'
+        ? typeof body.rootRef === 'string' && body.rootRef.startsWith('incident:') && AUTHORITY_UUID.test(body.rootRef.slice(9))
+        : body.purpose === 'PAYMENT_COMPLAINT'
+          ? typeof body.rootRef === 'string' && /^complaint:[A-Za-z0-9._:-]{1,200}$/.test(body.rootRef)
+          : false
   return rootValid && text('principalId', 200) && text('caseId', 200) && text('purpose', 80) &&
     typeof body.validTo === 'string' && Number.isFinite(Date.parse(body.validTo))
 }

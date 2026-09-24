@@ -69,6 +69,20 @@ paths:
               schema: { $ref: '#/components/schemas/FraudAssignedCandidates' }
         '403': { description: Role, assignment or policy denied }
         '503': { description: Authorization or reference store unavailable }
+  /api/v1/context/kyb-cases/{id}/access:
+    get:
+      operationId: checkAssignedKybCaseAccess
+      summary: Check current KYB case assignment without returning ownership history
+      description: Uses the human investigator's bearer, exact case and purpose; the decision is read-audited.
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '204': { description: Current KYB case access allowed; no case data returned }
+        '400': { description: Case and purpose mismatch }
+        '403': { description: Role, root assignment or policy denied }
+        '503': { description: Authorization unavailable }
   /api/v1/context/kyb-cases/{id}/ownership-observations:
     get:
       operationId: getKybOwnershipObservationReferences
@@ -80,6 +94,7 @@ paths:
         - $ref: '#/components/parameters/purpose'
         - name: knownAt
           in: query
+          description: Omit for the current database-recorded snapshot; provide a timestamp for an exact historical cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -103,6 +118,7 @@ paths:
           schema: { type: string, format: date-time }
         - name: knownAt
           in: query
+          description: Omit for a current database-recorded snapshot; provide a timestamp for an exact historical knowledge cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -126,6 +142,7 @@ paths:
           schema: { type: string, format: date-time }
         - name: knownAt
           in: query
+          description: Omit for a current database-recorded snapshot; provide a timestamp for an exact historical knowledge cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -149,6 +166,7 @@ paths:
           schema: { type: string, format: date-time }
         - name: knownAt
           in: query
+          description: Omit for a current database-recorded snapshot; provide a timestamp for an exact historical knowledge cutoff.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -229,7 +247,7 @@ paths:
         - $ref: '#/components/parameters/purpose'
         - $ref: '#/components/parameters/asOf'
       responses:
-        '200': { description: Authorized bounded neighborhood }
+        '200': { description: Authorized bounded neighborhood; a source-confirmed SEPA return may include a REVERSAL_TRANSACTION node and REVERSED_BY edge when transaction-service returned a reversal ID }
         '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
         '404': { description: Root not projected }
@@ -386,7 +404,7 @@ components:
         rootRef:
           type: [string, "null"]
           maxLength: 300
-          description: Required exact case root for authorization, AML, KYB or Fraud investigation; absent for complaint and incident purposes
+          description: Required exact root for every purpose — delegation:UUID, aml-case:UUID, kyb-case:UUID, fraud-case:UUID, incident:UUID or complaint:reference. An old unscoped assignment never authorizes a graph read.
     DecideAssignment:
       type: object
       required: [approve]

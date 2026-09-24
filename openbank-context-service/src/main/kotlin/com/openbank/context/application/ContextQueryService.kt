@@ -14,10 +14,11 @@ import com.openbank.libs.authz.ResourceRef
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.security.MessageDigest
 import java.time.Clock
 
 @ApplicationScoped
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "TooManyFunctions")
 class ContextQueryService(
     private val graph: ContextGraphPort,
     private val assignments: CaseAssignmentPort,
@@ -28,12 +29,13 @@ class ContextQueryService(
     @ConfigProperty(name = "openbank.context.max-nodes") private val maxNodes: Int,
     @ConfigProperty(name = "openbank.context.max-edges") private val maxEdges: Int,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
+    @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
 ) {
     internal suspend fun <T> authorizationEvidence(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T = authorized(
         "context.authorization.read",
         "AUTHORIZATION_REVIEW",
@@ -48,7 +50,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T = authorized(
         "context.aml-case.read",
         "AML_INVESTIGATION",
@@ -63,7 +65,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T = authorized(
         "context.kyb-case.read",
         "KYB_OWNERSHIP_REVIEW",
@@ -78,7 +80,7 @@ class ContextQueryService(
         ref: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T = authorized(
         "context.fraud-case.read",
         "FRAUD_INVESTIGATION",
@@ -98,7 +100,27 @@ class ContextQueryService(
             actor,
             context,
         ) {
-            graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$ref", context.asOf, maxNodes, maxEdges)
+            val view = graph.neighborhood(
+                ContextNamespace.COMPLAINT,
+                "complaint:$ref",
+                context.asOf,
+                maxNodes,
+                maxEdges,
+            )
+            ContextReadResult(
+                view,
+                view?.let {
+                    val references = it.nodes.map { node ->
+                        "node:${node.sourceSystem}:${node.sourceRef}:${node.sourceVersion}"
+                    } + it.edges.map { edge -> edge.evidenceRef }
+                    ContextDisclosure(
+                        references,
+                        references.size,
+                        it.truncated,
+                        projectionGeneration,
+                    )
+                },
+            )
         }
 
     suspend fun incident(ref: String, actor: Investigator, context: InvestigationContext): IncidentImpact = authorized(
@@ -113,12 +135,21 @@ class ContextQueryService(
         val affected = view?.nodes.orEmpty().filter {
             it.key != "incident:$ref"
         }.groupingBy { it.type }.eachCount().toSortedMap()
+        val evidenceRefs = view?.edges.orEmpty().map { it.evidenceRef }.distinct()
         val status = when {
             view == null -> ImpactProjectionStatus.MISSING
             view.truncated -> ImpactProjectionStatus.PARTIAL
             else -> ImpactProjectionStatus.AVAILABLE
         }
-        IncidentImpact(ref, affected, affected.values.sum(), drilldownAvailable = false, projectionStatus = status)
+        ContextReadResult(
+            IncidentImpact(ref, affected, affected.values.sum(), drilldownAvailable = false, projectionStatus = status),
+            ContextDisclosure(
+                evidenceRefs,
+                maxOf(affected.values.sum(), evidenceRefs.size),
+                view?.truncated ?: false,
+                projectionGeneration,
+            ),
+        )
     }
 
     @Suppress("ThrowsCount")
@@ -129,7 +160,7 @@ class ContextQueryService(
         root: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T {
         val started = System.nanoTime()
         try {
@@ -148,7 +179,7 @@ class ContextQueryService(
         root: String,
         actor: Investigator,
         context: InvestigationContext,
-        block: suspend () -> T,
+        block: suspend () -> ContextReadResult<T>,
     ): T {
         val now = clock.instant()
         if (context.purpose != requiredPurpose) {
@@ -156,17 +187,7 @@ class ContextQueryService(
             decisionMetric(action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
-        val rootScoped = namespace in setOf(
-            ContextNamespace.AUTHORIZATION,
-            ContextNamespace.AML,
-            ContextNamespace.KYB,
-            ContextNamespace.FRAUD,
-        )
-        val assigned = if (rootScoped) {
-            assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
-        } else {
-            assignments.isAssigned(actor.id, context.caseId, context.purpose, now)
-        }
+        val assigned = assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
         if (!assigned) {
             audit.record(entry(actor, context, action, root, "DENIED", null, "NO_ACTIVE_ASSIGNMENT", now))
             decisionMetric(action, "denied", "no_active_assignment")
@@ -182,7 +203,7 @@ class ContextQueryService(
                         "caseId" to context.caseId,
                         "purpose" to context.purpose,
                         "assignmentVerified" to true,
-                        "rootScopeVerified" to rootScoped,
+                        "rootScopeVerified" to true,
                         "effectiveAt" to context.asOf.toString(),
                         "knownAt" to context.knownAt?.toString(),
                         "bankScope" to bankScope,
@@ -199,9 +220,37 @@ class ContextQueryService(
             decisionMetric(action, "denied", "policy_denied")
             throw ContextAccessDenied()
         }
-        audit.record(entry(actor, context, action, root, "ALLOWED", decision.policyVersion, "POLICY_ALLOWED", now))
+        val allowed = entry(actor, context, action, root, "ALLOWED", decision.policyVersion, "POLICY_ALLOWED", now)
+        audit.record(allowed)
         decisionMetric(action, "allowed", "policy_allowed")
-        return block()
+        val result = block()
+        result.disclosure?.let { disclosure ->
+            require(
+                disclosure.evidenceCount >= disclosure.evidenceRefs.size &&
+                    disclosure.evidenceRefs.size <= MAX_EVIDENCE_REFS,
+            ) {
+                "invalid disclosure evidence count"
+            }
+            audit.recordDisclosure(
+                ContextDisclosureAudit(allowed.id, queryHash(action, root, context), disclosure, clock.instant()),
+            )
+        }
+        return result.value
+    }
+
+    private fun queryHash(action: String, root: String, context: InvestigationContext): String {
+        val fields =
+            listOf(
+                bankScope,
+                action,
+                root,
+                context.caseId,
+                context.purpose,
+                context.asOf.toString(),
+                context.knownAt?.toString().orEmpty(),
+            )
+        val bytes = fields.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
+        return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
     }
 
     private fun decisionMetric(action: String, decision: String, reason: String) = meters.counter(
@@ -225,4 +274,8 @@ class ContextQueryService(
         reason: String,
         now: java.time.Instant,
     ) = ContextReadAudit(actor.id, c.caseId, c.purpose, action, root, decision, version, reason, now, c.asOf, c.knownAt)
+
+    private companion object {
+        const val MAX_EVIDENCE_REFS = 512
+    }
 }

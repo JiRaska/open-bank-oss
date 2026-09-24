@@ -288,6 +288,8 @@
 .source,
 .relations { color: #b5c7da; font-size: 10px; line-height: 1.55; }
 .source strong { color: #cffafe; }
+.recordLink { display: inline-block; color: #67e8f9; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.recordLink:hover { color: #cffafe; }
 .facts { margin: 12px 0; padding-left: 17px; color: #d6e4f0; font-size: 11px; line-height: 1.7; }
 .facts li::marker { color: #67e8f9; }
 .emptyEvidence { min-height: 170px; color: #9bb1c5; font-size: 11px; line-height: 1.6; }

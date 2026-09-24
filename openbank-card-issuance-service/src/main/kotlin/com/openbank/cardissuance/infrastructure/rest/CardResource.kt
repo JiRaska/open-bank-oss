@@ -9,7 +9,6 @@ import com.openbank.cardissuance.application.port.`in`.CardUseCase
 import com.openbank.cardissuance.application.port.`in`.ReadSecureDetailsQuery
 import com.openbank.cardissuance.application.port.`in`.UpdateControlsCommand
 import com.openbank.cardissuance.application.port.`in`.UpdateLimitsCommand
-import com.openbank.cardissuance.application.port.out.MAX_PARTY_CARD_LIST_LIMIT
 import com.openbank.cardissuance.infrastructure.rest.dto.CardStatusRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.IssueCardRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.UpdateControlsRequest
@@ -103,10 +102,8 @@ class CardResource(private val cardUseCase: CardUseCase) {
         val cards = if (limit == null) {
             cardUseCase.listByParty(partyId)
         } else {
-            require(limit in 1..MAX_PARTY_CARD_LIST_LIMIT) {
-                "limit must be between 1 and $MAX_PARTY_CARD_LIST_LIMIT"
-            }
-            cardUseCase.listRecentByParty(partyId, limit)
+            require(limit in 1..MAX_PARTY_LIST_LIMIT) { "limit must be between 1 and $MAX_PARTY_LIST_LIMIT" }
+            cardUseCase.listByParty(partyId, limit)
         }
         return Response.ok(cards.map { it.toResponse() }).build()
     }
@@ -245,6 +242,8 @@ class CardResource(private val cardUseCase: CardUseCase) {
     }
 
     private companion object {
+        const val MAX_PARTY_LIST_LIMIT = 200
+
         // #3624 — X-Operator-Id is the AUDIT attribution on every card lifecycle write, so a null
         // flowing through is worse than the 500 it actually produced. These are `suspend` handlers:
         // no Intrinsics.checkNotNullParameter is emitted, and the null was carried into

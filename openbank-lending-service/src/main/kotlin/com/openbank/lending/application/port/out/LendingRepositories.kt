@@ -24,6 +24,7 @@ interface LoanApplicationRepository {
     fun save(application: LoanApplication): Uni<LoanApplication>
     fun findById(id: LoanApplicationId): Uni<LoanApplication?>
     fun findByParty(partyId: UUID): Uni<List<LoanApplication>>
+    fun findByParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>>
 
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>>

@@ -4,6 +4,7 @@ package com.openbank.context.infrastructure
 import com.openbank.context.application.ContextAccessDenied
 import com.openbank.context.application.ContextAuthorizationUnavailable
 import com.openbank.context.application.ContextQueryService
+import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
@@ -42,8 +43,11 @@ class FraudCaseAccessResource(
                 actor,
                 InvestigationContext(investigationCaseId, purpose, at),
             ) {
-                Response.ok(references.assignedCandidates(caseId, actor.id, at))
-                    .header("Cache-Control", "no-store").build()
+                ContextReadResult(
+                    Response.ok(references.assignedCandidates(caseId, actor.id, at))
+                        .header("Cache-Control", "no-store").build(),
+                    null,
+                )
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
@@ -69,7 +73,7 @@ class FraudCaseAccessResource(
                 Investigator(identity.principal.name, identity.roles.sorted()),
                 InvestigationContext(investigationCaseId, purpose, clock.instant()),
             ) {
-                Response.noContent().header("Cache-Control", "no-store").build()
+                ContextReadResult(Response.noContent().header("Cache-Control", "no-store").build(), null)
             }
         } catch (_: ContextAccessDenied) {
             Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()

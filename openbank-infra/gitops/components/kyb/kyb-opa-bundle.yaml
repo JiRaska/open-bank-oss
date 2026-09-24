@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "3fd0844d734fb3b5"
+    openbank.tech/policy-checksum: "89f5bf62af2a31ec"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -631,6 +631,20 @@ data:
         input.principal.type == "HUMAN"
         "ROLE_ADMIN" in input.principal.roles
         not startswith(input.principal.id, "service-account-")
+    }
+
+    human_ubo_correction_reviewer if {
+        input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
+        some role in {"ROLE_KYC", "ROLE_ADMIN"}
+        role in input.principal.roles
+    }
+
+    # The resource checks the live case assignment and purpose; OPA first excludes
+    # operators, edge clients and service accounts from all correction operations.
+    prohibited if {
+        startswith(input.action, "kyb.ubo.correction.")
+        not human_ubo_correction_reviewer
     }
 
     allowed_reasons contains "admin-kyb-observation-restriction" if {

@@ -73,6 +73,9 @@ quarkus:
       query-timeout-ms: 5000
   mp:
     messaging:
+      outgoing:
+        context-audit-commitments-out:
+          connector: smallrye-in-memory
       incoming:
         fraud-case-references-in:
           connector: smallrye-in-memory
@@ -219,6 +222,12 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.context-service.sepa-payment-events
+    outgoing:
+      context-audit-commitments-out:
+        connector: smallrye-kafka
+        topic: openbank.context.audit.commitments
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

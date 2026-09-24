@@ -33,6 +33,7 @@ interface CardRepository {
     suspend fun findByAccountId(accountId: UUID): List<Card>
 
     suspend fun findByPartyId(partyId: UUID): List<Card>
+    suspend fun findByPartyId(partyId: UUID, limit: Int): List<Card>
 
     /** Database-bounded newest slice for Customer 360; full list remains for subject access. */
     suspend fun findRecentByPartyId(partyId: UUID, limit: Int): List<Card>

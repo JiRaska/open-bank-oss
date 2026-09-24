@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.integration
 
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
 import com.openbank.kyb.application.port.out.UboObservationAccessDecision
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
@@ -44,6 +45,27 @@ class UboObservationApiIT {
 
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.password")
     lateinit var jdbcPassword: String
+
+    @Test
+    fun `correction HTTP operations and supersession field are declared in OpenAPI`() {
+        val spec = YAMLMapper().readTree(checkNotNull(javaClass.getResourceAsStream("/openapi.yaml")))
+        assertThat(spec.at("/info/version").asText()).isEqualTo("1.11.0")
+        assertThat(
+            spec.at("/paths/~1api~1v1~1kyb~1cases~1{id}~1ubo-observations~1{observationId}~1corrections/post")
+                .isMissingNode,
+        ).isFalse()
+        assertThat(spec.at("/paths/~1api~1v1~1kyb~1cases~1{id}~1ubo-corrections~1{correctionId}/get").isMissingNode)
+            .isFalse()
+        assertThat(
+            spec.at("/paths/~1api~1v1~1kyb~1cases~1{id}~1ubo-corrections~1{correctionId}~1decision/post")
+                .isMissingNode,
+        ).isFalse()
+        assertThat(spec.at("/components/schemas/UboObservation/properties/supersedesObservationId/format").asText())
+            .isEqualTo("uuid")
+        val restriction = spec.path("paths")
+            .path("/api/v1/kyb/cases/{id}/ubo-observations/{observationId}/restrict")
+        assertThat(restriction.path("post").path("responses").path("503").isMissingNode).isFalse()
+    }
 
     @Test
     @TestSecurity(user = "kyc-reviewer", roles = ["ROLE_KYC"])
@@ -111,6 +133,40 @@ class UboObservationApiIT {
 
     @Test
     @TestSecurity(user = "kyb-admin", roles = ["ROLE_ADMIN"])
+    fun `restriction fails closed before source mutation`() {
+        val caseId = UUID.randomUUID()
+        val observationId = UUID.randomUUID()
+        seed(caseId, observationId)
+        access.decisions[caseId] = UboObservationAccessDecision.ALLOWED
+        val restriction = "/api/v1/kyb/cases/$caseId/ubo-observations/$observationId/restrict"
+
+        Given {
+            contentType("application/json")
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
+        } When { post(restriction) } Then { statusCode(403) }
+        access.decisions[caseId] = UboObservationAccessDecision.UNAVAILABLE
+        Given {
+            contentType("application/json")
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
+            body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
+        } When { post(restriction) } Then { statusCode(503) }
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                "SELECT count(*) FROM kyb_ubo_observation_restrictions WHERE observation_id = ?",
+            ).use { statement ->
+                statement.setObject(1, observationId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isZero()
+                }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "kyb-admin", roles = ["ROLE_ADMIN"])
     fun `restriction immediately hides source detail and commits one reference-only event`() {
         val caseId = UUID.randomUUID()
         val observationId = UUID.randomUUID()
@@ -122,11 +178,13 @@ class UboObservationApiIT {
         Given {
             contentType("application/json")
             header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
             body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
         } When { post(restriction) } Then { statusCode(204) }
         Given {
             contentType("application/json")
             header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
             body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
         } When { post(restriction) } Then { statusCode(204) }
         Given {
@@ -175,6 +233,109 @@ class UboObservationApiIT {
         Given { header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW") } When {
             get("/api/v1/kyb/cases/${UUID.randomUUID()}/ubo-observations/${UUID.randomUUID()}")
         } Then { statusCode(403) }
+    }
+
+    @Test
+    @TestSecurity(user = "checker", roles = ["ROLE_KYC"])
+    fun `correction read is audited and approval atomically writes successor and outbox`() {
+        val caseId = UUID.randomUUID()
+        val priorId = UUID.randomUUID()
+        val correctionId = UUID.randomUUID()
+        seed(caseId, priorId)
+        seedCorrection(caseId, priorId, correctionId)
+        access.decisions[caseId] = UboObservationAccessDecision.ALLOWED
+        val correctionUrl = "/api/v1/kyb/cases/$caseId/ubo-corrections/$correctionId"
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+            contentType("application/json")
+            body("{\"approve\":true}")
+        } When { post("$correctionUrl/decision") } Then { statusCode(409) }
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+        } When { get(correctionUrl) } Then {
+            statusCode(200)
+            body("status", equalTo("PENDING"))
+            body("candidate.source", equalTo("REGISTER"))
+        }
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                "SELECT principal_id FROM kyb_ubo_correction_reads WHERE correction_id = ?",
+            ).use { statement ->
+                statement.setObject(1, correctionId)
+                statement.executeQuery().use { reads ->
+                    assertThat(reads.next()).isTrue()
+                    assertThat(reads.getString(1)).isEqualTo("checker")
+                }
+            }
+        }
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+            contentType("application/json")
+            body("{\"approve\":true}")
+        } When { post("$correctionUrl/decision") } Then { statusCode(204) }
+        assertApprovedCorrection(caseId, priorId, correctionId)
+    }
+
+    private fun seedCorrection(caseId: UUID, priorId: UUID, correctionId: UUID) {
+        val finding = UboFinding(
+            identifier = LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, "45274649"),
+            source = UboSource.REGISTER,
+            owners = emptyList(),
+            registerStatements = listOf("synthetic corrected register statement"),
+            threshold = 0.25,
+            registerName = "synthetic",
+            sourceRef = "synthetic-case",
+            fetchedAt = Instant.parse("2026-01-02T12:00:00Z"),
+        )
+        val json = KybUboJson.write(finding)
+        val hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(json.toByteArray()))
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                """INSERT INTO kyb_ubo_observation_corrections
+                   (correction_id, case_id, prior_observation_id, candidate_finding_json,
+                    candidate_sha256, candidate_source, candidate_fetched_at, reason_code,
+                    proposed_by, proposed_at) VALUES (?, ?, ?, ?, ?, 'REGISTER', ?,
+                    'REGISTER_CORRECTION', 'maker', now())""",
+            ).use { statement ->
+                statement.setObject(1, correctionId)
+                statement.setObject(2, caseId)
+                statement.setObject(3, priorId)
+                statement.setString(4, json)
+                statement.setString(5, hash)
+                statement.setTimestamp(6, Timestamp.from(finding.fetchedAt))
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun assertApprovedCorrection(caseId: UUID, priorId: UUID, correctionId: UUID) {
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                """SELECT o.observation_id, o.supersedes_observation_id, c.status
+                   FROM kyb_ubo_observations o JOIN kyb_ubo_observation_corrections c
+                   ON c.correction_id = o.correction_id WHERE o.case_id = ? AND c.correction_id = ?""",
+            ).use { statement ->
+                statement.setObject(1, caseId)
+                statement.setObject(2, correctionId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject("supersedes_observation_id", UUID::class.java)).isEqualTo(priorId)
+                    assertThat(rows.getString("status")).isEqualTo("APPROVED")
+                }
+            }
+            connection.prepareStatement(
+                "SELECT count(*) FROM kyb_outbox WHERE aggregate_id = ? AND event_type = 'KybUboObservationRecorded'",
+            ).use { statement ->
+                statement.setObject(1, caseId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(1)
+                }
+            }
+        }
     }
 
     private fun seed(caseId: UUID, observationId: UUID) {

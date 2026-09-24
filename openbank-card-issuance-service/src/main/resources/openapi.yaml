@@ -150,8 +150,8 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Return newest cards only; omitted preserves the complete subject-access list.
-          schema: { type: integer, minimum: 1, maximum: 100 }
+          description: Return at most this many newest cards; omit for the full subject-access list.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Cards

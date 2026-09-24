@@ -176,12 +176,13 @@ class AssignmentAdministrationService(
             caseId = request.caseId.trim()
             purpose = request.purpose.trim()
             rootRef = request.rootRef?.let { root ->
-                val prefix = when (request.purpose) {
-                    "AML_INVESTIGATION" -> "aml-case:"
-                    "KYB_OWNERSHIP_REVIEW" -> "kyb-case:"
-                    else -> "delegation:"
+                when (request.purpose) {
+                    "AUTHORIZATION_REVIEW" -> "delegation:${UUID.fromString(root.removePrefix("delegation:"))}"
+                    "AML_INVESTIGATION" -> "aml-case:${UUID.fromString(root.removePrefix("aml-case:"))}"
+                    "KYB_OWNERSHIP_REVIEW" -> "kyb-case:${UUID.fromString(root.removePrefix("kyb-case:"))}"
+                    "INCIDENT_IMPACT" -> "incident:${UUID.fromString(root.removePrefix("incident:"))}"
+                    else -> root
                 }
-                "$prefix${UUID.fromString(root.removePrefix(prefix))}"
             }
             this.validFrom = validFrom
             validTo = request.validTo
@@ -277,6 +278,17 @@ class AssignmentAdministrationService(
         }
         require(request.caseId.isNotBlank() && request.caseId.length <= MAX_CASE_LENGTH) { "invalid caseId" }
         require(request.purpose in ALLOWED_PURPOSES) { "invalid purpose" }
+        validateRoot(request)
+        require(
+            validFrom >= now.minus(MAX_CLOCK_SKEW) &&
+                request.validTo > validFrom &&
+                request.validTo <= validFrom.plus(Duration.ofDays(MAX_VALIDITY_DAYS)),
+        ) {
+            "validity must start now or later and last no more than 31 days"
+        }
+    }
+
+    private fun validateRoot(request: ProposeAssignmentRequest) {
         if (request.purpose == "AUTHORIZATION_REVIEW") {
             val root = requireNotNull(request.rootRef) { "AUTHORIZATION_REVIEW requires a delegation root" }
             require(root.startsWith("delegation:") && root.length == DELEGATION_ROOT_LENGTH) {
@@ -295,15 +307,19 @@ class AssignmentAdministrationService(
             }
             val id = UUID.fromString(root.removePrefix("kyb-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
+        } else if (request.purpose == "INCIDENT_IMPACT") {
+            val root = requireNotNull(request.rootRef) { "INCIDENT_IMPACT requires an incident root" }
+            require(root.startsWith("incident:") && root.length == INCIDENT_ROOT_LENGTH) { "invalid incident root" }
+            UUID.fromString(root.removePrefix("incident:"))
+        } else if (request.purpose == "PAYMENT_COMPLAINT") {
+            val root = requireNotNull(request.rootRef) { "PAYMENT_COMPLAINT requires a complaint root" }
+            require(
+                root.startsWith("complaint:") &&
+                    root.length in MIN_COMPLAINT_ROOT_LENGTH..MAX_COMPLAINT_ROOT_LENGTH &&
+                    COMPLAINT_ROOT_PATTERN.matches(root),
+            ) { "invalid complaint root" }
         } else {
             require(request.rootRef == null) { "root scope is not supported for this purpose" }
-        }
-        require(
-            validFrom >= now.minus(MAX_CLOCK_SKEW) &&
-                request.validTo > validFrom &&
-                request.validTo <= validFrom.plus(Duration.ofDays(MAX_VALIDITY_DAYS)),
-        ) {
-            "validity must start now or later and last no more than 31 days"
         }
     }
 
@@ -348,6 +364,10 @@ class AssignmentAdministrationService(
         const val DELEGATION_ROOT_LENGTH = 47
         const val AML_CASE_ROOT_LENGTH = 45
         const val KYB_CASE_ROOT_LENGTH = 45
+        const val INCIDENT_ROOT_LENGTH = 45
+        const val MIN_COMPLAINT_ROOT_LENGTH = 11
+        const val MAX_COMPLAINT_ROOT_LENGTH = 210
+        val COMPLAINT_ROOT_PATTERN = Regex("complaint:[A-Za-z0-9._:-]+")
         const val MAX_QUEUE_SIZE = 200
         const val MAX_PRINCIPAL_LENGTH = 200
         const val MAX_CASE_LENGTH = 200

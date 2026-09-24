@@ -56,7 +56,7 @@ export function ContextAssignmentAdministration() {
       const validTo = new Date(Date.now() + Math.min(Math.max(hours, 1), 24 * 31) * 3_600_000).toISOString()
       const response = await fetch('/api/context/assignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ principalId: principalId.trim(), caseId: proposedCaseId, purpose, validTo, ...(purpose === 'AUTHORIZATION_REVIEW' ? { rootRef: rootRef.trim() } : purpose === 'AML_INVESTIGATION' ? { rootRef: `aml-case:${proposedCaseId}` } : {}) }),
+        body: JSON.stringify({ principalId: principalId.trim(), caseId: proposedCaseId, purpose, validTo, rootRef: purpose === 'AML_INVESTIGATION' ? `aml-case:${proposedCaseId}` : rootRef.trim() }),
       })
       if (!response.ok) throw new Error('proposal rejected')
       setPrincipalId(''); setCaseId(''); setMessage(t('Návrh čeká na nezávislé schválení.', 'The proposal awaits independent approval.')); await load()
@@ -94,7 +94,7 @@ export function ContextAssignmentAdministration() {
       <input required className="input" value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
       <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option><option>AUTHORIZATION_REVIEW</option><option>AML_INVESTIGATION</option></select>
       <input className="input" type="number" min={1} max={744} value={hours} onChange={e => setHours(Number(e.target.value))} aria-label={t('Platnost v hodinách', 'Validity in hours')} />
-      {purpose === 'AUTHORIZATION_REVIEW' && <input className="input" required value={rootRef} onChange={e => setRootRef(e.target.value)} aria-label={t('Schvalovaný objekt', 'Approved root')} placeholder="delegation:UUID" />}
+      {purpose !== 'AML_INVESTIGATION' && <input className="input" required value={rootRef} onChange={e => setRootRef(e.target.value)} aria-label={t('Schvalovaný objekt', 'Approved root')} placeholder={purpose === 'AUTHORIZATION_REVIEW' ? 'delegation:UUID' : purpose === 'INCIDENT_IMPACT' ? 'incident:UUID' : 'complaint:reference'} />}
       {purpose === 'AML_INVESTIGATION' && <input className="input" readOnly value={caseId.trim() ? `aml-case:${caseId.trim().toLowerCase()}` : ''} aria-label={t('Schvalovaný objekt AML', 'Approved AML root')} placeholder="aml-case:UUID" />}
       <button className="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'propose'}>{busy === 'propose' ? t('Ukládám…', 'Saving…') : t('Navrhnout', 'Propose')}</button>
     </form>

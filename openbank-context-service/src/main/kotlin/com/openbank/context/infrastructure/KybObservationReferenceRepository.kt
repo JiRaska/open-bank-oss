@@ -17,6 +17,7 @@ import org.hibernate.reactive.mutiny.Mutiny
 import java.io.Serializable
 import java.time.Duration
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 data class KybObservationReferenceKey(var bankScope: String = "", var eventId: UUID = UUID(0, 0)) : Serializable {
@@ -107,6 +108,11 @@ class KybObservationReferenceRepository(
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val timeoutMs: Int,
 ) {
+    /** recordedAt is assigned by PostgreSQL; current snapshots use the same clock. */
+    suspend fun databaseNow(): Instant = transaction { session ->
+        session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
+    }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending().toInstant()
+
     suspend fun history(caseId: UUID, knownAt: Instant): KybObservationHistory {
         val rows = transaction { session ->
             session.createQuery(

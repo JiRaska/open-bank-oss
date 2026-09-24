@@ -85,7 +85,7 @@ class KybObservationReferenceIT {
             onVertx { repository.append(recorded) }
             if (!restrictionFirst) onVertx { repository.restrict(restricted) }
             onVertx { repository.restrict(restricted) }
-            assertThat(onVertx { repository.history(caseId, Instant.now()) }.observations).isEmpty()
+            assertThat(onVertx { repository.history(caseId, repository.databaseNow()) }.observations).isEmpty()
             assertThatThrownBy {
                 onVertx { repository.restrict(restricted.copy(sourceSha256 = "b".repeat(64))) }
             }.hasStackTraceContaining("conflicting KYB observation restriction")
@@ -131,7 +131,7 @@ class KybObservationReferenceIT {
         onVertx { consumer.consume(restricted.value) }
         assertThat(restricted.acked.get()).isEqualTo(1)
         assertThat(restricted.nacked.get()).isZero()
-        assertThat(onVertx { repository.history(caseId, Instant.now()) }.observations).isEmpty()
+        assertThat(onVertx { repository.history(caseId, repository.databaseNow()) }.observations).isEmpty()
     }
 
     @Test
@@ -143,6 +143,7 @@ class KybObservationReferenceIT {
             repository.append(decoder.decode(payload(caseId, observationId), UUID.randomUUID().toString(), EVENT_TYPE))
         }
         request(caseId).then().statusCode(403)
+        requestAccess(caseId).then().statusCode(403)
         val proposal = onVertx {
             assignments.propose(
                 ProposeAssignmentRequest(
@@ -159,27 +160,39 @@ class KybObservationReferenceIT {
         val assignmentId = requireNotNull(
             onVertx { assignments.decide(proposal.id, true, "kyb-checker") }.assignmentId,
         )
-        request(caseId).then().statusCode(200).header("Cache-Control", "no-store")
+        val current = request(caseId).then().statusCode(200).header("Cache-Control", "no-store")
             .body("root", org.hamcrest.Matchers.equalTo("kyb-case:$caseId"))
             .body("observations.size()", org.hamcrest.Matchers.equalTo(1))
             .body("observations[0].observationId", org.hamcrest.Matchers.equalTo(observationId.toString()))
+            .extract().jsonPath()
+        assertThat(Instant.parse(current.getString("knownAt")))
+            .isAfterOrEqualTo(Instant.parse(current.getString("observations[0].recordedAt")))
+        requestAccess(caseId).then().statusCode(204).header("Cache-Control", "no-store")
+            .header("Content-Type", org.hamcrest.Matchers.nullValue())
         given().header("X-Investigation-Case-Id", UUID.randomUUID().toString())
             .header("X-Investigation-Purpose", PURPOSE)
             .get("/api/v1/context/kyb-cases/$caseId/ownership-observations").then().statusCode(400)
         onVertx { assignments.revoke(assignmentId, "kyb-revoker") }
         request(caseId).then().statusCode(403)
+        requestAccess(caseId).then().statusCode(403)
     }
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
     fun `operator cannot list KYB ownership references`() {
         request(UUID.randomUUID()).then().statusCode(403)
+        requestAccess(UUID.randomUUID()).then().statusCode(403)
     }
 
     private fun request(caseId: UUID) = given()
         .header("X-Investigation-Case-Id", caseId.toString())
         .header("X-Investigation-Purpose", PURPOSE)
         .get("/api/v1/context/kyb-cases/$caseId/ownership-observations")
+
+    private fun requestAccess(caseId: UUID) = given()
+        .header("X-Investigation-Case-Id", caseId.toString())
+        .header("X-Investigation-Purpose", PURPOSE)
+        .get("/api/v1/context/kyb-cases/$caseId/access")
 
     private fun payload(caseId: UUID, observationId: UUID, type: String = EVENT_TYPE) =
         """{"schemaVersion":1,"eventType":"$type","caseId":"$caseId", """ +

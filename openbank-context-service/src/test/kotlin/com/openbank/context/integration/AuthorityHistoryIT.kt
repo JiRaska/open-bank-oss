@@ -109,7 +109,14 @@ class AuthorityHistoryIT {
         val case = "legacy-${UUID.randomUUID()}"
         val proposal = onVertx {
             assignments.propose(
-                ProposeAssignmentRequest(ACTOR, case, "PAYMENT_COMPLAINT", null, Instant.now().plusSeconds(3600)),
+                ProposeAssignmentRequest(
+                    ACTOR,
+                    case,
+                    "PAYMENT_COMPLAINT",
+                    null,
+                    Instant.now().plusSeconds(3600),
+                    "complaint:synthetic",
+                ),
                 "maker",
             )
         }
