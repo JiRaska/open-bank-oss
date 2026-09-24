@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.4...fx-service-v0.16.0) (2026-09-24)
+
+
+### Features
+
+* **fx:** publish fx.fixing.published on ČNB fixing ingest (ADR-0314 D5) ([#10686](https://github.com/JiRaska/open-bank-oss/issues/10686)) ([161bed0](https://github.com/JiRaska/open-bank-oss/commit/161bed0b8c2e1ab97e97aec6f8ceae09c1ae626e))
+
 ## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.3...fx-service-v0.15.4) (2026-09-23)
 
 

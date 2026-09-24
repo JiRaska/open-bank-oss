@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.19.0...audit-service-v0.20.0) (2026-09-24)
+
+
+### Features
+
+* **fx:** publish fx.fixing.published on ČNB fixing ingest (ADR-0314 D5) ([#10686](https://github.com/JiRaska/open-bank-oss/issues/10686)) ([161bed0](https://github.com/JiRaska/open-bank-oss/commit/161bed0b8c2e1ab97e97aec6f8ceae09c1ae626e))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.5...audit-service-v0.19.0) (2026-09-19)
 
 
