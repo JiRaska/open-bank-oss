@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { buildCustomerGraph } from '@/lib/context/customerGraph'
+import { buildCustomerGraph, selectGraphFocus, type CustomerGraph } from '@/lib/context/customerGraph'
 import type { Customer360Evidence } from '@/lib/customer360/evidence'
 
 const PARTY = '11111111-1111-4111-8111-111111111111'
@@ -66,6 +66,26 @@ function graph(data = evidence) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Customer context graph', () => {
+  it('keeps later search matches that fit after a longer source chain exceeds the visible budget', () => {
+    const nodes: CustomerGraph['nodes'] = [
+      { id: 'account:one', kind: 'account', label: 'Account', source: 'account', facts: [] },
+      { id: 'card:one', kind: 'card', label: 'Card', source: 'card', facts: [] },
+      { id: 'notification:one', kind: 'notification', label: 'Interaction', source: 'notification', facts: [] },
+    ]
+    const sourceGraph: CustomerGraph = {
+      nodes,
+      edges: [
+        { id: 'owns-account', from: 'customer', to: 'account:one', relation: 'OWNS' },
+        { id: 'account-card', from: 'account:one', to: 'card:one', relation: 'HAS_CARD' },
+        { id: 'customer-notification', from: 'customer', to: 'notification:one', relation: 'RECEIVED' },
+      ],
+      truncated: false,
+    }
+
+    expect(selectGraphFocus(sourceGraph, [nodes[1], nodes[2]], 1).map(node => node.id))
+      .toEqual(['notification:one'])
+  })
+
   it('connects live accounts, products, cards and interactions to the customer', async () => {
     const fetchMock = installSources()
     graph()

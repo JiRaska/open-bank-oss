@@ -77,7 +77,7 @@ export function selectGraphFocus(graph: CustomerGraph, matches: CustomerGraphNod
       current = parentId
     }
     const needed = chain.filter(node => !seen.has(node.id))
-    if (selected.length + needed.length > limit) break
+    if (selected.length + needed.length > limit) continue
     for (const node of needed) {
       selected.push(node)
       seen.add(node.id)
