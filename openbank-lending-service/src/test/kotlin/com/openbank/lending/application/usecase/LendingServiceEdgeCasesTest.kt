@@ -101,7 +101,7 @@ class LendingServiceEdgeCasesTest {
         clock,
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-        OriginationConfig(false),
+        OriginationConfig(false, false),
         NoOpOriginationWorkflowPort(),
         OriginationDecisionService(
             NoOpCreditBureauPort(),
