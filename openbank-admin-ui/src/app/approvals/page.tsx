@@ -137,6 +137,8 @@ export default function ApprovalsPage() {
       const res = await fetch('/api/agent/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Legacy BFF versions still require decidedBy. New BFF/provider versions bind
+        // audit identity to the authenticated session/token and ignore this client value.
         body: JSON.stringify({ proposalId: p.id, approve, decidedBy, reason }),
       })
       if (!res.ok) {

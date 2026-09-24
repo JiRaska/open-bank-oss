@@ -4,7 +4,8 @@
 
 // BFF proxy for the agent HITL approval queue (ADR-0031 D4). The agent owns the
 // proposals store; the admin-ui lists pending proposals and records a human
-// decision. GET ?state=pending|all ; POST { proposalId, approve, decidedBy, reason }.
+// decision. GET ?state=pending|all ; POST { proposalId, approve, reason }.
+// A legacy decidedBy field may be sent by older clients, but never supplies audit identity.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
@@ -66,12 +67,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { proposalId, approve, decidedBy, reason } = body ?? {}
-    if (!proposalId || typeof approve !== 'boolean' || !decidedBy) {
-      return NextResponse.json({ error: 'proposalId, approve (bool) and decidedBy are required' }, { status: 400 })
+    const { proposalId, approve, reason } = body ?? {}
+    if (!proposalId || typeof approve !== 'boolean') {
+      return NextResponse.json({ error: 'proposalId and approve (bool) are required' }, { status: 400 })
     }
-    const accessToken = await operatorBearer()
-    if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    const session = await auth()
+    const accessToken = session?.user?.accessToken
+    // Retain the legacy field for a mixed-version agent-service rollout, but source it
+    // from the authenticated session, never the browser's decidedBy body property.
+    const decidedBy = session?.user?.id?.trim()
+    if (!accessToken || !decidedBy) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10000)
     const res = await fetch(`${agentBase()}/api/v1/proposals/${encodeURIComponent(proposalId)}/decision`, {
