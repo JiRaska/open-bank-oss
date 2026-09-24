@@ -45,13 +45,15 @@ export async function GET(req: NextRequest) {
       const id = row.proposedBy ?? 'unknown'
       const known = resolveAgentIdentity(id, registry).status === 'chartered'
       if (!registry.available) return row
+      // A missing AI charter is not proof that this principal is a human.
+      if (!known) return { ...row, agent: undefined }
       return {
         ...row,
         agent: {
           id,
           displayName: id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-          icon: known ? 'bot' : 'user',
-          charterKnown: known,
+          icon: 'bot',
+          charterKnown: true,
         },
       }
     }) : rows

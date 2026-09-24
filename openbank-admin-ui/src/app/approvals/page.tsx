@@ -352,12 +352,9 @@ export default function ApprovalsPage() {
           // means we could not read agents.yaml and must not claim either way (#5904).
           const identity = resolveAgentIdentity(p.proposedBy, registry)
           const chartered = identity.status === 'chartered'
-          const proposerKind = p.agent
-            ? p.agent.icon === 'bot' ? 'agent' : 'human'
-            : chartered ? 'agent' : 'unverified'
+          const proposerKind = chartered ? 'agent' : p.agent?.icon === 'user' ? 'human' : 'unverified'
           // Caution is still required when AI authorship cannot be ruled out, but the copy
           // must not assert that an unverified actor definitely was an AI agent.
-          const cautionAi = proposerKind !== 'human'
           const ProposerIcon = proposerKind === 'agent' ? Bot : proposerKind === 'human' ? UserRound : ShieldQuestion
           return (
             <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? 'var(--warning-text)' : m.color}` }}>
@@ -371,7 +368,7 @@ export default function ApprovalsPage() {
                   <m.Icon size={11} /> {t(m.cs, m.en)}
                 </span>
               </div>
-              {cautionAi && !registryLoading && (
+              {proposerKind !== 'human' && !registryLoading && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0 }} />
                   {proposerKind === 'agent'

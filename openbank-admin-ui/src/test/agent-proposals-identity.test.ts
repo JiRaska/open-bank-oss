@@ -35,14 +35,14 @@ describe('agent proposal identity enrichment', () => {
     expect(body[0].agent).toMatchObject({ id: 'service-account-fraud-investigator', icon: 'bot', charterKnown: true })
   })
 
-  it('does not mislabel an unknown human principal as a governed agent', async () => {
+  it('does not assert human identity for a principal absent from the charter registry', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{
       id: 'proposal-2', proposedBy: 'alice@example.test', suggestedAction: 'agent.review',
     }]), { status: 200, headers: { 'content-type': 'application/json' } })))
     const { GET } = await import('@/app/api/agent/proposals/route')
     const body = await (await GET(new NextRequest('http://localhost/api/agent/proposals'))).json()
 
-    expect(body[0].agent).toMatchObject({ id: 'alice@example.test', icon: 'user', charterKnown: false })
+    expect(body[0].agent).toBeUndefined()
   })
 
   it('preserves upstream provenance when the charter registry is unavailable', async () => {

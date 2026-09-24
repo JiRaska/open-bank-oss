@@ -7,7 +7,7 @@
 // different things; see that module for why `unresolved` and `unverifiable` must not
 // collapse into one badge.
 
-import { Bot, ShieldQuestion, UserRound } from 'lucide-react'
+import { Bot, ShieldQuestion } from 'lucide-react'
 import type { AgentIdentity } from '@/lib/governance/agentIdentity'
 
 interface Props {
@@ -58,7 +58,7 @@ export function AgentIdentityBadge({ identity, loading = false, lang = 'en' }: P
         data-state="unresolved"
         className="badge badge-sm badge-neutral"
       >
-        <UserRound size={11} aria-hidden="true" />
+        <ShieldQuestion size={11} aria-hidden="true" />
         {cs ? 'Bez charteru v agents.yaml' : 'No charter in agents.yaml'}
       </span>
     )
