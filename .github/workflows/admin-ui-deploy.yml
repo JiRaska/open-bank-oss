@@ -402,12 +402,14 @@ jobs:
         # so unrelated frequent main runs cannot evict an unchanged service's proof.
         #
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: expired or absent → shows tests:0 (accurate "not run recently").
+        # A successful inventory lookup with no artifact is legitimately not-run.
+        # An API failure is not: fail the image build instead of replacing a
+        # complete sandbox snapshot with a partially empty one.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
           # Released components come from version.txt. The deterministic-simulation
@@ -427,15 +429,18 @@ jobs:
             # cap this best-effort collector at 295 read calls for 59 components;
             # a hit normally arrives on page one.
             for page in 1 2 3 4 5; do
-              artifact="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}" \
-                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" \
-                2>/dev/null || true)"
+              local inventory
+              inventory="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}")" || {
+                echo "Artifact inventory API failed for ${artifact_name} page ${page}" >&2
+                return 2
+              }
+              artifact="$(python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" <<< "${inventory}")" || return 2
               if [ -n "${artifact}" ]; then
                 printf '%s\n' "${artifact}"
                 return 0
               fi
             done
-            return 1
+            return 0
           }
 
           DOWNLOADED=0
@@ -444,13 +449,13 @@ jobs:
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            art_id="$(latest_main_artifact "${art_name}" || true)"
+            art_id="$(latest_main_artifact "${art_name}")" || exit 1
             if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue
             fi
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
-                -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
+                -L -o "/tmp/${art_name}.zip"; then
               TMPDIR_ART="/tmp/${art_name}-extracted"
               rm -rf "${TMPDIR_ART}" && mkdir -p "${TMPDIR_ART}"
               unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}" 2>/dev/null || true
@@ -479,7 +484,8 @@ jobs:
               DOWNLOADED=$((DOWNLOADED + 1))
               echo "  ${svc}: staged"
             else
-              echo "  ${svc}: download failed (skip)"
+              echo "  ${svc}: artifact download failed; refusing incomplete Test Intelligence image" >&2
+              exit 1
             fi
           done
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
@@ -609,29 +615,28 @@ jobs:
         # collect-test-intelligence.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
         # Do not filter to success: a failed/latest attempt must not disappear behind an
-        # older green run. Best-effort absence stays visible as missing evidence.
+        # older green run. Confirmed absence stays visible as missing evidence;
+        # an API failure must stop the deploy instead of erasing PIT results.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           # A one-item response has selected an older completed run while a newer
           # main run and its artifacts existed. Compare attempt timestamps explicitly
           # rather than trusting the API's first item (reruns can change recency).
-          RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=100" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True); print(r[0]['id'] if r else '')" \
-            2>/dev/null || true)
+          RUN_INVENTORY=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=100") || exit 1
+          RUN_ID=$(python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True); print(r[0]['id'] if r else '')" <<< "${RUN_INVENTORY}") || exit 1
           if [ -z "${RUN_ID}" ]; then
             echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."
-          ARTIFACTS=$(api \
-            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
-            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" \
-            2>/dev/null || true)
+          ARTIFACT_INVENTORY=$(api \
+            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100") || exit 1
+          ARTIFACTS=$(python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" <<< "${ARTIFACT_INVENTORY}") || exit 1
           if [ -z "${ARTIFACTS}" ]; then
             echo "No pitest artifacts found in run ${RUN_ID} — skipping."
             exit 0
@@ -640,7 +645,7 @@ jobs:
           while IFS=' ' read -r art_id art_name; do
             [ -n "${art_id}" ] || continue
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
-                -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
+                -L -o "/tmp/${art_name}.zip"; then
               # Each artifact zip's top-level is the pitest
               # report contents (mutations.xml, index.html, com.openbank.*/ …) because
               # actions/upload-artifact@v7 strips the <component>/build/reports/pitest/
@@ -656,8 +661,11 @@ jobs:
               esac
               dest="${svc}/build/reports/pitest"
               mkdir -p "${dest}"
-              unzip -q "/tmp/${art_name}.zip" -d "${dest}" 2>/dev/null || true
+              unzip -q "/tmp/${art_name}.zip" -d "${dest}" || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
+            else
+              echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
+              exit 1
             fi
           done <<< "${ARTIFACTS}"
           COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
