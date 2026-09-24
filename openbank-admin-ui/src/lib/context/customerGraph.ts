@@ -54,6 +54,38 @@ export function selectGraphOverview(nodes: CustomerGraphNode[], limit: number): 
   return selected
 }
 
+/** Add the shortest visible source chain for each match, up to two hops and within the UI budget. */
+export function selectGraphFocus(graph: CustomerGraph, matches: CustomerGraphNode[], limit: number): CustomerGraphNode[] {
+  const byId = new Map(graph.nodes.map(node => [node.id, node]))
+  const direct = new Set(graph.edges.filter(edge => edge.from === 'customer').map(edge => edge.to))
+  const parent = new Map<string, string>()
+  for (const edge of graph.edges) {
+    if (edge.from !== 'customer' && byId.has(edge.from) && !parent.has(edge.to)) parent.set(edge.to, edge.from)
+  }
+  const selected: CustomerGraphNode[] = []
+  const seen = new Set<string>()
+  for (const match of matches) {
+    if (seen.has(match.id)) continue
+    const chain: CustomerGraphNode[] = [match]
+    let current = match.id
+    while (!direct.has(current) && chain.length < 3) {
+      const parentId = parent.get(current)
+      if (!parentId || seen.has(parentId) || chain.some(node => node.id === parentId)) break
+      const parentNode = byId.get(parentId)
+      if (!parentNode) break
+      chain.unshift(parentNode)
+      current = parentId
+    }
+    const needed = chain.filter(node => !seen.has(node.id))
+    if (selected.length + needed.length > limit) break
+    for (const node of needed) {
+      selected.push(node)
+      seen.add(node.id)
+    }
+  }
+  return selected
+}
+
 export interface AccountFact {
   id: string
   accountNumber: string

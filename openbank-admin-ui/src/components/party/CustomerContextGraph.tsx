@@ -16,6 +16,7 @@ import {
   buildCustomerGraph,
   emptyLiveCustomerFacts,
   selectGraphOverview,
+  selectGraphFocus,
   type CustomerGraphKind,
   type LiveCustomerFacts,
 } from '@/lib/context/customerGraph'
@@ -70,9 +71,10 @@ export function CustomerContextGraph({ evidence, partyName }: {
     (kind === 'all' || node.kind === kind)
     && `${node.label} ${node.facts.join(' ')}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   )
-  const visible = kind === 'all' && query.trim() === ''
+  const filteredActive = kind !== 'all' || query.trim() !== ''
+  const visible = !filteredActive
     ? selectGraphOverview(filtered, MAX_VISIBLE)
-    : filtered.slice(0, MAX_VISIBLE)
+    : selectGraphFocus(graph, filtered, MAX_VISIBLE)
   const selected = graph.nodes.find(node => node.id === selectedId) ?? null
   const visibleIds = new Set(visible.map(node => node.id))
   const visibleEdges = graph.edges.filter(edge =>
@@ -208,7 +210,9 @@ export function CustomerContextGraph({ evidence, partyName }: {
           <div className={styles.coordinates} aria-hidden="true">REL / 360° · {visible.length.toString().padStart(2, '0')}</div>
         </div>
         <p role="status" className={styles.resultStatus}>
-          {t('Zobrazené uzly', 'Visible nodes')}: {visible.length} / {filtered.length}
+          {filteredActive
+            ? t(`${filtered.length} shod · ${visible.length} uzlů včetně kontextu`, `${filtered.length} matches · ${visible.length} nodes including context`)
+            : <>{t('Zobrazené uzly', 'Visible nodes')}: {visible.length} / {filtered.length}</>}
           {(filtered.length > MAX_VISIBLE || graph.truncated) && ` · ${t('výsledek je omezen', 'result is bounded')}`}
         </p>
         {filtered.length === 0 && <p role="status">{t('Žádný uzel neodpovídá filtru.', 'No nodes match this filter.')}</p>}

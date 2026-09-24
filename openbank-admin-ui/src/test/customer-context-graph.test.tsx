@@ -142,7 +142,9 @@ describe('Customer context graph', () => {
     await screen.findByRole('button', { name: 'Card: 411111******1111' })
     fireEvent.change(screen.getByLabelText('Find in graph'), { target: { value: 'LOST_OR_STOLEN' } })
     expect(screen.getByRole('button', { name: 'Card: 411111******1111' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Account: CZ12…3456' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Account: CZ12…3456' })).toBeInTheDocument()
+    expect(Array.from(document.querySelectorAll('svg title')).some(title => title.textContent === 'HAS_CARD')).toBe(true)
+    expect(screen.getByText('1 matches · 2 nodes including context')).toBeInTheDocument()
   })
 
   it('bounds notification nodes and reports truncation', () => {
