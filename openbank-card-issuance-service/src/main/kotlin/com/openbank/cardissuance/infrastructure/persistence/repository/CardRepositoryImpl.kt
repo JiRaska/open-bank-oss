@@ -68,7 +68,9 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
     }
 
     override suspend fun findByPartyId(partyId: UUID, limit: Int): List<Card> {
-        require(limit in 1..200) { "limit must be between 1 and 200" }
+        require(limit in 1..MAX_GRAPH_PARTY_LIST_LIMIT) {
+            "limit must be between 1 and $MAX_GRAPH_PARTY_LIST_LIMIT"
+        }
         return Panache.withSession {
             find("partyId = ?1 ORDER BY createdAt DESC, id DESC", partyId).page(Page.ofSize(limit)).list()
         }.awaitSuspending().map { it.toDomain() }
@@ -144,6 +146,8 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
     }.awaitSuspending() == 1
 
     private companion object {
+        const val MAX_GRAPH_PARTY_LIST_LIMIT = 200
+
         /** `status` is persisted as its enum NAME (see CardMapper), so the query compares strings. */
         val TERMINAL_STATUS_NAMES = Card.TERMINAL_STATUSES.map { it.name }
     }
