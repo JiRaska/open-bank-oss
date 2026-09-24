@@ -126,6 +126,7 @@ survives in it.
    ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
+   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -342,6 +343,48 @@ tool whose capability no charter holds (agent-service's interest tools, mcp-serv
 confirmation) moves to the agent's identity with **no** upstream grant, so it stays denied end to end.
 If a charter later gains that capability, add the upstream read rule in the same change;
 `AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
+
+### Synthetic journey identity: Product Catalog read (#7324)
+
+One client, and it differs from the batches above in two ways: it holds **no realm role at all**
+(not `ROLE_API`), and its only grant is a **client scope** the live realm does not have yet.
+
+| Keycloak object | Source | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|---|
+| client scope `catalog:read` | `.clientScopes[]` entry in `realm-template.json` | none | none | none |
+| client `openbank-synthetic-catalog-read` | `.clients[]` entry in `realm-template.json` | `keycloak/synthetic-catalog-read` | `journey-product-catalog-read-oidc` (observability) | `SYNTHETIC_CATALOG_READ_CLIENT_SECRET` |
+
+Order matters: create the scope first, or the client's `defaultClientScopes` reference drops
+silently (Keycloak logs `Referenced client scope ... doesn't exist. Ignoring`) and the token
+carries an empty `scope`, so product-catalog answers 403.
+
+```sh
+T=openbank-infra/gitops/components/keycloak/realm-template.json
+# 1. the scope (not a realm default: only a client that lists it receives it)
+jq '.clientScopes[] | select(.name=="catalog:read")' "$T" | $KC create client-scopes -r openbank -f -
+# 2. the client, WITHOUT its placeholder secret; Keycloak generates one server-side
+jq '.clients[] | select(.clientId=="openbank-synthetic-catalog-read") | del(.secret)' "$T" \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-synthetic-catalog-read --fields id --format csv --noquotes)
+# 3. NO add-roles step. The service account must hold no realm role.
+# 4. secret Keycloak -> Vault KV through a pipe, never printed
+$KC get clients/$ID/client-secret -r openbank | jq -r .value \
+  | bao kv put openbank/keycloak/synthetic-catalog-read client_id=openbank-synthetic-catalog-read client_secret=-
+```
+
+Verify without revealing: `$KC get clients/$ID/default-client-scopes -r openbank` lists exactly
+`basic` and `catalog:read`; `.../users/<sa-id>/role-mappings/realm` holds no `ROLE_*` role;
+`kubectl -n observability annotate externalsecret journey-product-catalog-read-oidc force-sync="$(date +%s)" --overwrite`
+reports `SecretSynced`. Acceptance is the next scheduled Job exiting 0 with all three checks passing
+(200, JSON, array). Before the KV entry exists the CronJob still runs (its secret ref is
+`optional: true`) and fails red with `credential absent` in its log, never a crash loop.
+
+The template declares `clientScopes`, and a realm import that declares **any** client scope skips
+Keycloak's built-in defaults (`basic`, `roles`, `profile`, ...). The template therefore carries the
+full KC 26.6.3 default set plus `catalog:read`, and `defaultDefaultClientScopes` /
+`defaultOptionalClientScopes` as Keycloak creates them. Measured on a throwaway 26.6.3 import: every
+existing service-account client mints a token with the same claims as before. Re-check that after a
+Keycloak major upgrade changes its default scopes.
 
 ## What this does NOT fix
 
