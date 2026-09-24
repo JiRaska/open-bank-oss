@@ -121,6 +121,25 @@ describe('Customer context graph', () => {
     expect(result.truncated).toBe(true)
   })
 
+  it('keeps account links resolvable when referenced accounts exceed the display cap', () => {
+    const result = buildCustomerGraph(evidence, {
+      accounts: Array.from({ length: 51 }, (_, index) => ({ ...account, id: `account-${index}` })),
+      cards: [{ ...card, accountId: 'account-50' }],
+      amlCases: [{
+        id: 'aml-other-account', accountId: 'account-from-aml', transactionId: '',
+        screeningType: 'TRANSACTION_MONITORING', riskLevel: 'MEDIUM', status: 'OPEN',
+        alertCode: 'TM01', screenedAt: '2026-09-13T10:00:00Z',
+      }],
+      notifications: [], lendingApplications: [], devices: [], documents: [], unavailable: [], truncated: [],
+    })
+    const nodeIds = new Set(result.nodes.map(node => node.id))
+    expect(result.edges.every(edge => edge.from === 'customer' || nodeIds.has(edge.from))).toBe(true)
+    expect(result.edges.every(edge => nodeIds.has(edge.to))).toBe(true)
+    expect(result.nodes.filter(node => node.id === 'account:account-50')).toHaveLength(1)
+    expect(result.nodes.filter(node => node.id === 'account:account-from-aml')).toHaveLength(1)
+    expect(result.truncated).toBe(true)
+  })
+
   it('does not render any customer surface when the authorized projection is unavailable', async () => {
     installSources()
     graph({ ...evidence, available: false })

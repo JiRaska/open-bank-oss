@@ -288,9 +288,18 @@ export function buildCustomerGraph(
 
   const products = new Set<string>()
   const liveAccountIds = new Set(live.accounts.map(account => account.id))
+  const accountNodeIds = new Set<string>()
+  const ensureAccountReference = (accountId: string, source: string) => {
+    const id = `account:${accountId}`
+    if (accountNodeIds.has(id)) return id
+    accountNodeIds.add(id)
+    nodes.push({ id, kind: 'account', label: accountId, source, facts: [`Account reference: ${accountId}`] })
+    return id
+  }
   for (const accountId of evidence.accountIds) {
     if (liveAccountIds.has(accountId)) continue
     const id = `account:${accountId}`
+    accountNodeIds.add(id)
     nodes.push({
       id, kind: 'account', label: accountId, source: 'analytics-sink',
       facts: [`Projected account reference: ${accountId}`],
@@ -299,6 +308,7 @@ export function buildCustomerGraph(
   }
   for (const account of live.accounts.slice(0, 50)) {
     const id = `account:${account.id}`
+    accountNodeIds.add(id)
     nodes.push({
       id, kind: 'account', label: account.accountNumber || account.id, source: 'account-service',
       facts: [account.accountType, account.currencyCode, `Status: ${account.status}`, `Opened: ${account.openedAt}`],
@@ -323,7 +333,8 @@ export function buildCustomerGraph(
         ...(card.blockedReason ? [`Block reason: ${card.blockedReason}`] : []),
       ].filter(Boolean),
     })
-    addEdge(`account:${card.accountId}`, id, 'HAS_CARD')
+    if (card.accountId) addEdge(ensureAccountReference(card.accountId, 'card-issuance-service'), id, 'HAS_CARD')
+    else addEdge('customer', id, 'HAS_CARD')
     if (card.productCode) {
       products.add(card.productCode)
       addEdge(id, `product:${card.productCode}`, 'ISSUED_AS_PRODUCT')
@@ -372,7 +383,7 @@ export function buildCustomerGraph(
       ],
     })
     addEdge('customer', id, 'SUBJECT_OF_AML_CASE')
-    if (amlCase.accountId) addEdge(`account:${amlCase.accountId}`, id, 'SCREENED_IN_CASE')
+    if (amlCase.accountId) addEdge(ensureAccountReference(amlCase.accountId, 'aml-service'), id, 'SCREENED_IN_CASE')
     if (amlCase.transactionId) {
       const transactionId = `domain-reference:transaction:${amlCase.transactionId}`
       if (!transactionReferences.has(transactionId)) {
