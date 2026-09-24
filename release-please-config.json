@@ -445,6 +445,12 @@
       "exclude-paths": [
         "openbank-context-service/src/test"
       ]
+    },
+    "openbank-risk-engine": {
+      "component": "risk-engine",
+      "exclude-paths": [
+        "openbank-risk-engine/src/test"
+      ]
     }
   }
 }

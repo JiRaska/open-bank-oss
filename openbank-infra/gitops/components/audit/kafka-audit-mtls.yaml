@@ -128,6 +128,12 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.fx.fixing.published
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.documents.document.event
           patternType: literal
         operations: [Read, Describe]
@@ -198,6 +204,14 @@ spec:
       - resource:
           type: topic
           name: openbank.delegation.spend-reservation-state
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0312: business-signing approvals (who signed which company payment) are money-path
+      # evidence and belong in the tamper-evident trail from the first event.
+      - resource:
+          type: topic
+          name: openbank.delegation.approval-events
           patternType: literal
         operations: [Read, Describe]
         host: "*"

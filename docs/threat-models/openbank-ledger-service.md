@@ -72,7 +72,7 @@ isolation from transport/persistence.
 | E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
 | E3 | Close DRAFT / maker evidence | **Elevation** — an M2M journal writer creates the close DRAFT and is recorded as its maker | Close creation uses the dedicated `ledger.close.draft` action and `operator-ledger-close-draft` OPA reason, which requires operator/admin and excludes every `service-account-*` identity. Routine M2M posting remains narrowly allowed only on `ledger.create`; it cannot manufacture maker evidence. Regression tests cover both the shared service account denial and the staff operator allow decision | Low — RBAC plus the identity-aware OPA rule gate the maker action; freeze independently requires a distinct human checker |
 | T4 | Outbox/Kafka | **Tampering** — downstream consumes a non-emitted, reordered or duplicated event | Transactional outbox (single DB tx with the posting); dispatch runs on the Vert.x event loop so it actually drains (ADR-0050 N1, was `HR000068`); **deterministic Kafka key = `aggregate_id`** preserves per-account order (N2); **`event.id` carried as `ce-id`/`idempotency-key` header** for consumer dedup (N3); idempotency key on posting dedupes retries | Schema-compat on event change (advisory gate); signed event provenance — *planned* |
-| S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — ledger's `OIDC_CLIENT_SECRET` is projected from the **shared** Vault key `account-service` (all services reuse the single `openbank-services` Keycloak confidential client, see `gitops/components/ledger/oidc-externalsecret.yaml`). Compromise of that one Vault key would let an attacker mint bearer tokens accepted by **both** account-service and the ledger money path — a single secret is a single point of forgery across services. | Secret is Vault-projected (never in git/state); ExternalSecret `deletionPolicy: Retain`; the Keycloak client is **confidential** (not public), so the secret alone is required and it is access-controlled in Vault; ledger write endpoints additionally require `ROLE_OPERATOR` (S1/E1), so a forged service token still cannot post without the operator role claim. | **Shared-credential blast radius is accepted for sandbox only.** Tightening = a dedicated Vault path + per-service Keycloak client for ledger (planned, §5). **Production go-live requires the second money-path approver to explicitly sign off this residual** (ADR-0030). — *open* |
+| S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — ledger's `OIDC_CLIENT_SECRET` is projected from the **shared** Vault key `account-service` (all services reuse the single `openbank-services` Keycloak confidential client, see `gitops/components/ledger/oidc-externalsecret.yaml`). Compromise of that one Vault key would let an attacker mint bearer tokens accepted by **both** account-service and the ledger money path — a single secret is a single point of forgery across services. | Secret is Vault-projected (never in git/state); ExternalSecret `deletionPolicy: Retain`; the Keycloak client is **confidential** (not public), so the secret alone is required and it is access-controlled in Vault; `reverseJournal` additionally requires `ROLE_OPERATOR` (S1/E1). **Since #10486 step 1 this is no longer true of `postJournal`**, which admits `ROLE_API` so a per-service identity can post; a forged shared-client token (`ROLE_API`) is then stopped only by OPA's identity rules, and `service-ledger-post` DOES admit the shared principal — so for `ledger.create` the operator-role claim is no longer a second control (it never was in the live realm, where the shared account holds `ROLE_OPERATOR`, #10486). | **Shared-credential blast radius is accepted for sandbox only.** Tightening = a dedicated Vault path + per-service Keycloak client for ledger (planned, §5). **Production go-live requires the second money-path approver to explicitly sign off this residual** (ADR-0030). — *open* |
 
 ## 4. Key invariants (must never regress)
 
@@ -241,6 +241,25 @@ an additional store; not implemented in this PR. Also open (unchanged by this PR
 set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
+
+- **2026-09-21** — **First per-service M2M identity on the ledger write path (#10486 step 1).**
+  interest-service's capitalization journal now arrives as its own Keycloak client
+  `openbank-interest` (principal `service-account-openbank-interest`, realm role `ROLE_API` only)
+  instead of the shared `openbank-services` principal. Two changes here, both on
+  `POST /api/v1/journals` only: `postJournal`'s RBAC widens from `ROLE_OPERATOR` to
+  `ROLE_API, ROLE_OPERATOR` (RBAC runs before OPA, so no rego rule could admit a ROLE_API-only
+  caller otherwise), and `ledger_rest_ext.rego` gains `service-interest-ledger-post`, gated on
+  `input.principal.id` and on `ledger.create` alone. **STRIDE-E:** the RBAC widening is the new
+  exposure — every ROLE_API holder now reaches OPA for `ledger.create`. OPA is therefore the whole
+  control for them, and it is identity-gated: measured with `opa eval` on the regenerated
+  `ledger-opa-bundle`, another ROLE_API service account (`service-account-openbank-mcp-service`)
+  and a no-role principal are DENIED `ledger.create`, the new identity is DENIED
+  `ledger.reverse`/`ledger.approve`, and every existing principal's decision is byte-identical to
+  `main`'s bundle (shared client, edge, staff operator). The shared client's `ledger.create` path
+  (`service-ledger-post`) is untouched; with this RBAC change it no longer depends on the shared
+  account holding `ROLE_OPERATOR`, which is the precondition for #10486's final step (dropping that
+  role). `reverseJournal` stays `ROLE_OPERATOR`-only. Rollback: revert the commit — the interest
+  client falls back to nothing (its post 403s), so revert the interest-service change with it.
 
 - **2026-09-07** — Idempotency contract of the close-cycle POSTs verified and documented
   (ADR-0294, burn-down #8351). No code change: open-day and transition already conflict loudly
@@ -461,3 +480,49 @@ set) apply equally to the new `ledger.approval.decide` action.
   bodies before projecting the journal reference as complaint evidence. It adds no journal lines,
   amount, account, actor or description and does not change ledger posting. Risk class = provenance
   integrity with low additional disclosure. Rollback is wire-compatible because the field is additive.
+
+- **2026-09-20** — **Two new inbound edges over a new private-CA mTLS listener** (8443, client auth
+  REQUIRED, TLSv1.3; server cert `ledger-service-internal-tls`), the same shape as account-service
+  and party-service. HTTP/8101 is unchanged for its existing callers (transaction, lending,
+  settlement, balance, billing, finrep), so this is additive, not a migration. The two callers on
+  8443 are clearing-service `NetSettlementPostingConsumer` (ADR-0281, `ClearingLedgerRestClient`)
+  and interest-service `RestLedgerPostingAdapter` (ADR-0033 §D, `LedgerRestClient`), both doing
+  `POST /api/v1/journals` (`ledger.create`) as the shared `service-account-openbank-services` —
+  which `ledger_rest_ext.rego`'s `service-ledger-post` already admits for `ledger.create` only, so
+  there is no policy change and no new action. Neither caller has a `reverseJournal` method, so
+  `service-ledger-reverse` is untouched. Before this, neither caller's gitops manifest set
+  `LEDGER_SERVICE_URL`, so both dialled the `application.yaml` fallback `http://localhost:8101`
+  inside their own pods: the edges existed in code and never reached this service, and neither
+  net-settlement nor capitalization journals have ever been posted from the cluster. **Risk class:**
+  the book of record gains two authenticated write callers that were always intended to have it
+  (integrity of journal ingestion); no new principal, no new action, no widened role. The shared
+  service-account identity means OPA still cannot distinguish which of the five M2M posters is
+  calling — unchanged residual risk, already recorded against `service-ledger-post`. Rollback: drop
+  the two callers' `LEDGER_SERVICE_URL` env vars and the listener env; the 8101 path is untouched
+  throughout, so nothing that works today depends on this change.
+
+- **2026-09-20** — **Correction, and the fix: the 8443 listener's client-certificate validation was
+  declared but not in effect.** Earlier entries describe this listener as "client auth REQUIRED".
+  That posture was expressed only as the container env `QUARKUS_HTTP_SSL_CLIENT_AUTH`, and
+  `quarkus.http.ssl.client-auth` is a **build-time** property: Quarkus fixes it into the image at
+  build time and ignores a differing runtime value (it says so in the boot log). The deployed
+  listener therefore ran with the default, `none` — server-authenticated TLS, encrypted in transit,
+  but the caller's certificate was not demanded or validated. The transport-confidentiality claims in
+  the earlier entries hold; the caller-authentication half did not, and those entries should be read
+  with this one. Completed here by setting `quarkus.http.ssl.client-auth: required` in this service's
+  `application.yaml`, the file the image is built from, so the value is baked rather than injected;
+  the gitops env is kept in the same spelling so manifest and image cannot disagree. Every declared
+  caller of this listener already mounts a private-CA client certificate and names it on its
+  rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
+  restored to what the design always stated. Rollback: revert the property (and expect the listener
+  to return to server-only TLS).
+- **2026-09-21** — **Two more per-service identities on `ledger.create` (#10486 batch 1).** `service-lending-ledger-post` (`service-account-openbank-lending`) and `service-clearing-ledger-post` (`service-account-openbank-clearing`), each gated on `input.principal.id` and on `ledger.create` alone — same shape as the interest rule. No RBAC change (postJournal already admits `ROLE_API` since step 1). Measured with `opa test`: both identities are DENIED reverse/trigger/replay/approve/close.draft, and neither rule admits the other, the interest client or the shared client; removing either `principal.id` line turns three must-deny tests red.
+- **2026-09-21** — **`ledger.reverse` reachable by one per-service identity (#10486 batch 2).** `reverseJournal`'s RBAC widens from `ROLE_OPERATOR` to `ROLE_API, ROLE_OPERATOR` (RBAC runs before OPA, so no rego rule could admit a ROLE_API-only caller otherwise). Two identity rules: `service-transaction-ledger-write` (`service-account-openbank-transaction`: `ledger.create` + `ledger.reverse`) and `service-settlement-ledger-post` (`service-account-openbank-settlement`: `ledger.create` + `ledger.read`). **STRIDE-E:** every ROLE_API holder now reaches OPA for the book-of-record reversal; OPA is the whole control for them and it is identity-gated — `ledger_rest_ext_test.rego` proves another ROLE_API service account and each batch-1 poster (lending, clearing, interest) are DENIED `ledger.reverse`, each batch-2 identity is denied every action it was not granted, and neither rule admits the other or the shared client. Removing the `principal.id` line of the transaction rule turns 7 tests red, of the settlement rule 5. `AUTHZ_ENFORCE` is `"true"` for ledger-service in gitops. The shared `service-ledger-reverse` rule is untouched (removed in #10486's final step). Rollback: revert together with the callers.
+- **2026-09-24** — **New read-only caller: risk-engine (ADR-0314 phase 0, #10618).** The `risk`
+  namespace joins ledger's ingress allow-list (regenerated by `gen-network-policies.py` from
+  risk-engine's Deployment env). It calls only `GET /api/v1/journals/trial-balance` and
+  `GET /api/v1/journals/sub-ledger-balances`, over the private-CA mTLS listener on 8443 with its
+  own client certificate (`risk-internal-tls`), as the shared `openbank-services` principal, which
+  ledger already authorizes for `ledger.read`. No rego, RBAC or listener change here. **STRIDE-I:**
+  one more reader of per-customer deposit-control balances; it writes nothing to the ledger.
+  Rollback: remove the risk-engine Deployment env and regenerate the policies.

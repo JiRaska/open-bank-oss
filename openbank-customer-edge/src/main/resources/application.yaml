@@ -144,6 +144,12 @@ openbank:
     # a kill switch for X-Acting-For — off, every request is the personal profile.
     kyb-service-url: ${KYB_SERVICE_URL:http://kyb-service.kyb.svc:8157}
     acting-for-enabled: ${ACTING_FOR_ENABLED:true}
+    # #10281 multi-signature hold for payments under X-Acting-For. Off until delegation-service
+    # serves the business-signing API in the environment: on, a policy that cannot be evaluated
+    # REFUSES the payment (503) rather than sending it with one signature, so turning it on before
+    # that API is deployed would stop every business payment. Flip per environment in GitOps.
+    business-approvals:
+      enforce: ${BUSINESS_APPROVALS_ENFORCE:false}
     bank-bic: ${OPENBANK_BANK_BIC:OPENCZPPXXX}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
     party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}

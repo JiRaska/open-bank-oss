@@ -76,6 +76,17 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486 batch 6: the party eligibility read (pid party.read) and the card ownership read
+    # (card-issuance card.read) no longer ride the shared openbank-services principal. PidServiceRestClient and
+    # CardIssuanceRestClient select this NAMED client (@OidcClientFilter("m2m")), so their principal is
+    # service-account-openbank-delegation (ROLE_API only), granted by identity upstream.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-delegation
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   smallrye-reactive-messaging:
     kafka:
@@ -163,6 +174,16 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ADR-0312 business-signing lifecycle (APPROVAL_REQUESTED … PAYMENT_RELEASE_FAILED), keyed by
+      # approval request id. Consumers: notification-service (#10313), audit-service.
+      approval-events-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-approval-${quarkus.uuid}
+        topic: openbank.delegation.approval-events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:
@@ -231,6 +252,10 @@ openbank:
     # scheduler does not.
     expiration:
       cron: "0 7 * * * ?"
+    business-signing:
+      # ADR-0312: flips PENDING / unclaimed-APPROVED approval requests past expiresAt to EXPIRED.
+      # A config expression so BusinessApprovalExpirySweepIT can drive the REAL scheduler.
+      expiry-cron: "0 */5 * * * ?"
     recertification:
       # A reminder-only sweep. Due tasks are idempotent and the grant remains ACTIVE after dueAt.
       cron: "0 15 * * * ?"

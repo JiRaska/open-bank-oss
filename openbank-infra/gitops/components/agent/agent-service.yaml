@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-161bed0b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -80,6 +80,15 @@ spec:
                   # pod; until the key is present the service token can't be minted and the
                   # read tools return 401 — no worse than before. Add the key + restart -> real data.
                   optional: true
+            # #10486 batch 7: agent-service's OWN Keycloak client (openbank-agent, ROLE_API only) for the read
+            # tools listed in application.yaml - the named oidc-client `m2m`. optional: false so an unseeded Vault
+            # entry is a loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # ADR-0080 P0 (pentest FIND-S4-05): enforce the policy gate. With the in-process
             # charter allow-list, a capability outside the ui-assistant charter (e.g. AML reads)
             # is denied locally — block makes that DENY actually stop the call. Allowed tools whose
@@ -90,6 +99,15 @@ spec:
             # ADR-0031 D9 phase 2: the scheduled compliance-officer oversight sweep. Proposal-only
             # output into the HITL queue; charter-rate-limited to 48 runs/day (every 30 min).
             - name: AGENT_OVERSIGHT_ENABLED
+              value: "true"
+            # ADR-0244 D7: durable kill-switch audit events are also the event-fed control
+            # projection consumed by case-coordinator. The local outbox acknowledges the DB row
+            # before this transport, so a broker outage cannot lose the governance action.
+            - name: AGENT_AUDIT_KAFKA_ENABLED
+              value: "true"
+            # ADR-0244 D7: direct kill-switch set/clear events from agent-service to
+            # case-coordinator-agent (separate from the audit-audit outbox above).
+            - name: AGENT_KILL_SWITCH_KAFKA_ENABLED
               value: "true"
             # Free OpenAI-compatible backend (Groq), reached through the in-cluster LiteLLM gateway
             # (ADR-0174/0175, #1919) — NOT api.groq.com directly. litellm-config maps this exact

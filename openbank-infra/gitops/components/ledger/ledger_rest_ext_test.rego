@@ -147,3 +147,161 @@ test_extension_is_loaded if {
 	"operator-ledger-write" in rest.allowed_reasons with input as {"principal": operator, "action": "ledger.replay"}
 		with data.rules as rules_mock
 }
+
+# --- #10486: interest-service's own machine identity (ROLE_API only) ---
+# The identity carries ROLE_API and nothing else, exactly as the realm template grants it. The
+# matrix mock grants ROLE_OPERATOR only, so no role-based reason can admit these principals: the
+# identity rule is the whole grant, and everything else must deny.
+
+interest_m2m := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+
+# Any OTHER service account holding ROLE_API. LedgerResource.postJournal now admits ROLE_API at the
+# RBAC layer, so OPA is the only thing between this principal and a book-of-record write.
+other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+
+no_role := {"type": "HUMAN", "id": "u-nobody", "roles": []}
+
+test_interest_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": interest_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-interest-ledger-post" in rest.allowed_reasons with input as {"principal": interest_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_interest_may_not_perform_any_other_ledger_action if {
+	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		rest.allow == false with input as {"principal": interest_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_interest_may_not_create_a_transaction if {
+	rest.allow == false with input as {"principal": interest_m2m, "action": "transaction.create"}
+		with data.rules as rules_mock
+}
+
+# The must-DENY that proves the RBAC widening stays narrow: remove the principal.id line from
+# service-interest-ledger-post and this goes red.
+test_other_role_api_service_account_may_not_create if {
+	rest.allow == false with input as {"principal": other_role_api_sa, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_no_role_principal_may_not_create if {
+	rest.allow == false with input as {"principal": no_role, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_interest_identity_rule_does_not_admit_the_shared_client if {
+	not "service-interest-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+# --- #10486 batch 1: lending-service and clearing-service own identities (ROLE_API only) ---
+
+lending_m2m := {"type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_API"]}
+
+clearing_m2m := {"type": "HUMAN", "id": "service-account-openbank-clearing", "roles": ["ROLE_API"]}
+
+test_lending_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": lending_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-lending-ledger-post" in rest.allowed_reasons with input as {"principal": lending_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_clearing_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": clearing_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-clearing-ledger-post" in rest.allowed_reasons with input as {"principal": clearing_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_batch1_identities_may_not_perform_any_other_ledger_action if {
+	every p in [lending_m2m, clearing_m2m] {
+		every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+			rest.allow == false with input as {"principal": p, "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+# Each identity rule admits exactly its own principal — never another per-service client, never
+# the shared one. Remove a principal.id line and one of these goes red.
+test_batch1_identity_rules_do_not_cross_admit if {
+	not "service-lending-ledger-post" in rest.allowed_reasons with input as {"principal": clearing_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-clearing-ledger-post" in rest.allowed_reasons with input as {"principal": lending_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-lending-ledger-post" in rest.allowed_reasons with input as {"principal": interest_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-clearing-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+# --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
+
+transaction_m2m := {"type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
+
+settlement_m2m := {"type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
+
+other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+
+test_transaction_may_create_and_reverse_via_its_identity_rule if {
+	every action in {"ledger.create", "ledger.reverse"} {
+		decision := rest.allow with input as {"principal": transaction_m2m, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"service-transaction-ledger-write" in rest.allowed_reasons with input as {"principal": transaction_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_settlement_may_create_and_read_via_its_identity_rule if {
+	every action in {"ledger.create", "ledger.read"} {
+		decision := rest.allow with input as {"principal": settlement_m2m, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"service-settlement-ledger-post" in rest.allowed_reasons with input as {"principal": settlement_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_batch2_identities_denied_every_other_ledger_action if {
+	every action in {"ledger.read", "ledger.list", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		rest.allow == false with input as {"principal": transaction_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+	every action in {"ledger.reverse", "ledger.list", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		rest.allow == false with input as {"principal": settlement_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# reverseJournal admits ROLE_API at the RBAC layer now: OPA is the whole control for every other
+# ROLE_API holder, including the batch-1 ledger posters. Remove the principal.id line from
+# service-transaction-ledger-write and this goes red.
+test_other_role_api_sa_may_not_reverse_or_create if {
+	every p in [other_role_api_sa, lending_m2m, clearing_m2m, interest_m2m] {
+		rest.allow == false with input as {"principal": p, "action": "ledger.reverse"}
+			with data.rules as rules_mock
+	}
+	rest.allow == false with input as {"principal": other_role_api_sa, "action": "ledger.create"}
+		with data.rules as rules_mock
+	rest.allow == false with input as {"principal": other_role_api_sa, "action": "ledger.read"}
+		with data.rules as rules_mock
+}
+
+test_batch2_identity_rules_do_not_cross_admit if {
+	not "service-transaction-ledger-write" in rest.allowed_reasons with input as {"principal": settlement_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-settlement-ledger-post" in rest.allowed_reasons with input as {"principal": transaction_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	not "service-transaction-ledger-write" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.reverse"}
+		with data.rules as rules_mock
+	not "service-settlement-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}

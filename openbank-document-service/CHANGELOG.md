@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.3...document-service-v0.15.4) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.2...document-service-v0.15.3) (2026-09-21)
+
+
+### Security
+
+* **document-service:** bump BouncyCastle to 1.85 for CVE-2026-8763 ([#10530](https://github.com/JiRaska/open-bank-oss/issues/10530)) ([6d6a6cc](https://github.com/JiRaska/open-bank-oss/commit/6d6a6ccb7e500d0ec7e7b13d93e36490c0bb5778))
+
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.1...document-service-v0.15.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.0...document-service-v0.15.1) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.4...document-service-v0.15.0) (2026-09-17)
 
 
