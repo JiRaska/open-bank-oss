@@ -41,12 +41,6 @@ triaging an incident that starts on `risk-engine`.
 - **Scale:** `kubectl scale deploy/risk-engine -n risk --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
-- **Upload a curve set (sandbox):** `POST /api/v1/risk/curve-sets` as a human operator with
-  `{"asOf","provenance":"synthetic","source","curves":{"CZEONIA":[{"tenor":"ON","rate":0.035},…]}}`.
-  Rates are simple money-market fractions, tenors ON…1Y. A set is immutable; upload a new one to
-  correct it. Cash flows of a run: `GET /api/v1/risk/snapshots/{id}/cash-flows?curveSetId=<id>` —
-  the set must be as of the run's date.
-
 ## Common failure modes
 
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
@@ -54,10 +48,6 @@ triaging an incident that starts on `risk-engine`.
   `kubectl describe pod` events and the first 50 log lines.
 - **Readiness flapping:** datastore (PostgreSQL) unreachable or saturated — check the
   datastore pod/cluster health and connection-pool metrics.
-- **Cash flows answer 409:** the run is UNTIED — read `GET /api/v1/risk/snapshots/{id}` for the
-  mismatches; nothing derived from an untied run is served. **400 "curve set … is as of":** upload
-  a curve set for the run's as-of date. **A currency listed in `unpriced`:** the set has no
-  discounting curve for it (CZK needs CZEONIA, EUR needs ESTR); its buckets are still reported.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
