@@ -7,8 +7,3 @@
 # Both callers fail closed until then. Blocked on #10515.
 openbank-copilot-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
 openbank-lending-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
-# risk-engine -> lending (ADR-0314 D4): triaged 2026-09-24 — a DEAD client in the deployed pod, not an
-# outage. The gitops Deployment sets OPENBANK_RISK_LENDING_ENABLED=false, so the loan-book read is never
-# made (RiskLendingReadDisabledIT proves it by effect). lending serves no mTLS listener and ASVS V9.1
-# forbids a new plaintext edge; delete this line when that listener and LENDING_SERVICE_URL land.
-openbank-risk-engine: quarkus.rest-client.lending-service.url falls back to localhost and gitops never sets LENDING_SERVICE_URL
