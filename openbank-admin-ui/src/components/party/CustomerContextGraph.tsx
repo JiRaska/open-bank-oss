@@ -4,6 +4,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Network, Pause, Play, ScanSearch, Sparkles } from 'lucide-react'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { ArrowMarker, NodeShadow } from '@/components/topology/TopologyDefs'
@@ -217,6 +218,9 @@ export function CustomerContextGraph({ evidence, partyName }: {
         {selected ? <>
           <p className={styles.selectedLabel} style={{ borderColor: NODE_COLORS[selected.kind] }}><strong>{selected.label}</strong></p>
           <p className={styles.source}>{t('Zdroj', 'Source')}: {selected.source}</p>
+          {selected.href && <Link className={styles.recordLink} href={selected.href}>
+            {t('Otevřít zdrojový záznam', 'Open source record')}
+          </Link>}
           <ul className={styles.facts}>{selected.facts.map((fact, index) => <li key={index}>{fact}</li>)}</ul>
           <p className={styles.relations}>{t('Vztahy', 'Relations')}: {graph.edges.filter(e => e.from === selected.id || e.to === selected.id).map(e => e.relation).join(', ') || '—'}</p>
         </> : <p className={styles.emptyEvidence}>{t('Vyberte uzel a zobrazte jeho podklad a vztahy.', 'Select a node to inspect its evidence and relationships.')}</p>}

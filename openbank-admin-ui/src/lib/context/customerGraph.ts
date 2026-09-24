@@ -12,6 +12,7 @@ export interface CustomerGraphNode {
   label: string
   source: string
   facts: string[]
+  href?: string
 }
 
 export interface CustomerGraphEdge {
@@ -311,6 +312,7 @@ export function buildCustomerGraph(
     accountNodeIds.add(id)
     nodes.push({
       id, kind: 'account', label: account.accountNumber || account.id, source: 'account-service',
+      href: recordHref('account', account.id),
       facts: [account.accountType, account.currencyCode, `Status: ${account.status}`, `Opened: ${account.openedAt}`],
     })
     addEdge('customer', id, 'OWNS')
@@ -324,6 +326,7 @@ export function buildCustomerGraph(
     const id = `card:${card.id}`
     nodes.push({
       id, kind: 'card', label: card.maskedPan || `${card.cardType} card`, source: 'card-issuance-service',
+      href: recordHref('card', card.id),
       facts: [
         [card.cardType, card.network].filter(Boolean).join(' · '),
         `Status: ${card.status}`,
@@ -367,6 +370,7 @@ export function buildCustomerGraph(
     const id = `application:${application.id}`
     nodes.push({
       id, kind: 'application', label: application.productKind || application.id, source: 'lending-service',
+      href: recordHref('application', application.id),
       facts: [`Status: ${application.status}`, `Created: ${application.createdAt}`],
     })
     addEdge('customer', id, 'APPLIED_FOR_CREDIT')
@@ -458,4 +462,13 @@ export function buildCustomerGraph(
       || live.lendingApplications.length > 30 || live.amlCases.length > 30 || live.devices.length > 20
       || live.documents.length > 30,
   }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function recordHref(kind: 'account' | 'card' | 'application', id: string): string | undefined {
+  if (!UUID_RE.test(id)) return undefined
+  if (kind === 'account') return `/accounts/${id}`
+  if (kind === 'card') return `/cards/${id}`
+  return `/lending/applications/${id}`
 }

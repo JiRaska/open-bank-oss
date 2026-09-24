@@ -9,6 +9,9 @@ import { buildCustomerGraph } from '@/lib/context/customerGraph'
 import type { Customer360Evidence } from '@/lib/customer360/evidence'
 
 const PARTY = '11111111-1111-4111-8111-111111111111'
+const ACCOUNT_ID = '22222222-2222-4222-8222-222222222222'
+const CARD_ID = '33333333-3333-4333-8333-333333333333'
+const APPLICATION_ID = '44444444-4444-4444-8444-444444444444'
 const evidence: Customer360Evidence = {
   available: true, partyId: PARTY, asOf: '2026-09-13 10:00:00.000', excludedCount: 0,
   domains: [{ aggregateType: 'credit_funnel', events: 1, lastEventType: 'credit.funnel.step', lastOccurredAt: '2026-09-13 10:00:00.000' }],
@@ -16,11 +19,11 @@ const evidence: Customer360Evidence = {
 }
 
 const account = {
-  id: 'account-alpha', accountNumber: 'CZ12…3456', accountType: 'CURRENT', partyId: PARTY,
+  id: ACCOUNT_ID, accountNumber: 'CZ12…3456', accountType: 'CURRENT', partyId: PARTY,
   productId: 'product-current', currencyCode: 'CZK', status: 'ACTIVE', openedAt: '2026-07-20T10:00:00Z',
 }
 const card = {
-  id: 'card-alpha', partyId: PARTY, accountId: 'account-alpha', productCode: 'VIRTUAL_DEBIT',
+  id: CARD_ID, partyId: PARTY, accountId: ACCOUNT_ID, productCode: 'VIRTUAL_DEBIT',
   cardType: 'VIRTUAL', network: 'VISA', maskedPan: '411111******1111', status: 'BLOCKED',
   createdAt: '2026-07-24T10:00:00Z', activatedAt: '2026-07-25T10:00:00Z',
   blockedAt: '2026-07-31T10:00:00Z', blockedReason: 'LOST_OR_STOLEN',
@@ -42,7 +45,7 @@ function installSources(failed = '') {
     if (failed === 'graph') return json({}, false)
     return json({
       accounts: [account], cards: [card], notifications: failed === 'notifications' ? [] : [notification],
-      lendingApplications: [{ id: 'application-alpha', status: 'APPROVED', productKind: 'UNSECURED', createdAt: '2026-07-21T10:00:00Z' }],
+      lendingApplications: [{ id: APPLICATION_ID, status: 'APPROVED', productKind: 'UNSECURED', createdAt: '2026-07-21T10:00:00Z' }],
       amlCases: [{ id: 'case-alpha', screeningType: 'TRANSACTION_MONITORING', riskLevel: 'MEDIUM', status: 'CLEARED', alertCode: 'TM01', screenedAt: '2026-07-22T10:00:00Z' }],
       devices: [{ id: 'device-alpha', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-07-23T10:00:00Z' }],
       documents: [{ id: 'document-alpha', templateCode: 'ACCOUNT_AGREEMENT', templateVersion: '1', status: 'GENERATED', productRef: 'product-current', createdAt: '2026-07-20T10:00:00Z' }],
@@ -88,8 +91,27 @@ describe('Customer context graph', () => {
     expect(within(detail).getByText('Status: BLOCKED')).toBeInTheDocument()
     expect(within(detail).getByText('Block reason: LOST_OR_STOLEN')).toBeInTheDocument()
     expect(within(detail).getByText('Source: card-issuance-service')).toBeInTheDocument()
+    expect(within(detail).getByRole('link', { name: 'Open source record' })).toHaveAttribute('href', `/cards/${CARD_ID}`)
     expect(screen.queryByText('must-not-render@example.test')).not.toBeInTheDocument()
     expect(screen.queryByText('must not render')).not.toBeInTheDocument()
+  })
+
+  it('links only live source records with valid internal identifiers', () => {
+    const result = buildCustomerGraph(evidence, {
+      accounts: [account], cards: [card], notifications: [],
+      lendingApplications: [{ id: APPLICATION_ID, status: 'APPROVED', productKind: 'UNSECURED', createdAt: '' }],
+      amlCases: [], devices: [], documents: [], unavailable: [], truncated: [],
+    })
+    expect(result.nodes.find(node => node.id === `account:${ACCOUNT_ID}`)?.href).toBe(`/accounts/${ACCOUNT_ID}`)
+    expect(result.nodes.find(node => node.id === `card:${CARD_ID}`)?.href).toBe(`/cards/${CARD_ID}`)
+    expect(result.nodes.find(node => node.id === `application:${APPLICATION_ID}`)?.href).toBe(`/lending/applications/${APPLICATION_ID}`)
+    expect(result.nodes.find(node => node.id === 'domain:credit_funnel')?.href).toBeUndefined()
+
+    const invalid = buildCustomerGraph(evidence, {
+      accounts: [{ ...account, id: '../../other-route' }], cards: [], notifications: [],
+      lendingApplications: [], amlCases: [], devices: [], documents: [], unavailable: [], truncated: [],
+    })
+    expect(invalid.nodes.find(node => node.id === 'account:../../other-route')?.href).toBeUndefined()
   })
 
   it('keeps successful domains visible and marks an independently failed source', async () => {
