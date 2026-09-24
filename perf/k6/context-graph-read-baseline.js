@@ -6,6 +6,8 @@
 // stack with a synthetic assigned investigation and a populated projection. The response includes
 // policy and audit work; a rejected request or empty fixture is not a graph performance sample.
 // Never put tokens or case/root identifiers in k6 tags, output or a committed report.
+// Run CONTEXT_PERF_PROFILE=capacity on both isolated 1x and 10x annual-volume fixtures;
+// 10x refers to stored data, while the request rate stays at the planned 100 RPS.
 // For a reversal fixture, set CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID to require both
 // the source-backed reversal edge and a posted reversal journal in every successful sample.
 import http from "k6/http";
@@ -15,32 +17,49 @@ import { Trend } from "k6/metrics";
 http.setResponseCallback(http.expectedStatuses(200));
 
 const lens = __ENV.CONTEXT_PERF_LENS;
+const profile = __ENV.CONTEXT_PERF_PROFILE || "smoke";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
+
+const scenarios = profile === "capacity" ? {
+  authorized_graph_reads: {
+    executor: "constant-arrival-rate",
+    rate: 100,
+    timeUnit: "1s",
+    duration: "5m",
+    preAllocatedVUs: 50,
+    maxVUs: 100,
+    gracefulStop: "10s",
+  },
+} : {
+  authorized_graph_reads: {
+    executor: "ramping-vus",
+    startVUs: 1,
+    stages: [
+      { duration: "30s", target: 5 },
+      { duration: "1m", target: 5 },
+      { duration: "30s", target: 0 },
+    ],
+    gracefulStop: "10s",
+  },
+};
 
 export const options = {
   // k6's default `url` system tag includes the path reference. Keep only non-identifying tags.
   systemTags: ["status", "method", "name", "check", "scenario", "expected_response"],
-  scenarios: {
-    authorized_graph_reads: {
-      executor: "ramping-vus",
-      startVUs: 1,
-      stages: [
-        { duration: "30s", target: 5 },
-        { duration: "1m", target: 5 },
-        { duration: "30s", target: 0 },
-      ],
-      gracefulStop: "10s",
-    },
-  },
+  scenarios,
   thresholds: {
     context_graph_read_ms: ["p(95)<300", "p(99)<1000"],
+    ...(profile === "capacity" ? { dropped_iterations: ["count==0"] } : {}),
     http_req_failed: ["rate==0"],
     checks: ["rate==1"],
   },
 };
 
 export function setup() {
+  if (!["smoke", "capacity"].includes(profile)) {
+    fail("CONTEXT_PERF_PROFILE must be smoke or capacity");
+  }
   const required = [
     "CONTEXT_PERF_URL",
     "CONTEXT_PERF_TOKEN",
