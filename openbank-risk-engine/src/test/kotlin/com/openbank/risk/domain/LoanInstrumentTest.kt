@@ -225,8 +225,8 @@ class LoanInstrumentTest {
         val inputs = tiedOutWithLoans(BigDecimal("1"))
         val a = lendingLoan()
         val changed = a.copy(
-            remainingInstallments = a.remainingInstallments.mapIndexed { i, it ->
-                if (i == 0) it.copy(interest = it.interest.add(BigDecimal("0.01"))) else it
+            remainingInstallments = a.remainingInstallments.mapIndexed { i, inst ->
+                if (i == 0) inst.copy(interest = inst.interest.add(BigDecimal("0.01"))) else inst
             },
         )
         assertThat(InputHash.of(inputs, listOf(changed))).isNotEqualTo(InputHash.of(inputs, listOf(a)))
