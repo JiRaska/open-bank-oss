@@ -64,5 +64,5 @@
   "openbank-loyalty-service": "0.3.0",
   "openbank-wealth-service": "0.2.0",
   "openbank-context-service": "0.3.0",
-  "openbank-risk-engine": "0.2.0"
+  "openbank-risk-engine": "0.3.0"
 }
