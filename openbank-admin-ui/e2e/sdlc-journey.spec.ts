@@ -32,13 +32,17 @@ test.describe('/devops/sdlc — interactive delivery journey', () => {
     await expect(innovations.getByText(/Governance-as-code|Governance as code/i)).toBeVisible()
     await expect(innovations.getByText(/Documentation-as-code|Documentation as code/i)).toBeVisible()
     await expect(innovations.getByText(/SBOM svázaný s image|SBOM bound to the image/i)).toBeVisible()
-    await expect(innovations.getByRole('link', { name: /Prohlédnout image a SBOM|Explore images and SBOMs/i }))
+    await expect(innovations.getByRole('link', { name: /Prohlédnout obsah SBOM|Explore SBOM contents/i }))
       .toHaveAttribute('href', '/system/inventory')
   })
 
   test('is keyboard operable and meets WCAG A/AA in light and dark themes', async ({ page }) => {
     await page.goto('/devops/sdlc')
     await expect(page.getByRole('button', { name: /Pozastavit animaci|Pause animation|Spustit animaci|Play animation/i })).toBeVisible()
+    const detail = page.getByRole('region', { name: /Detail fáze|Stage detail/i })
+    await detail.getByRole('link').focus()
+    await expect(page.getByRole('button', { name: /Spustit animaci|Play animation/i })).toBeVisible()
+    await expect(detail).toHaveAttribute('aria-live', 'polite')
     const releaseStage = page.getByRole('button', { name: /05 · RELEASE.*(Vytvoř důvěryhodný artefakt|Create a trusted artifact)/i })
     await releaseStage.focus()
     await releaseStage.press('Enter')

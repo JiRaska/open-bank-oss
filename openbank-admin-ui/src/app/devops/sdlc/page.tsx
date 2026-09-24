@@ -127,17 +127,17 @@ const STAGES: Stage[] = [
   },
   {
     id: 'review', eyebrowCs: '04 · KONTROLA', eyebrowEn: '04 · REVIEW',
-    titleCs: 'Rozhodni ve čtyřech očích', titleEn: 'Decide with four eyes',
-    summaryCs: 'Pull request spojuje kontext, diff, automatické důkazy a lidské posouzení do jednoho rozhodnutí.',
-    summaryEn: 'The pull request brings context, diff, automated evidence, and human judgment into one decision.',
-    systemCs: 'Podepsané Conventional Commits, povinné kontroly a dvě schválení u money-path služeb.',
-    systemEn: 'Signed Conventional Commits, required checks, and two approvals for money-path services.',
-    proofCs: 'Schválená změna s odpovědností', proofEn: 'Approved change with accountability',
-    href: '/approvals', linkCs: 'Otevřít schvalování', linkEn: 'Open approvals', accent: '#fbbf24', icon: GitPullRequestArrow,
+    titleCs: 'Zkontroluj rozhodnutí', titleEn: 'Review the decision',
+    summaryCs: 'Pull request spojuje kontext, diff a automatické důkazy. Politika žádá lidské review, ale GitHub je zatím nevynucuje.',
+    summaryEn: 'A pull request joins context, diff, and automated evidence. Policy asks for human review, but GitHub does not enforce it yet.',
+    systemCs: 'Podepsané Conventional Commits a povinné kontroly blokují merge; cíl 1 schválení, 2 u money-path, je zatím nevynucený.',
+    systemEn: 'Signed Conventional Commits and required checks block merge; the one-approval target, two for money paths, is not enforced yet.',
+    proofCs: 'Dohledatelné rozhodnutí a přiznaná mezera review', proofEn: 'Traceable decision and an explicit review gap',
+    href: 'https://github.com/JiRaska/open-bank-oss/blob/main/openbank-libs/governance/rules.yaml', linkCs: 'Přečíst pravidla review', linkEn: 'Read review policy', accent: '#fbbf24', icon: GitPullRequestArrow,
     actions: {
       developer: { cs: 'Vysvětlím proč, ukážu důkaz a zapracuji připomínky reviewera.', en: 'I explain why, show evidence, and resolve reviewer feedback.' },
       devops: { cs: 'Ověřím provozní dopady, rollback, kapacitu a bezpečnost nasazení.', en: 'I verify operational impact, rollback, capacity, and deployment safety.' },
-      business: { cs: 'U kritických toků je rozhodnutí oddělené od autora změny.', en: 'For critical flows, the decision is independent from the change author.' },
+      business: { cs: 'U kritických toků chci nezávislé posouzení; dokud není vynucené, chrání je threat model a CI gate.', en: 'I want independent judgment for critical flows; until enforced, threat models and CI gates provide compensating controls.' },
     },
   },
   {
@@ -145,8 +145,8 @@ const STAGES: Stage[] = [
     titleCs: 'Vytvoř důvěryhodný artefakt', titleEn: 'Create a trusted artifact',
     summaryCs: 'Merge spustí verzování podle skutečného typu a rozsahu změny; ruční přepis verzí není součást procesu.',
     summaryEn: 'Merge triggers versioning from the actual change type and scope; manual version edits are not part of the process.',
-    systemCs: 'release-please → image podle digestu → podepsaná SBOM attestace a provenance → scan registru.',
-    systemEn: 'release-please → digest-addressed image → signed SBOM attestation and provenance → registry scan.',
+    systemCs: 'release-please → image se SHA tagem → podpis a SBOM attestace svázané s digestem → scan registru.',
+    systemEn: 'release-please → SHA-tagged image → signature and SBOM attestation bound to its digest → registry scan.',
     proofCs: 'Neměnný a podepsaný artefakt', proofEn: 'Immutable, signed artifact',
     href: '/system/inventory', linkCs: 'Prohlédnout inventář', linkEn: 'Browse inventory', accent: '#fb7185', icon: Boxes,
     actions: {
@@ -162,11 +162,11 @@ const STAGES: Stage[] = [
     summaryEn: 'Deployment is a declared desired-state change, not an invisible command from a laptop.',
     systemCs: 'GitOps PR → kontrola manifestu → ArgoCD sync → Kyverno ověření podpisu a SBOM attestace.',
     systemEn: 'GitOps PR → manifest checks → ArgoCD sync → Kyverno signature and SBOM-attestation verification.',
-    proofCs: 'Schválený stav přesně svázaný s digestem', proofEn: 'Approved state bound to an exact digest',
+    proofCs: 'GitOps stav s konkrétním SHA tagem', proofEn: 'GitOps state with a specific SHA tag',
     href: '/infrastructure/topology', linkCs: 'Zobrazit topologii', linkEn: 'View topology', accent: '#818cf8', icon: Rocket,
     actions: {
       developer: { cs: 'Sleduji, že moje verze prošla až do cílového prostředí.', en: 'I follow my version all the way into the target environment.' },
-      devops: { cs: 'Propaguji digest, sleduji sync a při problému vracím deklarovaný stav.', en: 'I promote a digest, observe sync, and restore declared state when needed.' },
+      devops: { cs: 'Propaguji SHA tag, sleduji sync a při problému vracím deklarovaný stav.', en: 'I promote a SHA tag, observe sync, and restore declared state when needed.' },
       business: { cs: 'Nasazení má vlastní schválení, historii a jednoznačný obsah.', en: 'A deployment has its own approval, history, and unambiguous contents.' },
     },
   },
@@ -235,9 +235,9 @@ const GATES: Gate[] = [
     questionCs: 'Nevnáší změna tajemství, známou zranitelnost nebo rizikový vzor?', questionEn: 'Does the change introduce a secret, known vulnerability, or risky pattern?',
     checksCs: 'Gitleaks, CodeQL, dependency review, Trivy a bezpečnostní regrese; workflow závislosti jsou připnuté a prověřené.',
     checksEn: 'Gitleaks, CodeQL, dependency review, Trivy, and security regression checks; workflow dependencies are pinned and verified.',
-    failureCs: 'Potvrzený nález blokuje postup. Neprůkazný scan se nesmí vydávat za čistý výsledek.', failureEn: 'A confirmed finding blocks progress. An inconclusive scan must never be reported as clean.',
+    failureCs: 'Selhání povinných kontrol, například Gitleaks, blokuje merge. CodeQL běží podle rozsahu změny a není required check.', failureEn: 'Failure of required checks such as Gitleaks blocks merge. CodeQL runs by change scope and is not a required check.',
     valueCs: 'Snižuje pravděpodobnost incidentu a dokládá průběžnou péči o ICT riziko.', valueEn: 'Reduces incident likelihood and demonstrates continuous ICT-risk care.',
-    modeCs: 'Blokující + pravidelné hloubkové běhy', modeEn: 'Blocking + scheduled deep scans', icon: ScanSearch, href: '/security',
+    modeCs: 'Povinné kontroly + nepovinná analýza', modeEn: 'Required checks + non-required analysis', icon: ScanSearch, href: '/security',
   },
   {
     id: 'manifests', number: 'G6', titleCs: 'Manifesty a policy-as-code', titleEn: 'Manifests and policy as code',
@@ -250,12 +250,13 @@ const GATES: Gate[] = [
   },
   {
     id: 'review', number: 'G7', titleCs: 'Review a odpovědnost', titleEn: 'Review and accountability',
-    questionCs: 'Potvrdil změnu někdo jiný než její autor a jsou rizika pochopená?', questionEn: 'Did someone other than the author approve the change and understand its risks?',
-    checksCs: 'Povinné PR review, podepsaný commit, vazba na issue; money-path služba vyžaduje dvě schválení a threat model.',
-    checksEn: 'Required PR review, signed commit, issue linkage; a money-path service requires two approvals and a threat model.',
-    failureCs: 'Automaticky zelený kód bez požadovaného lidského rozhodnutí se nesloučí.', failureEn: 'Automatically green code does not merge without the required human decision.',
-    valueCs: 'Odděluje tvorbu od schválení a dává rozhodnutí jasného vlastníka.', valueEn: 'Separates creation from approval and gives the decision a clear owner.',
-    modeCs: 'Lidská blokující brána', modeEn: 'Human blocking gate', icon: UsersRound, href: '/approvals',
+    questionCs: 'Co je u PR skutečně vynucené a kde zůstává mezera?', questionEn: 'What does the PR actually enforce, and where is the gap?',
+    checksCs: 'Podepsaný commit, vazba na issue a povinné CI kontroly. Politika žádá 1 review, u money-path 2 a threat model; počet schválení GitHub zatím nevynucuje.',
+    checksEn: 'Signed commit, issue linkage, and required CI checks. Policy asks for one review, two plus a threat model for money paths; GitHub does not yet enforce approval counts.',
+    failureCs: 'Chybějící podpis či povinná kontrola blokuje merge. Chybějící lidské schválení ho dnes samo nezastaví — tato mezera je evidovaná.',
+    failureEn: 'A missing signature or required check blocks merge. Missing human approval alone does not stop it today — this gap is tracked.',
+    valueCs: 'Ukazuje rozdíl mezi cílovou čtyřočkovou politikou a skutečným vynucením.', valueEn: 'Makes the gap between four-eyes policy and actual enforcement visible.',
+    modeCs: 'Review politika dosud nevynucená', modeEn: 'Review policy not yet enforced', icon: UsersRound, href: 'https://github.com/JiRaska/open-bank-oss/blob/main/openbank-libs/governance/rules.yaml',
   },
   {
     id: 'admission', number: 'G8', titleCs: 'Artefakt a admission', titleEn: 'Artifact and admission',
@@ -317,15 +318,15 @@ const DIFFERENTIATORS: Array<{
     mechanismEn: 'The CycloneDX SBOM is a signed attestation for a specific image digest, not a loose CI file. Kyverno requires a valid signature and SBOM at admission.',
     outcomeCs: 'Ověření pokračuje až k artefaktu, který cluster skutečně přijímá.',
     outcomeEn: 'Verification reaches the artifact the cluster actually admits.',
-    linkCs: 'Prohlédnout image a SBOM', linkEn: 'Explore images and SBOMs', href: '/system/inventory', icon: Boxes,
+    linkCs: 'Prohlédnout obsah SBOM (ne attestaci)', linkEn: 'Explore SBOM contents (not the attestation)', href: '/system/inventory', icon: Boxes,
   },
   {
     id: 'releases', index: '05', titleCs: 'Release jako důkaz', titleEn: 'Release as evidence',
-    headlineCs: 'Verze má původ, obsah a ověřitelnou stopu.', headlineEn: 'A version has origin, contents, and a verifiable trail.',
-    mechanismCs: 'release-please odvozuje verzi a changelog z podepsaných commitů. Release evidence bundle nese SBOM, provenance a výsledky kontrol; ověřovací workflow kontroluje jeho podpisy a digesty.',
-    mechanismEn: 'release-please derives version and changelog from signed commits. A release evidence bundle carries SBOM, provenance, and check results; a verification workflow checks its signatures and digests.',
-    outcomeCs: 'Audit se může ptát na konkrétní verzi a dostat konkrétní artefakty.',
-    outcomeEn: 'An audit can ask about a specific version and receive specific artifacts.',
+    headlineCs: 'Verze může nést ověřitelnou stopu.', headlineEn: 'A version can carry a verifiable trail.',
+    mechanismCs: 'release-please odvozuje verzi a changelog z podepsaných commitů. Release evidence bundle se SBOM, provenance a kontrolami vzniká best-effort; jeho výpadek release zatím neblokuje.',
+    mechanismEn: 'release-please derives version and changelog from signed commits. The release-evidence bundle with SBOM, provenance, and checks is best-effort; its failure does not yet block a release.',
+    outcomeCs: 'Existující důkazy lze ověřit; chybějící bundle je přiznaná mezera, nikoli důkaz.',
+    outcomeEn: 'Present evidence can be verified; a missing bundle is an explicit gap, not proof.',
     linkCs: 'Prohlédnout důkazy', linkEn: 'Explore evidence', href: '/docs/control-tower', icon: ClipboardCheck,
   },
   {
@@ -411,7 +412,7 @@ export default function SdlcPage() {
         <div className={styles.metrics} aria-label={t('Hlavní principy procesu', 'Core process principles')}>
           <div><strong>7</strong><span>{t('navazujících fází', 'connected stages')}</span></div>
           <div><strong>1</strong><span>{t('dohledatelný řetězec důkazů', 'traceable chain of evidence')}</span></div>
-          <div><strong>2×</strong><span>{t('schválení pro money-path', 'approval for money paths')}</span></div>
+          <div><strong>8</strong><span>{t('vysvětlených quality gates', 'explained quality gates')}</span></div>
         </div>
 
         <div className={styles.journeyScroll}>
@@ -443,7 +444,7 @@ export default function SdlcPage() {
         </div>
       </section>
 
-      <section id="sdlc-stage-detail" role="region" aria-label={t('Detail fáze', 'Stage detail')} className={styles.detail} aria-live="polite" style={{ '--stage-accent': active.accent } as React.CSSProperties}>
+      <section id="sdlc-stage-detail" role="region" aria-label={t('Detail fáze', 'Stage detail')} className={styles.detail} aria-live={playing ? 'off' : 'polite'} onFocusCapture={() => setPlaying(false)} onPointerEnter={() => setPlaying(false)} style={{ '--stage-accent': active.accent } as React.CSSProperties}>
         <div className={styles.detailMain}>
           <div className={styles.detailHeading}>
             <span className={styles.detailIcon}><active.icon aria-hidden="true" size={22} /></span>
