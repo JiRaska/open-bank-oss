@@ -38,13 +38,16 @@ function json(body: unknown, ok = true): Response {
   return { ok, status: ok ? 200 : 503, json: async () => body } as Response
 }
 
-function installSources(failed = '') {
+function installSources(failed = '', accountCount = 1) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (!url.includes(`/api/customer-360/${PARTY}/graph`)) throw new Error(`unexpected ${url}`)
     if (failed === 'graph') return json({}, false)
     return json({
-      accounts: [account], cards: [card], notifications: failed === 'notifications' ? [] : [notification],
+      accounts: accountCount === 1 ? [account] : Array.from({ length: accountCount }, (_, index) => ({
+        ...account, id: `account-${index}`, accountNumber: `CZ-${index}`,
+      })),
+      cards: [card], notifications: failed === 'notifications' ? [] : [notification],
       lendingApplications: [{ id: APPLICATION_ID, status: 'APPROVED', productKind: 'UNSECURED', createdAt: '2026-07-21T10:00:00Z' }],
       amlCases: [{ id: 'case-alpha', screeningType: 'TRANSACTION_MONITORING', riskLevel: 'MEDIUM', status: 'CLEARED', alertCode: 'TM01', screenedAt: '2026-07-22T10:00:00Z' }],
       devices: [{ id: 'device-alpha', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-07-23T10:00:00Z' }],
@@ -120,6 +123,17 @@ describe('Customer context graph', () => {
     expect(await screen.findByText(/Unavailable sources: notifications/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Card: 411111******1111' })).toBeInTheDocument()
     expect(screen.getByText('6/7 domain feeds')).toBeInTheDocument()
+  })
+
+  it('keeps interactions and other domains in the bounded overview when accounts are numerous', async () => {
+    installSources('', 50)
+    graph()
+    expect(await screen.findByRole('button', { name: 'Interaction: SCA_APPROVAL' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Card: 411111******1111' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Credit application: UNSECURED' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'AML case: TRANSACTION_MONITORING' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Document: ACCOUNT_AGREEMENT' })).toBeInTheDocument()
+    expect(screen.getByText(/Visible nodes: 48/)).toBeInTheDocument()
   })
 
   it('searches facts as well as labels', async () => {

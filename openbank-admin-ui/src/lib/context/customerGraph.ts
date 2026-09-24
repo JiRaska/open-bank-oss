@@ -28,6 +28,32 @@ export interface CustomerGraph {
   truncated: boolean
 }
 
+/** Keep an overview representative when one high-volume domain fills the visible node budget. */
+export function selectGraphOverview(nodes: CustomerGraphNode[], limit: number): CustomerGraphNode[] {
+  if (nodes.length <= limit) return nodes
+  const byKind = new Map<CustomerGraphKind, CustomerGraphNode[]>()
+  for (const node of nodes) {
+    const group = byKind.get(node.kind) ?? []
+    group.push(node)
+    byKind.set(node.kind, group)
+  }
+  const selected: CustomerGraphNode[] = []
+  const positions = new Map<CustomerGraphKind, number>()
+  while (selected.length < limit) {
+    let added = false
+    for (const [kind, group] of byKind) {
+      const index = positions.get(kind) ?? 0
+      if (index >= group.length) continue
+      selected.push(group[index])
+      positions.set(kind, index + 1)
+      added = true
+      if (selected.length === limit) break
+    }
+    if (!added) break
+  }
+  return selected
+}
+
 export interface AccountFact {
   id: string
   accountNumber: string

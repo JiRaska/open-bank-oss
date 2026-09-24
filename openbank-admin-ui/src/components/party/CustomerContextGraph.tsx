@@ -15,6 +15,7 @@ import type { Customer360Evidence } from '@/lib/customer360/evidence'
 import {
   buildCustomerGraph,
   emptyLiveCustomerFacts,
+  selectGraphOverview,
   type CustomerGraphKind,
   type LiveCustomerFacts,
 } from '@/lib/context/customerGraph'
@@ -69,7 +70,9 @@ export function CustomerContextGraph({ evidence, partyName }: {
     (kind === 'all' || node.kind === kind)
     && `${node.label} ${node.facts.join(' ')}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   )
-  const visible = filtered.slice(0, MAX_VISIBLE)
+  const visible = kind === 'all' && query.trim() === ''
+    ? selectGraphOverview(filtered, MAX_VISIBLE)
+    : filtered.slice(0, MAX_VISIBLE)
   const selected = graph.nodes.find(node => node.id === selectedId) ?? null
   const visibleIds = new Set(visible.map(node => node.id))
   const visibleEdges = graph.edges.filter(edge =>
