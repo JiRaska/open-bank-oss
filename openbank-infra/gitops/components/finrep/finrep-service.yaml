@@ -50,6 +50,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # Declared explicitly rather than left to the libs default (`true`), issue #2394.
@@ -73,10 +77,6 @@ spec:
                   name: finrep-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: false
-            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://tempo.observability.svc:4317"
-            - name: OTEL_TRACES_SAMPLER_ARG
-              value: "0.1"
           resources:
             requests:
               cpu: 100m

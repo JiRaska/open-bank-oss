@@ -53,9 +53,7 @@ ENV_VAR = "QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT"
 SDK_DISABLED = "QUARKUS_OTEL_SDK_DISABLED"
 
 # manifest path (relative to COMPONENTS) -> the open PR that fixes it
-KNOWN_PENDING = {
-    "loyalty/loyalty-service.yaml": "#10761",
-}
+KNOWN_PENDING: dict[str, str] = {}
 
 # Both spellings exist in the fleet: the version-catalog alias and a literal coordinate.
 OTEL_DEP = re.compile(r"quarkus\.opentelemetry\b|io\.quarkus:quarkus-opentelemetry\b")

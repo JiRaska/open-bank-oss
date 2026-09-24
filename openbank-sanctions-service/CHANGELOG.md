@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.2...sanctions-service-v0.14.0) (2026-09-24)
+
+
+### Features
+
+* **sanctions:** import the Czech national sanctions list (MZV) ([#10759](https://github.com/JiRaska/open-bank-oss/issues/10759)) ([b2f95c3](https://github.com/JiRaska/open-bank-oss/commit/b2f95c3556ff8eb5d7941c82a1612998ffce78c6)), closes [#10757](https://github.com/JiRaska/open-bank-oss/issues/10757)
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.1...sanctions-service-v0.13.2) (2026-09-24)
 
 

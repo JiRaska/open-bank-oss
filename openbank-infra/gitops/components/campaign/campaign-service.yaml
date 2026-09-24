@@ -58,6 +58,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             # Keep the existing HTTP port for the admin BFF. The interaction validator gets a
             # parallel TLS port, so customer-edge does not introduce another plaintext edge.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
@@ -207,10 +211,6 @@ spec:
                   name: campaign-service-m2m-oidc
                   key: OIDC_M2M_CLIENT_SECRET
                   optional: false
-            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://tempo.observability.svc:4317"
-            - name: OTEL_TRACES_SAMPLER_ARG
-              value: "0.1"
           resources:
             requests:
               cpu: 100m
