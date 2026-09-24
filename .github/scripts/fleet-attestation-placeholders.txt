@@ -33,5 +33,4 @@
 # You do not remove an entry by hand when its service first deploys: auto-deploy.yml's rewrite
 # step prunes every entry that its own tag rewrite leaves undeclared, in the same deploy PR,
 # using the gate's own enumeration. Adding one is still a human decision.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-000000000
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-loyalty-service:sandbox-000000000
