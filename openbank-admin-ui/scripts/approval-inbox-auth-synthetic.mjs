@@ -42,15 +42,16 @@ if (!stateInfo.isFile() || (stateInfo.mode & 0o077) !== 0 ||
 let browser
 try {
   browser = await chromium.launch({ headless: true })
-  // Service workers can issue requests outside page.route; keep this probe read-only.
+  // Service workers can issue requests outside routing; keep this probe read-only.
   const context = await browser.newContext({ storageState: state, serviceWorkers: 'block' })
-  const page = await context.newPage()
   // The journey reads a real inbox. Even if the page changes, it must never
   // approve, reject, post a fee, or cause any other mutation while probing.
-  await page.route('**/*', route => {
+  // Context routing also covers popups, including their first request.
+  await context.route('**/*', route => {
     if (route.request().method() === 'GET' || route.request().method() === 'HEAD') return route.continue()
     return route.abort('blockedbyclient')
   })
+  const page = await context.newPage()
   const attestation = await context.request.get(new URL('/.well-known/openbank-build-attestation', base).toString(), { timeout: 10_000 })
   if (!attestation.ok()) throw new Error('deployed build attestation unavailable')
   const attested = await attestation.json()
