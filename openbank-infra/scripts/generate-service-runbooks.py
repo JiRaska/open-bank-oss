@@ -22,6 +22,7 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import os
 import re
 import sys
 import tempfile
@@ -43,6 +44,29 @@ def read(p: Path) -> str:
         return p.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return ""
+
+
+def write_runbook(out: Path, content: str) -> bool:
+    """Avoid needless rewrites and expose only complete documents to parallel gates."""
+    if out.exists() and out.read_text(encoding="utf-8") == content:
+        return False
+    # The readiness collectors run alongside the drift gate and read these files.
+    # write_text() truncates the destination first, so a reader can score an empty
+    # or partial runbook even when the final generated document is unchanged.
+    staged: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=out.parent,
+            prefix=f".{out.name}.", suffix=".tmp", delete=False,
+        ) as temporary:
+            staged = Path(temporary.name)
+            temporary.write(content)
+        os.chmod(staged, out.stat().st_mode & 0o777 if out.exists() else 0o644)
+        os.replace(staged, out)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+    return True
 
 
 def gov_facts(short: str) -> dict:
@@ -657,6 +681,21 @@ def self_test() -> int:
         if not ok:
             fails.append(label)
 
+    with tempfile.TemporaryDirectory() as tmp:
+        output = Path(tmp) / "svc-example.md"
+        output.write_text("## Disaster recovery\n", encoding="utf-8")
+        os.utime(output, ns=(1_000_000_000, 1_000_000_000))
+        original_inode = output.stat().st_ino
+        case("identical force regeneration leaves the readable file untouched",
+             not write_runbook(output, "## Disaster recovery\n")
+             and output.stat().st_ino == original_inode
+             and output.stat().st_mtime_ns == 1_000_000_000)
+        case("changed regeneration replaces a complete file and cleans staging",
+             write_runbook(output, "## Disaster recovery\nRestore steps.\n")
+             and output.stat().st_ino != original_inode
+             and output.read_text(encoding="utf-8") == "## Disaster recovery\nRestore steps.\n"
+             and not list(Path(tmp).glob(".svc-example.md.*.tmp")))
+
     tcp = {"ports": [{"name": "http", "containerPort": 3000}],
            "readinessProbe": {"tcpSocket": {"port": "http"}},
            "livenessProbe": {"exec": {"command": ["/check-health"]}}}
@@ -844,8 +883,10 @@ def main():
         if out.exists() and not args.force:
             skipped += 1
             continue
-        out.write_text(render(short), encoding="utf-8")
-        created += 1
+        if write_runbook(out, render(short)):
+            created += 1
+        else:
+            skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:
