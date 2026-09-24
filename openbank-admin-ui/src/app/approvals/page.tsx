@@ -304,9 +304,9 @@ export default function ApprovalsPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.action}</div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                {item.resourceId && <span style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
-                {item.maker && <span>{t('navrhl', 'by')} {item.maker}</span>}
-                {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
+                {item.resourceId && <span data-testid="approval-resource" style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
+                {item.maker && <span data-testid="approval-maker">{t('navrhl', 'by')} {item.maker}</span>}
+                {item.proposedAt && <time dateTime={item.proposedAt}> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</time>}
               </div>
             </div>
             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>

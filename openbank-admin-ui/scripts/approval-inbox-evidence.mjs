@@ -13,6 +13,7 @@ export function verifyApprovalInboxEvidence(payload, fixture) {
       Date.parse(matches[0].proposedAt) !== Date.parse(fixture.createdAt)) {
     throw new Error('sandbox fixture did not traverse billing provider and approval inbox BFF unchanged')
   }
+  return matches[0]
 }
 
 // The fixture wrapper suppresses child stdout to avoid leaking browser/session data.
