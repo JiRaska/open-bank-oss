@@ -157,7 +157,7 @@ def validate_envelope(envelope: dict) -> None:
         if observed_at - run_observed_at > MAX_FUTURE_SKEW:
             raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
-        if set(item) - {"kind", "state", "source", "detail", "variant", "buildAttestation"} or not {"kind", "state", "source"}.issubset(item):
+        if set(item) - {"kind", "state", "source", "detail", "variant", "buildAttestation", "thresholdResults"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
         if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
             raise ValueError("specialized evidence values are invalid")
@@ -165,6 +165,14 @@ def validate_envelope(envelope: dict) -> None:
             raise ValueError("synthetic evidence variant is invalid")
         if "buildAttestation" in item and (item["kind"] != "synthetic" or not valid_build_attestation(item["buildAttestation"])):
             raise ValueError("synthetic build attestation is invalid")
+        if "thresholdResults" in item:
+            results = item["thresholdResults"]
+            if (item["kind"] not in {"performance", "synthetic"}
+                    or not isinstance(results, dict) or set(results) != {"evaluated", "breached"}
+                    or any(not isinstance(results[key], int) or isinstance(results[key], bool)
+                           for key in ("evaluated", "breached"))
+                    or results["evaluated"] < 1 or not 0 <= results["breached"] <= results["evaluated"]):
+                raise ValueError("specialized threshold results are invalid")
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
         retry_fields = {"retryFlaky", "failedAttemptCount", "failedAttemptDurationMs"}
@@ -725,10 +733,10 @@ def specialized_evidence(
             else f"{len(thresholds)} threshold result(s), {failed} breached"
         specialized.append({
             "kind": "performance",
-            "state": "not-run" if summary is None else "failed" if failed else "passed",
+            "state": "not-run" if summary is None else "unknown" if not thresholds else "failed" if failed else "passed",
             "source": str(summary_file),
             "detail": detail,
-            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if summary is not None else {}),
+            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if thresholds else {}),
         })
     if mutation_report:
         mutation_file = Path(mutation_report)
@@ -757,11 +765,11 @@ def specialized_evidence(
                      (isinstance(value, dict) and value.get("ok") is False))
         specialized.append({
             "kind": "synthetic",
-            "state": "not-run" if summary is None else "failed" if failed else "passed",
+            "state": "not-run" if summary is None else "unknown" if not thresholds else "failed" if failed else "passed",
             "source": f"journey:{synthetic_journey}",
             "detail": "synthetic summary absent" if summary is None else
                       f"{len(thresholds)} threshold result(s), {failed} breached",
-            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if summary is not None else {}),
+            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if thresholds else {}),
         })
     elif synthetic_journey:
         if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
@@ -1205,6 +1213,23 @@ def main() -> None:
                 "testCases": [],
                 "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
             }
+            structured = json.loads(json.dumps(valid))
+            structured["specializedEvidence"][0]["thresholdResults"] = {"evaluated": 2, "breached": 0}
+            validate_envelope(structured)
+            for bad_results in (
+                {"evaluated": 0, "breached": 0},
+                {"evaluated": 2, "breached": 3},
+                {"evaluated": True, "breached": 0},
+                {"evaluated": 2, "breached": 0, "extra": 1},
+            ):
+                invalid = json.loads(json.dumps(structured))
+                invalid["specializedEvidence"][0]["thresholdResults"] = bad_results
+                try:
+                    validate_envelope(invalid)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"accepted invalid threshold results: {bad_results}")
             retry_envelope = json.loads(json.dumps(valid))
             retry_envelope["testCases"] = [retry_flaky]
             validate_envelope(retry_envelope)
