@@ -15,7 +15,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import Link from 'next/link'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, ShieldQuestion, AlertTriangle, Bot, UserRound, ExternalLink, Search } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, ShieldQuestion, AlertTriangle, Bot, ExternalLink, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
@@ -354,10 +354,12 @@ export default function ApprovalsPage() {
           // means we could not read agents.yaml and must not claim either way (#5904).
           const identity = resolveAgentIdentity(p.proposedBy, registry)
           const chartered = identity.status === 'chartered'
-          const proposerKind = chartered ? 'agent' : p.agent?.icon === 'user' ? 'human' : 'unverified'
+          // The provider exposes proposedBy but no authenticated human-provenance field.
+          // A legacy `agent.icon=user` decoration does not establish a human author.
+          const proposerKind = chartered ? 'agent' : 'unverified'
           // Caution is still required when AI authorship cannot be ruled out, but the copy
           // must not assert that an unverified actor definitely was an AI agent.
-          const ProposerIcon = proposerKind === 'agent' ? Bot : proposerKind === 'human' ? UserRound : ShieldQuestion
+          const ProposerIcon = proposerKind === 'agent' ? Bot : ShieldQuestion
           return (
             <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? 'var(--warning-text)' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
@@ -370,7 +372,7 @@ export default function ApprovalsPage() {
                   <m.Icon size={11} /> {t(m.cs, m.en)}
                 </span>
               </div>
-              {proposerKind !== 'human' && !registryLoading && (
+              {!registryLoading && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0 }} />
                   {proposerKind === 'agent'
@@ -389,8 +391,8 @@ export default function ApprovalsPage() {
                 <span style={{ fontWeight: 700 }}>{t('Navrhovaná akce: ', 'Suggested action: ')}</span>{p.suggestedAction}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 10 }}>
-                {t('Navrhl', 'Proposed by')} <b>{p.agent?.displayName ?? p.proposedBy}</b>
-                <span className="mono"> · {p.agent?.id ?? p.proposedBy}</span>
+                {t('Navrhl', 'Proposed by')} <b>{chartered ? p.agent?.displayName ?? p.proposedBy : p.proposedBy}</b>
+                <span className="mono"> · {p.proposedBy}</span>
                 {p.modelId ? <span className="mono"> · {p.modelId}</span> : null} · {new Date(p.proposedAt).toLocaleString(dateLocale)}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

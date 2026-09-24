@@ -27,7 +27,7 @@ describe('approval inbox source truthfulness', () => {
   })
 
   it('renders the proposer identity supplied by the BFF rather than assuming every proposer is a bot', () => {
-    expect(pageSource).toContain("const proposerKind = chartered ? 'agent' : p.agent?.icon === 'user' ? 'human' : 'unverified'")
+    expect(pageSource).toContain("const proposerKind = chartered ? 'agent' : 'unverified'")
     expect(pageSource).not.toContain('/assistant|agent|\\bai\\b/i.test(p.proposedBy)')
   })
 })
