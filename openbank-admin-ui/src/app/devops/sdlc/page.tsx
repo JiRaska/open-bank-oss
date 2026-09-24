@@ -152,7 +152,7 @@ const STAGES: Stage[] = [
     actions: {
       developer: { cs: 'Commit message přesně pojmenuje změnu a automaticky vytvoří changelog.', en: 'The commit message names the change precisely and generates the changelog.' },
       devops: { cs: 'Podepisuji image a vážu k jeho digestu SBOM i provenance.', en: 'I sign the image and bind its SBOM and provenance to the digest.' },
-      business: { cs: 'Každá verze má dohledatelný obsah, původ a bezpečnostní důkaz.', en: 'Every version has traceable contents, origin, and security evidence.' },
+      business: { cs: 'Dohledám původ image a ověřím dostupné bezpečnostní důkazy; chybějící release bundle není důkaz.', en: 'I can trace the image origin and inspect available security evidence; a missing release bundle is not proof.' },
     },
   },
   {
