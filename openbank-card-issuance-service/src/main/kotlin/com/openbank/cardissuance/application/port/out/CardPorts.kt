@@ -9,7 +9,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.time.LocalDate
 import java.util.UUID
 
-const val MAX_PARTY_CARD_LIST_LIMIT = 100
+const val MAX_PARTY_CARD_LIST_LIMIT = 200
 
 /**
  * Outbound persistence port for the card aggregate.

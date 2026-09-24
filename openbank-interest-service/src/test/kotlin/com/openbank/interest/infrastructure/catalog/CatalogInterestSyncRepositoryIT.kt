@@ -85,6 +85,9 @@ internal class CatalogInterestSyncRepositoryIT {
         assertThat(persisted.cursor.cursor).isEqualTo("cursor-2")
         assertThat(countSnapshots(revisionId)).isEqualTo(1)
         assertThat(countConfigs(profile.specificationId)).isEqualTo(1)
+        // ADR-0314 D5: the applied profile announced its config once, in the same transaction; the
+        // idempotent second record wrote no second event.
+        assertThat(rateChangedEvents(persisted.config.id)).containsExactly("CREATED")
     }
 
     private fun event(eventId: UUID, revisionId: UUID) = CatalogEventClientResponse(
@@ -103,6 +106,15 @@ internal class CatalogInterestSyncRepositoryIT {
             ).setParameter("revision", revisionId).singleResult.map { it.toLong() }
         }
     }
+
+    private fun rateChangedEvents(configId: UUID): List<String> = onEventLoop {
+        sessions.withSession { session ->
+            session.createNativeQuery<String>(
+                "SELECT payload FROM interest_outbox WHERE aggregate_id = :id AND event_type = 'interest.rate.changed.v1'",
+                String::class.java,
+            ).setParameter("id", configId).resultList
+        }
+    }.map { Regex("\"change\":\"([A-Z]+)\"").find(it)!!.groupValues[1] }
 
     private fun countConfigs(specificationId: UUID): Long = onEventLoop {
         sessions.withSession { session ->

@@ -8,6 +8,7 @@ import com.openbank.notification.domain.model.DeviceRegistration
 import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.quarkus.panache.common.Page
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -31,15 +32,13 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
     fun findActiveByParty(partyId: UUID): Uni<List<DeviceTokenEntity>> =
         find("partyId = ?1 and status = ?2", partyId, "ACTIVE").list()
 
-    /** All tokens for a party, for the REST listing. */
+    /** Complete subject-access list, or a database-bounded newest slice for Customer 360. */
     suspend fun listByParty(partyId: UUID, limit: Int? = null): List<DeviceTokenEntity> = Panache.withSession {
-        val query = find("partyId = ?1 order by createdAt desc, id desc", partyId)
-        if (limit == null) query.list() else query.range(0, limit - 1).list()
+        val query = find("partyId = ?1 order by createdAt desc, deviceId desc", partyId)
+        if (limit == null) query.list() else query.page(Page.ofSize(limit)).list()
     }.awaitSuspending()
 
-    suspend fun countByParty(partyId: UUID): Long = Panache.withSession {
-        count("partyId", partyId)
-    }.awaitSuspending()
+    suspend fun countByParty(partyId: UUID): Long = Panache.withSession { count("partyId", partyId) }.awaitSuspending()
 
     /**
      * Register (or refresh) a device token. Idempotent on (platform, token): a re-registration

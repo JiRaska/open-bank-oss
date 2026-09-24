@@ -19,7 +19,7 @@ data class InterestAccrualResponse(
     val currency: String,
     val rate: BigDecimal,
     val dayCount: DayCount,
-    val status: AccrualStatus
+    val status: AccrualStatus,
 )
 
 fun InterestAccrual.toResponse(dayCount: DayCount) = InterestAccrualResponse(
@@ -30,5 +30,5 @@ fun InterestAccrual.toResponse(dayCount: DayCount) = InterestAccrualResponse(
     currency = currency,
     rate = dailyRate,
     dayCount = dayCount,
-    status = status
+    status = status,
 )

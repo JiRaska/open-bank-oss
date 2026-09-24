@@ -40,6 +40,7 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanRateType
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
@@ -335,6 +336,8 @@ class LendingService @Inject constructor(
         require(profile.maxPrincipal == null || request.requestedAmount.amount <= profile.maxPrincipal) {
             "Requested amount exceeds the catalog maximum"
         }
+        // A catalog profile publishes a single rate and no index terms, so a catalog loan is FIXED.
+        require(request.rateTerms.rateType == LoanRateType.FIXED) { "Catalog loans carry a FIXED rate" }
         return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
     }
 
@@ -347,6 +350,10 @@ class LendingService @Inject constructor(
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
         require(request.termPeriods > 0) { "Term must be at least one period" }
         require(request.nominalAnnualRate.signum() >= 0) { "Nominal rate cannot be negative" }
+        request.rateTerms.validate(request.firstDueDate)
+        require(request.rateTerms.rateType == LoanRateType.FIXED || originationConfig.floatingRateEnabled) {
+            "FLOATING-rate origination is not enabled: no reset engine reprices a floating loan yet"
+        }
         require(proposedBy.isNotBlank()) { "Proposer identity is required" }
         listOf(request.verifiedIncomeMonthly, request.existingDebtServiceMonthly, request.existingDebtOutstanding)
             .filterNotNull().forEach { value ->
@@ -359,6 +366,7 @@ class LendingService @Inject constructor(
             partyId = request.partyId,
             requestedAmount = request.requestedAmount,
             nominalAnnualRate = request.nominalAnnualRate,
+            rateTerms = request.rateTerms,
             termPeriods = request.termPeriods,
             periodsPerYear = request.periodsPerYear,
             method = request.method,
@@ -546,6 +554,8 @@ class LendingService @Inject constructor(
 
     override fun listRecentApplicationsForParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
         applications.findRecentByParty(partyId, limit)
+    override fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+        applications.findByParty(partyId, limit)
 
     override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
         applications.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
@@ -589,6 +599,7 @@ class LendingService @Inject constructor(
             partyId = application.partyId,
             principal = application.requestedAmount,
             nominalAnnualRate = application.nominalAnnualRate,
+            rateTerms = application.rateTerms,
             termPeriods = application.termPeriods,
             periodsPerYear = application.periodsPerYear,
             method = application.method,
@@ -713,6 +724,9 @@ class LendingService @Inject constructor(
                                 payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
                                     """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
                                     """"principal":"${saved.principal}",""" +
+                                    // ADR-0314 D5: the rate terms, so the risk engine can tell a
+                                    // fixed loan from a floating one without asking lending.
+                                    saved.rateTerms.jsonFields() +
                                     """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
                                     """"sourceService":"lending"}""",
                             ),

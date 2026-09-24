@@ -14,8 +14,10 @@
 # narrow rule leaves the generated allow-list intact while admitting only the labelled
 # one-shot k6 pod, never the rest of the observability namespace.
 #
-# The journey performs exactly one unauthenticated GET /api/v1/products and carries no
-# credentials or ServiceAccount token. Port 8104 is the catalog HTTP API; management
+# The journey performs exactly one GET /api/v1/products, authenticated as the synthetic-only
+# client openbank-synthetic-catalog-read (catalog:read scope, no realm role; issue #7324,
+# token edge in networkpolicy-keycloak-synthetic-journey.yaml). It carries no ServiceAccount
+# token. Port 8104 is the catalog HTTP API; management
 # port 8085 remains governed by the generated Prometheus rule. Removing this file rolls
 # back the edge and makes the journey fail closed with a connection timeout.
 apiVersion: networking.k8s.io/v1

@@ -110,3 +110,10 @@ scenarios:
     target_schedule: "0 5 * * *"
     blocker: Needs a booted openbank-consent-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
     assertions: Exercises consents by party, consents by grantee, active-consent resolve. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: p3-shadow-kill-switch-smoke
+    definition: perf/scripts/p3-shadow-kill-switch-smoke.mjs
+    execution_mode: manual-sandbox-mutation
+    safety_boundary: Mutates sandbox state only for non-money-path incident-response SHADOW cases, then clears the kill-switch. SHADOW cases have no business effect and the harness always restores the pilot. Requires a kubectl context pointing at the target cluster, Keycloak port-forward (8090), and case-coordinator-agent port-forward (8146).
+    blocker: Not automated in CI yet; run manually from an operator workstation. Needs KEYCLOAK_CLIENT_SECRET for the openbank-services client in the target Keycloak realm.
+    assertions: M2M client_credentials mints a token; POST /api/v1/case-coordinator/cases returns 201 with a caseId; Kafka agent.killswitch.set is consumed from agent-kill-switch-events-in using the agent-service mTLS identity; GET /api/v1/case-coordinator/cases/{caseId} returns status CLOSED with non-zero haltedAtEpochMs and a case.halt POLICY_DECISION entry; agent.killswitch.cleared restores the pilot.

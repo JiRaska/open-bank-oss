@@ -103,6 +103,29 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A customer must explicitly review an active delegation; no access is changed by this reminder. */
     DELEGATION_RECERTIFICATION_DUE(setOf("audience")),
+
+    // ── Multi-signature business approvals (#10281), raised from `delegation-service`'s
+    // approval-events topic by ApprovalNotificationConsumer. Copy is rendered in Czech or English
+    // ([NotificationLanguage]) by ApprovalCopy. The push TITLE never carries a variable (it is the
+    // lock-screen-visible part, ADR-0135 §3); amount, payee and entity live only in the inbox body,
+    // which the app fetches on tap through the authenticated, party-scoped endpoint.
+    // `kind` is a closed producer vocabulary (PAYMENT, POLICY_CHANGE, PAYEE_ADD, PAYEE_REMOVE);
+    // an unknown kind renders as a generic "request", never verbatim.
+
+    /** A co-signer must sign or reject a pending request (APPROVAL_REQUESTED). SECURITY: never muted. */
+    APPROVAL_REQUIRED(setOf("entityName", "kind", "amountFormatted", "payeeName", "initiatorName", "expiresAt")),
+
+    /** Every required signature was collected (APPROVAL_COMPLETED). */
+    APPROVAL_COMPLETED(setOf("entityName", "kind", "amountFormatted", "payeeName")),
+
+    /** A signer rejected the request; nothing will be executed (APPROVAL_REJECTED). */
+    APPROVAL_REJECTED(setOf("entityName", "kind", "amountFormatted", "payeeName", "reason")),
+
+    /** The request ran out of time before collecting its signatures (APPROVAL_EXPIRED). */
+    APPROVAL_EXPIRED(setOf("entityName", "kind", "amountFormatted", "payeeName")),
+
+    /** A fully approved payment was refused by the payment rail at release (PAYMENT_RELEASE_FAILED). */
+    PAYMENT_RELEASE_FAILED(setOf("entityName", "amountFormatted", "payeeName", "reason")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -127,6 +150,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // someone just exercised delegated authority over the grantor's money, and a missing
             // device must not silence that (the fallback carries no body, only the prompt).
             DELEGATION_FIRST_USE,
+            // Same class as TRANSACTION_FAILED: an approved payment did NOT leave, and the people
+            // who approved it believe it did. The fallback carries no body, only the prompt.
+            PAYMENT_RELEASE_FAILED,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
@@ -147,6 +173,10 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_RENOUNCED,
             DELEGATION_EXPIRED,
             DELEGATION_RECERTIFICATION_DUE,
+            APPROVAL_REQUIRED,
+            APPROVAL_COMPLETED,
+            APPROVAL_REJECTED,
+            APPROVAL_EXPIRED,
             -> null
         }
 
@@ -164,12 +194,24 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
             DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             DELEGATION_RECERTIFICATION_DUE,
+            // A signature request is an authorisation step over company money, like SCA_APPROVAL:
+            // muting it would silently stall every payment that needs this person's signature.
+            APPROVAL_REQUIRED,
             -> NotificationCategory.SECURITY
-            TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
+            TRANSACTION_COMPLETED, TRANSACTION_FAILED,
+            APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED,
+            -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
             MARKETING_PRODUCT_OFFER -> NotificationCategory.MARKETING
         }
 }
+
+/**
+ * Language a template is rendered in. Only the approval templates (#10281) carry Czech copy today;
+ * every older template has English copy only and ignores this. `null` on a request = [EN], which is
+ * what every producer that predates the field has always received.
+ */
+enum class NotificationLanguage { CS, EN }
 
 /** Customer-facing notification categories for push preferences (#2). */
 enum class NotificationCategory { SECURITY, PAYMENTS, PRODUCT, MARKETING }
@@ -218,11 +260,15 @@ data class NotificationRequest(
      * delivery outcome. campaign-service currently supplies its send-log id (issue #4480).
      */
     val interactionRef: UUID? = null,
+    /** Rendering language (#10281). Optional and additive; `null` renders English. */
+    val language: NotificationLanguage? = null,
 )
 
 /** Closed allow-list for navigation metadata sent through FCM/APNs. */
 object MobileDeepLink {
     private const val DELEGATION_DETAIL_PREFIX = "openbank://delegations/"
+    private const val BUSINESS_APPROVAL_DETAIL_PREFIX = "openbank://business/approvals/"
+    private const val ENTITY_QUERY = "?entity="
 
     private val allowed = setOf(
         "openbank://home",
@@ -232,11 +278,42 @@ object MobileDeepLink {
         "openbank://products",
     )
 
-    fun isAllowed(value: String?): Boolean = value == null || value in allowed || isCanonicalDelegationDetail(value)
+    fun isAllowed(value: String?): Boolean = value == null ||
+        value in allowed ||
+        isCanonicalDetail(value, DELEGATION_DETAIL_PREFIX) ||
+        isCanonicalBusinessApproval(value)
 
-    private fun isCanonicalDelegationDetail(value: String): Boolean {
-        if (!value.startsWith(DELEGATION_DETAIL_PREFIX)) return false
-        val id = value.removePrefix(DELEGATION_DETAIL_PREFIX)
+    /**
+     * Builds the approval-detail link (#10281). With [entityPartyId] the app switches straight to
+     * that company's profile; without it the app falls back to resolving the entity itself.
+     */
+    fun businessApproval(approvalId: UUID, entityPartyId: UUID? = null): String =
+        BUSINESS_APPROVAL_DETAIL_PREFIX + approvalId + (entityPartyId?.let { ENTITY_QUERY + it } ?: "")
+
+    /**
+     * `<prefix><uuid>` optionally followed by exactly `?entity=<uuid>` — one query parameter, that
+     * name, a canonical UUID value, nothing after it. Any other parameter, a second one, an
+     * encoded or empty value, or a fragment is refused: the link steers device navigation.
+     */
+    private fun isCanonicalBusinessApproval(value: String): Boolean {
+        val queryAt = value.indexOf('?')
+        if (queryAt < 0) return isCanonicalDetail(value, BUSINESS_APPROVAL_DETAIL_PREFIX)
+        val query = value.substring(queryAt)
+        return isCanonicalDetail(value.substring(0, queryAt), BUSINESS_APPROVAL_DETAIL_PREFIX) &&
+            query.startsWith(ENTITY_QUERY) &&
+            isCanonicalUuid(query.removePrefix(ENTITY_QUERY))
+    }
+
+    private fun isCanonicalUuid(id: String): Boolean =
+        runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
+
+    /**
+     * `<prefix><uuid>` and nothing else: the remainder must round-trip as a canonical lower-case
+     * UUID, so a query string, a path suffix, a fragment or an upper-cased id is refused.
+     */
+    private fun isCanonicalDetail(value: String, prefix: String): Boolean {
+        if (!value.startsWith(prefix)) return false
+        val id = value.removePrefix(prefix)
         return runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
     }
 }

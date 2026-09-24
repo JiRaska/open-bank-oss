@@ -489,6 +489,7 @@ class LendingResource(
         const val APPLY_KEY_TTL_SECONDS = 300L
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
+        const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }
 

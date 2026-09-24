@@ -118,7 +118,7 @@ writer and Context consumer while retaining approved source evidence and audit
 history. Dropping populated evidence tables is a separate retention decision,
 not a deployment rollback. A 1×/10× synthetic portfolio with one asset shared
 across facilities, partial guarantees and mixed currencies is required before
-the P3 pilot. Flyway V18 is the **schema-only expand stage** for the four fact
+the P3 pilot. Flyway V20 is the **schema-only expand stage** for the four fact
 types; it enforces separate proposal/decision actors, immutable decided facts,
 approved matching legacy collateral on an allocation insert, and a locked
 recheck at allocation approval. A proposal whose collateral was released can

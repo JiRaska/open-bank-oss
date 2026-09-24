@@ -36,6 +36,7 @@ interface ApplyForLoanUseCase {
     fun getApplication(id: LoanApplicationId): Uni<LoanApplication?>
     fun listApplications(partyId: UUID): Uni<List<LoanApplication>>
     fun listRecentApplicationsForParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>>
+    fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>>
 
     /**
      * Drive an application one step forward along the canonical origination graph
@@ -131,4 +132,9 @@ interface ProvisioningUseCase {
  */
 interface RunProvisioningCycleUseCase {
     fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int): Uni<ProvisioningRunOutcome>
+}
+
+/** READ-ONLY: the loan book as the risk engine's instrument model reads it (ADR-0314 D4). */
+interface LoanBookUseCase {
+    fun loanBook(asOf: LocalDate): Uni<com.openbank.lending.domain.model.LoanBook>
 }

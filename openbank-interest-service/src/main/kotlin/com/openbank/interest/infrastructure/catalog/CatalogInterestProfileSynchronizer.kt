@@ -3,6 +3,7 @@
 
 package com.openbank.interest.infrastructure.catalog
 
+import com.openbank.interest.domain.event.InterestRateChanged
 import com.openbank.interest.domain.model.InterestRateConfig
 import com.openbank.interest.domain.model.InterestRateType
 import com.openbank.interest.infrastructure.client.CatalogEventClientResponse
@@ -12,6 +13,7 @@ import com.openbank.interest.infrastructure.persistence.entity.CatalogInterestRa
 import com.openbank.interest.infrastructure.persistence.entity.CatalogInterestSyncStateEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
 import com.openbank.interest.infrastructure.persistence.mapper.InterestMapper
+import com.openbank.interest.infrastructure.persistence.repository.toOutboxEntity
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -178,7 +180,10 @@ internal class CatalogInterestSyncRepository @Inject constructor(
             config.effectiveTo = profile.effectiveFrom.minusDays(1)
             config.updatedAt = now
         }
-        return persistAppliedProfile(session, resolution, profile, now)
+        // ADR-0314 D5: each cut-short config is announced in the same transaction that cuts it.
+        val superseded = configs.map { rateChangedRow(mapper.toDomain(it), InterestRateChanged.Change.SUPERSEDED, now) }
+        return superseded.fold(Uni.createFrom().voidItem()) { acc, row -> acc.chain { _ -> session.persist(row) } }
+            .chain { _ -> persistAppliedProfile(session, resolution, profile, now) }
     }
 
     private fun persistAppliedProfile(
@@ -200,7 +205,9 @@ internal class CatalogInterestSyncRepository @Inject constructor(
                 updatedAt = now,
             ),
         )
-        return session.persist(config).flatMap {
+        return session.persist(config).chain { _ ->
+            session.persist(rateChangedRow(mapper.toDomain(config), InterestRateChanged.Change.CREATED, now))
+        }.flatMap {
             val snapshot = CatalogInterestRateSnapshotEntity().also {
                 it.revisionId = profile.revisionId
                 it.offeringId = profile.offeringId
@@ -222,6 +229,9 @@ internal class CatalogInterestSyncRepository @Inject constructor(
             }
         }
     }
+
+    private fun rateChangedRow(config: InterestRateConfig, change: InterestRateChanged.Change, now: OffsetDateTime) =
+        InterestRateChanged.outboxMessage(config, change, now.toInstant()).toOutboxEntity(clock.instant())
 
     private fun findOverlappingConfigs(
         session: Mutiny.Session,

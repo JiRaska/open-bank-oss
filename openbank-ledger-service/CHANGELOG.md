@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.29.4](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.3...ledger-service-v1.29.4) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
+## [1.29.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.2...ledger-service-v1.29.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [1.29.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.1...ledger-service-v1.29.2) (2026-09-21)
+
+
+### Security
+
+* **interest:** post capitalization journals as its own M2M identity ([#10488](https://github.com/JiRaska/open-bank-oss/issues/10488)) ([c773897](https://github.com/JiRaska/open-bank-oss/commit/c7738978ade3265af13050fc54821454ca4113ba))
+
+## [1.29.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.0...ledger-service-v1.29.1) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [1.29.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.28.1...ledger-service-v1.29.0) (2026-09-14)
 
 

@@ -24,7 +24,12 @@ class DelegationRecertificationMigrationIT {
         val scripts = Files.list(source).use { paths -> paths.filter { it.toString().endsWith(".sql") }.toList() }
         val recertification = scripts.filter { it.fileName.toString().contains("__delegation_recertification_") }
         assertThat(recertification).hasSize(2)
-        scripts.filterNot { it in recertification }.forEach { Files.copy(it, migrations.resolve(it.fileName)) }
+        // Migrations LATER than the recertification pair (V25+, ADR-0312 onwards) are outside this
+        // upgrade scenario: copying them up front would put the baseline past V23/V24 and turn the
+        // test into an out-of-order refusal.
+        val lastRecertification = recertification.maxOf { version(it) }
+        scripts.filterNot { it in recertification || version(it) > lastRecertification }
+            .forEach { Files.copy(it, migrations.resolve(it.fileName)) }
 
         PostgreSQLContainer("postgres:16-alpine").withUsername("openbank").use { postgres ->
             postgres.start()
@@ -38,6 +43,9 @@ class DelegationRecertificationMigrationIT {
             verifyUpgrade(postgres, flyway, recertification)
         }
     }
+
+    private fun version(script: Path): Int =
+        script.fileName.toString().substringAfter("V").substringBefore("__").toInt()
 
     private fun verifyUpgrade(postgres: PostgreSQLContainer<*>, flyway: Flyway, recertification: List<Path>) {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->

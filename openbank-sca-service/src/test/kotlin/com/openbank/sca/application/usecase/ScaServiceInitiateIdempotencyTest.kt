@@ -11,6 +11,7 @@ import com.openbank.sca.application.port.out.DeviceAssertionVerifier
 import com.openbank.sca.application.port.out.EnrolledDeviceRepository
 import com.openbank.sca.application.port.out.OtpGenerator
 import com.openbank.sca.application.port.out.OtpStore
+import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
@@ -64,6 +65,7 @@ class ScaServiceInitiateIdempotencyTest {
             enrolledDeviceRepository = mockk<EnrolledDeviceRepository>(relaxed = true),
             decisionStore = decisionStore,
             assertionVerifier = mockk<DeviceAssertionVerifier>(relaxed = true),
+            partyTypeLookup = mockk<PartyTypeLookup>(),
             objectMapper = ObjectMapper(),
             metrics = mockk<DomainMetrics>(relaxed = true),
             idempotencyTtlSeconds = 300L,

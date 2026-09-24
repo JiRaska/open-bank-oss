@@ -101,7 +101,7 @@ class LendingServiceEdgeCasesTest {
         clock,
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-        OriginationConfig(false),
+        OriginationConfig(false, false),
         NoOpOriginationWorkflowPort(),
         OriginationDecisionService(
             NoOpCreditBureauPort(),
@@ -282,6 +282,8 @@ class LendingServiceEdgeCasesTest {
         assertThat(service.getApplication(app.id).await().indefinitely()).isEqualTo(app)
         assertThat(service.listApplications(partyId).await().indefinitely()).containsExactly(app)
         assertThat(service.listRecentApplicationsForParty(partyId, 31).await().indefinitely()).containsExactly(app)
+        every { applications.findByParty(partyId, 31) } returns Uni.createFrom().item(listOf(app))
+        assertThat(service.listApplications(partyId, 31).await().indefinitely()).containsExactly(app)
     }
 
     // --- Disbursement --------------------------------------------------------------------------

@@ -12,6 +12,9 @@ import java.util.UUID
 
 enum class InterestRateType { FIXED, VARIABLE, TIERED }
 
+/** The market index a VARIABLE rate follows (ADR-0314 D5). Closed on purpose: the risk engine needs a curve for each. */
+enum class RateIndex { CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3M }
+
 /**
  * Lifecycle of one daily accrual.
  *
@@ -38,6 +41,10 @@ data class InterestRateConfig(
     val currency: String,
     val rateType: InterestRateType = InterestRateType.FIXED,
     val annualRate: BigDecimal,
+    /** VARIABLE only: the index this rate follows. Set together with [spread] or not at all. */
+    val rateIndex: RateIndex? = null,
+    /** VARIABLE only: the margin over [rateIndex], as a decimal fraction like [annualRate]. */
+    val spread: BigDecimal? = null,
     val minBalance: BigDecimal = BigDecimal.ZERO,
     val maxBalance: BigDecimal? = null,
     val dayCount: DayCount = DayCount.ACT_365,

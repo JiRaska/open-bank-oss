@@ -65,7 +65,7 @@ pdfbox = "3.0.3"
 # 1.84 deliberately matches the version already resolved (and verified in
 # gradle/verification-metadata.xml) as a transitive dependency elsewhere in this build, rather
 # than introducing a second, differently-pinned BC version with its own fresh verification gap.
-bouncycastle = "1.84"
+bouncycastle = "1.85"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }

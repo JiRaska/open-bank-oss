@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.0...kyb-service-v0.8.1) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.7.0...kyb-service-v0.8.0) (2026-09-19)
+
+
+### Features
+
+* **kyb:** give the sandbox demo company a second jednatel acting jointly ([#10349](https://github.com/JiRaska/open-bank-oss/issues/10349)) ([3ab9e43](https://github.com/JiRaska/open-bank-oss/commit/3ab9e43e793370c156828553f3c0b73422edfa6a)), closes [#10281](https://github.com/JiRaska/open-bank-oss/issues/10281)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.6.0...kyb-service-v0.7.0) (2026-09-17)
 
 

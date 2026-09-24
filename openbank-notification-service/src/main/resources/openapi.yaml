@@ -57,16 +57,16 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Return at most this many most recently created devices. Omit for the full subject-access list.
+          description: Return at most this many newest devices. Omit for the full subject-access list; total remains the full party count.
           schema:
             type: integer
             minimum: 1
-            maximum: 100
+            maximum: 200
       responses:
         '200':
           description: Device list
         '400':
-          description: Missing partyId or limit outside 1–100
+          description: partyId is required or limit is outside the allowed range
           content:
             application/json:
               schema:
