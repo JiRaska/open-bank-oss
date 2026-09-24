@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.12.0"
+  version: "1.13.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -329,7 +329,8 @@ paths:
       summary: Approve or reject a pending proposal
       description: |
         Records a human decision on a PROPOSED proposal (ADR-0031 D4). Segregation of duties is
-        enforced: `decidedBy` must differ from the proposal's author, and a proposal already
+        enforced against the authenticated principal, which must differ from the proposal's author.
+        The legacy `decidedBy` body field is ignored for audit attribution; a proposal already
         decided returns 409.
       parameters:
         - name: id
@@ -356,7 +357,7 @@ paths:
         "404":
           description: Proposal not found
         "409":
-          description: Proposal already decided, or decidedBy equals the author (segregation of duties)
+          description: Proposal already decided, or authenticated principal equals the author (segregation of duties)
 
   /q/health/ready:
     get:
@@ -728,7 +729,8 @@ components:
           type: boolean
         decidedBy:
           type: string
-          description: The deciding operator's identity — must differ from the proposal's proposedBy.
+          deprecated: true
+          description: Legacy compatibility field, ignored for attribution. The authenticated principal is the deciding operator and must differ from proposedBy.
         reason:
           type: string
           nullable: true
