@@ -15,47 +15,6 @@ afterEach(() => {
 })
 
 describe('GET /api/test-intelligence', () => {
-  it('projects retained browser verdicts into required controls without Prometheus', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-browser-control-'))
-    dirs.push(dir)
-    const file = path.join(dir, 'report.json')
-    const observedAt = new Date().toISOString()
-    writeFileSync(file, JSON.stringify({
-      schemaVersion: 1, collectedAt: observedAt,
-      components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [
-        {
-          id: 'admin-ui-sso-boundary', title: 'SSO', status: 'active', state: 'unknown',
-          executor: 'github-actions', severity: 'ticket', schedule: '13 */2 * * *',
-          environment: 'sandbox', covers: [], falsifies: 'break auth', blocker: null,
-          ci: {
-            state: 'passed', observedAt, detail: '2/2 variants passed',
-            run: { id: '123', attempt: 1, branch: 'main', commit: 'abc', workflow: 'Admin UI browser synthetic', url: 'https://example.test/run/123', observedAt },
-          },
-        },
-        {
-          id: 'public-edge', title: 'Edge', status: 'active', state: 'unknown',
-          executor: 'kubernetes-cronjob', severity: 'page', schedule: '*/5 * * * *',
-          environment: 'sandbox', covers: [], falsifies: 'break edge', blocker: null,
-        },
-      ],
-      requiredControls: [
-        { id: 'synthetic:admin-ui-sso-boundary', component: null, kind: 'synthetic', state: 'unknown', reason: 'SSO', source: null, observedAt: null },
-        { id: 'synthetic:public-edge', component: null, kind: 'synthetic', state: 'unknown', reason: 'Edge', source: null, observedAt: null },
-      ],
-      clientExperiences: [], history: [], runHistory: [], testCases: [],
-      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0, requiredControls: 2, requiredControlGaps: 2 },
-      warnings: [],
-    }))
-    process.env.OPENBANK_TEST_INTELLIGENCE = file
-
-    const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
-    expect(body.syntheticJourneys.map((journey: { state: string }) => journey.state)).toEqual(['passed', 'unknown'])
-    expect(body.requiredControls.map((control: { state: string }) => control.state)).toEqual(['passed', 'unknown'])
-    expect(body.requiredControls[0].observedAt).toBe(observedAt)
-    expect(body.totals.requiredControlGaps).toBe(1)
-  })
-
   it('serves a valid versioned snapshot without changing its evidence states', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-route-'))
     dirs.push(dir)

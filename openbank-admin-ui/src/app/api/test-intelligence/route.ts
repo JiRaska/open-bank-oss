@@ -184,6 +184,7 @@ async function queryPrometheus(base: string, query: string): Promise<number | nu
 
 async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {
   const base = prometheusBase()
+  if (!base) return report
   const nowSeconds = Date.now() / 1000
   const syntheticJourneys = await Promise.all(report.syntheticJourneys.map(async journey => {
     if (journey.status !== 'active') return journey
@@ -194,7 +195,6 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       ...journey,
       state: journey.ci?.state ?? 'not-run' as EvidenceState,
     }
-    if (!base) return journey
     const cronjob = cronjobSelector(journey.id)
     if (!cronjob) return journey
     // A failure must remain visible for the same evidence window used to judge a
@@ -271,28 +271,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       detail: `Sandbox synthetic runtime observation over the last ${Math.round(measured.windowSeconds / 60)} minutes; the Kubernetes Job verdict remains authoritative.`,
     }]
   })
-  const journeyByControlId = new Map(syntheticJourneys.map(journey => [`synthetic:${journey.id}`, journey]))
-  const requiredControls = report.requiredControls?.map(control => {
-    if (control.kind !== 'synthetic') return control
-    const journey = journeyByControlId.get(control.id)
-    if (!journey) return control
-    return {
-      ...control,
-      state: journey.state,
-      source: journey.live?.source ?? journey.ci?.run?.url ?? control.source,
-      observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? control.observedAt,
-    }
-  })
-  return {
-    ...report, syntheticJourneys, performance: [...report.performance, ...runtimePerformance],
-    ...(requiredControls ? {
-      requiredControls,
-      totals: {
-        ...report.totals,
-        requiredControlGaps: requiredControls.filter(control => control.state !== 'passed').length,
-      },
-    } : {}),
-  }
+  return { ...report, syntheticJourneys, performance: [...report.performance, ...runtimePerformance] }
 }
 
 async function attachLiveClientExperience(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {
