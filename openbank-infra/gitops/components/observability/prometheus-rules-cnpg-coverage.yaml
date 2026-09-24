@@ -229,6 +229,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: loyalty
+            cluster: loyalty-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: messaging
             cluster: apicurio-db
             origin: manifest

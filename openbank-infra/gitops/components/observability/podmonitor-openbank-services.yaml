@@ -83,6 +83,7 @@ spec:
       - kyc
       - ledger
       - lending
+      - loyalty
       - kyb
       - notifications
       - onboarding
