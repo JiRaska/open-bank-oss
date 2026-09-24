@@ -129,6 +129,10 @@ spec:
             # creation to real staff only, and no service-account reaches it by any rule.
             - name: AUTHZ_ENFORCE
               value: "true"
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
           resources:
             requests:
               cpu: 100m
