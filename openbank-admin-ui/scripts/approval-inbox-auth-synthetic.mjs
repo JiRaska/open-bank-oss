@@ -4,6 +4,7 @@
 import { chromium } from 'playwright'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
+import { verifyApprovalInboxEvidence } from './approval-inbox-evidence.mjs'
 
 const required = [
   'OPENBANK_APPROVAL_SYNTHETIC_URL', 'OPENBANK_APPROVAL_STORAGE_STATE',
@@ -68,14 +69,12 @@ try {
   }
   if (response.status() !== 200) throw new Error(`approval inbox BFF returned HTTP ${response.status()}`)
   const payload = await response.json()
-  if (payload?.sources?.billing !== 'ok') throw new Error('billing approval source did not answer successfully')
-  const matches = payload.items?.filter(item => item.domain === 'billing' && item.id === id) ?? []
-  if (matches.length !== 1 || matches[0].action !== process.env.OPENBANK_APPROVAL_FIXTURE_ACTION ||
-      matches[0].resourceId !== process.env.OPENBANK_APPROVAL_FIXTURE_RESOURCE_ID ||
-      matches[0].maker !== process.env.OPENBANK_APPROVAL_FIXTURE_MAKER_ID ||
-      Date.parse(matches[0].proposedAt) !== Date.parse(process.env.OPENBANK_APPROVAL_FIXTURE_CREATED_AT)) {
-    throw new Error('sandbox fixture did not traverse billing provider and approval inbox BFF unchanged')
-  }
+  verifyApprovalInboxEvidence(payload, {
+    id, action: process.env.OPENBANK_APPROVAL_FIXTURE_ACTION,
+    resourceId: process.env.OPENBANK_APPROVAL_FIXTURE_RESOURCE_ID,
+    makerId: process.env.OPENBANK_APPROVAL_FIXTURE_MAKER_ID,
+    createdAt: process.env.OPENBANK_APPROVAL_FIXTURE_CREATED_AT,
+  })
   const row = page.getByTestId(`domain-approval-billing:${id}`)
   await row.waitFor({ state: 'visible', timeout: 10_000 })
   if (!await row.getByText(process.env.OPENBANK_APPROVAL_FIXTURE_ACTION, { exact: true }).isVisible()) {
