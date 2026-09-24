@@ -57,6 +57,12 @@ def trusted_run_url(url: str, run_id: str) -> bool:
 SHA_PATTERN = re.compile(r"[0-9a-f]{7,40}")
 
 
+def matching_build_shas(requested: str, observed: str | None) -> bool:
+    # The deployed image currently attests its abbreviated tag SHA. Accept either
+    # prefix direction, as the browser probe does, without accepting unrelated SHAs.
+    return observed is not None and (observed.startswith(requested) or requested.startswith(observed))
+
+
 def build_attestation_from(vitals: dict | None) -> dict | None:
     """The rollout attestation the browser synthetic recorded, or None when none was requested.
 
@@ -75,9 +81,7 @@ def build_attestation_from(vitals: dict | None) -> dict | None:
         return None
     requested = requested.lower()
     observed = observed.lower() if isinstance(observed, str) and SHA_PATTERN.fullmatch(observed.lower()) else None
-    # A short requested SHA matches the full observed one it prefixes, never the other way round:
-    # the attestation endpoint is the authority on the full identity.
-    matched = observed is not None and observed.startswith(requested)
+    matched = matching_build_shas(requested, observed)
     return {"requestedSha": requested, "observedSha": observed, "matched": matched}
 
 
@@ -87,7 +91,7 @@ def valid_build_attestation(value) -> bool:
             and (value["observedSha"] is None
                  or (isinstance(value["observedSha"], str) and SHA_PATTERN.fullmatch(value["observedSha"]) is not None))
             and isinstance(value["matched"], bool)
-            and value["matched"] == (value["observedSha"] is not None and value["observedSha"].startswith(value["requestedSha"])))
+            and value["matched"] == matching_build_shas(value["requestedSha"], value["observedSha"]))
 
 
 def validate_envelope(envelope: dict) -> None:
@@ -1186,6 +1190,9 @@ def main() -> None:
             attested = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert attested[0]["state"] == "passed", attested
             assert attested[0]["buildAttestation"] == {"requestedSha": "abc1234", "observedSha": "abc1234def5678", "matched": True}, attested
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234def5678","observedSha":"abc1234"}}')
+            abbreviated = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert abbreviated[0]["state"] == "passed" and abbreviated[0]["buildAttestation"]["matched"] is True, abbreviated
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"9999999aaaa"}}')
             mismatch = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert mismatch[0]["state"] == "failed" and mismatch[0]["buildAttestation"]["matched"] is False, mismatch
@@ -1200,6 +1207,7 @@ def main() -> None:
             assert forged[0]["buildAttestation"]["matched"] is False and forged[0]["state"] == "failed", forged
             # And the envelope validator refuses an attestation whose `matched` disagrees with its SHAs.
             assert valid_build_attestation({"requestedSha": "abc1234", "observedSha": "abc1234def", "matched": True})
+            assert valid_build_attestation({"requestedSha": "abc1234def", "observedSha": "abc1234", "matched": True})
             assert not valid_build_attestation({"requestedSha": "abc1234", "observedSha": "9999999", "matched": True})
             assert not valid_build_attestation({"requestedSha": "abc1234", "observedSha": None, "matched": True, "extra": 1})
             valid = {

@@ -93,6 +93,15 @@ journeys:
     const byBrowser = Object.fromEntries(variants.map(variant => [variant.browser, variant]))
     expect(byBrowser.chromium?.buildAttestation).toBeUndefined()
     expect(byBrowser.firefox?.buildAttestation).toEqual({ requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: false })
+
+    // The deployed image currently exposes its short tag SHA while the dispatch can request
+    // the full commit; that valid prefix must survive the collector's independent check.
+    write(repo, 'openbank-admin-ui/test-run-history/firefox.json', envelope('b-2', 'firefox', { requestedSha: 'abc1234def5678', observedSha: 'abc1234', matched: true }))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const refreshed = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const abbreviated = refreshed.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')?.ci?.variants
+      .find(variant => variant.browser === 'firefox')
+    expect(abbreviated?.buildAttestation).toEqual({ requestedSha: 'abc1234def5678', observedSha: 'abc1234', matched: true })
   })
 
   it('derives inventory, classifies an IT from JUnit identity, parses Kover and keeps missing evidence explicit', () => {

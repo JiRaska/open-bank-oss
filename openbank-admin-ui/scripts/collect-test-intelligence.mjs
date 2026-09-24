@@ -134,7 +134,8 @@ const validBuildAttestation = value => Boolean(value) && typeof value === 'objec
   && typeof value.requestedSha === 'string' && SHA.test(value.requestedSha)
   && (value.observedSha === null || (typeof value.observedSha === 'string' && SHA.test(value.observedSha)))
   && typeof value.matched === 'boolean'
-  && value.matched === (value.observedSha !== null && value.observedSha.startsWith(value.requestedSha))
+  && value.matched === (value.observedSha !== null
+    && (value.observedSha.startsWith(value.requestedSha) || value.requestedSha.startsWith(value.observedSha)))
 
 const retainActionableFailure = (previous, next, validRecovery) =>
   previous?.state === 'failed' && next.state !== 'failed' && !validRecovery ? previous : next
