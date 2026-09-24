@@ -106,7 +106,7 @@ spec:
             #   3. Add a RoleBinding for admin-ui-discovery below.
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
-              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk,loyalty
             - name: REFERRAL_SERVICE_URL
               value: https://referral-service.referral.svc:8443
             - name: NODE_EXTRA_CA_CERTS
@@ -885,6 +885,24 @@ kind: RoleBinding
 metadata:
   name: admin-ui-discovery
   namespace: campaign
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+# loyalty (Lípa / ADR-0282). The /api/loyalty BFF calls loyalty-service directly over HTTP
+# (serverSvcUrl, port 8157); discovery reports its live workload health to operators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: loyalty
   labels:
     app.kubernetes.io/name: admin-ui
 roleRef:
