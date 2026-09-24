@@ -42,7 +42,8 @@ if (!stateInfo.isFile() || (stateInfo.mode & 0o077) !== 0 ||
 let browser
 try {
   browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ storageState: state })
+  // Service workers can issue requests outside page.route; keep this probe read-only.
+  const context = await browser.newContext({ storageState: state, serviceWorkers: 'block' })
   const page = await context.newPage()
   // The journey reads a real inbox. Even if the page changes, it must never
   // approve, reject, post a fee, or cause any other mutation while probing.
