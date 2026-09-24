@@ -81,7 +81,9 @@ class SanctionsImportService(
     /**
      * Downloads and imports [listType] from [sourceUrl].
      *
-     * @return the import outcome — [ListImportOutcome.IMPORTED] with the upserted count, or a
+     * @return the import outcome — [ListImportOutcome.IMPORTED] with the number of entries the
+     * feed carried (the list's size, NOT the rows [SanctionsEntryRepository.upsertAll] wrote: an
+     * unchanged row is skipped there, so a quiet day would otherwise report a handful), or a
      * named non-success (see [ListImportResult]); the caller must key its bookkeeping on the
      * outcome, never on "count > 0".
      */
@@ -186,8 +188,13 @@ class SanctionsImportService(
         }
 
         val deactivated = entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, seenExternalIds)
-        Log.infof("Imported %d EU FSF entries (%d no longer present, deactivated)", total, deactivated)
-        return total
+        Log.infof(
+            "Imported %d EU FSF entries (%d written, %d no longer present, deactivated)",
+            seenExternalIds.size,
+            total,
+            deactivated,
+        )
+        return seenExternalIds.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -304,8 +311,8 @@ class SanctionsImportService(
         for (chunk in allEntries.chunked(IMPORT_BATCH_SIZE)) {
             total += entryRepo.upsertAll(chunk)
         }
-        Log.infof("Upserted %d OFAC SDN entries", total)
-        total
+        Log.infof("Imported %d OFAC SDN entries (%d written)", allEntries.size, total)
+        allEntries.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -346,6 +353,7 @@ class SanctionsImportService(
         }
 
         var total = 0
+        var parsed = 0
         val batch = mutableListOf<SanctionsEntry>()
         // Present-set for the end-of-stream reconciliation sweep below — NOT a deactivate-first
         // pass. Deactivating stale entries used to run BEFORE this loop, unconditionally, for
@@ -407,10 +415,12 @@ class SanctionsImportService(
                     programs = programs,
                 )
 
+                parsed++
+
                 if (batch.size >= IMPORT_BATCH_SIZE) {
                     total += entryRepo.upsertAll(batch)
                     batch.clear()
-                    if (total % 10_000 == 0) Log.infof("OpenSanctions %s: %d entries imported so far…", listType, total)
+                    if (parsed % 10_000 == 0) Log.infof("OpenSanctions %s: %d entries parsed so far…", listType, parsed)
                 }
             }
         } finally {
@@ -424,12 +434,13 @@ class SanctionsImportService(
         // existing list is left untouched rather than partially wiped.
         val deactivated = entryRepo.deactivateMissing(listType, seenExternalIds)
         Log.infof(
-            "Imported %d OpenSanctions entries for %s (%d no longer present, deactivated)",
-            total,
+            "Imported %d OpenSanctions entries for %s (%d written, %d no longer present, deactivated)",
+            parsed,
             listType,
+            total,
             deactivated,
         )
-        return total
+        return parsed
     }
 
     // ──────────────────────────────────────────────────────────────────────────
