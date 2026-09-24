@@ -6,6 +6,7 @@ package com.openbank.mcp.infrastructure.read
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -62,7 +63,9 @@ interface BalanceServiceClient {
 
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-mcp` (ROLE_API
+// only). transaction-service grants it transaction.list (mcp-anonymous: query.transaction.readonly).
+@OidcClientFilter("m2m")
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -105,7 +108,10 @@ interface StatementServiceClient {
 
 @RegisterRestClient(configKey = "sepa-payment-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-mcp` (ROLE_API
+// only). sepa-payment grants it NOTHING: no charter holds query.payment_confirmation.readonly, so
+// the MCP gate already refuses get_payment_confirmation and the upstream now agrees.
+@OidcClientFilter("m2m")
 @Path("/api/v1/sepa-payments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -118,7 +124,9 @@ interface SepaPaymentServiceClient {
 
 @RegisterRestClient(configKey = "domestic-payment-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-mcp` (ROLE_API
+// only). domestic-payment grants it NOTHING, for the same reason as SepaPaymentServiceClient.
+@OidcClientFilter("m2m")
 @Path("/api/v1/domestic-payments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

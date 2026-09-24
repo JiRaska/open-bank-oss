@@ -5,6 +5,7 @@
 
 package com.openbank.casecoordinator.application
 
+import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.infrastructure.config.CaseCoordinatorConfig
@@ -54,6 +55,7 @@ class CaseOpenService(
     private val gate: CaseCapabilityGate,
     private val config: CaseCoordinatorConfig,
     private val clock: Clock,
+    private val killSwitchState: CaseKillSwitchStatePort,
 ) {
 
     private val log = Logger.getLogger(CaseOpenService::class.java)
@@ -81,6 +83,7 @@ class CaseOpenService(
         dispositionTarget: String,
     ): CaseOpenResult {
         if (!temporalConfig.enabled()) return CaseOpenResult.Unavailable
+        if (killSwitchState.pilotHaltReason() != null) return CaseOpenResult.Denied
         if (!gate.canOpenCase(openedBy) || caseClass !in config.case().enabledClasses()) {
             return CaseOpenResult.Denied
         }

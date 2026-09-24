@@ -277,6 +277,12 @@ locals {
     # here prevents the otherwise silent "Ready but no WAL archive credentials" failure at first boot.
     incentive = { namespace = "incentive", sa = "incentive-db" }
     context   = { namespace = "context", sa = "context-db" }
+    # ADR-0314. Declared with the cluster, never after: a barmanObjectStore with no association
+    # archives to NOWHERE and reports success (only `aws s3 ls` tells the two apart).
+    risk = { namespace = "risk", sa = "risk-db" }
+    # #9800. Declared with the cluster, never after: a barmanObjectStore with no association
+    # archives to NOWHERE and reports success (only `aws s3 ls` tells the two apart).
+    loyalty = { namespace = "loyalty", sa = "loyalty-db" }
   }
 }
 

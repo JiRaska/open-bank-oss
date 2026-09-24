@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.3.0
+  version: 1.4.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -100,6 +100,31 @@ channels:
       DelegationSpendReservationStateChanged:
         $ref: '#/components/messages/DelegationSpendReservationStateChanged'
 
+  approvalEvents:
+    address: openbank.delegation.approval-events
+    title: Business payment signing lifecycle (ADR-0312)
+    description: |
+      Declared as a KafkaTopic alongside its consumer (notification-service, #10313).
+      Consumed by notification-service and audit-service. Partition key: `aggregateId`,
+      the approval request id, so one request's events stay ordered. A change feed for
+      notification-service (push + inbox); the state of record is delegation-service's
+      `approval_requests` table, readable over REST.
+    messages:
+      APPROVAL_REQUESTED:
+        $ref: '#/components/messages/APPROVAL_REQUESTED'
+      APPROVAL_SIGNED:
+        $ref: '#/components/messages/APPROVAL_SIGNED'
+      APPROVAL_COMPLETED:
+        $ref: '#/components/messages/APPROVAL_COMPLETED'
+      APPROVAL_REJECTED:
+        $ref: '#/components/messages/APPROVAL_REJECTED'
+      APPROVAL_EXPIRED:
+        $ref: '#/components/messages/APPROVAL_EXPIRED'
+      PAYMENT_RELEASED:
+        $ref: '#/components/messages/PAYMENT_RELEASED'
+      PAYMENT_RELEASE_FAILED:
+        $ref: '#/components/messages/PAYMENT_RELEASE_FAILED'
+
 operations:
   publishDelegationEvents:
     action: send
@@ -141,6 +166,24 @@ operations:
     messages:
       - $ref: '#/channels/spendReservationState/messages/DelegationSpendReservationStateChanged'
 
+  publishApprovalEvents:
+    action: send
+    title: Publish business-signing lifecycle transitions
+    channel:
+      $ref: '#/channels/approvalEvents'
+    description: |
+      **Producer: `openbank-delegation-service`**, `mp.messaging.outgoing.approval-events-out`.
+      Written to the outbox in the same transaction as the approval request's state change.
+      **Consumer:** `openbank-notification-service`. `recipientPartyIds` names who to tell.
+    messages:
+      - $ref: '#/channels/approvalEvents/messages/APPROVAL_REQUESTED'
+      - $ref: '#/channels/approvalEvents/messages/APPROVAL_SIGNED'
+      - $ref: '#/channels/approvalEvents/messages/APPROVAL_COMPLETED'
+      - $ref: '#/channels/approvalEvents/messages/APPROVAL_REJECTED'
+      - $ref: '#/channels/approvalEvents/messages/APPROVAL_EXPIRED'
+      - $ref: '#/channels/approvalEvents/messages/PAYMENT_RELEASED'
+      - $ref: '#/channels/approvalEvents/messages/PAYMENT_RELEASE_FAILED'
+
 components:
   messageTraits:
     outboxHeaders:
@@ -164,6 +207,86 @@ components:
               assume each event arrives once.
 
   schemas:
+    # ADR-0312. Every approval event type carries this ONE shape (schema version 1), mirroring
+    # the data classes in ApprovalEvents.kt; check-event-contract-code-agreement.py compares both
+    # directions. A breaking change ships as version 2, never an in-place edit.
+    approvalEvent:
+      type: object
+      required:
+        - eventId
+        - aggregateId
+        - aggregateType
+        - eventType
+        - version
+        - occurredAt
+        - sourceService
+        - entityPartyId
+        - kind
+        - status
+        - requiredSignatures
+        - collectedSignatures
+        - initiatorPartyId
+        - recipientPartyIds
+        - signerPartyIds
+        - expiresAt
+        - payloadSha256
+        - summary
+        - approvalId
+        - type
+        - schemaVersion
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId:
+          type: string
+          format: uuid
+          description: The approval request id — also the partition key.
+        aggregateType: { type: string, const: ApprovalRequest }
+        eventType:
+          type: string
+          enum: [APPROVAL_REQUESTED, APPROVAL_SIGNED, APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED,
+                 PAYMENT_RELEASED, PAYMENT_RELEASE_FAILED]
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, const: delegation-service }
+        entityPartyId: { type: string, format: uuid, description: The company whose payment or policy this is }
+        kind: { type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE] }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED] }
+        # AWAITING_INITIATOR never appears on the wire: nothing is published before the initiator signs.
+        requiredSignatures: { type: integer, minimum: 1 }
+        collectedSignatures: { type: integer, minimum: 0 }
+        initiatorPartyId: { type: string, format: uuid }
+        actorPartyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The human who caused this transition (signer, rejecter); null for system transitions.
+        recipientPartyIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: >-
+            Who to tell. APPROVAL_REQUESTED — every eligible signer who has not signed yet, never
+            the initiator. Every other type — the initiator and every eligible signer.
+        signerPartyIds: { type: array, items: { type: string, format: uuid } }
+        expiresAt: { type: string, format: date-time }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        summary:
+          type: object
+          additionalProperties: true
+          description: >-
+            PAYMENT — amount (decimal string), currency, creditorIban, creditorName, rail.
+            PAYEE_ADD/PAYEE_REMOVE — iban, name. POLICY_CHANGE — the proposed change.
+        reason: { type: string, nullable: true, description: Rejection reason, SUPERSEDED, or the rail error }
+        releaseRef: { type: string, nullable: true, description: The rail's reference, on PAYMENT_RELEASED }
+        # The flat v1 consumer contract pinned with notification-service (#10313).
+        approvalId: { type: string, format: uuid, description: Same value as aggregateId }
+        type: { type: string, description: Same value as eventType }
+        schemaVersion: { type: integer, const: 1 }
+        entityName: { type: string, nullable: true, description: Snapshot at creation; display only }
+        initiatorName: { type: string, nullable: true, description: Snapshot at creation; display only }
+        amount: { type: string, nullable: true, description: 'PAYMENT only: decimal string' }
+        currency: { type: string, nullable: true, description: 'PAYMENT only' }
+        payeeName: { type: string, nullable: true, description: Creditor name (PAYMENT) or payee name (PAYEE_*) }
+
     spendReservationState:
       type: object
       required:
@@ -455,6 +578,69 @@ components:
           description: The active lifecycle revision reviewed; this is evidence, not an authority transition.
 
   messages:
+    APPROVAL_REQUESTED:
+      name: APPROVAL_REQUESTED
+      title: A request needs signatures — tell every eligible signer who has not signed yet
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
+    APPROVAL_SIGNED:
+      name: APPROVAL_SIGNED
+      title: One more distinct signer signed
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
+    APPROVAL_COMPLETED:
+      name: APPROVAL_COMPLETED
+      title: The round is complete (APPROVED); an administrative change is already applied
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
+    APPROVAL_REJECTED:
+      name: APPROVAL_REJECTED
+      title: An eligible signer rejected it, or a policy change was SUPERSEDED
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
+    APPROVAL_EXPIRED:
+      name: APPROVAL_EXPIRED
+      title: Nobody completed (or released) it in time — nothing executes
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
+    PAYMENT_RELEASED:
+      name: PAYMENT_RELEASED
+      title: The held payment was posted to its rail
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
+    PAYMENT_RELEASE_FAILED:
+      name: PAYMENT_RELEASE_FAILED
+      title: The rail refused the released payment
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/approvalEvent'
+
     DelegationSpendReservationStateChanged:
       name: DelegationSpendReservationStateChanged
       title: Full current state of a delegated domestic-payment reservation

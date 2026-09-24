@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.campaign.application.port.out.IncentiveOfferRegistry
 import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -22,7 +22,9 @@ import java.util.UUID
 
 @RegisterRestClient(configKey = "incentive-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 6: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-campaign`
+// (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1/incentives")
 @Produces(MediaType.APPLICATION_JSON)
 interface IncentiveServiceClient {

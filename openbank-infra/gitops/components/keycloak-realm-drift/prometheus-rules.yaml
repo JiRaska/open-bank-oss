@@ -40,6 +40,10 @@ spec:
               to whatever other role the annotation lists, which is how ADR-0116's KYC four-eyes
               became unenforceable while every gate was green (#2540). Read the
               `keycloak-realm-drift` ConfigMap in the `iam` namespace for the per-role detail.
+              It also fails when a SERVICE ACCOUNT holds ROLE_OPERATOR/ROLE_ADMIN the template
+              does not grant (`privilegedServiceAccountDriftCount` > 0 — a matrix grant to a
+              machine identity), or when a client named as `service-account-<x>` in rego lacks
+              the `profile` default scope live (identity-gated rules never match) (#10486).
 
         # A detector that quietly stops running is indistinguishable from a clean realm.
         - alert: KeycloakRealmDriftScanStale

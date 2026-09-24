@@ -6,6 +6,8 @@ package com.openbank.interest.infrastructure.client
 
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 
 /**
@@ -65,14 +67,40 @@ object CapitalizationJournalFactory {
     fun idempotencyKey(posting: CapitalizationPosting): String =
         "interest-capitalization-${posting.accountId}-${posting.productId}-${posting.periodTo}"
 
-    fun buildRequest(posting: CapitalizationPosting, config: InterestLedgerConfig): PostJournalRequest {
+    /** The ledger's business-day zone: its accounting days open and cut off on Prague midnight. */
+    val LEDGER_ZONE: ZoneId = ZoneId.of("Europe/Prague")
+
+    /**
+     * Builds the journal. [bookingDate] is the ledger business date at the moment of posting.
+     *
+     * **Entry date vs value date.** The value date is always the period end — that is when the
+     * interest economically belongs to the customer. The ENTRY (booking) date is the later of the
+     * period end and [bookingDate], because the ledger refuses a posting dated into an accounting day
+     * that is no longer OPEN (ADR-0207 D3, `ClosedAccountingDayException` → 409) and its documented
+     * remedy for late activity is to book it forward into the open day. Posting on the period end
+     * itself (the normal scheduled path) is unchanged: there the two dates coincide. A late post —
+     * a recovery sweep completing a stranded claim days later — previously re-sent the period-end
+     * entry date into a TIED_OUT day and drew the same 409 on every attempt, forever (#10404).
+     *
+     * Neither date is part of the idempotency key, so a retry that straddles midnight still replays
+     * onto the same journal: the ledger answers a known key before it looks at any date.
+     */
+    /** The on-time journal: booked on its own period end, where entry and value date coincide. */
+    fun buildRequest(posting: CapitalizationPosting, config: InterestLedgerConfig): PostJournalRequest =
+        buildRequest(posting, config, posting.periodTo)
+
+    fun buildRequest(
+        posting: CapitalizationPosting,
+        config: InterestLedgerConfig,
+        bookingDate: LocalDate,
+    ): PostJournalRequest {
         val key = idempotencyKey(posting)
         return PostJournalRequest(
             idempotencyKey = key,
             // Deterministic in the same business identity as the key: a retry must not mint a new
             // transactionId, or the replayed entry would look like a different economic event.
             transactionId = UUID.nameUUIDFromBytes(key.toByteArray(Charsets.UTF_8)),
-            entryDate = posting.periodTo.toString(),
+            entryDate = maxOf(posting.periodTo, bookingDate).toString(),
             valueDate = posting.periodTo.toString(),
             description = "Interest capitalization ${posting.productId} to ${posting.periodTo}",
             lines = buildLines(posting, config),

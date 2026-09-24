@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA CLIENT certificate for account-service's mTLS call to sca-service (8443, client auth
+# REQUIRED) — the SavingsProposalService SCA approval (#10383). Distinct from
+# account-service-internal-tls in this same namespace, which is account-service's own SERVER
+# certificate for its 8443 listener (#10380). Same shape as notification-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: account-service-client-tls
+  namespace: accounts
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: account-service-client-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: account-service.accounts.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

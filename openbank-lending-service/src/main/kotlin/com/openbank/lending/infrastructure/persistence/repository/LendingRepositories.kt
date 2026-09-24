@@ -18,6 +18,7 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStateSummary
+import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.MoneyTotal
 import com.openbank.lending.infrastructure.persistence.entity.CollateralEntity
 import com.openbank.lending.infrastructure.persistence.entity.InstallmentEntity
@@ -318,6 +319,13 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             .setMaxResults(limit)
             .resultList
     }.map { it.map(mapper::toDomain) }
+
+    @WithSession override fun findOnBook(offBook: Set<LoanStatus>, limit: Int): Uni<List<Loan>> = sf.withSession { s ->
+        s.createQuery("FROM LoanEntity WHERE status NOT IN :offBook ORDER BY id ASC", LoanEntity::class.java)
+            .setParameter("offBook", offBook)
+            .setMaxResults(limit)
+            .resultList
+    }.map { it.map(mapper::toDomain) }
 }
 
 @ApplicationScoped
@@ -374,6 +382,18 @@ class InstallmentRepositoryImpl @Inject constructor(
     @WithTransaction override fun deleteUnpaid(loanId: LoanId): Uni<Int> = sf.withTransaction { s, _ ->
         s.createMutationQuery("DELETE FROM InstallmentEntity WHERE loanId = :l AND paid = false")
             .setParameter("l", loanId.value).executeUpdate()
+    }
+
+    @WithSession
+    override fun findByLoans(loanIds: Collection<UUID>): Uni<List<LoanInstallment>> = if (loanIds.isEmpty()) {
+        Uni.createFrom().item(emptyList())
+    } else {
+        sf.withSession { s ->
+            s.createQuery(
+                "FROM InstallmentEntity WHERE loanId IN :ids ORDER BY loanId ASC, number ASC",
+                InstallmentEntity::class.java,
+            ).setParameter("ids", loanIds).resultList
+        }.map { it.map(mapper::toDomain) }
     }
 }
 

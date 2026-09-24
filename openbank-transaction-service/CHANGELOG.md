@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.24.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.2...transaction-service-v1.24.3) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
+## [1.24.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.1...transaction-service-v1.24.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [1.24.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.0...transaction-service-v1.24.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **fx:** give fx-service an mTLS listener and point transaction-service's rate lookup at it ([#10401](https://github.com/JiRaska/open-bank-oss/issues/10401)) ([2523bfc](https://github.com/JiRaska/open-bank-oss/commit/2523bfccbc3f99843553973c26c06f04fc5eb8ee))
+
 ## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.23.0...transaction-service-v1.24.0) (2026-09-14)
 
 
