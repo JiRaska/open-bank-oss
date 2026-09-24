@@ -4,7 +4,12 @@
 
 package com.openbank.risk.application.port.`in`
 
+import com.openbank.risk.domain.cashflow.SnapshotCashFlows
+import com.openbank.risk.domain.curve.CurveIndex
+import com.openbank.risk.domain.curve.CurveSet
+import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.model.Position
+import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
 import java.time.LocalDate
 import java.util.UUID
@@ -19,4 +24,26 @@ interface SnapshotUseCase {
 
     /** Throws [UntiedSnapshotException] for a run that did not tie out (ADR-0314 D3). */
     suspend fun getPositions(id: UUID): List<Position>
+}
+
+/** An operator's curve upload: simple money-market quotes per index. */
+data class CreateCurveSetCommand(
+    val asOf: LocalDate,
+    val provenance: Provenance,
+    val source: String,
+    val quotes: Map<CurveIndex, List<MoneyMarketQuote>>,
+)
+
+interface CurveSetUseCase {
+    suspend fun create(command: CreateCurveSetCommand): CurveSet
+
+    suspend fun get(id: UUID): CurveSet
+}
+
+/** A run's flows, with the run and the curve set they were derived from. */
+data class CashFlowProjection(val run: SnapshotRun, val curveSet: CurveSet, val flows: SnapshotCashFlows)
+
+interface CashFlowUseCase {
+    /** Throws [com.openbank.risk.application.port.out.UntiedSnapshotException] for an UNTIED run. */
+    suspend fun project(runId: UUID, curveSetId: UUID): CashFlowProjection
 }

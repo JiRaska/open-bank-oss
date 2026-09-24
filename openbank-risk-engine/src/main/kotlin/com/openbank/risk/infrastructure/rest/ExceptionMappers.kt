@@ -4,19 +4,24 @@
 
 package com.openbank.risk.infrastructure.rest
 
+import com.openbank.risk.application.port.out.CurveSetNotFoundException
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.UntiedSnapshotException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
 /**
- * Only the two this service owns. `IllegalArgumentException` → 400 is mapped by libs-runtime
+ * Only the ones this service owns. `IllegalArgumentException` → 400 is mapped by libs-runtime
  * fleet-wide, and a service-local mapper for it is forbidden (ADR-0049, #526).
  */
 class ExceptionMappers {
 
     @ServerExceptionMapper
     fun notFound(e: SnapshotNotFoundException): Response =
+        Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+
+    @ServerExceptionMapper
+    fun curveSetNotFound(e: CurveSetNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
 
     /** ADR-0314 D3: an UNTIED run is never rendered — the caller gets the breaks instead. */
