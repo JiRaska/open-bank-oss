@@ -124,7 +124,7 @@ approved matching legacy collateral on an allocation insert, and a locked
 recheck at allocation approval. A proposal whose collateral was released can
 be rejected but cannot be approved. There is no
 application writer, source read contract, Context projector, UI or measured
-workload yet, so V18 alone does not deliver the P3 lens.
+workload yet, so V20 alone does not deliver the P3 lens.
 Separately, the existing Customer 360 credit-application overlay uses an optional
 database-bounded `limit` on the party application list. Omitting the parameter
 retains the existing full-list contract. A `(party_id, created_at DESC, id DESC)`
@@ -141,7 +141,7 @@ with the owning service before proposal or approval. The schema cannot establish
 that a guarantor party is verified, an asset identity is unique across documents,
 or a document hash matches the authoritative file.
 The future source adapter must verify these with their owners and recheck the
-current collateral status at publication/read time. No row in V18 alone is
+current collateral status at publication/read time. No row in V20 alone is
 eligible to become a Context edge.
 
 ### Source proof boundary for the first writer
@@ -175,7 +175,7 @@ and emits the versioned, reference-only event through Lending's transactional
 outbox. Context consumes it idempotently, preserves effective and recorded time,
 and reads detail through the source's case-scoped API under a separate OPA
 decision. Until the dedicated identity, source check, writer and outbox exist,
-the V18 rows must not be projected or presented as verified links. This
+the V20 rows must not be projected or presented as verified links. This
 deliberately leaves the schema-only stage dark rather than inventing evidence.
 
 ## Alternatives considered
