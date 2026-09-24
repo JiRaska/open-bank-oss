@@ -8,7 +8,7 @@ info:
   # MINOR is the required class. 1.22.0 is what live origin/main holds; read in the same turn and
   # 1.23.0 confirmed unused on this file, because a taken version is textually identical to a free
   # one and nothing in a merge can tell them apart.
-  version: 1.23.0
+  version: 1.24.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -1358,13 +1358,31 @@ components:
         termMonths:
           type: integer
           description: Requested term. Bounds are server configuration; outside them is a 400.
+    LoanRateTerms:
+      type: object
+      description: >-
+        ADR-0314. Omitted = FIXED. FIXED carries no other field; FLOATING requires all four. FLOATING
+        origination is a 400 while `lending.origination.floating-rate-enabled` is off (the default),
+        because nothing reprices a floating loan at its reset date yet. A catalog loan is always FIXED.
+      properties:
+        rateType: { type: string, enum: [FIXED, FLOATING], default: FIXED }
+        rateIndex:
+          type: string
+          nullable: true
+          enum: [CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3M]
+        spread: { type: number, nullable: true, description: Margin over rateIndex, decimal fraction. }
+        resetFrequencyMonths: { type: integer, nullable: true, enum: [1, 3, 6, 12] }
+        nextResetDate: { type: string, format: date, nullable: true, description: Not before firstDueDate. }
     LoanApplicationRequest:
       type: object
       required: [partyId, requestedAmount, nominalAnnualRate, termPeriods, firstDueDate]
       properties:
         partyId: { type: string, format: uuid }
         requestedAmount: { $ref: '#/components/schemas/Money' }
-        nominalAnnualRate: { type: number }
+        nominalAnnualRate:
+          type: number
+          description: The rate applied. For a FLOATING loan, index + spread at origination.
+        rateTerms: { $ref: '#/components/schemas/LoanRateTerms' }
         termPeriods: { type: integer }
         periodsPerYear: { type: integer, default: 12 }
         method:
