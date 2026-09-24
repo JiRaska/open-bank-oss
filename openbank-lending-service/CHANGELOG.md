@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.1...lending-service-v0.35.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **lending:** four-eyes ledger backfill for the 44 loans that never posted ([#10746](https://github.com/JiRaska/open-bank-oss/issues/10746)) ([#10765](https://github.com/JiRaska/open-bank-oss/issues/10765)) ([c86b350](https://github.com/JiRaska/open-bank-oss/commit/c86b350bf0531f429722988b93946307b1572512))
+
 ## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.0...lending-service-v0.35.1) (2026-09-24)
 
 
