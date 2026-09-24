@@ -3319,10 +3319,14 @@ gates:
     selftest_inputs:
       - ".github/scripts/check-release-evidence-coverage.py"
       - ".github/scripts/test-release-evidence-upload.py"
+      - ".github/scripts/verify-release-evidence-manifest.py"
+      - ".github/scripts/test-verify-release-evidence-manifest.py"
       - ".github/workflows/release-please.yml"
+      - ".github/workflows/verify-release-evidence.yml"
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
       python3 .github/scripts/test-release-evidence-upload.py
+      python3 .github/scripts/test-verify-release-evidence-manifest.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
 
