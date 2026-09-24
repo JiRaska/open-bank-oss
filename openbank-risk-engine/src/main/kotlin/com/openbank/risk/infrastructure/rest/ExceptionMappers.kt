@@ -7,6 +7,7 @@ package com.openbank.risk.infrastructure.rest
 import com.openbank.risk.application.port.out.CurveSetNotFoundException
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.UntiedSnapshotException
+import com.openbank.risk.domain.model.InvalidLoanContractException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -23,6 +24,15 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun curveSetNotFound(e: CurveSetNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+
+    /**
+     * Lending answered a loan book the engine cannot interpret (ADR-0314 D4). The upstream broke its
+     * contract, so this is a 502 and no run is stored — never a guess at what the loan meant.
+     */
+    @ServerExceptionMapper
+    fun invalidLoan(e: InvalidLoanContractException): Response = Response.status(Response.Status.BAD_GATEWAY)
+        .entity(mapOf("error" to e.message))
+        .build()
 
     /** ADR-0314 D3: an UNTIED run is never rendered — the caller gets the breaks instead. */
     @ServerExceptionMapper

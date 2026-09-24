@@ -100,6 +100,13 @@ spec:
             # label is a decision of this environment, not an inherited default.
             - name: OPENBANK_RISK_PROVENANCE
               value: synthetic
+            # ADR-0314 D4: the loan-book read from lending is OFF here, deliberately. lending serves
+            # no private-CA mTLS listener yet and ASVS V9.1 forbids a new plaintext east-west edge,
+            # so there is no LENDING_SERVICE_URL to give. Off, Loans Receivable stays a GL-level
+            # position (the pre-D4 snapshot); turning it on needs lending's 8443 listener, a client
+            # cert and this edge in the network policies — one change, not a flag flip.
+            - name: OPENBANK_RISK_LENDING_ENABLED
+              value: "false"
             # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED); client cert
             # risk-internal-tls, %prod TLS bucket ledger-authority. ASVS V9.1 forbids a new
             # plaintext edge, so the legacy HTTP/8101 port is not used.

@@ -7,7 +7,9 @@ package com.openbank.risk.application.port.out
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
+import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LedgerInputs
+import com.openbank.risk.domain.model.LoanContract
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutMismatch
@@ -21,19 +23,33 @@ interface LedgerPort {
     suspend fun read(asOf: LocalDate): LedgerInputs
 }
 
+/**
+ * Reads lending's loan book at snapshot time (ADR-0314 D4). A PULL, not an event consumer: no
+ * event carries a loan's remaining schedule — see [com.openbank.risk.domain.model.LoanContract].
+ */
+interface LendingPort {
+    suspend fun readLoanBook(asOf: LocalDate): List<LoanContract>
+}
+
 interface SnapshotRepository {
     suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun?
 
     suspend fun findById(id: UUID): SnapshotRun?
 
     /**
-     * Stores the run and its positions in ONE transaction, idempotently on (asOf, inputHash).
-     * Returns the run that is stored afterwards — [run] itself, or the one a concurrent request
-     * committed first under the same natural key.
+     * Stores the run, its positions and its instruments in ONE transaction, idempotently on
+     * (asOf, inputHash). Returns the run that is stored afterwards — [run] itself, or the one a
+     * concurrent request committed first under the same natural key.
      */
-    suspend fun saveIfAbsent(run: SnapshotRun, positions: List<Position>): SnapshotRun
+    suspend fun saveIfAbsent(
+        run: SnapshotRun,
+        positions: List<Position>,
+        instruments: List<Instrument> = emptyList(),
+    ): SnapshotRun
 
     suspend fun findPositions(runId: UUID): List<Position>
+
+    suspend fun findInstruments(runId: UUID): List<Instrument>
 }
 
 /** One currency rate from a published central-bank fixing (ADR-0314 D5). */

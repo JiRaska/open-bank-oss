@@ -525,7 +525,31 @@ What that changes, and what it does not:
 | **D**oS / availability | A campaign sweep drives call volume into lending | Reduced, not solved: the check sits at DELIVERY rather than enrolment, so the volume is what is actually being sent today rather than everyone in a segment. Unit cost (one DB read + one analytics call per party) is unchanged and is recorded in #8918. |
 | **T**ampering | A lending outage is read by the caller as permission to market | campaign-service raises rather than answering "not allowed": an outage is retriable infrastructure state, never a customer-policy suppression, so nothing is sent AND nothing is recorded as a distress refusal. |
 
+## 9f. The risk engine's loan-book read (ADR-0314 D4) — STRIDE supplement
+
+`GET /api/v1/lending/loan-book?asOf=` is a NEW inbound REST surface on a money-path service,
+modelled here before any deployed caller exists (ADR-0030 D2). It moves a trust boundary: a
+machine can now read the WHOLE loan book in one call — every on-book loan's terms, remaining
+schedule, latest IFRS 9 stage and party id (as an opaque reference) — where before the only bulk
+reads were capped console views for staff.
+
+It is READ-ONLY BY CONSTRUCTION: one `GET` (`LendingSecurityTest` asserts no write verb exists on
+the resource), three repository reads, no posting, no event, no state change. Why it exists: the
+risk engine must tie every loan out to the ledger's Loans Receivable, and no event carries a
+loan's remaining schedule, so the engine pulls it at snapshot time.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **E**levation of privilege | The shared M2M identity reaches other lending actions through the door opened for this read | `@RolesAllowed` admits `ROLE_API` on this ONE endpoint only. OPA rule `service-risk-loan-book-read` is scoped to one action and one principal (`service-account-openbank-services`); rego tests assert that principal still cannot disburse, and that another `ROLE_API` service account is denied. |
+| **I**nformation disclosure | The whole book, with party references, leaves lending in one response | Callers are the credit desk, admins and the shared M2M client — the last is every backend service at once (ADR-0206 D5 limit, as for 9e). The edge proxy is explicitly vetoed (`prohibited`) because base `operator-read-any` would otherwise admit its `ROLE_OPERATOR`. No name, address or national id is returned — only the party UUID. No deployed caller yet: risk-engine runs with the read switched off until lending serves an mTLS listener, so there is no network-policy edge to review today. |
+| **T**ampering / misleading | A partial book is read as the whole book and the risk figures understate exposure | The book is returned whole or not at all: over 20 000 loans the call fails (`LoanBookTooLargeException`) rather than truncating. The outstanding is derived from the remaining installments, so the two cannot disagree in the response. |
+| **T**ampering / misleading | A past `asOf` is read as exact | As-of reconstruction is best effort and says so in the OpenAPI description: status has no history and a reschedule replaces the unpaid tail. The consumer ties every loan out against the ledger at the same date; where the reconstruction is wrong the run is UNTIED, not silently accepted. |
+| **D**oS / availability | A snapshot storm loads lending's database | Snapshots are operator-triggered and idempotent on their input; each read is three indexed queries. Not rate-limited beyond the fleet limiter — accepted for a single internal caller, revisit if the engine gains a scheduler. |
+| **R**epudiation | Which book did a risk run see | The risk engine hashes this response into its run's input hash (ADR-0314 D2), so a figure is tied to the exact book read. |
+
 ## 10. Change log
+
+- **2026-09-24** — **Trust-boundary change: the risk engine's loan-book read (ADR-0314 D4, #10618).** New READ-ONLY `GET /api/v1/lending/loan-book?asOf=` (action `lending.book.read`, `@RolesAllowed` ROLE_API / ROLE_CREDIT_RISK / ROLE_ADMIN) returning every on-book loan with its Loans Receivable GL code, rate terms, remaining installments and latest IFRS 9 stage; see section 9f. OPA: new identity-scoped `service-risk-loan-book-read` for the shared M2M account, the action added to `credit-risk-desk`, and the edge vetoed in `prohibited`. Two new repository reads (`findOnBook`, `findByLoans`); `LendingGlChart` now also exposes the Loans Receivable CODE per currency (the UUID set is derived from it, unchanged values). No write, posting, event, migration or change to any amount. No deployed caller yet (risk-engine's read is off until lending has an mTLS listener), so no network-policy edge. Money-path: the PR needs two approvals. Rollback: revert the commit.
 
 - **2026-09-24** — Loan rate terms (ADR-0314 D5, #10618). `loan_application` and `loan` gain `rate_type` (FIXED default; every existing row is FIXED, which is true since nothing here has ever repriced), and the FLOATING terms `rate_index` (closed enum), `spread`, `reset_frequency_months` (1/3/6/12) and `next_reset_date`, under a V18 CHECK that permits exactly the two shapes. They are accepted on the existing `POST /applications` under unchanged authz, validated to 400 first, copied onto the loan at disbursement, and added to the existing `loan.disbursed` payload. No new caller, endpoint, topic or privilege. **Tampering / economic:** the schedule and every posting still use `nominalAnnualRate`; the terms change no amount. **FLOATING origination is OFF by default** (`lending.origination.floating-rate-enabled`), because no engine reprices a floating loan at its reset date yet, and a floating loan whose rate silently never moves would misstate both the customer contract and the risk engine's view. Catalog loans are FIXED-only. Rollback: revert; V18 is additive and its comment carries the down-migration.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
