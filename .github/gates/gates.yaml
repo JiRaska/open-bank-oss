@@ -3318,9 +3318,11 @@ gates:
     min_subjects: 60
     selftest_inputs:
       - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/scripts/test-release-evidence-upload.py"
       - ".github/workflows/release-please.yml"
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
+      python3 .github/scripts/test-release-evidence-upload.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
 

@@ -172,7 +172,7 @@ def missing_release_assets(tag: str, actual: set[str]) -> list[str]:
     return sorted(expected_release_assets(tag) - actual)
 
 
-def fetch_release_asset_names(repository: str, tag: str, runner=None) -> tuple[set[str] | None, str | None]:
+def fetch_release_assets(repository: str, tag: str, runner=None) -> tuple[dict[str, int] | None, str | None]:
     if runner is None:
         runner = subprocess.run
     endpoint = f"repos/{repository}/releases/tags/{quote(tag, safe='-._')}"
@@ -192,10 +192,17 @@ def fetch_release_asset_names(repository: str, tag: str, runner=None) -> tuple[s
         return None, f"UNRESOLVED malformed release API response for {tag}: {exc}"
     assets = release.get("assets") if isinstance(release, dict) else None
     if not isinstance(assets, list) or any(
-        not isinstance(asset, dict) or not isinstance(asset.get("name"), str) for asset in assets
+        not isinstance(asset, dict)
+        or not isinstance(asset.get("name"), str)
+        or not isinstance(asset.get("size"), int)
+        or isinstance(asset.get("size"), bool)
+        or asset["size"] < 0
+        for asset in assets
     ):
         return None, f"UNRESOLVED malformed release asset list for {tag}"
-    return {asset["name"] for asset in assets}, None
+    if len({asset["name"] for asset in assets}) != len(assets):
+        return None, f"UNRESOLVED duplicate release asset names for {tag}"
+    return {asset["name"]: asset["size"] for asset in assets}, None
 
 
 def verify_released_assets(paths: list[str], outputs: dict, repository: str, runner=None) -> list[str]:
@@ -212,14 +219,17 @@ def verify_released_assets(paths: list[str], outputs: dict, repository: str, run
         if not isinstance(tag, str) or not tag:
             findings.append(f"UNRESOLVED release-please produced no tag_name for released path {path}")
             continue
-        actual, error = fetch_release_asset_names(repository, tag, runner)
+        actual, error = fetch_release_assets(repository, tag, runner)
         if error:
             findings.append(error)
             continue
-        missing = missing_release_assets(tag, actual or set())
+        missing = missing_release_assets(tag, set(actual or {}))
         if missing:
             findings.append(f"{tag} is missing required release evidence assets: {', '.join(missing)}")
-        else:
+        empty = sorted(name for name in expected_release_assets(tag) if actual and actual.get(name) == 0)
+        if empty:
+            findings.append(f"{tag} has empty release evidence assets: {', '.join(empty)}")
+        if not missing and not empty:
             print(f"PASS {tag}: all {len(REQUIRED_ASSET_SUFFIXES)} required release evidence assets are attached")
     return findings
 
@@ -253,6 +263,9 @@ def release_asset_workflow_findings(workflow: dict) -> list[str]:
     for argument in ("--verify-release-assets", "--paths-released", "--rp-outputs", "--repository"):
         if argument not in command:
             findings.append(f"release-evidence-assets does not invoke verifier argument {argument}")
+    for prerequisite in ("needs.release-evidence.result", "needs.provenance-subjects.result", "needs.provenance.result"):
+        if prerequisite not in command:
+            findings.append(f"release-evidence-assets does not check upstream success: {prerequisite}")
     return findings
 
 
@@ -260,25 +273,30 @@ def self_test_release_assets() -> list[tuple[str, bool]]:
     tag = "fixture-v1.2.3"
     expected = expected_release_assets(tag)
 
-    def response(assets: set[str], returncode: int = 0, stderr: str = ""):
-        payload = json.dumps({"assets": [{"name": name} for name in sorted(assets)]})
+    def response(assets: dict[str, int], returncode: int = 0, stderr: str = ""):
+        payload = json.dumps({"assets": [{"name": name, "size": size} for name, size in sorted(assets.items())]})
         return subprocess.CompletedProcess(["gh", "api"], returncode, payload, stderr)
 
     def complete_runner(_command, **_kwargs):
-        return response(expected)
+        return response({name: 100 for name in expected})
 
     complete = verify_released_assets(["openbank-fixture"], {"openbank-fixture--tag_name": tag}, "owner/repo", complete_runner)
     incomplete_names = expected - {f"{tag}.evidence.json.sig"}
 
     def incomplete_runner(_command, **_kwargs):
-        return response(incomplete_names)
+        return response({name: 100 for name in incomplete_names})
 
     incomplete = verify_released_assets(["openbank-fixture"], {"openbank-fixture--tag_name": tag}, "owner/repo", incomplete_runner)
 
     def empty_runner(_command, **_kwargs):
-        return response(set())
+        return response({})
 
     empty = verify_released_assets(["openbank-fixture"], {"openbank-fixture--tag_name": tag}, "owner/repo", empty_runner)
+
+    def zero_byte_runner(_command, **_kwargs):
+        return response({name: 0 if name == f"{tag}.vex.json" else 100 for name in expected})
+
+    zero_byte = verify_released_assets(["openbank-fixture"], {"openbank-fixture--tag_name": tag}, "owner/repo", zero_byte_runner)
 
     def rate_limited_runner(_command, **_kwargs):
         return subprocess.CompletedProcess(
@@ -290,6 +308,7 @@ def self_test_release_assets() -> list[tuple[str, bool]]:
         ("complete release passes with all nine assets", not complete),
         ("release missing a signature is rejected", any(f"{tag}.evidence.json.sig" in item for item in incomplete)),
         ("release with no assets is rejected", bool(empty) and len(expected) == len(REQUIRED_ASSET_SUFFIXES)),
+        ("release with a zero-byte asset is rejected", any("empty release evidence assets" in item for item in zero_byte)),
         ("rate-limited release lookup is unresolved, not a pass", any("UNRESOLVED release API rate limit" in item for item in unreadable)),
         ("released path without a tag is unresolved", bool(verify_released_assets(["openbank-missing-tag"], {}, "owner/repo", complete_runner))),
     ]
@@ -372,6 +391,16 @@ def self_test() -> int:
     broken_workflow = release_asset_workflow_findings({"jobs": {}})
     results.append(("workflow without the postcondition is rejected", bool(broken_workflow)))
     print(f"  workflow without the postcondition is rejected: {'PASS' if broken_workflow else 'FAIL'}")
+    workflow_without_upstream_check = yaml.safe_load(
+        (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
+    )
+    postcondition = workflow_without_upstream_check["jobs"]["release-evidence-assets"]
+    postcondition["steps"] = [
+        step for step in postcondition["steps"] if step.get("name") != "Require successful evidence and provenance jobs"
+    ]
+    unguarded = release_asset_workflow_findings(workflow_without_upstream_check)
+    results.append(("workflow without upstream success check is rejected", any("upstream success" in item for item in unguarded)))
+    print(f"  workflow without upstream success check is rejected: {'PASS' if unguarded else 'FAIL'}")
 
     ok = all(flagged for _, flagged in results)
     print()
