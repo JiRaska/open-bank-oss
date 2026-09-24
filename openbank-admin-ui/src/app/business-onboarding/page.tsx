@@ -439,6 +439,8 @@ export default function BusinessOnboardingPage() {
   const [unavail, setUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [graphSelection, setGraphSelection] = useState({ caseId: '', version: 0 })
+  const graphRef = useRef<HTMLDivElement>(null)
   const loadGeneration = useRef(0)
 
   const load = useCallback(async () => {
@@ -507,7 +509,7 @@ export default function BusinessOnboardingPage() {
           <RefreshCw size={14} aria-hidden="true" style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
         </button>}
       />
-      <Can permission="business-onboarding:ownership-evidence"><KybOwnershipInvestigation /></Can>
+      <Can permission="business-onboarding:ownership-evidence"><div ref={graphRef}><KybOwnershipInvestigation key={graphSelection.version} initialCaseId={graphSelection.caseId} /></div></Can>
       {loading && cases.length === 0 ? (
         <LoadingState
           label={t('Načítám frontu…', 'Loading the queue…')}
@@ -564,6 +566,14 @@ export default function BusinessOnboardingPage() {
                   {t('případ', 'case')} {shortId(c.id)}
                 </span>
               </div>
+              <Can permission="business-onboarding:ownership-evidence">
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 10 }} onClick={() => {
+                  setGraphSelection(previous => ({ caseId: c.id, version: previous.version + 1 }))
+                  graphRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+                }}>
+                  {t('Vybrat případ v grafu vlastnictví', 'Select case in ownership graph')}
+                </button>
+              </Can>
               {c.reviewReason && (
                 <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>{c.reviewReason}</div>
               )}
