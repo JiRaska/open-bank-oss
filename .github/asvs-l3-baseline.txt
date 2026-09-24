@@ -296,3 +296,18 @@ V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plai
 V9.1 openbank-infra/gitops/components/case-coordinator/pilot-case-injector.yaml:173: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:126: plaintext http:// env value http://document-service.documents.svc:8143
+# Tempo OTLP endpoint for the Deployments that had none and exported to localhost:4317.
+# Plaintext for the same reason as every other tempo.observability.svc:4317 line here;
+# retiring it is the mesh-mTLS work (baseline Layer 1).
+V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/communication/communication-service.yaml:47: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/context/context-service.yaml:36: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/finrep/finrep-service.yaml:54: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/incentive/incentive-service.yaml:49: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:73: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/loyalty/loyalty-service.yaml:119: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/referral/referral-service.yaml:42: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/risk/risk-engine.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/wealth/wealth-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
