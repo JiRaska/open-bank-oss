@@ -11,6 +11,7 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.infrastructure.persistence.entity.LedgerBackfillRequestEntity
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.governance.MakerCheckerViolation
 import com.openbank.libs.governance.Proposal
@@ -86,7 +87,7 @@ class LedgerBackfillService(
 
     /** Pure read: the exact journal set, per-GL-relevant totals and the tie-out. Writes nothing anywhere. */
     fun dryRun(scope: BackfillScope): Uni<BackfillPlan> {
-        val today = LocalDate.now(clock.withZone(BUSINESS_ZONE))
+        val today = AccountingClock.bank(clock).today()
         require(!scope.cutoverDate.isBefore(today)) {
             "cutoverDate ${scope.cutoverDate} is before today ($today): the backfill books into the current " +
                 "open accounting day and never back-dates into closed days — original dates go in valueDate"
@@ -114,7 +115,12 @@ class LedgerBackfillService(
                 createdAt = now
                 updatedAt = now
             }
-            requests.save(entity).call { saved -> audit(saved, "PROPOSED", maker) }.map { it.toView() }
+            // Natural-key replay (#8351): a retried propose for the same plan returns the pending
+            // request instead of stacking a second one awaiting a checker.
+            requests.findProposedByHash(plan.planHash).flatMap { twin ->
+                twin?.let { Uni.createFrom().item(it.toView()) }
+                    ?: requests.save(entity).call { saved -> audit(saved, "PROPOSED", maker) }.map { it.toView() }
+            }
         }
     }
 
@@ -172,7 +178,7 @@ class LedgerBackfillService(
                 "propose and approve a new request"
         }
         check(plan.executable) { "plan is no longer executable: ${refusal(plan)}" }
-        val today = LocalDate.now(clock.withZone(BUSINESS_ZONE))
+        val today = AccountingClock.bank(clock).today()
         check(!entity.cutoverDate.isBefore(today)) {
             "cutoverDate ${entity.cutoverDate} has passed; propose a new request with a current cut-over date"
         }
@@ -281,8 +287,8 @@ class LedgerBackfillService(
     )
 
     companion object {
-        /** The ledger's accounting day is a Prague business day (AccountingDayScheduler). */
-        val BUSINESS_ZONE: ZoneId = ZoneId.of("Europe/Prague")
+        /** The bank's accounting day (AccountingClock, ADR-0207 D1): business dates derive from it. */
+        val BUSINESS_ZONE: ZoneId = AccountingClock.BANK_ZONE
         const val MAX_LOANS = 10_000
         val EXECUTION_LEASE: Duration = Duration.ofMinutes(15)
         const val POSTED = "POSTED"

@@ -20,6 +20,7 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -68,6 +69,7 @@ class LedgerBackfillIT {
     private val cutover = LocalDate.now(ZoneId.of("Europe/Prague"))
     private lateinit var requestId: String
     private var expectedLegs = 0
+    private var applicationId: UUID? = null
 
     private fun mine() = ledger.journals.filterKeys {
         it.contains(czkLoan.toString()) || it.contains(eurLoan.toString())
@@ -92,6 +94,7 @@ class LedgerBackfillIT {
                 jsonPath().getString("id")
             },
         )
+        this.applicationId = applicationId
         sql(
             """
             INSERT INTO loan(id, application_id, party_id, principal, currency, nominal_annual_rate, term_periods,
@@ -303,6 +306,18 @@ class LedgerBackfillIT {
         Given { queryParam("execute", true) } When {
             post("/api/v1/lending/ledger-backfill/requests/$requestId/execute")
         } Then { statusCode(422) }
+    }
+
+    /** The IT database is shared by every @QuarkusTest: leave nothing behind for book-wide counts (LendingSummaryIT). */
+    @AfterAll
+    fun cleanup() {
+        val loans = "'$czkLoan', '$eurLoan'"
+        sql("DELETE FROM lending_outbox WHERE aggregate_id IN (SELECT id FROM ledger_backfill_request)")
+        sql("DELETE FROM ledger_backfill_request")
+        sql("DELETE FROM installment WHERE loan_id IN ($loans)")
+        sql("DELETE FROM loan_provisioning WHERE loan_id IN ($loans)")
+        sql("DELETE FROM loan WHERE id IN ($loans)")
+        applicationId?.let { sql("DELETE FROM loan_application WHERE id = '$it'") }
     }
 
     private fun state(): String = dataSource.connection.use { c ->

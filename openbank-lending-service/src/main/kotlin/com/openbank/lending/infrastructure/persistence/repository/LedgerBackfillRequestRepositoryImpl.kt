@@ -29,6 +29,10 @@ class LedgerBackfillRequestRepositoryImpl :
     @WithSession
     override fun findById(id: UUID): Uni<LedgerBackfillRequestEntity?> = find("id", id).firstResult()
 
+    @WithSession
+    override fun findProposedByHash(planHash: String): Uni<LedgerBackfillRequestEntity?> =
+        find("planHash = ?1 and state = ?2", planHash, ProposalState.PROPOSED).firstResult()
+
     @WithTransaction
     override fun compareAndSetDecision(entity: LedgerBackfillRequestEntity): Uni<Int> =
         Panache.getSession().flatMap { session ->

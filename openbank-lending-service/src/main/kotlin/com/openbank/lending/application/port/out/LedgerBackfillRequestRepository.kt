@@ -14,6 +14,9 @@ interface LedgerBackfillRequestRepository {
     fun save(entity: LedgerBackfillRequestEntity): Uni<LedgerBackfillRequestEntity>
     fun findById(id: UUID): Uni<LedgerBackfillRequestEntity?>
 
+    /** A still-PROPOSED request for the same plan hash — the natural key a retried propose replays to. */
+    fun findProposedByHash(planHash: String): Uni<LedgerBackfillRequestEntity?>
+
     /** Apply a decision only if the row is still PROPOSED, in one statement. `1` = this caller won. */
     fun compareAndSetDecision(entity: LedgerBackfillRequestEntity): Uni<Int>
 
