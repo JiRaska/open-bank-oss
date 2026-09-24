@@ -26,7 +26,7 @@ import java.time.format.DateTimeParseException
 import java.util.UUID
 
 /**
- * Balance-sheet snapshot runs (ADR-0314 D1–D3).
+ * Balance-sheet snapshot runs (ADR-0314 D1–D4).
  *
  * NOTE the annotation order: `@Path` sits immediately above `class`. A Kotlin annotation binds to
  * the NEXT declaration, so a top-level helper slipped in between silently steals it and the
@@ -74,6 +74,16 @@ class RiskResource {
         val positions = snapshots.getPositions(id)
         val run = snapshots.getRun(id)
         return Response.ok(PositionsResponse(run.id, run.asOf.toString(), positions.map { it.toDto() })).build()
+    }
+
+    @GET
+    @Path("/{id}/instruments")
+    @Operation(summary = "Contract-level instruments of a TIED_OUT run (ADR-0314 D4); 409 for an UNTIED one")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun instruments(@PathParam("id") id: UUID): Response {
+        val instruments = snapshots.getInstruments(id)
+        val run = snapshots.getRun(id)
+        return Response.ok(InstrumentsResponse(run.id, run.asOf.toString(), instruments.map { it.toDto() })).build()
     }
 
     /**

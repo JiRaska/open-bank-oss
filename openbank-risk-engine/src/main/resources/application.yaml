@@ -64,6 +64,11 @@ quarkus:
       # gitops Deployment env, where gen-network-policies.py can see the edge; a cluster URL
       # baked in here would be an edge that generator cannot see (network-policy-code-edges).
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+    # ADR-0314 D4: lending's loan-book read. Local default only, as for ledger above. NOT yet in the
+    # gitops Deployment: lending serves no mTLS listener, and ASVS V9.1 forbids a new plaintext
+    # edge, so the deployed engine runs with openbank.risk.lending.enabled=false until it does.
+    lending-service:
+      url: ${LENDING_SERVICE_URL:http://localhost:8126}
 
   smallrye-reactive-messaging:
     kafka:
@@ -143,6 +148,10 @@ openbank:
     # ADR-0313 D13: a run says which world it describes. Defaults to synthetic, so a run is
     # labelled production only where an environment explicitly says so.
     provenance: ${OPENBANK_RISK_PROVENANCE:synthetic}
+    lending:
+      # ADR-0314 D4: read lending's loan book into every snapshot (loans become contract-level
+      # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
+      enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

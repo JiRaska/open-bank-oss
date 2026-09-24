@@ -1,0 +1,241 @@
+{
+  "consumer": {
+    "name": "openbank-risk-engine"
+  },
+  "interactions": [
+    {
+      "description": "GET the loan book as of a date",
+      "providerStates": [
+        {
+          "name": "the loan book holds one active FIXED CZK loan with two remaining installments"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/lending/loan-book",
+        "query": {
+          "asOf": [
+            "2020-06-30"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "asOf": "2020-06-30",
+          "loans": [
+            {
+              "counterpartyRef": "0190a4c0-0000-7000-8000-000000000001",
+              "currency": "CZK",
+              "disbursedOn": "2000-01-31",
+              "glAccountCode": "1200",
+              "ifrs9Stage": null,
+              "loanId": "0190a4c0-0000-7000-8000-00000000000a",
+              "maturityDate": "2000-01-31",
+              "method": "ANNUITY",
+              "nominalAnnualRate": 0.06,
+              "outstandingPrincipal": 2000.0,
+              "periodsPerYear": 12,
+              "rateTerms": {
+                "nextResetDate": null,
+                "rateIndex": null,
+                "rateType": "FIXED",
+                "resetFrequencyMonths": null,
+                "spread": null
+              },
+              "remainingInstallments": [
+                {
+                  "dueDate": "2000-01-31",
+                  "interest": 10.0,
+                  "number": 2,
+                  "principal": 1000.0
+                }
+              ],
+              "status": "ACTIVE"
+            }
+          ]
+        },
+        "generators": {
+          "body": {
+            "$.loans[*].disbursedOn": {
+              "format": "yyyy-MM-dd",
+              "type": "Date"
+            },
+            "$.loans[*].maturityDate": {
+              "format": "yyyy-MM-dd",
+              "type": "Date"
+            },
+            "$.loans[*].remainingInstallments[*].dueDate": {
+              "format": "yyyy-MM-dd",
+              "type": "Date"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.loans": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.loans[*].counterpartyRef": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.loans[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.loans[*].disbursedOn": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd",
+                  "match": "date"
+                }
+              ]
+            },
+            "$.loans[*].glAccountCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.loans[*].loanId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.loans[*].maturityDate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd",
+                  "match": "date"
+                }
+              ]
+            },
+            "$.loans[*].method": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.loans[*].nominalAnnualRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.loans[*].outstandingPrincipal": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.loans[*].periodsPerYear": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.loans[*].remainingInstallments": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.loans[*].remainingInstallments[*].dueDate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd",
+                  "match": "date"
+                }
+              ]
+            },
+            "$.loans[*].remainingInstallments[*].interest": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.loans[*].remainingInstallments[*].number": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.loans[*].remainingInstallments[*].principal": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.loans[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-lending-service"
+  }
+}

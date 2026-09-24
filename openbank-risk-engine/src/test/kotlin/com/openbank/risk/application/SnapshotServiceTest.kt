@@ -12,6 +12,7 @@ import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.BOB
 import com.openbank.risk.domain.Fixtures.sl
+import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LedgerInputs
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.Provenance
@@ -42,14 +43,23 @@ class SnapshotServiceTest {
 
         override suspend fun findById(id: UUID) = runs.firstOrNull { it.id == id }
 
-        override suspend fun saveIfAbsent(run: SnapshotRun, positions: List<Position>): SnapshotRun {
+        val instruments = mutableMapOf<UUID, List<Instrument>>()
+
+        override suspend fun saveIfAbsent(
+            run: SnapshotRun,
+            positions: List<Position>,
+            instruments: List<Instrument>,
+        ): SnapshotRun {
             findByNaturalKey(run.asOf, run.inputHash)?.let { return it }
             runs += run
             this.positions[run.id] = positions
+            this.instruments[run.id] = instruments
             return run
         }
 
         override suspend fun findPositions(runId: UUID) = positions[runId].orEmpty()
+
+        override suspend fun findInstruments(runId: UUID) = instruments[runId].orEmpty()
     }
 
     private val clock = Clock.fixed(Instant.parse("2026-10-01T06:00:00Z"), ZoneOffset.UTC)

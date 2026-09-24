@@ -3,7 +3,9 @@ info:
   title: OpenBank Risk Engine API
   # 1.0.0: first contract (ADR-0314 phase 0, issue #10618).
   # 1.1.0: curve sets and snapshot cash flows (ADR-0313 D4, ADR-0314 D6) — additive.
-  version: 1.1.0
+  # 1.2.0: loans as contract-level instruments (ADR-0314 D4) — LOAN position kind, instrumentId,
+  #        GET .../instruments; cash flows now expand loans. Additive.
+  version: 1.2.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -13,6 +15,11 @@ info:
 
     Positions carry the trial-balance sign convention (`debit − credit`). Every run states its
     `provenance` — `synthetic` or `production` (ADR-0313 D13).
+
+    Loans (ADR-0314 D4) are read from lending's loan book at snapshot time — a deliberate pull,
+    since no event carries a loan's remaining schedule — and enter the run as contract-level
+    instruments (`LOAN` positions on Loans Receivable 1200–1203), tied out to the ledger exactly
+    like customer deposits. The loan book is part of the run's input hash.
 
     Curve sets are uploaded by operators as simple money-market quotes (tenors up to 1Y) and
     bootstrapped into continuously-compounded zero curves (ACT/365F, linear on zero rates, flat
@@ -106,6 +113,33 @@ paths:
           description: No such run
         '409':
           description: The run is UNTIED; its positions are never served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/instruments:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotInstruments
+      summary: Contract-level instruments of a TIED_OUT run (ADR-0314 D4)
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run's instruments (loans in this slice)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Instruments'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run
+        '409':
+          description: The run is UNTIED; its instruments are never served (ADR-0314 D3)
           content:
             application/json:
               schema:
@@ -282,7 +316,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [SUB_LEDGER, GL_ACCOUNT]
+          enum: [SUB_LEDGER, GL_ACCOUNT, LOAN]
         glAccountCode:
           type: [string, 'null']
         glAccountType:
@@ -295,6 +329,98 @@ components:
         amount:
           type: number
           description: Trial-balance sign convention, debit − credit.
+        instrumentId:
+          type: [string, 'null']
+          description: For a LOAN position, the instrument it came from.
+
+    Instrument:
+      type: object
+      required: [id, kind, currency, outstanding]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [AMORTISING_LOAN, BULLET, NON_MATURITY_DEPOSIT, TERM_DEPOSIT, CURRENT_ACCOUNT, FX_POSITION,
+            CASH_NOSTRO, BOND, MONEY_MARKET_DEAL, DERIVATIVE_LEG, EQUITY_CAPITAL]
+        glAccountCode:
+          type: [string, 'null']
+        currency:
+          type: string
+        outstanding:
+          type: number
+          description: Trial-balance sign convention, debit − credit (a loan is positive).
+        valueDate:
+          type: [string, 'null']
+          format: date
+        maturityDate:
+          type: [string, 'null']
+          format: date
+        rateTerms:
+          type: [object, 'null']
+          properties:
+            rateType:
+              type: string
+              enum: [FIXED, FLOATING]
+            currentAnnualRate:
+              type: [number, 'null']
+            index:
+              type: [string, 'null']
+              enum: [CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3M, null]
+            spread:
+              type: [number, 'null']
+            resetFrequencyMonths:
+              type: [integer, 'null']
+            nextResetDate:
+              type: [string, 'null']
+              format: date
+        counterpartyRef:
+          type: [string, 'null']
+          description: Opaque party reference; identity stays in party-service.
+        ifrs9Stage:
+          type: [string, 'null']
+        loan:
+          type: [object, 'null']
+          properties:
+            method:
+              type: string
+              enum: [ANNUITY, EQUAL_PRINCIPAL, BULLET]
+            periodsPerYear:
+              type: integer
+            remainingPeriods:
+              type: integer
+            nextDueDate:
+              type: [string, 'null']
+              format: date
+            remainingInstallments:
+              type: array
+              items:
+                type: object
+                properties:
+                  number:
+                    type: integer
+                  dueDate:
+                    type: string
+                    format: date
+                  principal:
+                    type: number
+                  interest:
+                    type: number
+
+    Instruments:
+      type: object
+      required: [runId, asOf, instruments]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        asOf:
+          type: string
+          format: date
+        instruments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Instrument'
 
     Positions:
       type: object
