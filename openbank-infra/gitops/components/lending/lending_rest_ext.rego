@@ -80,6 +80,8 @@ allowed_reasons contains "credit-risk-desk" if {
 		"lending.writeoff",
 		"lending.collateralRegister",
 		"lending.collateralDecide",
+		# ADR-0314 D4 loan-book read (LoanBookResource admits ROLE_CREDIT_RISK).
+		"lending.book.read",
 		"lending.approval.read",
 		"lending.approval.decide",
 	}
@@ -150,6 +152,19 @@ allowed_reasons contains "service-credit-offer-eligibility" if {
 	input.action == "lending.creditOffer.eligibility"
 }
 
+# ADR-0314 D4: risk-engine reads the WHOLE loan book (contract terms, remaining schedule, IFRS 9
+# stage, an opaque party reference) at snapshot time, because no event carries a loan's remaining
+# schedule. It authenticates on the SHARED `openbank-services` client (ROLE_API only in the deployed
+# realm), so — as for service-credit-offer-eligibility above — this identity is every backend
+# service at once. Scoped to ONE read action with no write counterpart; LoanBookResource is a single
+# GET. RBAC admits ROLE_API on that endpoint only; this rule is what lets the service account
+# through OPA, and any other ROLE_API holder is still denied (lending_rest_ext_test.rego).
+allowed_reasons contains "service-risk-loan-book-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action == "lending.book.read"
+}
+
 # NO BLANKET SERVICE (M2M) rule on purpose: in-repo M2M callers are the ones named above (the
 # admin-ui BFF reaches only the unauthenticated /api/v1/info discovery, the observability/security
 # scanners use the management port, and ledger posting is an OUTBOUND call from lending). A blanket
@@ -176,6 +191,10 @@ prohibited if {
 		"lending.repay",
 		"lending.reschedule",
 		"lending.writeoff",
+		# Not a write, but the whole book with party references: the customer-facing proxy has
+		# no business reading it, and base operator-read-any would otherwise admit its
+		# ROLE_OPERATOR to any `*.read` (ADR-0314 D4).
+		"lending.book.read",
 	}
 }
 

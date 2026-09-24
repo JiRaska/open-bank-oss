@@ -70,7 +70,7 @@ class CashFlowService(
         return CashFlowProjection(
             run,
             curveSet,
-            SnapshotCashFlowProjection.project(positions, run.asOf, curveSet, model),
+            SnapshotCashFlowProjection.project(positions, run.asOf, curveSet, model, snapshots.getInstruments(runId)),
         )
     }
 }

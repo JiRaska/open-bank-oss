@@ -14,6 +14,12 @@ enum class PositionKind {
 
     /** A GL account the ledger exposes no finer breakdown for (GL level). */
     GL_ACCOUNT,
+
+    /**
+     * A loan from lending's loan book (contract level, ADR-0314 D4), on its Loans Receivable
+     * account. [Position.instrumentId] names the snapshot instrument it came from.
+     */
+    LOAN,
 }
 
 /**
@@ -25,8 +31,8 @@ enum class PositionKind {
  * tie-out ends up comparing a liability against its own negation.
  *
  * [glAccountCode] is null only for a sub-ledger balance whose currency has no single
- * deposit-control account in the trial balance — an UNMAPPED position, which the tie-out always
- * reports.
+ * deposit-control account in the trial balance, or a loan lending names no GL account for — an
+ * UNMAPPED position, which the tie-out always reports.
  */
 data class Position(
     val kind: PositionKind,
@@ -35,4 +41,5 @@ data class Position(
     val currency: String,
     val subAccountId: UUID?,
     val amount: BigDecimal,
+    val instrumentId: String? = null,
 )

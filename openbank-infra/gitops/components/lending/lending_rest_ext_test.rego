@@ -151,3 +151,36 @@ test_edge_does_not_inherit_the_eligibility_rule if {
 		with input as {"principal": edge, "action": "lending.creditOffer.eligibility"}
 		with data.rules as rules_mock
 }
+
+# --- ADR-0314 D4: the risk engine's loan-book read ---
+
+risk_engine := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
+
+other_api_client := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+
+credit_risk := {"type": "HUMAN", "id": "u-cr", "roles": ["ROLE_CREDIT_RISK"]}
+
+test_risk_engine_may_read_loan_book if {
+	rest.allow with input as {"principal": risk_engine, "action": "lending.book.read"}
+		with data.rules as rules_mock
+}
+
+test_risk_engine_may_not_write_via_the_book_rule if {
+	not rest.allow with input as {"principal": risk_engine, "action": "lending.disburse"}
+		with data.rules as rules_mock
+}
+
+test_other_role_api_client_may_not_read_loan_book if {
+	not rest.allow with input as {"principal": other_api_client, "action": "lending.book.read"}
+		with data.rules as rules_mock
+}
+
+test_credit_risk_may_read_loan_book if {
+	rest.allow with input as {"principal": credit_risk, "action": "lending.book.read"}
+		with data.rules as rules_mock
+}
+
+test_edge_denied_loan_book if {
+	not rest.allow with input as {"principal": edge, "action": "lending.book.read"}
+		with data.rules as rules_mock
+}

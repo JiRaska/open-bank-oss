@@ -10,17 +10,32 @@ import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.curve.Curve
 import com.openbank.risk.domain.curve.CurveIndex
+import com.openbank.risk.domain.model.ScheduledInstallment
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /** How a loan's rate is set (ADR-0314 D5), as the cash-flow engine needs it. */
 sealed interface LoanRate {
     /** [nominalAnnualRate] as a fraction, e.g. `0.069`. */
     data class Fixed(val nominalAnnualRate: BigDecimal) : LoanRate
 
-    /** Index + [spread] (fraction), projected per payment period from the index's curve. */
-    data class Floating(val index: CurveIndex, val spread: BigDecimal) : LoanRate
+    /**
+     * Index + [spread] (fraction), projected from the index's curve.
+     *
+     * With [resetFrequencyMonths] null the index resets every PAYMENT period (the phase-0 shape).
+     * With it set, the rate is fixed at each reset date — [nextResetDate], then every
+     * [resetFrequencyMonths] after it — for the whole reset period, and [currentRate] (the rate
+     * the loan carries now) applies to every payment period that starts before [nextResetDate].
+     */
+    data class Floating(
+        val index: CurveIndex,
+        val spread: BigDecimal,
+        val currentRate: BigDecimal? = null,
+        val resetFrequencyMonths: Int? = null,
+        val nextResetDate: LocalDate? = null,
+    ) : LoanRate
 }
 
 /** The remaining life of one amortising loan as seen at the run's as-of date. */
@@ -32,6 +47,12 @@ data class AmortisingLoan(
     val remainingPeriods: Int,
     val method: AmortizationMethod,
     val nextDueDate: LocalDate,
+    /**
+     * The owning service's own remaining installments (ADR-0314 D4). When present, a FIXED loan's
+     * flows ARE these — the contract lending collects — rather than a re-derivation from the
+     * outstanding, which can differ from the booked schedule by rounding cents mid-life.
+     */
+    val contractualSchedule: List<ScheduledInstallment>? = null,
 )
 
 /**
@@ -44,8 +65,9 @@ data class AmortisingLoan(
  * **FLOATING** reproduces that algorithm period by period with a per-period rate: the index rate
  * for `[due − period, due]` (start clamped to the curve's as-of) is the curve's
  * [Curve.averageForwardRate], plus the spread, divided by `periodsPerYear` exactly as the fixed
- * schedule divides its nominal rate. The index resets every PAYMENT period in phase 0 — lending's
- * `resetFrequencyMonths` is not yet on the snapshot. For ANNUITY the payment is recomputed over the
+ * schedule divides its nominal rate. Without reset terms the index resets every PAYMENT period;
+ * with lending's `resetFrequencyMonths` / `nextResetDate` (ADR-0314 D5, on the snapshot since D4)
+ * the rate is fixed per RESET period — see [LoanRate.Floating]. For ANNUITY the payment is recomputed over the
  * remaining balance and periods only when the period rate changes; with an unchanged rate it is
  * the fixed schedule's payment, which is what makes a flat curve reproduce that schedule to the
  * cent (held to `AmortisingLoanCashFlowsTest`).
@@ -55,8 +77,8 @@ data class AmortisingLoan(
  * forward from a flat curve differs between a 28- and a 31-day month, so "flat curve = fixed rate"
  * would not hold. Phase-0 approximation, recorded here so a later switch is a visible change.
  *
- * NOT wired to the snapshot in this PR: the snapshot carries no loan contracts yet (that is the
- * instrument-model PR, ADR-0314 D4). This is the engine's loan leg, tested on its own.
+ * **FIXED with a contractual schedule** (every loan from the snapshot, ADR-0314 D4) emits that
+ * schedule's installments as they are — the key oracle, held to `LoanInstrumentCashFlowsTest`.
  */
 object AmortisingLoanCashFlows {
 
@@ -74,6 +96,15 @@ object AmortisingLoanCashFlows {
     }
 
     private fun fixed(loan: AmortisingLoan, rate: LoanRate.Fixed): List<CashFlow> {
+        loan.contractualSchedule?.let { contract ->
+            val scheduled = contract.fold(BigDecimal.ZERO) { acc, i -> acc.add(i.principal) }
+            require(scheduled.compareTo(loan.outstandingPrincipal) == 0) {
+                "contractual schedule principal $scheduled != outstanding ${loan.outstandingPrincipal}"
+            }
+            return contract.sortedBy {
+                it.number
+            }.flatMap { flows(it.dueDate, loan.currency, it.principal, it.interest) }
+        }
         val schedule = Amortization.schedule(
             principal = Money.of(loan.outstandingPrincipal, loan.currency),
             nominalAnnualRate = rate.nominalAnnualRate,
@@ -89,7 +120,13 @@ object AmortisingLoanCashFlows {
 
     private fun floating(loan: AmortisingLoan, rate: LoanRate.Floating, curve: Curve): List<CashFlow> {
         require(curve.index == rate.index) { "loan floats on ${rate.index}, curve is ${curve.index}" }
-        require(loan.nextDueDate.isAfter(curve.asOf)) { "next due date must be after the curve's as-of" }
+        if (rate.resetFrequencyMonths == null) {
+            require(loan.nextDueDate.isAfter(curve.asOf)) { "next due date must be after the curve's as-of" }
+        } else {
+            require(rate.resetFrequencyMonths in VALID_PERIODS) {
+                "resetFrequencyMonths must divide 12: ${rate.resetFrequencyMonths}"
+            }
+        }
         val scale = minorUnits(loan.currency)
         val monthsPerPeriod = MONTHS_PER_YEAR / loan.periodsPerYear
         val n = loan.remainingPeriods
@@ -105,9 +142,8 @@ object AmortisingLoanCashFlows {
         val out = ArrayList<CashFlow>(2 * n)
         for (k in 1..n) {
             val due = loan.nextDueDate.plusMonths(monthsPerPeriod * (k - 1))
-            val start = maxOf(due.minusMonths(monthsPerPeriod), curve.asOf)
-            val annual = curve.averageForwardRate(start, due).add(rate.spread)
-            require(annual.signum() >= 0) { "projected rate for $start..$due is negative: $annual" }
+            val annual = periodRate(rate, curve, due.minusMonths(monthsPerPeriod), due)
+            require(annual.signum() >= 0) { "projected rate for the period due $due is negative: $annual" }
             val periodRate = annual.divide(ppy, BigMath.MC)
             val interest = opening.multiply(periodRate, BigMath.MC).setScale(scale, RoundingMode.HALF_EVEN)
             if (loan.method == AmortizationMethod.ANNUITY &&
@@ -126,6 +162,26 @@ object AmortisingLoanCashFlows {
             opening = opening.subtract(principal)
         }
         return out
+    }
+
+    /**
+     * The annual rate for the payment period `[start, due]`.
+     *
+     * - no reset terms: the index over the period itself (start clamped to the curve's as-of);
+     * - a period starting before the next reset: the loan's current rate, when known;
+     * - otherwise the index fixed at the latest reset date on or before `start`, averaged over
+     *   that whole reset period (clamped to the curve's as-of), plus the spread.
+     */
+    private fun periodRate(rate: LoanRate.Floating, curve: Curve, start: LocalDate, due: LocalDate): BigDecimal {
+        val freq = rate.resetFrequencyMonths?.toLong()
+            ?: return curve.averageForwardRate(maxOf(start, curve.asOf), due).add(rate.spread)
+        val firstReset = rate.nextResetDate ?: curve.asOf
+        if (start.isBefore(firstReset) && rate.currentRate != null) return rate.currentRate
+        val resetsElapsed = if (start.isBefore(firstReset)) 0L else ChronoUnit.MONTHS.between(firstReset, start) / freq
+        val fixing = firstReset.plusMonths(resetsElapsed * freq)
+        val from = maxOf(fixing, curve.asOf)
+        val to = maxOf(fixing.plusMonths(freq), from.plusDays(1))
+        return curve.averageForwardRate(from, to).add(rate.spread)
     }
 
     /** The same annuity formula as libs `Amortization`, so an unchanged rate gives its payment. */
