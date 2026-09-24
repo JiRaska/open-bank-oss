@@ -48,7 +48,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     read('notifications', serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/notifications', {
       partyId, page: '0', size: String(LIMITS.notifications + 1),
     }), bearer),
-    read('lending', serverSvcUrl('lending-service', 'lending', 8126, '/api/v1/lending/applications', { partyId }), bearer),
+    read('lending', serverSvcUrl('lending-service', 'lending', 8126, '/api/v1/lending/applications', {
+      partyId, limit: String(LIMITS.lending + 1),
+    }), bearer),
     read('aml', serverSvcUrl('aml-service', 'aml', 8117, '/api/v1/aml/cases', {
       partyId, limit: String(LIMITS.aml + 1), offset: '0',
     }), bearer),

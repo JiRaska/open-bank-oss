@@ -38,7 +38,10 @@ describe('Customer graph live overlay route', () => {
         id: 'device-1', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-01-01T00:00:00Z',
         token: 'must-not-leak', appInstance: 'must-not-leak',
       }] })
-      if (url.includes(':8126/')) return response([{ id: 'application-1', status: 'APPROVED', productKind: 'UNSECURED' }])
+      if (url.includes(':8126/')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('31')
+        return response([{ id: 'application-1', status: 'APPROVED', productKind: 'UNSECURED' }])
+      }
       if (url.includes(':8117/')) return response([{ id: 'case-1', status: 'CLEARED', alertDetail: 'must-not-leak' }])
       if (url.includes(':8143/')) return response([{
         id: 'document-1', templateCode: 'AGREEMENT', status: 'GENERATED', storageKey: 'must-not-leak', sha256: 'must-not-leak',
