@@ -198,7 +198,12 @@ def generate(repo, output, env, extra_arguments=()):
                    '--max-workers=2', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g',
                    *extra_arguments, *tasks]
         started = time.monotonic()
-        run_bounded(command, repo, child_env, shard / 'run.log')
+        # The first process also warms build-logic and resolves the root project.
+        # Its successful hosted run took 135s; a cold run was killed at 180s
+        # while still resolving projects. Keep every shard bounded, but give
+        # only this extra-work shard measured cold-run headroom.
+        run_bounded(command, repo, child_env, shard / 'run.log',
+                    timeout=240 if i == 0 else 180)
         verify_coverage(coverage, projects, sha)
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:

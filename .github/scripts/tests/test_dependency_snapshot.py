@@ -109,8 +109,11 @@ class RunnerTests(unittest.TestCase):
                 env['DEPENDENCY_GRAPH_INCLUDE_PROJECTS'] = ':only-one'
             calls = []
 
-            def execute(command, repo, child_env, logfile):
+            timeouts = []
+
+            def execute(command, repo, child_env, logfile, timeout=180):
                 calls.append(command)
+                timeouts.append(timeout)
                 if case == 'second-fails' and len(calls) == 2:
                     raise RuntimeError('producer failed')
                 coverage = Path(child_env['DEPENDENCY_GRAPH_COVERAGE_DIR'])
@@ -136,6 +139,7 @@ class RunnerTests(unittest.TestCase):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
+                    self.assertEqual(timeouts, [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
                 else:
