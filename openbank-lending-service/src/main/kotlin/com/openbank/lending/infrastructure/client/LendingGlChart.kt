@@ -82,6 +82,15 @@ object LendingGlChart {
     /** The Loans Receivable GL code a loan in [currency] is carried on, or null for an unseeded currency. */
     fun loansReceivableCode(currency: String): String? = LOANS_RECEIVABLE_CODES[currency]
 
+    /**
+     * The chart code of a lending GL account id (e.g. `1200`), for human-readable dry-run totals
+     * (#10746). CZK funding clearing is the one pre-convention id (`…-000001`, code 1100).
+     */
+    fun codeOf(id: UUID): String =
+        if (id == FUNDING_CLEARING.getValue("CZK")) "1100" else id.toString().takeLast(UUID_NODE_DIGITS).trimStart('0')
+
+    private const val UUID_NODE_DIGITS = 12
+
     private fun leafSet(czk: String, eur: String, usd: String, gbp: String): Map<String, UUID> =
         mapOf("CZK" to leaf(czk), "EUR" to leaf(eur), "USD" to leaf(usd), "GBP" to leaf(gbp))
 
