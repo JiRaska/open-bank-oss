@@ -85,10 +85,27 @@ class SanctionsImportServiceTest {
     }
 
     @Test
-    fun `importList skips CNB_DOMESTIC as seeded via migration`(): Unit = runBlocking {
-        val result = service.importList(SanctionsListType.CNB_DOMESTIC, "https://example.com/unused")
+    fun `importList imports the Czech national list from its OpenSanctions feed`(): Unit = runBlocking {
+        // #10757: the Czech national sanctions list (MZV, Act No. 1/2023 Coll.) used to be three
+        // Flyway demo rows behind a SKIPPED outcome, so no real designation was ever screened.
+        val csv = "id,schema,name,aliases,birth_date,countries,addresses,identifiers,sanctions," +
+            "phones,emails,program_ids,dataset,first_seen,last_seen,last_change\n" +
+            "NK-voe,LegalEntity,Voice of Europe s.r.o.,,,cz,,,,,,CZ-A1-2023COLL,cz_national_sanctions,,,\n" +
+            "NK-kc,Person,Koba CHAGUNAVA,,,ge,,,,,,,cz_national_sanctions,,,\n"
+        val url = serveOnce(csv, "text/csv")
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        // The demo seed rows (cnb-001..003) are absent from the feed, so reconciliation retires them.
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.CNB_DOMESTIC, setOf("NK-voe", "NK-kc")) } returns 3
 
-        assertThat(result.outcome).isEqualTo(ListImportOutcome.SKIPPED_NOT_ENTITY_BASED)
+        val result = service.importList(SanctionsListType.CNB_DOMESTIC, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(2)
+        val entries = entriesSlot.captured
+        assertThat(entries.first { it.externalId == "NK-voe" }.programs).containsExactly("CZ-A1-2023COLL")
+        assertThat(entries.first { it.externalId == "NK-kc" }.programs).containsExactly("CZ-NATIONAL-SANCTIONS")
+        coVerify { entryRepo.deactivateMissing(SanctionsListType.CNB_DOMESTIC, setOf("NK-voe", "NK-kc")) }
     }
 
     @Test
