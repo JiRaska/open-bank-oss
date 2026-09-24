@@ -483,4 +483,30 @@ class SanctionsImportServiceTest {
         assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
         assertThat(result.entriesImported).isEqualTo(2)
     }
+
+    // ──── quoted fields spanning physical lines ─────────────────────────────
+    // gb_fcdo_sanctions carries line breaks inside the quoted `sanctions` column (1,665 of 6,283
+    // records on 2026-09-24). A line-by-line reader split each such record: the fragments were
+    // upserted as bogus entries with a text fragment as their name, and the real record lost every
+    // column after the break — program_ids included.
+
+    @Test
+    fun `a quoted field containing line breaks stays one record`(): Unit = runBlocking {
+        val csv = "id,schema,name,aliases,birth_date,countries,addresses,identifiers,sanctions," +
+            "phones,emails,program_ids,dataset,first_seen,last_seen,last_change\n" +
+            "gb-1,Person,Ivan Example,,,ru,,,\"UK Sanctions List\nRussia regime\nasset freeze\"," +
+            ",,RUS,gb_fcdo_sanctions,,,\n" +
+            "gb-2,Organization,Example Holdings,,,,,,,,,RUS,gb_fcdo_sanctions,,,\n"
+        val url = serveOnce(csv, "text/csv")
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.HM_TREASURY, setOf("gb-1", "gb-2")) } returns 0
+
+        val result = service.importList(SanctionsListType.HM_TREASURY, url)
+
+        assertThat(result.entriesImported).isEqualTo(2)
+        val entries = entriesSlot.captured
+        assertThat(entries.map { it.externalId }).containsExactly("gb-1", "gb-2")
+        assertThat(entries.first { it.externalId == "gb-1" }.programs).containsExactly("RUS")
+    }
 }

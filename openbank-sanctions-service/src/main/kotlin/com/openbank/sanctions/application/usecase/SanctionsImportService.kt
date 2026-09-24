@@ -334,8 +334,8 @@ class SanctionsImportService(
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { reader.readLine() } ?: return 0
-        val headers = parseCsvLine(headerLine)
+        val headerLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: return 0
+        val headers = OpenSanctionsCsv.parseRecord(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
         val idxId = headers.indexOf("id")
@@ -367,10 +367,10 @@ class SanctionsImportService(
 
         try {
             while (true) {
-                val rawLine = withContext(Dispatchers.IO) { reader.readLine() } ?: break
+                val rawLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: break
                 if (rawLine.isBlank()) continue
 
-                val cols = parseCsvLine(rawLine)
+                val cols = OpenSanctionsCsv.parseRecord(rawLine)
                 val id = col(cols, idxId)
                 val schema = col(cols, idxSchema)
                 val name = col(cols, idxName)
@@ -488,7 +488,45 @@ class SanctionsImportService(
         .trim()
 
     /** RFC 4180-compatible CSV line parser (handles quoted fields with embedded commas/quotes). */
-    private fun parseCsvLine(line: String): List<String> {
+
+    companion object {
+        const val IMPORT_BATCH_SIZE = 500
+
+        /** `openbank.sanctions.eu.source` values: first-party FSF XML (default), the OpenSanctions mirror, or non-production seeds. */
+        const val EU_SOURCE_EU_FSF = "eu-fsf"
+        const val EU_SOURCE_OPENSANCTIONS = "opensanctions"
+        const val EU_SOURCE_SEED = "seed"
+
+        /** The official EU Financial Sanctions Files endpoint (full consolidated list, FSF v1.1). */
+        const val DEFAULT_EU_FSF_URL =
+            "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
+
+        private val EU_PROGRAMS = listOf("EU-SANCTIONS")
+    }
+}
+
+/** Minimal RFC 4180 reader for the OpenSanctions `targets.simple.csv` feeds. */
+private object OpenSanctionsCsv {
+    /**
+     * Read one CSV RECORD, which is not the same as one line: a quoted field may contain line
+     * breaks (gb_fcdo_sanctions puts them in its `sanctions` column), and reading such a record
+     * line by line splits it — the fragments become bogus entries and the real one loses every
+     * column after the break. Keeps appending physical lines while a quote is still open; `""`
+     * inside a quoted field adds two quotes, so an odd running count means "still inside quotes".
+     */
+    fun readRecord(reader: BufferedReader): String? {
+        val first = reader.readLine() ?: return null
+        var record = first
+        var quotes = first.count { it == '"' }
+        while (quotes % 2 != 0) {
+            val next = reader.readLine() ?: break
+            record += "\n" + next
+            quotes += next.count { it == '"' }
+        }
+        return record
+    }
+
+    fun parseRecord(line: String): List<String> {
         val result = mutableListOf<String>()
         val current = StringBuilder()
         var inQuote = false
@@ -512,20 +550,5 @@ class SanctionsImportService(
         }
         result += current.toString()
         return result
-    }
-
-    companion object {
-        const val IMPORT_BATCH_SIZE = 500
-
-        /** `openbank.sanctions.eu.source` values: first-party FSF XML (default), the OpenSanctions mirror, or non-production seeds. */
-        const val EU_SOURCE_EU_FSF = "eu-fsf"
-        const val EU_SOURCE_OPENSANCTIONS = "opensanctions"
-        const val EU_SOURCE_SEED = "seed"
-
-        /** The official EU Financial Sanctions Files endpoint (full consolidated list, FSF v1.1). */
-        const val DEFAULT_EU_FSF_URL =
-            "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
-
-        private val EU_PROGRAMS = listOf("EU-SANCTIONS")
     }
 }
