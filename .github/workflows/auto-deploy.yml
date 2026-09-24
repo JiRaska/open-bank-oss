@@ -543,7 +543,7 @@ jobs:
       # token.actions.githubusercontent.com for repo:JiRaska/open-bank-oss:*) — no per-pod webhook
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
