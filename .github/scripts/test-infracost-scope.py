@@ -25,11 +25,12 @@ class InfracostScopeTest(unittest.TestCase):
         module = [{'filename': 'openbank-infra/aws/modules/network/main.tf'}]
         self.assertTrue(scope.cost_scope(platform, 1, 'platform'))
         self.assertFalse(scope.cost_scope(platform, 1, 'substrate'))
-        # The platform workflow triggers for every env: retain that conservative
-        # scope even when a shared file outside sandbox-platform is changed.
-        self.assertTrue(scope.cost_scope(substrate, 1, 'platform'))
+        self.assertFalse(scope.cost_scope(substrate, 1, 'platform'))
         self.assertTrue(scope.cost_scope(substrate, 1, 'substrate'))
         self.assertTrue(scope.cost_scope(module, 1, 'substrate'))
+        self.assertFalse(scope.cost_scope(module, 1, 'platform'))
+        self.assertFalse(scope.cost_scope(
+            [{'filename': 'openbank-infra/aws/envs/web-prod/main.tf'}], 1, 'platform'))
 
     def test_rename_out_of_environment_still_prices_removal(self):
         files = [{'filename': 'docs/retired.tf',
@@ -57,6 +58,14 @@ class InfracostScopeTest(unittest.TestCase):
             self.assertIn('GH_TOKEN', detector['env'])
             self.assertTrue(all(step.get('if') == "steps.scope.outputs.run == 'true'"
                                 for step in steps[steps.index(detector) + 1:]))
+
+    def test_platform_workflow_triggers_only_for_its_root(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = yaml.safe_load((root / '.github/workflows/platform-tofu.yml').read_text())
+        for event in ('pull_request', 'push'):
+            paths = workflow[True][event]['paths']  # PyYAML 1.1 parses "on" as bool
+            self.assertIn('openbank-infra/aws/envs/sandbox-platform/**', paths)
+            self.assertNotIn('openbank-infra/aws/envs/**', paths)
 
 
 if __name__ == '__main__':

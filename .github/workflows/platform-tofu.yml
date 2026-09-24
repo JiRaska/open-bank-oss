@@ -1,4 +1,4 @@
-# Platform OpenTofu (ADR-0060). Applies envs/** from CI so a merged infra change
+# Platform OpenTofu (ADR-0060). Applies sandbox-platform from CI so a merged infra change
 # is no longer left for a laptop `tofu apply`.
 #
 #   pull_request / push -> `plan` job: read-only `tofu plan` to the job summary
@@ -23,12 +23,12 @@ name: Platform OpenTofu
 on:
   pull_request:
     paths:
-      - "openbank-infra/aws/envs/**"
+      - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
   push:
     branches: [main]
     paths:
-      - "openbank-infra/aws/envs/**"
+      - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
   workflow_dispatch: {}
 

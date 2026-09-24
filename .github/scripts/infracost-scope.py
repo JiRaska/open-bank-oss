@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 PREFIXES = {
-    'platform': ('openbank-infra/aws/envs/',),
+    'platform': ('openbank-infra/aws/envs/sandbox-platform/',),
     'substrate': ('openbank-infra/aws/envs/sandbox-substrate/', 'openbank-infra/aws/modules/'),
 }
 
