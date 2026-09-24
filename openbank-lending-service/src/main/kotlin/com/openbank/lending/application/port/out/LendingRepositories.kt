@@ -113,6 +113,13 @@ interface LoanRepository {
 
     /** Every loan regardless of status, newest disbursement first. Capped by the caller. */
     fun findRecent(limit: Int): Uni<List<Loan>>
+
+    /**
+     * Loans NOT in any of [offBook] statuses, ordered by id, at most [limit] rows (the caller asks
+     * for one more than it accepts to detect an over-cap book). Read-only: drives the risk-engine
+     * loan-book read (ADR-0314 D4).
+     */
+    fun findOnBook(offBook: Set<com.openbank.lending.domain.model.LoanStatus>, limit: Int): Uni<List<Loan>>
 }
 
 interface InstallmentRepository {
@@ -134,6 +141,9 @@ interface InstallmentRepository {
      * Already-paid rows are never touched: history is never rewritten. Returns the number deleted.
      */
     fun deleteUnpaid(loanId: LoanId): Uni<Int>
+
+    /** Every installment of [loanIds] (paid or not), ordered by loan then number. Read-only (ADR-0314 D4). */
+    fun findByLoans(loanIds: Collection<UUID>): Uni<List<LoanInstallment>>
 }
 
 interface CollateralRepository {

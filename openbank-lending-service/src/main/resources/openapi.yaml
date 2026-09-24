@@ -8,7 +8,9 @@ info:
   # MINOR is the required class. 1.22.0 is what live origin/main holds; read in the same turn and
   # 1.23.0 confirmed unused on this file, because a taken version is textually identical to a free
   # one and nothing in a merge can tell them apart.
-  version: 1.24.0
+  # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
+  # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
+  version: 1.25.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -407,6 +409,34 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/CreditPortfolioSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/loan-book:
+    get:
+      tags: [Lending]
+      operationId: loanBook
+      summary: Loans on the book as of a date, with rate terms and remaining installments (ADR-0314 D4)
+      description: >-
+        READ-ONLY. Every loan not closed, written off, unwound, settled or withdrawn and disbursed on
+        or before asOf, with its Loans Receivable GL code, outstanding principal (the sum of its
+        remaining installments' principal), rate terms, latest IFRS 9 stage and the installments
+        unpaid at asOf. The whole book or an error, never a prefix. As-of reconstruction is best
+        effort: lending keeps no status history, and a reschedule replaces the unpaid tail. Read by
+        the risk engine's snapshot (the service account of the shared M2M client) and the credit desk.
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: ISO date; defaults to today (UTC).
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The loan book as of asOf
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanBook' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/risk/policy:
@@ -1467,3 +1497,53 @@ components:
         newFirstDueDate: { type: string, format: date }
         principalForgiveness: { $ref: '#/components/schemas/Money' }
         reason: { type: string, nullable: true }
+    LoanBook:
+      type: object
+      required: [asOf, loans]
+      properties:
+        asOf: { type: string, format: date }
+        loans:
+          type: array
+          items: { $ref: '#/components/schemas/LoanBookEntry' }
+    LoanBookEntry:
+      type: object
+      required: [loanId, counterpartyRef, status, currency, outstandingPrincipal, nominalAnnualRate, rateTerms,
+        method, periodsPerYear, disbursedOn, remainingInstallments]
+      properties:
+        loanId: { type: string, format: uuid }
+        counterpartyRef:
+          type: string
+          format: uuid
+          description: Opaque party reference; identity stays in party-service.
+        status:
+          type: string
+          enum: [ACTIVE, DELINQUENT, DEFAULTED, FORBEARANCE_ASSESSED, TERMINATION_NOTICED, ACCELERATED,
+            EARLY_REPAYMENT_REQUESTED, SETTLEMENT_QUOTED, SETTLED, WITHDRAWN, UNWOUND, CLOSED, WRITTEN_OFF]
+        currency: { type: string }
+        glAccountCode:
+          type: string
+          nullable: true
+          description: Loans Receivable GL code the loan is carried on (1200 CZK, 1201 EUR, 1202 USD, 1203 GBP).
+        outstandingPrincipal:
+          type: number
+          description: Sum of remainingInstallments' principal.
+        nominalAnnualRate:
+          type: number
+          description: The rate currently applied; for FLOATING, index + spread at the last reset.
+        rateTerms: { $ref: '#/components/schemas/LoanRateTerms' }
+        method: { type: string, enum: [ANNUITY, EQUAL_PRINCIPAL, BULLET] }
+        periodsPerYear: { type: integer }
+        disbursedOn: { type: string, format: date }
+        maturityDate: { type: string, format: date, nullable: true }
+        ifrs9Stage: { type: string, nullable: true, enum: [STAGE_1, STAGE_2, STAGE_3] }
+        remainingInstallments:
+          type: array
+          items: { $ref: '#/components/schemas/RemainingInstallment' }
+    RemainingInstallment:
+      type: object
+      required: [number, dueDate, principal, interest]
+      properties:
+        number: { type: integer }
+        dueDate: { type: string, format: date }
+        principal: { type: number }
+        interest: { type: number }
