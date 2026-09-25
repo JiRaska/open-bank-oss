@@ -118,6 +118,29 @@ class LendingGuaranteeSourceEvidenceTest {
         io.mockk.verify(exactly = 0) { client.sharedGuarantorCandidates(any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `rejects guarantee facts that violate the source domain contract`(): Unit = runBlocking {
+        val fact = guarantee()
+        val invalid = listOf(
+            fact.copy(revision = 2, supersedesGuaranteeId = null),
+            fact.copy(capAmount = BigDecimal("-1.00")),
+            fact.copy(capAmount = BigDecimal("1.001")),
+            fact.copy(currency = "eur"),
+            fact.copy(coverageFraction = BigDecimal("1.1")),
+            fact.copy(coverageFraction = BigDecimal("0.1234567")),
+            fact.copy(seniority = 0),
+            fact.copy(validTo = fact.validFrom),
+            fact.copy(sourceSha256 = "A".repeat(64)),
+        )
+        invalid.forEach { candidate ->
+            every {
+                client.approvedGuarantees(loanId, bearer, loanId.toString(), "LENDING_EXPOSURE_REVIEW", 100)
+            } returns Uni.createFrom().item(history().copy(guarantees = listOf(candidate)))
+            assertThatThrownBy { runBlocking { source.read(loanId, bearer) } }
+                .isInstanceOf(LendingGuaranteeSourceUnavailable::class.java)
+        }
+    }
+
     private fun assertUnavailable() {
         assertThatThrownBy { runBlocking { source.read(loanId, bearer) } }
             .isInstanceOf(LendingGuaranteeSourceUnavailable::class.java)

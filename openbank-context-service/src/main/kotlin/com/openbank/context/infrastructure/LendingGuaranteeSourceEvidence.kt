@@ -178,18 +178,31 @@ class LendingGuaranteeSourceEvidence(
             facts.all(::validFact)
     }
 
-    private fun validFact(fact: LendingGuaranteeEvidence): Boolean = fact.guaranteeId != null &&
+    private fun validFact(fact: LendingGuaranteeEvidence): Boolean =
+        validIdentity(fact) && validTerms(fact) && validValidity(fact)
+
+    private fun validIdentity(fact: LendingGuaranteeEvidence): Boolean = fact.guaranteeId != null &&
         fact.contractId != null &&
         fact.revision != null &&
         fact.revision > 0 &&
+        ((fact.revision == 1L) == (fact.supersedesGuaranteeId == null)) &&
         fact.guarantorPartyId != null &&
-        fact.capAmount != null &&
-        fact.currency?.isNotBlank() == true &&
-        fact.coverageFraction != null &&
-        fact.seniority != null &&
-        fact.validFrom != null &&
         fact.sourceDocumentId != null &&
-        fact.sourceSha256?.matches(SHA256_PATTERN) == true &&
+        fact.sourceSha256?.matches(SHA256_PATTERN) == true
+
+    private fun validTerms(fact: LendingGuaranteeEvidence): Boolean = fact.capAmount != null &&
+        fact.capAmount > BigDecimal.ZERO &&
+        fact.capAmount.scale() <= 2 &&
+        fact.currency?.matches(CURRENCY_PATTERN) == true &&
+        fact.coverageFraction != null &&
+        fact.coverageFraction > BigDecimal.ZERO &&
+        fact.coverageFraction <= BigDecimal.ONE &&
+        fact.coverageFraction.scale() <= MAX_FRACTION_SCALE &&
+        fact.seniority != null &&
+        fact.seniority > 0
+
+    private fun validValidity(fact: LendingGuaranteeEvidence): Boolean = fact.validFrom != null &&
+        (fact.validTo == null || fact.validTo > fact.validFrom) &&
         fact.decidedAt != null
 
     private companion object {
@@ -198,8 +211,10 @@ class LendingGuaranteeSourceEvidence(
         const val MAX_RELATED_FACTS = 20
         const val MAX_INFLIGHT = 8
         const val TIMEOUT_SECONDS = 4L
+        const val MAX_FRACTION_SCALE = 6
         val DENIED_STATUSES = setOf(401, 403, 404)
-        val SHA256_PATTERN = Regex("[0-9a-fA-F]{64}")
+        val CURRENCY_PATTERN = Regex("[A-Z]{3}")
+        val SHA256_PATTERN = Regex("[0-9a-f]{64}")
     }
 }
 
