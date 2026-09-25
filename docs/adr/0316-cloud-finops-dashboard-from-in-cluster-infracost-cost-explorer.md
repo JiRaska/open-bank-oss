@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [finops, observability, analytics]
-summary: "A daily in-cluster CronJob runs infracost over the OpenTofu envs on main, evaluates versioned FinOps rules, pulls Cost Explorer actuals and writes all of it to ClickHouse, where a Grafana dashboard shows compliance, savings and estimate vs actual."
+summary: "A daily in-cluster CronJob prices the OpenTofu envs on main with infracost, evaluates versioned FinOps rules, adds Cost Explorer actuals and writes ClickHouse; Grafana shows compliance, savings and estimate vs actual."
 followup: "#10856 — seed the Infracost key in OpenBao, observe the first live run, and confirm the dashboard renders against real data (no cluster access from the authoring session)"
 ---
 
