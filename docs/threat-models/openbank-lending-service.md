@@ -788,7 +788,7 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
 The existing approved `collateral` record belongs to one loan and contributes to
 IFRS 9 LGD. It cannot establish that two loans share the same physical asset,
 and `type=GUARANTEE` does not identify a guarantor or enforceable guarantee.
-V18 adds separate source tables for these facts, with no enabled writer or read
+V20 adds separate source tables for these facts, with no enabled writer or read
 route; no historical row is inferred or backfilled. Deriving links from equal
 descriptions, values or names would
 create a false cross-borrower disclosure. The planned source model therefore

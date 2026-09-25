@@ -64,7 +64,7 @@ retention and data residency together. This ADR does not authorize that change.
 
 ## Consequences
 
-- Lending V18 uses local foreign keys and source-identity uniqueness. Its
+- Lending V20 uses local foreign keys and source-identity uniqueness. Its
   previously proposed per-row `bank_scope` is removed before adoption.
 - Context and Document retain deployment provenance. Operations must align their
   configured identifiers and validate that alignment before enabling a publisher.

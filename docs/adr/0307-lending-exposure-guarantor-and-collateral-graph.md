@@ -119,11 +119,11 @@ writer and Context consumer while retaining approved source evidence and audit
 history. Dropping populated evidence tables is a separate retention decision,
 not a deployment rollback. A 1×/10× synthetic portfolio with one asset shared
 across facilities, partial guarantees and mixed currencies is required before
-the P3 pilot. Flyway V18 is the **schema-only expand stage** for the four fact
+the P3 pilot. Flyway V20 is the **schema-only expand stage** for the four fact
 types; it enforces separate proposal/decision actors, immutable decided facts,
 approved matching legacy collateral on an allocation insert, and a locked
 recheck at allocation approval. A proposal whose collateral was released can
-be rejected but cannot be approved. V18 alone does not deliver the P3 lens.
+be rejected but cannot be approved. V20 alone does not deliver the P3 lens.
 An internal guarantee writer now validates loan, Party and signed Document
 evidence on proposal and approval, and persists an approval pointer atomically
 with the decision. It is disabled by default and has no HTTP route, dedicated
@@ -138,7 +138,7 @@ be prebuilt concurrently before the Flyway migration so startup does not build
 it under write load. The graph requests one extra row to mark truncation.
 This overlay is not the case-scoped Lending exposure read contract in step 4.
 The database checks proposal/decision separation and local referential lineage.
-ADR-0311 preserves ADR-0152's single-bank-per-deployment boundary for Lending. V18 therefore uses local IDs
+ADR-0311 preserves ADR-0152's single-bank-per-deployment boundary for Lending. V20 therefore uses local IDs
 and foreign keys without a per-row bank dimension; the existing `loan` and
 `collateral` tables follow the same boundary. A writer must derive the bank
 identifier for outgoing Context references from trusted deployment configuration,
@@ -147,7 +147,7 @@ provenance. The schema cannot establish
 that a guarantor party is verified, an asset identity is unique across documents,
 or a document hash matches the authoritative file.
 The future source adapter must verify these with their owners and recheck the
-current collateral status at publication/read time. No row in V18 alone is
+current collateral status at publication/read time. No row in V20 alone is
 eligible to become a Context edge.
 
 ### Source proof boundary for the first writer
@@ -190,7 +190,7 @@ and emits the versioned, reference-only event through Lending's transactional
 outbox. Context consumes it idempotently, preserves effective and recorded time,
 and reads detail through the source's case-scoped API under a separate OPA
 decision. Until the dedicated credential, source check, writer and outbox exist,
-the V18 rows must not be projected or presented as verified links. This
+the V20 rows must not be projected or presented as verified links. This
 deliberately leaves the schema-and-proof stage dark rather than inventing evidence.
 
 ## Alternatives considered
