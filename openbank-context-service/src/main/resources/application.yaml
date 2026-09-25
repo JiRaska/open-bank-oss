@@ -59,6 +59,26 @@ quarkus:
       fraud-service:
         tls-configuration-name: fraud-source
 
+# Activate together with prod only after the optional client certificate and the HTTPS
+# Lending source URL are provisioned. Keeping this bucket out of the default prod profile
+# lets the existing Context deployment boot while the source-backed lens stays disabled.
+"%lending-graph-source":
+  quarkus:
+    tls:
+      lending-source:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/lending-client-tls/tls.crt
+              key: /mnt/lending-client-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/lending-client-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      lending-service:
+        tls-configuration-name: lending-source
+
 "%dev":
   quarkus:
     oidc:
