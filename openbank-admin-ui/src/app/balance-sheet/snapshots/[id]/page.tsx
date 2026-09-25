@@ -138,6 +138,11 @@ function SnapshotDetail({ id }: { id: string }) {
             {t('Úrokové riziko (IRRBB)', 'Interest-rate risk (IRRBB)')}
           </Link>
         )}
+        {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/liquidity`} className="btn btn-secondary btn-sm">
+            {t('Likvidita (LCR/NSFR)', 'Liquidity (LCR/NSFR)')}
+          </Link>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>

@@ -13,6 +13,8 @@ import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.IrrbbResult
+import com.openbank.risk.domain.liquidity.LiquidityParameters
+import com.openbank.risk.domain.liquidity.LiquidityResult
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.Provenance
@@ -76,4 +78,12 @@ data class IrrbbAnalysis(
 interface IrrbbUseCase {
     /** Same 404 / 409 / 400 rules as [CashFlowUseCase.project]. */
     suspend fun analyse(runId: UUID, curveSetId: UUID, tier1Capital: BigDecimal?): IrrbbAnalysis
+}
+
+/** LCR and NSFR of a run under a versioned parameter set (ADR-0313 phase 1). */
+data class LiquidityAnalysis(val run: SnapshotRun, val parameters: LiquidityParameters, val result: LiquidityResult)
+
+interface LiquidityUseCase {
+    /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
+    suspend fun analyse(runId: UUID): LiquidityAnalysis
 }

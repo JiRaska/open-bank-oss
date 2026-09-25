@@ -162,6 +162,82 @@ openbank:
       # Post-shock floor `atZeroBp/slopeBpPerYear` is optional and unset here: d368 leaves floors
       # to national supervisors (not above zero). Set OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR and
       # OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE from the applicable supervisory text.
+    # ADR-0313 phase 1: LCR and NSFR. A VERSIONED parameter set — bump parameter-set-version on any
+    # change here; every /liquidity result names the id and version it was computed with.
+    # BCBS standard factors: d238 = "Basel III: The Liquidity Coverage Ratio and liquidity risk
+    # monitoring tools" (Jan 2013); d295 = "Basel III: the net stable funding ratio" (Oct 2014).
+    # EU CRR / Delegated Regulation (EU) 2015/61 deviations are NOT applied.
+    # Every key below is required (LiquidityConfig is a mapping; the domain rejects missing or
+    # unknown factor keys and values outside [0, 1]), so nothing here has a code default.
+    liquidity:
+      parameter-set-id: bcbs-d238-d295
+      parameter-set-version: "1"
+      source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
+      factors:
+        lcr-l1-haircut: 0                    # d238 ¶49
+        lcr-l2a-haircut: 0.15                # d238 ¶52
+        lcr-l2b-rmbs-haircut: 0.25           # d238 ¶54(a)
+        lcr-l2b-other-haircut: 0.50          # d238 ¶54(b),(c)
+        lcr-level2-cap: 0.40                 # d238 ¶46, ¶51, Annex 1
+        lcr-level2b-cap: 0.15                # d238 ¶47, Annex 1
+        lcr-retail-stable-runoff: 0.05       # d238 ¶75 (¶78: a jurisdiction may allow 3%)
+        lcr-retail-less-stable-runoff: 0.10  # d238 ¶79 (minimum)
+        lcr-operational-deposit-runoff: 0.25 # d238 ¶93
+        lcr-other-contractual-outflow: 1.00  # d238 ¶141
+        lcr-retail-loan-inflow: 0.50         # d238 ¶153
+        lcr-fi-inflow: 1.00                  # d238 ¶154
+        lcr-operational-deposit-inflow: 0    # d238 ¶156 (and ¶98)
+        lcr-inflow-cap: 0.75                 # d238 ¶69, ¶144
+        nsfr-asf-capital: 1.00               # d295 ¶21(a)
+        nsfr-asf-retail-stable: 0.95         # d295 ¶22
+        nsfr-asf-retail-less-stable: 0.90    # d295 ¶23
+        nsfr-asf-operational-deposit: 0.50   # d295 ¶24(b)
+        nsfr-asf-other: 0                    # d295 ¶25
+        nsfr-rsf-cash-and-reserves: 0        # d295 ¶36(a),(b)
+        nsfr-rsf-l1-securities: 0.05         # d295 ¶37
+        nsfr-rsf-l2a: 0.15                   # d295 ¶39(a)
+        nsfr-rsf-l2b: 0.50                   # d295 ¶40(a)
+        nsfr-rsf-fi-under-6m: 0.15           # d295 ¶39(b)
+        nsfr-rsf-operational-deposit-at-fi: 0.50 # d295 ¶40(d)
+        nsfr-rsf-loan-under-1y: 0.50         # d295 ¶40(e), amortising split per ¶29
+        nsfr-rsf-loan-1y-low-rw: 0.65        # d295 ¶41(b)
+        nsfr-rsf-loan-1y-other: 0.85         # d295 ¶42(b)
+        nsfr-rsf-other-asset: 1.00           # d295 ¶43(c)
+      classification:
+        # d238 ¶80: deposit-insurance coverage and depositor relationship are not in the data, so
+        # ALL retail deposits are "less stable". Raise only with evidence of ¶75 eligibility.
+        retail-stable-share: 0
+        # d238 ¶93-104: operational treatment needs a clearing/custody/cash-management
+        # relationship and supervisory approval. None unless configured.
+        operational-deposit-share: 0
+        # d295 ¶21(a): Tier 2 counts 100% only for residual maturity ≥ 1 year; maturities of
+        # capital instruments are not in the ledger, so none is assumed.
+        tier2-over-one-year-share: 0
+        # d295 ¶41(b) vs ¶42(b): risk weights are not in the data -> the 85% (conservative) factor.
+        loans-qualify-for-low-risk-weight: false
+        # GL code -> class. ONLY accounts named here count; any other balance is reported as not
+        # classified. Nothing is mapped to HQLA: the chart has no central-bank reserve account, and
+        # 1000 "Cash and Cash Equivalents" is not known to be coins/banknotes/reserves (d238
+        # ¶50(a),(b)) — map it here only once it is. Nostro 1001 is a balance at a commercial
+        # bank: never HQLA; treated as operational (clearing) -> 0% inflow (d238 ¶156), 50% RSF
+        # (d295 ¶40(d)), the conservative reading of both.
+        gl-accounts:
+          "1001": deposit-at-fi-operational
+          "1300": other-asset
+          "1301": other-asset
+          "1302": other-asset
+          "1303": other-asset
+          "6000": capital
+          "6010": capital
+          "6020": capital
+          "6030": capital
+          "6040": capital-deduction
+          "6050": capital
+          "6060": capital-tier2
+        # Income / expense accounts not yet closed to equity: 0% ASF (d295 ¶25(a)); no LCR flow.
+        gl-account-types:
+          INCOME: current-year-result
+          EXPENSE: current-year-result
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

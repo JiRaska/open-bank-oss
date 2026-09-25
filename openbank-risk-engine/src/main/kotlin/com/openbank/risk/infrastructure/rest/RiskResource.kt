@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -51,6 +52,9 @@ class RiskResource {
 
     @Inject
     lateinit var irrbb: IrrbbUseCase
+
+    @Inject
+    lateinit var liquidity: LiquidityUseCase
 
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
@@ -131,6 +135,16 @@ class RiskResource {
         }
         return Response.ok(irrbb.analyse(id, parseCurveSetId(curveSetId), tier1).toResponse()).build()
     }
+
+    /**
+     * LCR (BCBS d238) and NSFR (BCBS d295) of a TIED_OUT run (ADR-0313 phase 1), under the
+     * versioned parameter set `openbank.risk.liquidity.*`. Same gate as positions: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/liquidity")
+    @Operation(summary = "LCR and NSFR of a TIED_OUT run with components, caps and assumptions; 409 for an UNTIED one")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun liquidity(@PathParam("id") id: UUID): Response = Response.ok(liquidity.analyse(id).toResponse()).build()
 
     private fun parseCurveSetId(curveSetId: String?): UUID {
         val raw = requireNotNull(curveSetId) { "query parameter 'curveSetId' is required" }
