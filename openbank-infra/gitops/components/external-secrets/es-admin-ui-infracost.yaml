@@ -1,0 +1,26 @@
+# Infracost pricing-API key for the cloud-finops-collector CronJob (ADR-0316), projected from
+# OpenBao into the admin-ui namespace. The same key the platform-tofu / substrate-tofu workflows
+# hold as the GitHub Actions secret INFRACOST_API_KEY. Never committed in plaintext.
+#
+# Seed with: bao kv put openbank/cloud-finops INFRACOST_API_KEY=<key>
+# Until it is seeded the Secret does not exist and the collector pod sits at
+# CreateContainerConfigError (no `optional: true` on purpose — loud beats a silent $0 estimate).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: cloud-finops-infracost
+  namespace: admin-ui
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: cloud-finops-infracost
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: api-key
+      remoteRef:
+        key: cloud-finops
+        property: INFRACOST_API_KEY
