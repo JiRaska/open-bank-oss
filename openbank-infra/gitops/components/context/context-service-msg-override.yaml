@@ -10,6 +10,9 @@ metadata:
 data:
   override.properties: |
     config_ordinal=500
+    mp.messaging.incoming.lending-guarantee-references-in.group.id=openbank-context-service-lending-guarantees
+    mp.messaging.incoming.lending-guarantee-references-in.auto.offset.reset=earliest
+    mp.messaging.incoming.lending-guarantee-references-in.dead-letter-queue.topic=openbank.dlq.context-service.lending-guarantee-references
     mp.messaging.incoming.dispute-events-in.group.id=openbank-context-service
     mp.messaging.incoming.dispute-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.ict-incident-events-in.group.id=openbank-context-service

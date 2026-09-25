@@ -159,6 +159,21 @@ an unassigned customer. Context stores no account/counterparty values from this 
 The source case and outbox remain authoritative if the topic or Context consumer
 lags. A malformed or unauthorized broker record is nacked to the dedicated DLQ.
 
+## Lending guarantee reference ingress
+
+The Lending feed carries only a versioned approval pointer: guarantee and loan
+UUIDs, revision, bank scope and event time. Context accepts it only from the
+dedicated Kafka topic with its exact event identity/type headers and a bounded,
+seven-field payload. It rejects duplicate JSON keys, extra fields, cross-bank
+scope and messages over 512 bytes. A separate literal topic/group ACL and DLQ
+limit the feed's reach; the incoming channel is disabled until Lending's topic
+exists in the target cluster. The append-only, bank-scoped reference ledger
+deduplicates replay and rejects conflicting event or guarantee revisions. A
+pointer proves neither a current guarantee nor permission to inspect a loan:
+no graph edge or read endpoint is created from this feed. Current source proof,
+exact loan assignment, purpose, policy and read audit remain prerequisites for
+any later Lending graph disclosure.
+
 ## Invariants
 
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.

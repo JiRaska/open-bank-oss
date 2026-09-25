@@ -77,6 +77,9 @@ quarkus:
         context-audit-commitments-out:
           connector: smallrye-in-memory
       incoming:
+        lending-guarantee-references-in:
+          connector: smallrye-in-memory
+          enabled: true
         fraud-case-references-in:
           connector: smallrye-in-memory
         kyb-ubo-observation-references-in:
@@ -113,6 +116,16 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      lending-guarantee-references-in:
+        connector: smallrye-kafka
+        # Activate only after Lending owns the topic in the target cluster.
+        enabled: ${CONTEXT_LENDING_REFERENCE_CONSUMER_ENABLED:false}
+        topic: openbank.lending.graph.references
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.lending-guarantee-references
       fraud-case-references-in:
         connector: smallrye-kafka
         topic: openbank.fraud.investigation.case.references
