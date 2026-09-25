@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.255.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.254.0...admin-ui-v0.255.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** IRRBB — repricing gap, supervisory shocks, ΔEVE/ΔNII, with an admin-ui page (ADR-0313 phase 1) ([#10853](https://github.com/JiRaska/open-bank-oss/issues/10853)) ([5f5518f](https://github.com/JiRaska/open-bank-oss/commit/5f5518faefaf99fc041a06a0aed5c807b512bf64))
+
 ## [0.254.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.253.0...admin-ui-v0.254.0) (2026-09-25)
 
 
