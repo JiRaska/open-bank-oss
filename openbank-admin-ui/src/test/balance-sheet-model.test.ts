@@ -4,9 +4,9 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  backfillActions, bankToday, cumulativeGap, gapRows, isIsoDate, ladderRows, parseQuotes, parseTier1, principalNameFromToken,
+  backfillActions, bankToday, capEffects, cumulativeGap, ratioPercent, gapRows, isIsoDate, ladderRows, parseQuotes, parseTier1, principalNameFromToken,
 } from '@/components/balance-sheet/model'
-import { backfillPlanSchema, cashFlowsSchema, snapshotListSchema } from '@/components/balance-sheet/contracts'
+import { backfillPlanSchema, cashFlowsSchema, snapshotListSchema, type CurrencyLiquidity } from '@/components/balance-sheet/contracts'
 import type { BackfillRequest } from '@/components/balance-sheet/contracts'
 
 const token = (claims: Record<string, unknown>) =>
@@ -121,5 +121,26 @@ describe('IRRBB derivations', () => {
   it('gapRows draws liabilities down and keeps the engine totals', () => {
     const rows = gapRows({ currency: 'EUR', buckets: [{ bucket: 'overnight', assets: 5, liabilities: 60, gap: -55, cumulativeGap: -55 }], totalAssets: 5, totalLiabilities: 60, totalGap: -55 })
     expect(rows).toEqual([{ bucket: 'overnight', assets: 5, liabilities: -60, gap: -55, cumulativeGap: -55 }])
+  })
+})
+
+describe('LCR / NSFR derivations', () => {
+  it('ratioPercent never turns a missing ratio into a number', () => {
+    expect(ratioPercent(null, 'en-GB')).toBeNull()
+    expect(ratioPercent(undefined, 'en-GB')).toBeNull()
+    expect(ratioPercent(1.8, 'en-GB')).toBe('180 %')
+    expect(ratioPercent(0, 'en-GB')).toBe('0 %')
+  })
+
+  it('capEffects names each binding cap with the amount it removed', () => {
+    const c = {
+      currency: 'CZK',
+      lcr: {
+        hqla: { lines: [], level1: 100, level2a: 100, level2b: 0, adjustmentFor15Cap: 0, adjustmentFor40Cap: 33.33, level2bCapBinding: false, level2CapBinding: true, stock: 166.67 },
+        outflows: [], inflows: [], totalOutflows: 100, totalInflows: 200, inflowCap: 75, cappedInflows: 75, inflowCapBinding: true, netOutflows: 25, ratio: 6.6668,
+      },
+      nsfr: { asf: [], rsf: [], totalAsf: 0, totalRsf: 0, ratio: null },
+    } as CurrencyLiquidity
+    expect(capEffects(c)).toEqual([{ cap: 'level2', amount: 33.33 }, { cap: 'inflow', amount: 125 }])
   })
 })
