@@ -110,6 +110,18 @@ The source transition is expand-first and source-owned:
    every contributor is available and reconciled, the UI shows the topology
    and `TOTAL_UNAVAILABLE`, not a partial or currency-blind total.
 
+For the initial single-facility case read, the investigation `caseId` is the
+source loan UUID and the assignment root is `lending-loan:<loanId>`. Context
+accepts `LENDING_EXPOSURE_REVIEW` only when that case ID, root, purpose and
+investigator match a live approved assignment. Lending receives the
+investigator's bearer and checks Context's live, data-free access decision for
+the exact loan before returning any source detail; it also applies its own
+role and field policy. Unavailable authorization fails closed. A shared
+guarantor or asset does not extend this assignment to another loan: each
+additional facility requires its own access decision and audit. Portfolio
+reads require a separately reviewed portfolio ownership source and assignment
+contract; a caller-supplied list of loan IDs is not such a contract.
+
 Mixed-version rollout leaves the existing `CollateralUseCase`, IFRS 9 LGD and
 ledger postings unchanged. New writers are disabled until their schema, maker/
 checker policy, negative tests and bounded read API are ready. Verify old loan
