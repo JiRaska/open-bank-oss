@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.256.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.255.0...admin-ui-v0.256.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** LCR and NSFR on BCBS factors, with an admin-ui page (ADR-0313 phase 1) ([#10860](https://github.com/JiRaska/open-bank-oss/issues/10860)) ([6998a83](https://github.com/JiRaska/open-bank-oss/commit/6998a831635be984d661da2cb89f4aa9c5f469dd))
+
 ## [0.255.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.254.0...admin-ui-v0.255.0) (2026-09-25)
 
 
