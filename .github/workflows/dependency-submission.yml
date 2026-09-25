@@ -214,8 +214,13 @@ jobs:
       # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
       # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
       # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
+      # --max-workers=2 (#10145): the 2026-09-25 runs OOM'd with 18 concurrent JVMs holding
+      # 8.7 GiB of heap and only 1.8 GiB of system memory left on the runner, so raising -Xmx
+      # alone would trade a Gradle OOM for a runner OOM. Fewer parallel tasks bound both the
+      # daemon's resolution working set and the number of compiler JVMs alive at once. The
+      # structural fix (resolve-only, no compilation) is #9971.
       - name: Resolve fleet dependency graph
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon
+        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon --max-workers=2
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
