@@ -181,6 +181,7 @@ const platformNav: NavItem[] = [
   // near the bottom of System made an implemented route effectively invisible.
   { nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', href: '/system/tests', icon: FlaskConical, permission: 'system:view', badge: 'LIVE' },
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
+  { nameCs: 'SDLC / CI·CD', nameEn: 'SDLC / CI·CD', href: '/devops/sdlc', icon: Workflow, permission: 'system:view', badge: 'GUIDE' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
   { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
   { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },

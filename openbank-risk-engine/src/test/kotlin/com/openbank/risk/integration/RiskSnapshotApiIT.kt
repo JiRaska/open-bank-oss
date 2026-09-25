@@ -114,10 +114,44 @@ class RiskSnapshotApiIT {
         given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(404)
     }
 
+    // #10618 department roles. RBAC only (OPA is off in %test; the rego suite holds the policy half).
+    @Test
+    @TestSecurity(user = "risk-analyst", roles = ["ROLE_RISK"])
+    fun `the risk department creates a snapshot and uploads a curve set`() {
+        ledger.inputs = Fixtures.tiedOut()
+        val id = create("2026-05-31").then().statusCode(201).extract().path<String>("id")
+        given().`when`().get("/api/v1/risk/snapshots/$id").then().statusCode(200)
+        given().contentType("application/json")
+            .body(curveSetBody("2026-05-31"))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(201)
+    }
+
+    @Test
+    @TestSecurity(user = "fin-reader", roles = ["ROLE_FINANCE"])
+    fun `the finance department reads but cannot create a snapshot or upload a curve set`() {
+        // 404, not 403: RBAC admitted the reader and the run simply does not exist.
+        given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(404)
+        create("2026-07-31").then().statusCode(403)
+        given().contentType("application/json")
+            .body(curveSetBody("2026-07-31"))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "dealer", roles = ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"])
+    fun `treasury roles are declared only and reach nothing here`() {
+        given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(403)
+        create("2026-08-31").then().statusCode(403)
+    }
+
     @Test
     fun `an unauthenticated caller is refused`() {
         create("2026-04-30").then().statusCode(401)
     }
+
+    private fun curveSetBody(asOf: String) =
+        """{"asOf":"$asOf","provenance":"synthetic","source":"IT","curves":{"CZEONIA":""" +
+            """[{"tenor":"ON","rate":0.035},{"tenor":"3M","rate":0.036},{"tenor":"1Y","rate":0.038}]}}"""
 
     private fun count(sql: String, id: String): Int {
         val config = ConfigProvider.getConfig()
