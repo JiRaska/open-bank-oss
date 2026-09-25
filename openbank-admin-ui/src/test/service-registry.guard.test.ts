@@ -68,8 +68,9 @@ const NOT_YET_DEPLOYED = new Set(['openbank-analytics-sink'])
 // "not deployed", which is honest. Each key must still name a real module directory. Remove a
 // key once its workload lands (deliberately not asserted: the gitops PR may not run this suite,
 // and a stale-exemption failure would then redden main unseen).
-// treasury-service: ADR-0315 — its Deployment is being added separately (#10618).
-const SERVICE_MAP_NOT_YET_DEPLOYED = new Set(['treasury-service'])
+// Empty: treasury-service (ADR-0315) was the bridged key until its workload landed with the
+// service's own gitops component (#10618).
+const SERVICE_MAP_NOT_YET_DEPLOYED = new Set<string>()
 
 // ── Truth sources, re-derived from the repo ────────────────────────────────
 
