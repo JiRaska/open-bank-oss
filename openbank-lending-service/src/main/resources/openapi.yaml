@@ -10,7 +10,9 @@ info:
   # one and nothing in a merge can tell them apart.
   # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
-  # 1.26.0 -> 1.27.0: additive — ledger-backfill request history (GET .../requests, GET
+  # 1.26.0 -> 1.26.1: description-only — the ledger-backfill operations now name their roles
+  # (ROLE_FINANCE or ROLE_ADMIN, humans only, #10618). No schema or path change.
+  # 1.26.1 -> 1.27.0: additive — ledger-backfill request history (GET .../requests, GET
   # .../requests/{id}) and proposedAt/decidedAt/executedAt on LedgerBackfillRequestView, for the
   # admin console's finance workspace (#10618).
   version: 1.27.0
