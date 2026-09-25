@@ -54,7 +54,7 @@ class LiquidityParametersTest {
     @Test
     fun `the parameter set is identified and versioned`() {
         assertThat(p.id).isEqualTo("bcbs-d238-d295")
-        assertThat(p.version).isEqualTo("1")
+        assertThat(p.version).isEqualTo("2")
         assertThat(p.source).contains("d238").contains("d295").contains("2015/61 deviations not applied")
     }
 
@@ -114,7 +114,12 @@ class LiquidityParametersTest {
         assertThat(c.operationalDepositShare).isEqualByComparingTo("0")
         assertThat(c.tier2OverOneYearShare).isEqualByComparingTo("0")
         assertThat(c.loansQualifyForLowRiskWeight).isFalse()
-        assertThat(c.glAccounts.values.none { it.isHqla }).describedAs("nothing is HQLA until mapped").isTrue()
+        assertThat(c.glAccounts.filterValues { it.isHqla }.keys)
+            .describedAs("the only HQLA is the ČNB overnight deposit facility (ADR-0315)")
+            .containsExactly("1510")
+        assertThat(c.glAccounts["1510"]).isEqualTo(GlClass.HQLA_L1_CASH_OR_RESERVES)
+        assertThat(c.glAccounts["1500"]).describedAs("placements: maturity-blind, so conservative")
+            .isEqualTo(GlClass.OTHER_ASSET)
         assertThat(c.glAccounts["1001"]).isEqualTo(GlClass.DEPOSIT_AT_FI_OPERATIONAL)
         assertThat(c.glAccounts).doesNotContainKey("1000")
     }

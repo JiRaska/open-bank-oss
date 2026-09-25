@@ -101,6 +101,7 @@ spec:
       - security-scanner
       - statements
       - tpp-registry
+      - treasury
       - wealth
   podMetricsEndpoints:
     - port: management

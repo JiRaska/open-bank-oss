@@ -305,3 +305,33 @@ test_batch2_identity_rules_do_not_cross_admit if {
 	not "service-settlement-ledger-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
 		with data.rules as rules_mock
 }
+
+# --- ADR-0315: treasury-service's own identity (ROLE_API only), ledger.create alone ---
+
+treasury_m2m := {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
+
+test_treasury_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": treasury_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-treasury-ledger-post" in rest.allowed_reasons with input as {"principal": treasury_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+# Treasury reverses a deal by posting an offsetting journal, so ledger.reverse stays denied.
+test_treasury_identity_may_not_perform_any_other_ledger_action if {
+	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft", "ledger.read"} {
+		rest.allow == false with input as {"principal": treasury_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# The rule admits exactly its own principal. Remove its principal.id line and this goes red.
+test_treasury_identity_rule_admits_no_other_role_api_account if {
+	rest.allow == false with input as {"principal": other_role_api_sa, "action": "ledger.create"}
+		with data.rules as rules_mock
+	every p in [other_role_api_sa, lending_m2m, clearing_m2m, interest_m2m, services_m2m] {
+		not "service-treasury-ledger-post" in rest.allowed_reasons with input as {"principal": p, "action": "ledger.create"}
+			with data.rules as rules_mock
+	}
+}

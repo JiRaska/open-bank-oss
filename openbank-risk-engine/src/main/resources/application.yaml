@@ -171,7 +171,8 @@ openbank:
     # unknown factor keys and values outside [0, 1]), so nothing here has a code default.
     liquidity:
       parameter-set-id: bcbs-d238-d295
-      parameter-set-version: "1"
+      # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
+      parameter-set-version: "2"
       source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
       factors:
         lcr-l1-haircut: 0                    # d238 ¶49
@@ -216,13 +217,35 @@ openbank:
         # d295 ¶41(b) vs ¶42(b): risk weights are not in the data -> the 85% (conservative) factor.
         loans-qualify-for-low-risk-weight: false
         # GL code -> class. ONLY accounts named here count; any other balance is reported as not
-        # classified. Nothing is mapped to HQLA: the chart has no central-bank reserve account, and
+        # classified. The only HQLA account is treasury's 1510 (below); otherwise the chart has no
+        # central-bank reserve account, and
         # 1000 "Cash and Cash Equivalents" is not known to be coins/banknotes/reserves (d238
         # ¶50(a),(b)) — map it here only once it is. Nostro 1001 is a balance at a commercial
         # bank: never HQLA; treated as operational (clearing) -> 0% inflow (d238 ¶156), 50% RSF
         # (d295 ¶40(d)), the conservative reading of both.
+        #
+        # Treasury (ADR-0315, #10618). 1510 "Deposit Facility at CNB" is an OVERNIGHT deposit at the
+        # central bank: Level 1 as central-bank reserves (d238 ¶50(b) and its footnote on overnight
+        # deposits with the central bank). 1002 EUR nostro is treated like 1001. Money-market
+        # placements 1500/1501 are claims on banks whose d238 ¶154 100% inflow and d295 ¶39(b) 15%
+        # RSF both depend on RESIDUAL MATURITY (≤30 days / <6 months), which a GL-level mapping
+        # cannot see — so they are mapped conservatively as other-asset (no inflow, 100% RSF) until
+        # the risk engine reads treasury deals as contract-level MONEY_MARKET_DEAL instruments
+        # (ADR-0314 D4 follow-up). Borrowings 2300/2301 are unsecured wholesale funding from
+        # financial institutions: other-liability (100% outflow, d238 ¶141 conservative; 0% ASF,
+        # d295 ¶25(b)). Accrued interest follows its principal's side.
         gl-accounts:
           "1001": deposit-at-fi-operational
+          "1002": deposit-at-fi-operational
+          "1500": other-asset
+          "1501": other-asset
+          "1510": hqla-l1-cash-or-reserves
+          "1520": other-asset
+          "1521": other-asset
+          "2300": other-liability
+          "2301": other-liability
+          "2310": other-liability
+          "2311": other-liability
           "1300": other-asset
           "1301": other-asset
           "1302": other-asset

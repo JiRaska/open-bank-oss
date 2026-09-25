@@ -122,9 +122,9 @@ class LiquidityTest {
     @Test
     fun `an unmapped GL balance is listed as not classified and counted nowhere`() {
         val base = run(PositionBuilder.build(Fixtures.tiedOut())).total!!
-        val withStray = run(PositionBuilder.build(Fixtures.tiedOut()) + gl("1002", "ASSET", "500"))
+        val withStray = run(PositionBuilder.build(Fixtures.tiedOut()) + gl("1003", "ASSET", "500"))
         assertThat(withStray.unclassified.map { it.glAccountCode to it.amount }).containsExactly(
-            "1002" to BigDecimal("500"),
+            "1003" to BigDecimal("500"),
         )
         val t = withStray.total!!
         assertThat(t.nsfr.totalRsf).isEqualByComparingTo(base.nsfr.totalRsf)
@@ -132,9 +132,9 @@ class LiquidityTest {
         assertThat(t.lcr.totalInflows).isEqualByComparingTo(base.lcr.totalInflows)
         assertThat(
             t.nsfr.rsf.none {
-                it.glAccountCode == "1002"
+                it.glAccountCode == "1003"
             } &&
-                t.lcr.inflows.none { it.glAccountCode == "1002" },
+                t.lcr.inflows.none { it.glAccountCode == "1003" },
         ).isTrue()
     }
 

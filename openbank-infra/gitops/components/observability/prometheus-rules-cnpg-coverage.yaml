@@ -433,6 +433,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: treasury
+            cluster: treasury-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: wealth
             cluster: wealth-db
             origin: manifest
