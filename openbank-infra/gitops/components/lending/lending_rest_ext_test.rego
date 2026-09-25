@@ -237,3 +237,26 @@ test_backfill_veto_does_not_touch_other_admin_writes if {
 	not rest.prohibited with input as {"principal": admin, "action": "lending.disburse"}
 		with data.rules as rules_mock
 }
+
+test_graph_source_read_allows_human_risk_or_admin if {
+    every role in ["ROLE_CREDIT_RISK", "ROLE_ADMIN"] {
+        decision := rest.allow with input as {
+            "principal": {"type": "HUMAN", "id": "loan-reviewer", "roles": [role]},
+            "action": "lending.graph.read",
+        } with data.rules as rules_mock
+        decision.allow
+    }
+}
+
+test_graph_source_read_denies_operator_compliance_and_service_account if {
+    every principal in [
+        {"type": "HUMAN", "id": "operator", "roles": ["ROLE_OPERATOR"]},
+        {"type": "HUMAN", "id": "compliance", "roles": ["ROLE_COMPLIANCE"]},
+        {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_ADMIN"]},
+    ] {
+        not rest.allow with input as {
+            "principal": principal,
+            "action": "lending.graph.read",
+        } with data.rules as rules_mock
+    }
+}

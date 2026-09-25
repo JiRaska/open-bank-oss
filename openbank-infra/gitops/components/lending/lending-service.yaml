@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "47eea62cc20fec93"
+        openbank.tech/policy-checksum: "0a55d242e442d7b8"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -183,6 +183,10 @@ spec:
               value: https://party-service.party.svc:8443
             - name: DOCUMENT_SERVICE_URL
               value: https://document-service.documents.svc:8443
+            # Dormant investigator Context check. The endpoint is explicit, but the private
+            # HTTPS client identity, trust and network egress are not provisioned yet.
+            - name: CONTEXT_SERVICE_URL
+              value: https://context-service.context.svc:8443
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean

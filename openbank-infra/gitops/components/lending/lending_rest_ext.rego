@@ -218,3 +218,22 @@ prohibited if {
 	startswith(input.action, "lending.ledgerBackfill.")
 	not "ROLE_ADMIN" in input.principal.roles
 }
+
+# Graph source detail is released only after the route rechecks the exact human's
+# live Context assignment. This veto blocks broad base *.read grants and M2M.
+prohibited if {
+    input.action == "lending.graph.read"
+    startswith(input.principal.id, "service-account-")
+}
+
+prohibited if {
+    input.action == "lending.graph.read"
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
+}
+
+allowed_reasons contains "lending-graph-source-read" if {
+    input.action == "lending.graph.read"
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
+}

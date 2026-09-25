@@ -77,6 +77,10 @@ quarkus:
       grant:
         type: client
   rest-client:
+    context-lending-access:
+      url: ${CONTEXT_SERVICE_URL:http://localhost:8145}
+      connect-timeout: 1000
+      read-timeout: 3000
     lending-graph-party-proof:
       url: ${PARTY_SERVICE_URL:http://localhost:8111}
       connect-timeout: 1000

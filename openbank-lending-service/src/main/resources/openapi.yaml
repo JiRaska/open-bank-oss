@@ -8,7 +8,8 @@ info:
   # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4).
   # 1.26.0 -> 1.27.0: additive — bounded party application slice for Customer 360.
-  version: 1.27.0
+  # 1.27.0 -> 1.28.0: additive — case-scoped, bounded approved guarantee history.
+  version: 1.28.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -25,6 +26,47 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /api/v1/lending/graph/loans/{loanId}/approved-guarantees:
+    get:
+      tags: [Lending]
+      operationId: getApprovedGuaranteeHistory
+      summary: Read approved guarantee evidence for one assigned loan
+      description: >-
+        Requires a human credit-risk or admin role and a live Context assignment
+        for the exact loan and LENDING_EXPOSURE_REVIEW purpose. The source read is
+        disabled until the dedicated Context access dependency is deployed.
+        Shared guarantors do not grant access to another loan.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Case-Id
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Purpose
+          in: header
+          required: true
+          schema: { type: string, enum: [LENDING_EXPOSURE_REVIEW] }
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        '200':
+          description: Bounded, effective-dated approved guarantee history and provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovedGuaranteeHistory' }
+        '400': { description: Invalid scope, time or limit }
+        '403': { description: Role, live assignment or policy denied }
+        '503': { description: Source read disabled or Context authorization unavailable }
   /api/v1/lending/applications:
     post:
       tags: [Lending]
@@ -1168,6 +1210,37 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    ApprovedGuaranteeHistory:
+      type: object
+      required: [loanId, effectiveAt, knownAt, guarantees, truncated]
+      properties:
+        loanId: { type: string, format: uuid }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        guarantees:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/GraphGuaranteeEvidence' }
+        truncated: { type: boolean }
+    GraphGuaranteeEvidence:
+      type: object
+      required: [guaranteeId, contractId, revision, guarantorPartyId, capAmount, currency,
+        coverageFraction, seniority, validFrom, sourceDocumentId, sourceSha256, decidedAt]
+      properties:
+        guaranteeId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        supersedesGuaranteeId: { type: [string, 'null'], format: uuid }
+        guarantorPartyId: { type: string, format: uuid }
+        capAmount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        coverageFraction: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        seniority: { type: integer, minimum: 1 }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: [string, 'null'], format: date-time }
+        sourceDocumentId: { type: string, format: uuid }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        decidedAt: { type: string, format: date-time }
     LedgerBackfillRequestView:
       type: object
       properties:
