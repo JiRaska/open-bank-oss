@@ -104,7 +104,8 @@ recording times, plus synthetic provenance. Additive V11 stores the explicit env
 workflow start time for new observations; earlier rows remain nullable and are not backfilled
 with invented scope. The bounded internal reader reports `COMPLETE`, `PARTIAL` or `UNKNOWN`,
 marking gaps, absent scope, cross-environment revisions and backwards-time observations unknown.
-An exact event-ID lookup is internal only. Neither reader establishes incident causation.
+An internal exact lookup requires the event ID, expected payment ID and environment together;
+neither reader establishes incident causation.
 
 The current incident assignment and aggregate permission bind an investigator to an incident
 root, not to every payment whose ID they might know. Before case drill-down, a separately
