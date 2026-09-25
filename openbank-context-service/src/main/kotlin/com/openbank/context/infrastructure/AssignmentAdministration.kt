@@ -180,6 +180,7 @@ class AssignmentAdministrationService(
                     "AUTHORIZATION_REVIEW" -> "delegation:${UUID.fromString(root.removePrefix("delegation:"))}"
                     "AML_INVESTIGATION" -> "aml-case:${UUID.fromString(root.removePrefix("aml-case:"))}"
                     "KYB_OWNERSHIP_REVIEW" -> "kyb-case:${UUID.fromString(root.removePrefix("kyb-case:"))}"
+                    "LENDING_EXPOSURE_REVIEW" -> "lending-loan:${UUID.fromString(root.removePrefix("lending-loan:"))}"
                     "INCIDENT_IMPACT" -> "incident:${UUID.fromString(root.removePrefix("incident:"))}"
                     else -> root
                 }
@@ -307,6 +308,13 @@ class AssignmentAdministrationService(
             }
             val id = UUID.fromString(root.removePrefix("kyb-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
+        } else if (request.purpose == "LENDING_EXPOSURE_REVIEW") {
+            val root = requireNotNull(request.rootRef) { "LENDING_EXPOSURE_REVIEW requires a Lending loan root" }
+            require(root.startsWith("lending-loan:") && root.length == LENDING_LOAN_ROOT_LENGTH) {
+                "invalid Lending loan root"
+            }
+            val id = UUID.fromString(root.removePrefix("lending-loan:"))
+            require(request.caseId == id.toString()) { "the investigation case must match the Lending loan" }
         } else if (request.purpose == "INCIDENT_IMPACT") {
             val root = requireNotNull(request.rootRef) { "INCIDENT_IMPACT requires an incident root" }
             require(root.startsWith("incident:") && root.length == INCIDENT_ROOT_LENGTH) { "invalid incident root" }
@@ -364,6 +372,7 @@ class AssignmentAdministrationService(
         const val DELEGATION_ROOT_LENGTH = 47
         const val AML_CASE_ROOT_LENGTH = 45
         const val KYB_CASE_ROOT_LENGTH = 45
+        const val LENDING_LOAN_ROOT_LENGTH = 49
         const val INCIDENT_ROOT_LENGTH = 45
         const val MIN_COMPLAINT_ROOT_LENGTH = 11
         const val MAX_COMPLAINT_ROOT_LENGTH = 210
@@ -380,6 +389,7 @@ class AssignmentAdministrationService(
                 "AUTHORIZATION_REVIEW",
                 "AML_INVESTIGATION",
                 "KYB_OWNERSHIP_REVIEW",
+                "LENDING_EXPOSURE_REVIEW",
             )
     }
 }

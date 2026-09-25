@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "8b70ed60e2829bb7"
+    openbank.tech/policy-checksum: "7403c2e6749c794d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -650,6 +650,35 @@ data:
         object.get(input.attributes, "assignmentVerified", false) == true
         object.get(input.attributes, "rootScopeVerified", false) == true
         object.get(input.attributes, "purpose", "") == "FRAUD_INVESTIGATION"
+    }
+
+    prohibited if {
+        input.action == "context.lending-loan.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.lending-loan.read"
+        object.get(input.attributes, "assignmentVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.lending-loan.read"
+        object.get(input.attributes, "purpose", "") != "LENDING_EXPOSURE_REVIEW"
+    }
+
+    prohibited if {
+        input.action == "context.lending-loan.read"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
+    }
+
+    allowed_reasons contains "context-lending-exposure-review" if {
+        input.action == "context.lending-loan.read"
+        input.principal.type == "HUMAN"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
+        object.get(input.attributes, "assignmentVerified", false) == true
+        object.get(input.attributes, "rootScopeVerified", false) == true
+        object.get(input.attributes, "purpose", "") == "LENDING_EXPOSURE_REVIEW"
     }
 
     prohibited if {

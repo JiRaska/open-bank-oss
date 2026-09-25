@@ -2,9 +2,29 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/lending-loans/{loanId}/access:
+    get:
+      operationId: verifyAssignedLendingLoanAccess
+      summary: Verify live access to one exact loan without returning source data
+      description: >-
+        The human investigator's case ID must equal the loan UUID. A live, reviewed
+        LENDING_EXPOSURE_REVIEW assignment to lending-loan:{loanId} and policy allow
+        are required. Shared collateral or guarantors confer no access to other loans.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '204': { description: Exact loan assignment and policy allow; no data returned }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization unavailable }
   /api/v1/context/fraud-cases/{caseId}/network:
     get:
       operationId: getAssignedFraudCaseNetwork

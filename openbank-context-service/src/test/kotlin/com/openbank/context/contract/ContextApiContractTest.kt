@@ -8,6 +8,14 @@ class ContextApiContractTest {
     private val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
 
     @Test
+    fun `Lending access contract returns only a case scoped decision`() {
+        val operation = contract.substringAfter("/api/v1/context/lending-loans/{loanId}/access:")
+            .substringBefore("/api/v1/context/fraud-cases/{caseId}/network:")
+        assertThat(operation).contains("verifyAssignedLendingLoanAccess", "'204'", "'403'", "'503'")
+        assertThat(operation).doesNotContain("'200'", "guarantorPartyId", "capAmount", "sourceDocumentId")
+    }
+
+    @Test
     fun `KYB source access check has a data-free success response`() {
         val operation = contract.substringAfter("/api/v1/context/kyb-cases/{id}/access:")
             .substringBefore("/api/v1/context/kyb-cases/{id}/ownership-observations:")

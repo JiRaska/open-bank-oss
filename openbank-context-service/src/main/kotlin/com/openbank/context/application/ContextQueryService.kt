@@ -91,6 +91,21 @@ class ContextQueryService(
         block,
     )
 
+    internal suspend fun <T> lendingLoanAccess(
+        loanId: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> ContextReadResult<T>,
+    ): T = authorized(
+        "context.lending-loan.read",
+        "LENDING_EXPOSURE_REVIEW",
+        ContextNamespace.LENDING,
+        "lending-loan:$loanId",
+        actor,
+        context,
+        block,
+    )
+
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =
         authorized(
             "context.complaint.read",

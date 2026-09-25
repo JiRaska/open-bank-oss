@@ -70,6 +70,35 @@ allowed_reasons contains "context-fraud-investigation" if {
 }
 
 prohibited if {
+    input.action == "context.lending-loan.read"
+    object.get(input.attributes, "rootScopeVerified", false) != true
+}
+
+prohibited if {
+    input.action == "context.lending-loan.read"
+    object.get(input.attributes, "assignmentVerified", false) != true
+}
+
+prohibited if {
+    input.action == "context.lending-loan.read"
+    object.get(input.attributes, "purpose", "") != "LENDING_EXPOSURE_REVIEW"
+}
+
+prohibited if {
+    input.action == "context.lending-loan.read"
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
+}
+
+allowed_reasons contains "context-lending-exposure-review" if {
+    input.action == "context.lending-loan.read"
+    input.principal.type == "HUMAN"
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
+    object.get(input.attributes, "assignmentVerified", false) == true
+    object.get(input.attributes, "rootScopeVerified", false) == true
+    object.get(input.attributes, "purpose", "") == "LENDING_EXPOSURE_REVIEW"
+}
+
+prohibited if {
 	input.action == "context.kyb-case.read"
 	object.get(input.attributes, "assignmentVerified", false) != true
 }
