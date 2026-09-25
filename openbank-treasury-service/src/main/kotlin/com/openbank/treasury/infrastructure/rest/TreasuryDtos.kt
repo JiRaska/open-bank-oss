@@ -46,7 +46,12 @@ data class LimitCheckResponse(
 ) {
     companion object {
         fun from(c: LimitCheck) = LimitCheckResponse(
-            c.currency, c.limit, c.exposureBefore, c.exposureAfter, c.headroomAfter, c.breached,
+            c.currency,
+            c.limit,
+            c.exposureBefore,
+            c.exposureAfter,
+            c.headroomAfter,
+            c.breached,
         )
     }
 }
@@ -110,7 +115,9 @@ data class DealResponse(
             limitCheck = d.limitCheck?.let(LimitCheckResponse::from),
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
-            history = d.history.map { TransitionResponse(it.from, it.to, it.actor.id, it.actor.type.name, it.at, it.note) },
+            history = d.history.map {
+                TransitionResponse(it.from, it.to, it.actor.id, it.actor.type.name, it.at, it.note)
+            },
             journals = journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) },
         )
     }
@@ -128,8 +135,14 @@ data class CounterpartyResponse(
 ) {
     companion object {
         fun from(e: CounterpartyExposure) = CounterpartyResponse(
-            e.counterparty.id, e.counterparty.name, e.counterparty.kind, e.counterparty.synthetic,
-            e.currency, e.limit, e.exposure, e.headroom,
+            e.counterparty.id,
+            e.counterparty.name,
+            e.counterparty.kind,
+            e.counterparty.synthetic,
+            e.currency,
+            e.limit,
+            e.exposure,
+            e.headroom,
         )
     }
 }

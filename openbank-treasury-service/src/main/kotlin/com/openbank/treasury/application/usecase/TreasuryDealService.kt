@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.`in`.DealView
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
@@ -52,7 +53,8 @@ class TreasuryDealService(
     private val clock: Clock,
 ) : TreasuryDealUseCase {
 
-    override suspend fun draft(command: DraftDealCommand, actor: Actor): Deal {
+    override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
         val today = LocalDate.now(clock)
@@ -70,15 +72,17 @@ class TreasuryDealService(
             at = now,
             rationale = command.rationale,
         )
-        return deals.save(deal)
+        return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }
 
-    override suspend fun submit(dealId: UUID, actor: Actor): Deal {
+    override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = load(dealId)
-        return deals.save(deal.submit(actor, limitCheck(deal), clock.instant()))
+        return deals.save(deal.submit(actor, limitCheck(deal), clock.instant()), command = cmd(key, SUBMIT, dealId))
     }
 
-    override suspend fun approve(dealId: UUID, actor: Actor): Deal {
+    override suspend fun approve(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
         val deal = load(dealId)
         // Re-checked at approval: exposure may have moved since submission.
         val booked = deal.approve(actor, limitCheck(deal), clock.instant())
@@ -100,15 +104,21 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(booked, event = event)
+        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
     }
 
-    override suspend fun reject(dealId: UUID, reason: String, actor: Actor): Deal =
-        deals.save(load(dealId).reject(actor, reason, clock.instant()))
+    override suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, REJECT, dealId)?.let { return it } }
+        return deals.save(load(dealId).reject(actor, reason, clock.instant()), command = cmd(key, REJECT, dealId))
+    }
 
-    override suspend fun cancel(dealId: UUID, actor: Actor): Deal = deals.save(load(dealId).cancel(actor, clock.instant()))
+    override suspend fun cancel(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, CANCEL, dealId)?.let { return it } }
+        return deals.save(load(dealId).cancel(actor, clock.instant()), command = cmd(key, CANCEL, dealId))
+    }
 
-    override suspend fun settle(dealId: UUID, actor: Actor): Deal {
+    override suspend fun settle(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
         val settled = deal.settle(actor, LocalDate.now(clock), clock.instant())
         val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
@@ -128,10 +138,11 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(settled, ref, event)
+        return deals.save(settled, ref, event, cmd(key, SETTLE, dealId))
     }
 
-    override suspend fun mature(dealId: UUID, actor: Actor): Deal {
+    override suspend fun mature(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
         val matured = deal.mature(actor, LocalDate.now(clock), clock.instant())
         val ref = post(PostingRules.maturity(matured), matured.maturityDate, "treasury ${matured.product} maturity")
@@ -151,10 +162,11 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(matured, ref, event)
+        return deals.save(matured, ref, event, cmd(key, MATURE, dealId))
     }
 
-    override suspend fun reverse(dealId: UUID, reason: String, actor: Actor): Deal {
+    override suspend fun reverse(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
         val ref = PostingRules.reversal(reversed, deal.state)
@@ -175,7 +187,7 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(reversed, ref, event)
+        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
     }
 
     override suspend fun get(dealId: UUID): DealView = DealView(load(dealId), deals.journals(dealId))
@@ -235,4 +247,33 @@ class TreasuryDealService(
     }
 
     private suspend fun load(dealId: UUID): Deal = deals.findById(dealId) ?: throw DealNotFoundException(dealId)
+
+    /**
+     * A key already recorded: the same command on the same deal is a replay (answer with the deal
+     * as it stands); anything else is a client bug and refused rather than guessed at.
+     */
+    private suspend fun replay(key: String, action: String, dealId: UUID?): Deal? {
+        require(key.isNotBlank() && key.length <= MAX_KEY_LENGTH) {
+            "Idempotency-Key must be 1..$MAX_KEY_LENGTH characters"
+        }
+        val prior = deals.findCommand(key) ?: return null
+        require(prior.action == action && (dealId == null || prior.dealId == dealId)) {
+            "Idempotency-Key was already used for ${prior.action} on another request"
+        }
+        return load(prior.dealId)
+    }
+
+    private fun cmd(key: String?, action: String, dealId: UUID) = key?.let { CommandKey(it, action, dealId) }
+
+    private companion object {
+        const val MAX_KEY_LENGTH = 128
+        const val DRAFT = "DRAFT"
+        const val SUBMIT = "SUBMIT"
+        const val APPROVE = "APPROVE"
+        const val REJECT = "REJECT"
+        const val CANCEL = "CANCEL"
+        const val SETTLE = "SETTLE"
+        const val MATURE = "MATURE"
+        const val REVERSE = "REVERSE"
+    }
 }

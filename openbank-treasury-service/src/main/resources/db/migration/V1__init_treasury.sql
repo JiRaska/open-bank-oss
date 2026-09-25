@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- ADR-0315: money-market deals with four-eyes booking.
 -- Rollback (fresh environment only — nothing references these tables from outside):
---   DROP TABLE treasury_outbox, deal_journals, deal_transitions, deals, counterparties;
---   DROP SEQUENCE counterparties_seq, deals_seq, deal_transitions_seq, deal_journals_seq, treasury_outbox_seq;
+--   DROP TABLE treasury_outbox, deal_commands, deal_journals, deal_transitions, deals, counterparties;
+--   DROP SEQUENCE counterparties_seq, deals_seq, deal_transitions_seq, deal_journals_seq, deal_commands_seq, treasury_outbox_seq;
 
 CREATE TABLE counterparties (
     id               BIGINT PRIMARY KEY,
@@ -78,7 +78,19 @@ CREATE TABLE deal_journals (
 
 CREATE INDEX idx_deal_journals_deal ON deal_journals (deal_id);
 
--- Transactional outbox (ADR-0003 / ADR-0050), fleet shape incl. the ADR-0252 synthetic taint.
+-- Client Idempotency-Key per command (money-path idempotency, #8351): written in the SAME
+-- transaction as the state change it produced, so a replayed key finds either nothing (the
+-- command never committed, safe to run) or the command (answer with the deal as it stands).
+CREATE TABLE deal_commands (
+    id               BIGINT PRIMARY KEY,
+    idempotency_key  VARCHAR(128) NOT NULL UNIQUE,
+    action           VARCHAR(20)  NOT NULL,
+    deal_id          UUID         NOT NULL REFERENCES deals (deal_id),
+    created_at       TIMESTAMPTZ  NOT NULL
+);
+
+-- Transactional outbox (ADR-0003 / ADR-0050), fleet shape; the ADR-0252 synthetic taint column
+-- is added by V2 in the fleet's own named migration (check-synthetic-outbox-taint.py).
 CREATE TABLE treasury_outbox (
     id              BIGINT PRIMARY KEY,
     event_id        UUID NOT NULL UNIQUE,
@@ -90,7 +102,6 @@ CREATE TABLE treasury_outbox (
     last_error      TEXT,
     claimed_at      TIMESTAMPTZ,
     sent_at         TIMESTAMPTZ,
-    synthetic       BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT treasury_outbox_created_at_plausible CHECK (created_at >= TIMESTAMPTZ '2020-01-01')
@@ -102,6 +113,7 @@ CREATE SEQUENCE IF NOT EXISTS counterparties_seq INCREMENT BY 50;
 CREATE SEQUENCE IF NOT EXISTS deals_seq INCREMENT BY 50;
 CREATE SEQUENCE IF NOT EXISTS deal_transitions_seq INCREMENT BY 50;
 CREATE SEQUENCE IF NOT EXISTS deal_journals_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS deal_commands_seq INCREMENT BY 50;
 CREATE SEQUENCE IF NOT EXISTS treasury_outbox_seq INCREMENT BY 50;
 
 -- Counterparty master seed (ADR-0315 D4/D9). The three banks are SYNTHETIC — invented sandbox

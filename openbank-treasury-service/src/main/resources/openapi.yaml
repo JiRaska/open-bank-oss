@@ -32,6 +32,8 @@ info:
     interest) and, for a settled deal, reversal. Nothing posts before `BOOKED`; booking itself
     posts nothing. Each posted journal is listed on the deal as `journals[]`.
 
+    **Idempotency**: every command POST requires an `Idempotency-Key` header (money-path rule).
+
     **Sandbox**: a SYNTHETIC simulated counterparty set settles booked deals on their value date
     and matures settled deals on their maturity date (ADR-0315 D9). Real market connectivity is
     out of scope.
@@ -69,6 +71,8 @@ paths:
       tags: [Treasury]
       operationId: draftDeal
       summary: Draft a deal (ROLE_TREASURY_DEALER). Nothing posts.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -108,6 +112,7 @@ paths:
       summary: Submit a DRAFT for approval (ROLE_TREASURY_DEALER); records the limit check
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -121,6 +126,7 @@ paths:
       summary: Four-eyes approval — books the deal (ROLE_TREASURY_APPROVER)
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -140,6 +146,7 @@ paths:
       summary: Reject a PENDING_APPROVAL deal back to DRAFT (ROLE_TREASURY_APPROVER)
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -159,6 +166,7 @@ paths:
       summary: Cancel a DRAFT or PENDING_APPROVAL deal
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -171,6 +179,7 @@ paths:
       summary: Settle a BOOKED deal on or after its value date; posts the settlement journal
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -183,6 +192,7 @@ paths:
       summary: Mature a SETTLED deal on or after its maturity date; posts principal and interest
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -195,6 +205,7 @@ paths:
       summary: Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -256,6 +267,19 @@ components:
       bearerFormat: JWT
 
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated, one per user intent (e.g. a UUID), stable across automatic retries.
+        Stored with the state change it produced, in the same transaction: a replay returns the
+        deal as it now stands instead of acting twice; the same key on a different command or
+        deal is 400. 1..128 characters.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
     DealId:
       name: id
       in: path

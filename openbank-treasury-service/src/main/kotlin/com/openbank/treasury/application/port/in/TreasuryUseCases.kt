@@ -51,14 +51,19 @@ data class SimulatedMarketRun(val moved: Int, val failures: List<Throwable>)
 
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
-    suspend fun draft(command: DraftDealCommand, actor: Actor): Deal
-    suspend fun submit(dealId: UUID, actor: Actor): Deal
-    suspend fun approve(dealId: UUID, actor: Actor): Deal
-    suspend fun reject(dealId: UUID, reason: String, actor: Actor): Deal
-    suspend fun cancel(dealId: UUID, actor: Actor): Deal
-    suspend fun settle(dealId: UUID, actor: Actor): Deal
-    suspend fun mature(dealId: UUID, actor: Actor): Deal
-    suspend fun reverse(dealId: UUID, reason: String, actor: Actor): Deal
+    /**
+     * Every command takes the client's idempotency key (null only for the in-process simulated
+     * market). A replayed key returns the deal as it now stands; a key reused for a different
+     * command or deal is refused (400).
+     */
+    suspend fun draft(command: DraftDealCommand, actor: Actor, key: String? = null): Deal
+    suspend fun submit(dealId: UUID, actor: Actor, key: String? = null): Deal
+    suspend fun approve(dealId: UUID, actor: Actor, key: String? = null): Deal
+    suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
+    suspend fun cancel(dealId: UUID, actor: Actor, key: String? = null): Deal
+    suspend fun settle(dealId: UUID, actor: Actor, key: String? = null): Deal
+    suspend fun mature(dealId: UUID, actor: Actor, key: String? = null): Deal
+    suspend fun reverse(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun get(dealId: UUID): DealView
     suspend fun list(state: DealState?): List<Deal>
     suspend fun counterparties(): List<CounterpartyExposure>

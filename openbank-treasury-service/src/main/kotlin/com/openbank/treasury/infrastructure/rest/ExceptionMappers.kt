@@ -22,10 +22,12 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 class ExceptionMappers {
 
     @ServerExceptionMapper
-    fun notFound(e: DealNotFoundException): Response = error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+    fun notFound(e: DealNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
-    fun conflict(e: IllegalStateException): Response = error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+    fun conflict(e: IllegalStateException): Response =
+        error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
 
     @ServerExceptionMapper
     fun fourEyes(e: FourEyesViolationException): Response = error(UNPROCESSABLE, "FOUR_EYES_VIOLATION", e.message)

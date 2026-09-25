@@ -120,7 +120,9 @@ data class Deal(
         require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
         if (product == ProductType.CNB_DEPOSIT_FACILITY) {
             require(currency == CZK) { "the ČNB deposit facility is CZK only" }
-            require(counterpartyId == CNB_COUNTERPARTY_ID) { "the ČNB deposit facility's counterparty is $CNB_COUNTERPARTY_ID" }
+            require(counterpartyId == CNB_COUNTERPARTY_ID) {
+                "the ČNB deposit facility's counterparty is $CNB_COUNTERPARTY_ID"
+            }
             require(maturityDate == DayCount.nextBusinessDay(valueDate)) {
                 "the ČNB deposit facility is overnight: maturityDate must be the next business day"
             }
