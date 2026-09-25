@@ -194,17 +194,22 @@ def integrations(root: pathlib.Path):
 
 
 def can_publish_verification(root: pathlib.Path, provider: str) -> bool:
-    """True if the provider has a broker-sourced verification test.
+    """True if the provider has a broker-sourced test selected by providerPactTest.
 
     A `@PactFolder` test replays the committed pact from disk and never contacts the
     broker, so no amount of building that provider will ever publish a verification
-    result. Dispatching one is a build that cannot change the answer — see the module
-    header for the live case this was written after.
+    result. A @PactBroker class with the wrong filename is equally inert: the Gradle
+    providerPactTest source set selects *ProviderVerificationTest.kt. Lending had a
+    broker annotation on *PactBrokerProviderTest.kt and seven 30-minute dispatches
+    rebuilt the service before the contract job reported no providerPactTest (#10787).
+    Dispatch only when the broker class is discoverable by that same convention.
     """
     tests = root / provider / "src" / "test"
     if not tests.is_dir():
         return False
     for f in tests.rglob("*.kt"):
+        if not f.name.endswith("ProviderVerificationTest.kt"):
+            continue
         try:
             src = f.read_text(errors="replace")
         except OSError:
@@ -486,13 +491,18 @@ def self_test() -> int:
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         tmpp = pathlib.Path(tmp)
-        for name, ann in (("prov-broker", "@PactBroker"), ("prov-folder", '@PactFolder("../pacts")')):
+        for name, filename, ann in (
+            ("prov-broker", "TProviderVerificationTest.kt", "@PactBroker"),
+            ("prov-broker-off-filter", "TPactBrokerProviderTest.kt", "@PactBroker"),
+            ("prov-folder", "TProviderVerificationTest.kt", '@PactFolder("../pacts")'),
+        ):
             d = tmpp / name / "src" / "test" / "kotlin"
             d.mkdir(parents=True)
-            (d / "T.kt").write_text(f'@Provider("x")\n{ann}\nclass T\n')
+            (d / filename).write_text(f'@Provider("x")\n{ann}\nclass T\n')
         (tmpp / "prov-none" / "src" / "test").mkdir(parents=True)
         checks = [
             ("prov-broker", True, "@PactBroker provider is publishable"),
+            ("prov-broker-off-filter", False, "@PactBroker class outside providerPactTest is NOT publishable"),
             ("prov-folder", False, "@PactFolder-only provider is NOT publishable"),
             ("prov-none", False, "provider with no test at all is NOT publishable"),
             ("prov-missing", False, "provider directory that does not exist"),
