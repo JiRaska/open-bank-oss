@@ -102,6 +102,14 @@ const revenueNav: NavItem[] = [
   { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view' },
 ]
 
+// #10618: risk-engine snapshots/curves and the lending ledger backfill, for the risk and finance
+// departments. Each entry carries the permission of the page it opens (roles.ts).
+const balanceSheetNav: NavItem[] = [
+  { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view' },
+  { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view' },
+  { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view' },
+]
+
 const customerNav: NavItem[] = [
   { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view' },
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
@@ -218,7 +226,7 @@ const sysNav: NavItem[] = [
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...customerNav, ...paymentsNav,
+  ...coreNav, ...revenueNav, ...balanceSheetNav, ...customerNav, ...paymentsNav,
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
@@ -356,6 +364,12 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
         <NavSection items={filter(coreNav)} currentHref={currentHref} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
         <NavSection items={filter(revenueNav)} currentHref={currentHref} />
+        {filter(balanceSheetNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Rozvaha a riziko', 'Balance sheet & risk')}</SectionLabel>
+            <NavSection items={filter(balanceSheetNav)} currentHref={currentHref} />
+          </>
+        )}
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
         <NavSection items={filter(customerNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>

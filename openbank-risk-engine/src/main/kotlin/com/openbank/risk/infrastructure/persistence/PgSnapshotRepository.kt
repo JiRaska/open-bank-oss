@@ -6,6 +6,7 @@ package com.openbank.risk.infrastructure.persistence
 
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.port.out.SnapshotRunSummary
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.InstrumentKind
@@ -46,6 +47,19 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
             "$SELECT_RUN WHERE as_of = $1 AND input_hash = $2",
         ).execute(Tuple.of(asOf, inputHash)).awaitSuspending().firstOrNull(),
     )
+
+    override suspend fun listRecent(limit: Int): List<SnapshotRunSummary> =
+        pool.preparedQuery(SELECT_RECENT).execute(Tuple.of(limit)).awaitSuspending().map { row ->
+            SnapshotRunSummary(
+                id = row.getUUID("id"),
+                asOf = row.getLocalDate("as_of"),
+                recordedAt = row.getOffsetDateTime("recorded_at").toInstant(),
+                provenance = Provenance.parse(row.getString("provenance")).wire,
+                status = TieOutStatus.valueOf(row.getString("status")).name,
+                positionCount = row.getInteger("position_count"),
+                mismatchCount = row.getInteger("mismatch_count"),
+            )
+        }
 
     override suspend fun findById(id: UUID): SnapshotRun? =
         loadRun(pool.preparedQuery("$SELECT_RUN WHERE id = $1").execute(Tuple.of(id)).awaitSuspending().firstOrNull())
@@ -238,6 +252,9 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
     }
 
     private companion object {
+        const val SELECT_RECENT =
+            "SELECT id, as_of, recorded_at, provenance, status, position_count, mismatch_count FROM snapshot_run " +
+                "ORDER BY recorded_at DESC, id LIMIT $1"
         const val SELECT_RUN =
             "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count FROM snapshot_run"
         const val INSERT_RUN =

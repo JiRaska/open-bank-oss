@@ -4,6 +4,8 @@
 
 package com.openbank.risk.application.port.`in`
 
+import com.openbank.risk.application.port.out.CurveSetSummary
+import com.openbank.risk.application.port.out.SnapshotRunSummary
 import com.openbank.risk.domain.cashflow.SnapshotCashFlows
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
@@ -19,6 +21,8 @@ import java.util.UUID
 data class SnapshotOutcome(val run: SnapshotRun, val replayed: Boolean)
 
 interface SnapshotUseCase {
+    suspend fun listRuns(limit: Int): List<SnapshotRunSummary>
+
     suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome
 
     suspend fun getRun(id: UUID): SnapshotRun
@@ -39,6 +43,8 @@ data class CreateCurveSetCommand(
 )
 
 interface CurveSetUseCase {
+    suspend fun list(limit: Int): List<CurveSetSummary>
+
     suspend fun create(command: CreateCurveSetCommand): CurveSet
 
     suspend fun get(id: UUID): CurveSet

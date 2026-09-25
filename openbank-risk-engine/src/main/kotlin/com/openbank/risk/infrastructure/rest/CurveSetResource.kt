@@ -20,6 +20,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -60,6 +61,13 @@ class CurveSetResource {
         )
         return Response.status(Response.Status.CREATED).entity(curveSets.create(command).toResponse()).build()
     }
+
+    /** Bounded list for the console (#10618); pillars are on the set itself. */
+    @GET
+    @Operation(summary = "The most recently recorded curve sets, newest first (limit 1..100, default 25)")
+    @Authorize(action = "risk.curve-set.read", resource = "")
+    suspend fun list(@QueryParam("limit") limit: Int?): Response =
+        Response.ok(CurveSetListResponse(curveSets.list(boundedLimit(limit)).map { it.toDto() })).build()
 
     @GET
     @Path("/{id}")
