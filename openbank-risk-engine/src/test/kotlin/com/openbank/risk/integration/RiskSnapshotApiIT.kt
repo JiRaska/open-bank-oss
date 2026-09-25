@@ -122,7 +122,7 @@ class RiskSnapshotApiIT {
         val id = create("2026-05-31").then().statusCode(201).extract().path<String>("id")
         given().`when`().get("/api/v1/risk/snapshots/$id").then().statusCode(200)
         given().contentType("application/json")
-            .body("""{"asOf":"2026-05-31","provenance":"synthetic","source":"IT","curves":{"CZEONIA":[{"tenor":"ON","rate":0.035},{"tenor":"3M","rate":0.036},{"tenor":"1Y","rate":0.038}]}}""")
+            .body(curveSetBody("2026-05-31"))
             .`when`().post("/api/v1/risk/curve-sets").then().statusCode(201)
     }
 
@@ -133,7 +133,7 @@ class RiskSnapshotApiIT {
         given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(404)
         create("2026-07-31").then().statusCode(403)
         given().contentType("application/json")
-            .body("""{"asOf":"2026-07-31","provenance":"synthetic","source":"IT","curves":{"CZEONIA":[{"tenor":"ON","rate":0.035},{"tenor":"3M","rate":0.036},{"tenor":"1Y","rate":0.038}]}}""")
+            .body(curveSetBody("2026-07-31"))
             .`when`().post("/api/v1/risk/curve-sets").then().statusCode(403)
     }
 
@@ -148,6 +148,10 @@ class RiskSnapshotApiIT {
     fun `an unauthenticated caller is refused`() {
         create("2026-04-30").then().statusCode(401)
     }
+
+    private fun curveSetBody(asOf: String) =
+        """{"asOf":"$asOf","provenance":"synthetic","source":"IT","curves":{"CZEONIA":""" +
+            """[{"tenor":"ON","rate":0.035},{"tenor":"3M","rate":0.036},{"tenor":"1Y","rate":0.038}]}}"""
 
     private fun count(sql: String, id: String): Int {
         val config = ConfigProvider.getConfig()
