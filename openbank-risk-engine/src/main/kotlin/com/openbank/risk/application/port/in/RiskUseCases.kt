@@ -6,14 +6,18 @@ package com.openbank.risk.application.port.`in`
 
 import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.application.port.out.SnapshotRunSummary
+import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.cashflow.SnapshotCashFlows
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
+import com.openbank.risk.domain.irrbb.IrrbbParameters
+import com.openbank.risk.domain.irrbb.IrrbbResult
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
@@ -56,4 +60,20 @@ data class CashFlowProjection(val run: SnapshotRun, val curveSet: CurveSet, val 
 interface CashFlowUseCase {
     /** Throws [com.openbank.risk.application.port.out.UntiedSnapshotException] for an UNTIED run. */
     suspend fun project(runId: UUID, curveSetId: UUID): CashFlowProjection
+}
+
+/** An IRRBB analysis of a run under a curve set (ADR-0313 phase 1). */
+data class IrrbbAnalysis(
+    val run: SnapshotRun,
+    val curveSet: CurveSet,
+    val model: BehaviouralModel,
+    val parameters: IrrbbParameters,
+    val result: IrrbbResult,
+    /** Operator-supplied Tier 1 capital, in the aggregation currency; never fetched or defaulted. */
+    val tier1Capital: BigDecimal?,
+)
+
+interface IrrbbUseCase {
+    /** Same 404 / 409 / 400 rules as [CashFlowUseCase.project]. */
+    suspend fun analyse(runId: UUID, curveSetId: UUID, tier1Capital: BigDecimal?): IrrbbAnalysis
 }

@@ -43,7 +43,7 @@ data class ShockSizes(val parallelBp: BigDecimal, val shortBp: BigDecimal, val l
         /** Parses `parallel/short/long` in basis points, e.g. `200/250/100`. */
         fun parse(raw: String): ShockSizes {
             val parts = raw.split('/').map { it.trim() }
-            require(parts.size == 3) { "shock sizes must be 'parallel/short/long' in bp, got '$raw'" }
+            require(parts.size == SIZE_PARTS) { "shock sizes must be 'parallel/short/long' in bp, got '$raw'" }
             val bp = parts.map { p ->
                 requireNotNull(p.toBigDecimalOrNull()) { "shock size '$p' in '$raw' is not a number" }
             }
@@ -85,6 +85,7 @@ data class PostShockFloor(val atZeroBp: BigDecimal, val slopeBpPerYear: BigDecim
 }
 
 private const val BP_DECIMALS = 4
+private const val SIZE_PARTS = 3
 
 /**
  * The shock formulas of BCBS d368 Annex 2, evaluated at a tenor `t` in years (ACT/365F from
@@ -100,7 +101,7 @@ private const val BP_DECIMALS = 4
 object SupervisoryShocks {
 
     /** d368 Annex 2 footnote 43: x = 4 "for most currencies ... unless otherwise determined". */
-    val DECAY_YEARS: BigDecimal = BigDecimal(4)
+    val DECAY_YEARS: BigDecimal = BigDecimal("4")
     private val STEEP_SHORT = BigDecimal("-0.65")
     private val STEEP_LONG = BigDecimal("0.9")
     private val FLAT_SHORT = BigDecimal("0.8")
