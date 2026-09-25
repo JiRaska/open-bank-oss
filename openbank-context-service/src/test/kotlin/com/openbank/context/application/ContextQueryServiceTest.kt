@@ -15,6 +15,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -80,6 +81,17 @@ class ContextQueryServiceTest {
             .isInstanceOf(ContextAuthorizationUnavailable::class.java)
         coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
         coVerify { audit.record(match { it.decision == "UNAVAILABLE" && it.reasonCode == "PDP_UNAVAILABLE" }) }
+    }
+
+    @Test
+    fun `cancelled policy check stops before audit or graph lookup`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } throws CancellationException("request cancelled")
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(CancellationException::class.java)
+        coVerify(exactly = 0) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
     }
 
     @Test

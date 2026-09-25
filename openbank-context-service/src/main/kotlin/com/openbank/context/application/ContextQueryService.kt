@@ -13,6 +13,7 @@ import com.openbank.libs.authz.Principal
 import com.openbank.libs.authz.ResourceRef
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.security.MessageDigest
 import java.time.Clock
@@ -225,6 +226,8 @@ class ContextQueryService(
                     ),
                 ),
             )
+        } catch (exception: CancellationException) {
+            throw exception
         } catch (_: Exception) {
             audit.record(entry(actor, context, action, root, "UNAVAILABLE", null, "PDP_UNAVAILABLE", now))
             decisionMetric(action, "unavailable", "pdp_unavailable")
