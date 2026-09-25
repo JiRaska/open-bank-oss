@@ -14,7 +14,9 @@ import http from "k6/http";
 import { check, fail } from "k6";
 import { Trend } from "k6/metrics";
 
-http.setResponseCallback(http.expectedStatuses(200));
+// Capacity setup deliberately probes a denied identity; a 403 there is expected.
+// The measured positive path still requires 200 through its explicit checks.
+http.setResponseCallback(http.expectedStatuses(200, 403));
 
 const lens = __ENV.CONTEXT_PERF_LENS;
 const profile = __ENV.CONTEXT_PERF_PROFILE || "smoke";
@@ -101,6 +103,29 @@ export function setup() {
   }
   if (lens === "lending-shared" && !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_RELATED_LOAN_ID || "")) {
     fail("Shared lending baseline requires a synthetic related loan fixture");
+  }
+  if (profile === "capacity" && ["lending-guarantees", "lending-shared"].includes(lens)) {
+    if (!__ENV.CONTEXT_PERF_DENIED_TOKEN ||
+        __ENV.CONTEXT_PERF_DENIED_TOKEN === __ENV.CONTEXT_PERF_TOKEN) {
+      fail("Lending capacity baseline requires a distinct valid token without the graph role");
+    }
+    const deniedPath = lens === "lending-shared" ? "shared-guarantors" : "approved-guarantees";
+    const denied = http.get(
+      `${__ENV.CONTEXT_PERF_URL.replace(/\/$/, "")}/api/v1/context/lending-loans/${encodeURIComponent(__ENV.CONTEXT_PERF_REFERENCE)}/${deniedPath}`,
+      {
+        headers: {
+          Authorization: `Bearer ${__ENV.CONTEXT_PERF_DENIED_TOKEN}`,
+          "X-Investigation-Case-Id": __ENV.CONTEXT_PERF_CASE_ID,
+          "X-Investigation-Purpose": __ENV.CONTEXT_PERF_PURPOSE,
+        },
+        tags: { name: `context_${lens}_denied_preflight` },
+        redirects: 0,
+        timeout: "2s",
+      },
+    );
+    if (denied.status !== 403 || denied.body?.includes(__ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID)) {
+      fail("Lending capacity baseline requires a 403 without guarantee evidence for the denied role");
+    }
   }
   if (lens === "complaint" && __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID &&
       !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID)) {

@@ -13,3 +13,7 @@ at the same time and reject activation if payment p95 regresses by more than 2%.
 PostgreSQL saturation, OPA latency, projection lag and payment control result with the release
 evidence. The script is a repeatable gate definition; this repository change does not claim a
 production-sized benchmark has already run.
+
+For either Lending capacity lens, supply `CONTEXT_PERF_DENIED_TOKEN` for a valid synthetic user
+without the graph role. Setup requires a 403 with no guarantee evidence before measuring the
+authorized path. Use distinct tokens and keep both outside the repository and benchmark output.
