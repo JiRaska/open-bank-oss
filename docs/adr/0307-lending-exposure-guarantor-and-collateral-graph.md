@@ -142,7 +142,9 @@ with the decision. A real-PostgreSQL test proves that an outbox insert failure
 rolls back approval and a successful approval commits one minimized reference.
 The loan-scoped maker/checker HTTP routes are also disabled by default. A
 dedicated Kafka publisher and literal topic ACL now route only the approved
-reference away from the broad Lending topic; no proof credential is provisioned.
+reference away from the broad Lending topic. The pointer carries the source
+loan UUID so Context can bind it to an exact assigned loan; it carries no
+guarantor, amount, document or staff identity. No proof credential is provisioned.
 The publisher rejects unknown graph event types. A bounded,
 loan-scoped approved-guarantee source read is available
 behind a separate disabled-by-default switch. It requires the investigator's

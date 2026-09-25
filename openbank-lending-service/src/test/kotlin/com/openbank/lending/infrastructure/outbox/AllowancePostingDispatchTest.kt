@@ -33,7 +33,7 @@ class AllowancePostingDispatchTest {
     private val loanId = UUID.fromString("77777777-7777-7777-7777-777777777777")
     private val partyId = UUID.fromString("88888888-8888-8888-8888-888888888888")
     private val graphPayload = """{"schemaVersion":1,"eventType":"lending.graph.guarantee.approved",""" +
-        """"guaranteeId":"$loanId","revision":1,"bankScope":"demo-bank",""" +
+        """"guaranteeId":"$loanId","loanId":"$loanId","revision":1,"bankScope":"demo-bank",""" +
         """"occurredAt":"2026-04-01T10:00:00Z"}"""
 
     private fun command() = OutboxEntry(

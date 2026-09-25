@@ -823,15 +823,17 @@ checker identities. The API returns only ID, revision and state, with no
 guarantor or source-document identifiers. Party/Document proof outages return
 503 without a negative or positive decision. A real-PostgreSQL test proves an
 outbox insert failure rolls approval back, while a valid approval commits one
-minimal pointer. No proof client credential is provisioned yet. The shared
-Lending Kafka publisher explicitly rejects `lending.graph.*` messages, so an
-accidental internal call cannot disclose graph references on the broad existing
-topic. Before enabling a writer, add a dedicated topic and ACL, provision the
-narrow proof credential and verify the policy/identity path in a deployed
-environment. Source proof failure must propagate; a prior positive result
-cannot substitute for the approval-time check. A post-approval source change
-still requires revalidation at publication and source read time, so no Context
-edge is currently authorized from these rows.
+minimal pointer. No proof client credential is provisioned yet. A dedicated
+Kafka topic and literal producer ACL isolate graph references from the broad
+Lending stream. The producer accepts only the exact versioned approved-guarantee
+field set: guarantee and loan UUIDs, revision, bank scope and event time. It
+rejects unknown graph types or extra fields; no guarantor, amount, document or
+staff identity is published. Before enabling a writer, provision the narrow
+proof credential and verify the policy/identity path in a deployed environment.
+Source proof failure must propagate; a prior positive result cannot substitute
+for the approval-time check. A later source change requires live revalidation
+at authorized source read time; a Kafka pointer alone establishes no Context
+edge or current guarantee validity.
 - **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `RestCatalogLoanProfilePort`
   now reaches `product-catalog.accounts.svc:8443` with the client certificate `lending-internal-tls`
   (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in

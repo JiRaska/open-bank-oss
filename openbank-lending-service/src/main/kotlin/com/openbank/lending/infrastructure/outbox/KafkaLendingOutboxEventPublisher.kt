@@ -78,6 +78,7 @@ class KafkaLendingOutboxEventPublisher(
             node.path("bankScope").textValue()?.matches(BANK_SCOPE_PATTERN) == true
         check(validValues) { "Invalid lending graph reference values" }
         UUID.fromString(node.path("guaranteeId").textValue())
+        UUID.fromString(node.path("loanId").textValue())
         Instant.parse(node.path("occurredAt").textValue())
     }
 
@@ -86,6 +87,7 @@ class KafkaLendingOutboxEventPublisher(
             "schemaVersion",
             "eventType",
             "guaranteeId",
+            "loanId",
             "revision",
             "bankScope",
             "occurredAt",

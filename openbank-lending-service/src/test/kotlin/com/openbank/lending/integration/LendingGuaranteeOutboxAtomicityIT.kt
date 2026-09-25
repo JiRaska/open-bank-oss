@@ -61,7 +61,11 @@ class LendingGuaranteeOutboxAtomicityIT {
                 statement.executeQuery().use { rows ->
                     assertThat(rows.next()).isTrue()
                     val payload = rows.getString(1)
-                    assertThat(payload).contains(pending.guaranteeId.toString(), "\"schemaVersion\":1")
+                    assertThat(payload).contains(
+                        pending.guaranteeId.toString(),
+                        proposal.loanId.toString(),
+                        "\"schemaVersion\":1",
+                    )
                     assertThat(payload).doesNotContain(
                         proposal.guarantorPartyId.toString(),
                         proposal.sourceDocumentId.toString(),
