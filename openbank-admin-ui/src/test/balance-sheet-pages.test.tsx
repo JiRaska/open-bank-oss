@@ -29,6 +29,8 @@ vi.mock('recharts', () => {
 
 import LedgerBackfillPage from '@/app/balance-sheet/ledger-backfill/page'
 import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
+import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
+import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
 
 const json = (body: unknown, status = 200) =>
@@ -157,5 +159,138 @@ describe('snapshots', () => {
     expect(screen.getByText(/USD/)).toBeTruthy()
     expect(screen.getByText(/GL_ACCOUNT positions carry no contract terms/)).toBeTruthy()
     expect(calls.some(c => c.url.includes('/cash-flows?curveSetId=cs-1'))).toBe(true)
+  })
+})
+
+const IRRBB = (ratio: number | null, tier1: boolean) => ({
+  runId: 'run-3', asOf: '2026-09-30', provenance: 'synthetic', curveSetId: 'cs-1', curveSetProvenance: 'synthetic', curveSetSource: 'desk',
+  gaps: [{ currency: 'EUR', buckets: [{ bucket: 'overnight', assets: 0, liabilities: 60, gap: -60, cumulativeGap: -60 }, { bucket: '1-2Y', assets: 1000, liabilities: 0, gap: 1000, cumulativeGap: 940 }], totalAssets: 1000, totalLiabilities: 60, totalGap: 940 }],
+  scenarios: [
+    { scenario: 'parallel-up', currencies: [{ currency: 'EUR', basePv: 950, shockedPv: 930, deltaEve: -20, eveLoss: 20, deltaNii: 3.5 }], aggregateLoss: 20 },
+    { scenario: 'steepener', currencies: [{ currency: 'EUR', basePv: 950, shockedPv: 945, deltaEve: -5, eveLoss: 5, deltaNii: null }], aggregateLoss: 5 },
+  ],
+  worstCase: { scenario: 'parallel-up', loss: 20, currency: 'EUR', byCurrency: { EUR: 'parallel-up' } },
+  outlierTest: { tier1Supplied: tier1, tier1Capital: tier1 ? 100 : null, currency: 'EUR', threshold: 0.15, ratio, breached: ratio === null ? null : ratio > 0.15, note: tier1 ? 'ratio note' : 'Tier 1 not supplied' },
+  shockNotConfigured: ['CZK'], unpriced: [],
+  assumptions: {
+    model: { id: 'nmd-linear-core', version: '1.0.0', coreRatio: 0.7, coreRunoffYears: 5, annualDepositRate: 0 },
+    shockSizes: [{ currency: 'EUR', parallelBp: 200, shortBp: 250, longBp: 100 }], shockSource: 'BCBS d368 Annex 2', shortDecayYears: 4,
+    postShockFloor: null, postShockFloorSource: 'No post-shock floor configured', nmdRepricing: 'repricing = run-off', floatingRepricing: 'next reset',
+    eveBasis: 'run-off', niiBasis: 'constant balance sheet', niiHorizonMonths: 12, currencyAggregation: 'd368',
+  },
+})
+
+describe('IRRBB', () => {
+  const route = (url: string) => {
+    if (url.includes('/curve-sets')) return json({ curveSets: [{ id: 'cs-1', asOf: '2026-09-30', provenance: 'synthetic', source: 'desk', recordedAt: '2026-09-30T06:00:00Z', indices: ['ESTR'] }] })
+    if (url.includes('tier1Capital=100')) return json(IRRBB(0.2, true))
+    return json(IRRBB(null, false))
+  }
+
+  it('without Tier 1 shows no ratio, never sends one, and states not-configured currencies', async () => {
+    router = route
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: 'run-3' })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    const irrbbCalls = calls.filter(c => c.url.includes('/irrbb'))
+    expect(irrbbCalls.length).toBeGreaterThan(0)
+    expect(irrbbCalls.every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/snapshots/run-3/irrbb?') && !c.url.includes('tier1Capital'))).toBe(true)
+    expect(screen.queryByText(/Breached|Překročeno/)).toBeNull()
+    expect(screen.getByText(/No shock sizes are configured|nejsou nastaveny/).textContent).toContain('CZK')
+    expect(document.querySelectorAll('tr[data-worst="true"]').length).toBe(1)
+    expect(screen.getByText(/BCBS d368 Annex 2/)).toBeTruthy()
+  })
+
+  it('shows the outlier ratio only after the user supplies Tier 1', async () => {
+    router = route
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: 'run-3' })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    fireEvent.change(screen.getByLabelText(/^(Tier 1 capital|Kapitál Tier 1)$/), { target: { value: '100' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Apply|Použít/ })) })
+    await screen.findByText(/Breached|Překročeno/)
+    expect(calls.some(c => c.url.includes('tier1Capital=100'))).toBe(true)
+  })
+
+  it('an invalid Tier 1 cannot be applied', async () => {
+    router = route
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: 'run-3' })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    fireEvent.change(screen.getByLabelText(/^(Tier 1 capital|Kapitál Tier 1)$/), { target: { value: '-5' } })
+    expect((screen.getByRole('button', { name: /Apply|Použít/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+const line = (label: string, amount: number, factor: number | null, citation: string, factorKey: string | null = 'k') =>
+  ({ label, glAccountCode: null, amount, factor, factorKey, weighted: factor === null ? 0 : amount * factor, citation })
+const CZK = (inflowBinding: boolean, lcrRatio: number | null) => ({
+  currency: 'CZK',
+  lcr: {
+    hqla: { lines: [{ level: 'L1', glClass: 'hqla-l1-cash-or-reserves', glAccountCode: '9001', marketValue: 100, haircut: 0, afterHaircut: 100 }],
+      level1: 100, level2a: 0, level2b: 0, adjustmentFor15Cap: 0, adjustmentFor40Cap: 0, level2bCapBinding: false, level2CapBinding: false, stock: 100 },
+    outflows: [line('Retail deposits, less stable (2 customer accounts)', 1500, 0.1, 'BCBS d238 ¶79')],
+    inflows: [line('GL 1001 (deposit-at-fi-operational)', 1500, 0, 'BCBS d238 ¶156')],
+    totalOutflows: 150, totalInflows: inflowBinding ? 200 : 0, inflowCap: 112.5, cappedInflows: inflowBinding ? 112.5 : 0,
+    inflowCapBinding: inflowBinding, netOutflows: inflowBinding ? 37.5 : 150, ratio: lcrRatio,
+  },
+  nsfr: {
+    asf: [line('Retail deposits, less stable', 1500, 0.9, 'BCBS d295 ¶23'), line('GL 6040 (capital-deduction)', -10, null, 'BCBS d295 ¶17', null)],
+    rsf: [line('GL 1001', 1500, 0.5, 'BCBS d295 ¶40(d)')], totalAsf: 1350, totalRsf: 750, ratio: 1.8,
+  },
+})
+const LIQ = (opts: { unclassified?: boolean; inflowBinding?: boolean; lcrRatio?: number | null } = {}) => {
+  const c = CZK(opts.inflowBinding ?? false, opts.lcrRatio === undefined ? 0.666667 : opts.lcrRatio)
+  return {
+    runId: 'run-4', asOf: '2026-09-30', provenance: 'synthetic', parameterSetId: 'bcbs-d238-d295', parameterSetVersion: '1',
+    currencies: [c], total: c,
+    unclassified: opts.unclassified ? [{ glAccountCode: '1000', glAccountType: 'ASSET', currency: 'CZK', amount: 300, reason: 'not mapped' }] : [],
+    notes: [],
+    assumptions: {
+      parameterSetId: 'bcbs-d238-d295', parameterSetVersion: '1', source: 'BCBS d238 (Jan 2013) and d295 (Oct 2014)',
+      scope: 'BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.',
+      factors: [{ key: 'lcr-inflow-cap', value: 0.75, citation: 'BCBS d238 ¶69, ¶144' }],
+      classification: {
+        retailStableShare: 0, operationalDepositShare: 0, tier2OverOneYearShare: 0, loansQualifyForLowRiskWeight: false,
+        glAccounts: [{ key: '1001', glClass: 'deposit-at-fi-operational', description: 'Balance at another bank' }], glAccountTypes: [],
+        choices: ['All retail deposits are less stable (d238 ¶80).'],
+      },
+      hqlaCapMethod: 'Annex 1', loanInflows: '¶153', loanRsf: '¶29', notInData: 'none', currencyAggregation: 'per currency',
+    },
+  }
+}
+
+describe('Liquidity (LCR / NSFR)', () => {
+  it('shows both ratios, the component tables, the parameter set, citations and the scope statement', async () => {
+    router = () => json(LIQ())
+    await renderPage(<SnapshotLiquidityPage params={Promise.resolve({ id: 'run-4' })} />)
+    await screen.findByTestId('lcr-CZK')
+    expect(calls.every(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-4/liquidity')).toBe(true)
+    expect(screen.getByTestId('nsfr-CZK').textContent).toContain('180')
+    expect(screen.getByText(/bcbs-d238-d295 v1/)).toBeTruthy()
+    expect(screen.getAllByText(/2015\/61 deviations not applied/).length).toBeGreaterThan(0)
+    expect(screen.getByText('BCBS d238 ¶69, ¶144')).toBeTruthy()
+    expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Unclassified balances|Nezařazené zůstatky/)).toBeNull()
+  })
+
+  it('warns about unclassified GL balances with their amounts', async () => {
+    router = () => json(LIQ({ unclassified: true }))
+    await renderPage(<SnapshotLiquidityPage params={Promise.resolve({ id: 'run-4' })} />)
+    await screen.findByText(/Unclassified balances|Nezařazené zůstatky/)
+    expect(document.querySelectorAll('tr[data-unclassified="true"]').length).toBe(1)
+    expect(screen.getByRole('alert').textContent).toContain('1000')
+  })
+
+  it('names a binding inflow cap and shows an undefined ratio as undefined, never 0 %', async () => {
+    router = () => json(LIQ({ inflowBinding: true, lcrRatio: null }))
+    await renderPage(<SnapshotLiquidityPage params={Promise.resolve({ id: 'run-4' })} />)
+    await screen.findByTestId('lcr-CZK')
+    expect(screen.getByTestId('lcr-CZK').textContent).toMatch(/undefined|nedefinováno/)
+    expect(screen.getByText(/inflow cap \(75%\)|strop přítoků/).textContent).toContain('87')
+  })
+
+  it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
+    router = () => json({ error: 'UNTIED', runId: 'run-4', mismatches: [] }, 409)
+    await renderPage(<SnapshotLiquidityPage params={Promise.resolve({ id: 'run-4' })} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('lcr-CZK')).toBeNull()
   })
 })

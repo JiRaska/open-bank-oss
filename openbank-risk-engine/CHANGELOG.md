@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.9.0...risk-engine-v0.10.0) (2026-09-25)
+
+
+### Features
+
+* **treasury:** money-market deal service MVP — four-eyes booking, ledger posting, ČNB facility as HQLA (ADR-0315) ([#10872](https://github.com/JiRaska/open-bank-oss/issues/10872)) ([dad4c4b](https://github.com/JiRaska/open-bank-oss/commit/dad4c4b2801b03ca58cf3d50153310e0066d7ad0))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.8.0...risk-engine-v0.9.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** LCR and NSFR on BCBS factors, with an admin-ui page (ADR-0313 phase 1) ([#10860](https://github.com/JiRaska/open-bank-oss/issues/10860)) ([6998a83](https://github.com/JiRaska/open-bank-oss/commit/6998a831635be984d661da2cb89f4aa9c5f469dd))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.7.0...risk-engine-v0.8.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** IRRBB — repricing gap, supervisory shocks, ΔEVE/ΔNII, with an admin-ui page (ADR-0313 phase 1) ([#10853](https://github.com/JiRaska/open-bank-oss/issues/10853)) ([5f5518f](https://github.com/JiRaska/open-bank-oss/commit/5f5518faefaf99fc041a06a0aed5c807b512bf64))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.6.0...risk-engine-v0.7.0) (2026-09-25)
 
 

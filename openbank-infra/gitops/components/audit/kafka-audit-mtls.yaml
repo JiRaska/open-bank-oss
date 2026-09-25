@@ -290,6 +290,15 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # components/treasury/kafka-topic.yaml -- ADR-0315 money-market deal lifecycle
+      # (booked/settled/matured/reversed). Money-path: every settled/matured/reversed deal posts
+      # a ledger journal, and the audit trail must see the deal behind it.
+      - resource:
+          type: topic
+          name: openbank.treasury.deal.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service
