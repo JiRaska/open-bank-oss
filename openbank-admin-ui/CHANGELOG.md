@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.257.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.256.0...admin-ui-v0.257.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** treasury section — blotter, new deal, four-eyes approval inbox, limits, daily position (ADR-0315) ([#10877](https://github.com/JiRaska/open-bank-oss/issues/10877)) ([c7de662](https://github.com/JiRaska/open-bank-oss/commit/c7de662d992be3f4f7e1475c8cf11e9406aeb12c))
+
 ## [0.256.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.255.0...admin-ui-v0.256.0) (2026-09-25)
 
 
