@@ -9,6 +9,8 @@ import com.openbank.sepa.infrastructure.persistence.repository.WorkflowHistoryCo
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured
@@ -65,9 +67,20 @@ import javax.sql.DataSource
  * under which nothing would ever dispatch and no error would say so.)
  */
 @QuarkusTest
-@QuarkusTestResource(SepaPaymentOutboxAtomicityIT.NoDispatchInMemoryKafkaResource::class)
+@TestProfile(SepaPaymentOutboxAtomicityIT.ObservationEnabledProfile::class)
+@QuarkusTestResource(
+    SepaPaymentOutboxAtomicityIT.NoDispatchInMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(com.openbank.sepa.it.PostgresRedisTestResource::class)
 class SepaPaymentOutboxAtomicityIT {
+
+    class ObservationEnabledProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.sepa.workflow-observations.enabled" to "true",
+            "quarkus.http.test-port" to "0",
+        )
+    }
 
     class NoDispatchInMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =

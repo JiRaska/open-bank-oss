@@ -17,21 +17,25 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.HexFormat
 import java.util.UUID
 
 @ApplicationScoped
-class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxRepositoryImpl) :
-    SepaPaymentRepository,
+class SepaPaymentRepositoryImpl(
+    private val outboxRepository: SepaPaymentOutboxRepositoryImpl,
+    @ConfigProperty(name = "openbank.sepa.workflow-observations.enabled", defaultValue = "false")
+    private val workflowObservationsEnabled: Boolean,
+) : SepaPaymentRepository,
     PanacheRepository<SepaPaymentEntity> {
 
     override suspend fun save(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
         Panache.withTransaction {
             persist(payment.toEntity())
                 .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage) }
-                .flatMap { persistWorkflowObservation(payment, outboxMessage).replaceWith(payment) }
+                .flatMap { maybePersistWorkflowObservation(payment, outboxMessage) }
         }.awaitSuspending()
 
     override suspend fun findById(paymentId: UUID): SepaPayment? =
@@ -98,9 +102,18 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
             .flatMap {
                 outboxMessages.fold(Uni.createFrom().voidItem()) { chain, message ->
                     chain.flatMap { outboxRepository.persistWithinCurrentTransaction(message).replaceWithVoid() }
-                }.flatMap { persistWorkflowObservation(payment, outboxMessages.first()).replaceWith(payment) }
+                }.flatMap { maybePersistWorkflowObservation(payment, outboxMessages.first()) }
             }
     }.awaitSuspending()
+
+    private fun maybePersistWorkflowObservation(
+        payment: SepaPayment,
+        message: SepaPaymentOutboxMessage,
+    ): Uni<SepaPayment> = if (workflowObservationsEnabled) {
+        persistWorkflowObservation(payment, message).replaceWith(payment)
+    } else {
+        Uni.createFrom().item(payment)
+    }
 
     /** A source outcome, not an incident attribution; committed with its payment and outbox event. */
     private fun persistWorkflowObservation(payment: SepaPayment, message: SepaPaymentOutboxMessage): Uni<Int> {
