@@ -14,6 +14,9 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.HexFormat
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -136,6 +139,10 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(pair.observationXmin)
             .describedAs("the source workflow observation must commit with the payment and outbox")
             .isEqualTo(pair.paymentXmin)
+        val payloadDigest = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(pair.outboxPayload.toByteArray(StandardCharsets.UTF_8)),
+        )
+        assertThat(pair.contentDigest).isEqualTo(payloadDigest)
     }
 
     private data class WriterPair(
@@ -143,6 +150,8 @@ class SepaPaymentOutboxAtomicityIT {
         val outboxXmin: String,
         val observationXmin: String,
         val observedStatus: String,
+        val contentDigest: String,
+        val outboxPayload: String,
     )
 
     /** Per event type: the transaction ids (`xmin`) that wrote the aggregate row and that outbox row. */
@@ -150,7 +159,7 @@ class SepaPaymentOutboxAtomicityIT {
         connection.prepareStatement(
             """
             SELECT o.event_type, p.xmin::text AS payment_xmin, o.xmin::text AS outbox_xmin,
-                   w.xmin::text AS observation_xmin, w.payment_status
+                   w.xmin::text AS observation_xmin, w.payment_status, w.content_digest, o.payload
             FROM sepa_payments p
             JOIN sepa_payment_outbox o ON o.aggregate_id = p.payment_id
             JOIN sepa_payment_workflow_observations w ON w.event_id = o.event_id
@@ -166,6 +175,8 @@ class SepaPaymentOutboxAtomicityIT {
                             it.getString(3),
                             it.getString(4),
                             it.getString(5),
+                            it.getString(6),
+                            it.getString(7),
                         )
                     }
                     .toMap()

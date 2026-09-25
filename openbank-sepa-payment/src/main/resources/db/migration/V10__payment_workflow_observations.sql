@@ -8,6 +8,7 @@ CREATE TABLE sepa_payment_workflow_observations (
     payment_revision BIGINT NOT NULL CHECK (payment_revision >= 0),
     event_type VARCHAR(128) NOT NULL,
     payment_status VARCHAR(40) NOT NULL,
+    content_digest VARCHAR(64) NOT NULL CHECK (content_digest ~ '^[0-9a-f]{64}$'),
     observed_at TIMESTAMPTZ NOT NULL,
     synthetic BOOLEAN NOT NULL DEFAULT FALSE,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
