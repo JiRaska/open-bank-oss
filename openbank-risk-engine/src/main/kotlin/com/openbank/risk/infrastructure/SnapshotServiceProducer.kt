@@ -7,6 +7,7 @@ package com.openbank.risk.infrastructure
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
 import com.openbank.risk.application.port.out.LedgerPort
@@ -15,13 +16,16 @@ import com.openbank.risk.application.port.out.SnapshotRepository
 import com.openbank.risk.application.usecase.CashFlowService
 import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
+import com.openbank.risk.application.usecase.LiquidityService
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.PostShockFloor
 import com.openbank.risk.domain.irrbb.ShockSizes
 import com.openbank.risk.domain.model.Provenance
+import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Produces
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
@@ -99,6 +103,24 @@ class SnapshotServiceProducer {
             floorSource = floorSource.orElse(NO_FLOOR),
         ),
     )
+
+    /**
+     * LCR / NSFR (ADR-0313 phase 1): the versioned parameter set in `openbank.risk.liquidity.*`
+     * ([LiquidityConfig]); every factor comes from there, with its BCBS paragraph.
+     */
+    @Produces
+    @ApplicationScoped
+    fun liquidityUseCase(snapshots: SnapshotUseCase, config: LiquidityConfig): LiquidityUseCase =
+        LiquidityService(snapshots, config.toParameters())
+
+    /**
+     * The mapping's presence check runs at boot, but the range / unknown-key checks live in the
+     * domain and a producer bean is lazy — so parse once at startup, or a bad factor would surface
+     * on the first request instead of failing the deploy.
+     */
+    fun validateLiquidityParameters(@Observes event: StartupEvent, config: LiquidityConfig) {
+        config.toParameters()
+    }
 
     companion object {
         const val NO_FLOOR =

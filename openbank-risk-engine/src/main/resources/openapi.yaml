@@ -11,7 +11,9 @@ info:
   #        by ROLE_RISK / ROLE_OPERATOR / ROLE_ADMIN humans only.
   # 1.4.0: IRRBB read GET /snapshots/{id}/irrbb (ADR-0313 phase 1) — repricing gap, ΔEVE under the
   #        six BCBS d368 scenarios, ΔNII, optional caller-supplied Tier 1. Additive.
-  version: 1.4.0
+  # 1.5.0: LCR / NSFR read GET /snapshots/{id}/liquidity (ADR-0313 phase 1) — BCBS d238 / d295
+  #        standard factors from a versioned parameter set. Additive.
+  version: 1.5.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -264,6 +266,41 @@ paths:
           description: Forbidden
         '404':
           description: No such run or curve set
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/liquidity:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotLiquidity
+      summary: LCR and NSFR of a TIED_OUT run
+      description: |
+        Liquidity Coverage Ratio (BCBS d238) and Net Stable Funding Ratio (BCBS d295) per currency,
+        with a total only for a single-currency book. Every component line carries its factor, the
+        configuration key it came from and the BCBS paragraph. Factors and classification choices
+        come from the versioned parameter set `openbank.risk.liquidity.*`, named on the result.
+        BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.
+        A GL balance the configured classification does not name is listed in `unclassified` and
+        counted nowhere. Derived on request, never stored.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run's LCR and NSFR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Liquidity'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run
         '409':
           description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
           content:
@@ -940,3 +977,163 @@ components:
           type: array
           items: {type: string}
         assumptions: {$ref: '#/components/schemas/IrrbbAssumptions'}
+
+    LiquidityLine:
+      type: object
+      required: [label, amount, weighted, citation]
+      properties:
+        label: {type: string}
+        glAccountCode: {type: [string, 'null']}
+        amount: {type: number, description: Balance the factor applies to (positive for a normal balance)}
+        factor: {type: [number, 'null'], description: Null for a line reported but not weighted}
+        factorKey: {type: [string, 'null']}
+        weighted: {type: number}
+        citation: {type: string}
+
+    Hqla:
+      type: object
+      required: [lines, level1, level2a, level2b, adjustmentFor15Cap, adjustmentFor40Cap, level2bCapBinding,
+        level2CapBinding, stock]
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            required: [level, glClass, glAccountCode, marketValue, haircut, afterHaircut]
+            properties:
+              level: {type: string, enum: [L1, L2A, L2B]}
+              glClass: {type: string}
+              glAccountCode: {type: string}
+              marketValue: {type: number}
+              haircut: {type: number}
+              afterHaircut: {type: number}
+        level1: {type: number}
+        level2a: {type: number}
+        level2b: {type: number}
+        adjustmentFor15Cap: {type: number}
+        adjustmentFor40Cap: {type: number}
+        level2bCapBinding: {type: boolean}
+        level2CapBinding: {type: boolean}
+        stock: {type: number}
+
+    CurrencyLiquidity:
+      type: object
+      required: [currency, lcr, nsfr]
+      properties:
+        currency: {type: string}
+        lcr:
+          type: object
+          required: [hqla, outflows, inflows, totalOutflows, totalInflows, inflowCap, cappedInflows,
+            inflowCapBinding, netOutflows]
+          properties:
+            hqla: {$ref: '#/components/schemas/Hqla'}
+            outflows:
+              type: array
+              items: {$ref: '#/components/schemas/LiquidityLine'}
+            inflows:
+              type: array
+              items: {$ref: '#/components/schemas/LiquidityLine'}
+            totalOutflows: {type: number}
+            totalInflows: {type: number}
+            inflowCap: {type: number}
+            cappedInflows: {type: number}
+            inflowCapBinding: {type: boolean}
+            netOutflows: {type: number}
+            ratio: {type: [number, 'null'], description: HQLA / net outflows; null when there are none}
+        nsfr:
+          type: object
+          required: [asf, rsf, totalAsf, totalRsf]
+          properties:
+            asf:
+              type: array
+              items: {$ref: '#/components/schemas/LiquidityLine'}
+            rsf:
+              type: array
+              items: {$ref: '#/components/schemas/LiquidityLine'}
+            totalAsf: {type: number}
+            totalRsf: {type: number}
+            ratio: {type: [number, 'null'], description: ASF / RSF; null when RSF is zero}
+
+    GlMapping:
+      type: object
+      required: [key, glClass, description]
+      properties:
+        key: {type: string}
+        glClass: {type: string}
+        description: {type: string}
+
+    LiquidityAssumptions:
+      type: object
+      required: [parameterSetId, parameterSetVersion, source, scope, factors, classification, hqlaCapMethod,
+        loanInflows, loanRsf, notInData, currencyAggregation]
+      properties:
+        parameterSetId: {type: string}
+        parameterSetVersion: {type: string}
+        source: {type: string}
+        scope: {type: string}
+        factors:
+          type: array
+          items:
+            type: object
+            required: [key, value, citation]
+            properties:
+              key: {type: string}
+              value: {type: number}
+              citation: {type: string}
+        classification:
+          type: object
+          required: [retailStableShare, operationalDepositShare, tier2OverOneYearShare,
+            loansQualifyForLowRiskWeight, glAccounts, glAccountTypes, choices]
+          properties:
+            retailStableShare: {type: number}
+            operationalDepositShare: {type: number}
+            tier2OverOneYearShare: {type: number}
+            loansQualifyForLowRiskWeight: {type: boolean}
+            glAccounts:
+              type: array
+              items: {$ref: '#/components/schemas/GlMapping'}
+            glAccountTypes:
+              type: array
+              items: {$ref: '#/components/schemas/GlMapping'}
+            choices:
+              type: array
+              items: {type: string}
+        hqlaCapMethod: {type: string}
+        loanInflows: {type: string}
+        loanRsf: {type: string}
+        notInData: {type: string}
+        currencyAggregation: {type: string}
+
+    Liquidity:
+      type: object
+      required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, unclassified, notes,
+        assumptions]
+      properties:
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        provenance: {type: string}
+        parameterSetId: {type: string}
+        parameterSetVersion: {type: string}
+        currencies:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyLiquidity'}
+        total:
+          oneOf:
+            - {$ref: '#/components/schemas/CurrencyLiquidity'}
+            - {type: 'null'}
+          description: Present only for a single-currency book
+        unclassified:
+          type: array
+          items:
+            type: object
+            required: [currency, amount, reason]
+            properties:
+              glAccountCode: {type: [string, 'null']}
+              glAccountType: {type: [string, 'null']}
+              currency: {type: string}
+              amount: {type: number}
+              reason: {type: string}
+        notes:
+          type: array
+          items: {type: string}
+        assumptions: {$ref: '#/components/schemas/LiquidityAssumptions'}
