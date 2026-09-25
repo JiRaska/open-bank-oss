@@ -176,6 +176,13 @@ spec:
             # by consent_rest_ext.rego's service-consent-m2m rule.
             - name: CONSENT_SERVICE_URL
               value: https://consent-service.consent.svc:8443
+            # Dormant graph-proof clients: these private HTTPS endpoints are explicit so a
+            # future activation cannot silently fall back to localhost in this pod. The
+            # dedicated credential, trust material and egress policy are not provisioned.
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean

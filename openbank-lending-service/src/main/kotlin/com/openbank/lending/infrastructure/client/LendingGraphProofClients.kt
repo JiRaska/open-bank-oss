@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.client
 
 import com.openbank.lending.application.port.out.LendingGraphProofPort
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -14,12 +15,14 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
 /** The named client is mandatory: the default `openbank-services` token cannot read these proofs. */
 @RegisterRestClient(configKey = "lending-graph-party-proof")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @OidcClientFilter("lending-graph")
 @Path("/api/v1/parties/lending-guarantor-identity")
 @Consumes(MediaType.APPLICATION_JSON)
@@ -35,6 +38,7 @@ data class GuarantorIdentityProofRequest(val partyId: UUID)
 data class GuarantorIdentityProofResponse(val verified: Boolean)
 
 @RegisterRestClient(configKey = "lending-graph-document-proof")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @OidcClientFilter("lending-graph")
 @Path("/api/v1/documents/lending-guarantee-evidence")
 @Consumes(MediaType.APPLICATION_JSON)

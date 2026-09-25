@@ -908,7 +908,7 @@
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
       "bearerOnly": false,
-      "defaultClientScopes": ["openid", "roles"],
+      "defaultClientScopes": ["openid", "profile", "roles"],
       "secret": "__LENDING_GRAPH_CLIENT_SECRET__"
     },
     {

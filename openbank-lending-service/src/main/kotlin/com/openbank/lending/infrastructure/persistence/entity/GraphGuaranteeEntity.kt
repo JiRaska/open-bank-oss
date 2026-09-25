@@ -7,6 +7,7 @@ package com.openbank.lending.infrastructure.persistence.entity
 import com.openbank.lending.domain.model.GraphGuaranteeFact
 import com.openbank.lending.domain.model.GraphGuaranteeProposal
 import com.openbank.lending.domain.model.GraphGuaranteeStatus
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
@@ -20,7 +21,7 @@ import java.util.UUID
 class GraphGuaranteeEntity {
     @Id
     @Column(name = "guarantee_id")
-    var guaranteeId: UUID = UUID.randomUUID()
+    var guaranteeId: UUID = Ids.newId()
 
     @Column(name = "contract_id")
     lateinit var contractId: UUID

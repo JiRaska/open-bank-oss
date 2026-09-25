@@ -12,6 +12,7 @@ import com.openbank.lending.domain.model.GraphGuaranteeStatus
 import com.openbank.lending.infrastructure.persistence.entity.GraphGuaranteeEntity
 import com.openbank.lending.infrastructure.persistence.entity.LendingOutboxEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanEntity
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -73,7 +74,7 @@ class GraphGuaranteeRepositoryImpl(
     /** This outbox row commits atomically with approval. It is only a pointer, never the contract. */
     private fun approvedReference(entity: GraphGuaranteeEntity, at: Instant) = LendingOutboxEntity().also { outbox ->
         check(bankScope.matches(Regex("[a-z0-9][a-z0-9-]{0,63}"))) { "invalid deployment bank scope" }
-        outbox.eventId = UUID.randomUUID()
+        outbox.eventId = Ids.newId()
         outbox.aggregateId = entity.contractId
         outbox.eventType = APPROVED_EVENT_TYPE
         outbox.payload = mapper.writeValueAsString(
