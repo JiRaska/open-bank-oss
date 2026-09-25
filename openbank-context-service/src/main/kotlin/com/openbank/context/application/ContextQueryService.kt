@@ -62,6 +62,21 @@ class ContextQueryService(
         block,
     )
 
+    internal suspend fun <T> kybCaseEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> ContextReadResult<T>,
+    ): T = authorized(
+        "context.kyb-case.read",
+        "KYB_OWNERSHIP_REVIEW",
+        ContextNamespace.KYB,
+        "kyb-case:$ref",
+        actor,
+        context,
+        block,
+    )
+
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =
         authorized(
             "context.complaint.read",

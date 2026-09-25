@@ -483,8 +483,6 @@ change_requirements:
     ci_producer: ".github/scripts/check-event-consumer-liveness.py"
     # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
     allowlist:
-      - topic: "openbank.kyb.ubo-observation-references"
-        reason: "The reference-only KYB producer is introduced in #10243 while its strict Context consumer is in draft #10246. Remove this temporary entry when #10246 lands; no owner attributes are published on this topic."
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
       # openbank.kyb.events left the allowlist here: it now has TWO consumers, which is what the

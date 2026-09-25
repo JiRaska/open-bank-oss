@@ -69,8 +69,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network", "fraud-network"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network or fraud-network");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network, kyb or fraud-network");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -80,6 +80,10 @@ export function setup() {
   if (__ENV.CONTEXT_PERF_REFERENCE.length > 200) fail("Context Graph root reference is too long");
   if (__ENV.CONTEXT_PERF_CASE_ID.length > 200 || __ENV.CONTEXT_PERF_PURPOSE.length > 80) {
     fail("Context Graph case or purpose exceeds the API limit");
+  }
+  if (lens === "kyb" && (!/^[1-9][0-9]*$/.test(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS || "") ||
+      Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) > 50)) {
+    fail("KYB baseline requires CONTEXT_PERF_MIN_KYB_REVISIONS between 1 and 50");
   }
   if (lens === "fraud-network") {
     const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
@@ -103,6 +107,7 @@ export default function () {
     authority: `/api/v1/context/authorizations/${reference}`,
     aml: `/api/v1/context/aml-cases/${reference}`,
     "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
+    kyb: `/api/v1/context/kyb-cases/${reference}/ownership-observations`,
     "fraud-network": `/api/v1/context/fraud-cases/${reference}/network`,
   };
   const path = paths[lens];
@@ -153,6 +158,16 @@ export default function () {
       if (lens === "aml-network") {
         return Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
           hasEvidence(body.root, 100) && body.related.every((caseHistory) => hasEvidence(caseHistory, 20));
+      }
+      if (lens === "kyb") {
+        return body.root === `kyb-case:${__ENV.CONTEXT_PERF_REFERENCE}` &&
+          Array.isArray(body.observations) &&
+          body.observations.length >= Number(__ENV.CONTEXT_PERF_MIN_KYB_REVISIONS) &&
+          body.observations.length <= 50 && typeof body.truncated === "boolean" &&
+          body.observations.every((item) => Number.isInteger(item.revision) && item.revision > 0 &&
+            /^[0-9a-f]{64}$/.test(item.sourceSha256)) &&
+          body.observations.every((item, index) => index === 0 ||
+            item.revision < body.observations[index - 1].revision);
       }
       if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
       return hasEvidence(body, 100) &&

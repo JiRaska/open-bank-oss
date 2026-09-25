@@ -3,7 +3,7 @@ package com.openbank.context.domain
 
 import java.time.Instant
 
-enum class ContextNamespace { COMPLAINT, INCIDENT, AUTHORIZATION, AML }
+enum class ContextNamespace { COMPLAINT, INCIDENT, AUTHORIZATION, AML, KYB }
 enum class DataClassification { INTERNAL, CONFIDENTIAL, RESTRICTED }
 
 data class ContextNode(

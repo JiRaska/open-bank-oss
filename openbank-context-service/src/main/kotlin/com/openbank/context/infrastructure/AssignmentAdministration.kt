@@ -179,6 +179,7 @@ class AssignmentAdministrationService(
                 when (request.purpose) {
                     "AUTHORIZATION_REVIEW" -> "delegation:${UUID.fromString(root.removePrefix("delegation:"))}"
                     "AML_INVESTIGATION" -> "aml-case:${UUID.fromString(root.removePrefix("aml-case:"))}"
+                    "KYB_OWNERSHIP_REVIEW" -> "kyb-case:${UUID.fromString(root.removePrefix("kyb-case:"))}"
                     "INCIDENT_IMPACT" -> "incident:${UUID.fromString(root.removePrefix("incident:"))}"
                     else -> root
                 }
@@ -277,6 +278,17 @@ class AssignmentAdministrationService(
         }
         require(request.caseId.isNotBlank() && request.caseId.length <= MAX_CASE_LENGTH) { "invalid caseId" }
         require(request.purpose in ALLOWED_PURPOSES) { "invalid purpose" }
+        validateRoot(request)
+        require(
+            validFrom >= now.minus(MAX_CLOCK_SKEW) &&
+                request.validTo > validFrom &&
+                request.validTo <= validFrom.plus(Duration.ofDays(MAX_VALIDITY_DAYS)),
+        ) {
+            "validity must start now or later and last no more than 31 days"
+        }
+    }
+
+    private fun validateRoot(request: ProposeAssignmentRequest) {
         if (request.purpose == "AUTHORIZATION_REVIEW") {
             val root = requireNotNull(request.rootRef) { "AUTHORIZATION_REVIEW requires a delegation root" }
             require(root.startsWith("delegation:") && root.length == DELEGATION_ROOT_LENGTH) {
@@ -288,6 +300,13 @@ class AssignmentAdministrationService(
             require(root.startsWith("aml-case:") && root.length == AML_CASE_ROOT_LENGTH) { "invalid AML case root" }
             val id = UUID.fromString(root.removePrefix("aml-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the AML source case" }
+        } else if (request.purpose == "KYB_OWNERSHIP_REVIEW") {
+            val root = requireNotNull(request.rootRef) { "KYB_OWNERSHIP_REVIEW requires a KYB case root" }
+            require(root.startsWith("kyb-case:") && root.length == KYB_CASE_ROOT_LENGTH) {
+                "invalid KYB case root"
+            }
+            val id = UUID.fromString(root.removePrefix("kyb-case:"))
+            require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
         } else if (request.purpose == "INCIDENT_IMPACT") {
             val root = requireNotNull(request.rootRef) { "INCIDENT_IMPACT requires an incident root" }
             require(root.startsWith("incident:") && root.length == INCIDENT_ROOT_LENGTH) { "invalid incident root" }
@@ -301,13 +320,6 @@ class AssignmentAdministrationService(
             ) { "invalid complaint root" }
         } else {
             require(request.rootRef == null) { "root scope is not supported for this purpose" }
-        }
-        require(
-            validFrom >= now.minus(MAX_CLOCK_SKEW) &&
-                request.validTo > validFrom &&
-                request.validTo <= validFrom.plus(Duration.ofDays(MAX_VALIDITY_DAYS)),
-        ) {
-            "validity must start now or later and last no more than 31 days"
         }
     }
 
@@ -351,6 +363,7 @@ class AssignmentAdministrationService(
     private companion object {
         const val DELEGATION_ROOT_LENGTH = 47
         const val AML_CASE_ROOT_LENGTH = 45
+        const val KYB_CASE_ROOT_LENGTH = 45
         const val INCIDENT_ROOT_LENGTH = 45
         const val MIN_COMPLAINT_ROOT_LENGTH = 11
         const val MAX_COMPLAINT_ROOT_LENGTH = 210
@@ -361,7 +374,13 @@ class AssignmentAdministrationService(
         const val MAX_VALIDITY_DAYS = 31L
         val MAX_CLOCK_SKEW: Duration = Duration.ofMinutes(5)
         val ALLOWED_PURPOSES =
-            setOf("PAYMENT_COMPLAINT", "INCIDENT_IMPACT", "AUTHORIZATION_REVIEW", "AML_INVESTIGATION")
+            setOf(
+                "PAYMENT_COMPLAINT",
+                "INCIDENT_IMPACT",
+                "AUTHORIZATION_REVIEW",
+                "AML_INVESTIGATION",
+                "KYB_OWNERSHIP_REVIEW",
+            )
     }
 }
 

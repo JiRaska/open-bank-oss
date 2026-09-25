@@ -158,6 +158,7 @@ export const PERMISSIONS = {
   // Nav/route gating only: the BFF relays the operator's own bearer and kyb-service + OPA decide.
   "business-onboarding:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "business-onboarding:attest": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "business-onboarding:ownership-evidence": [ROLES.ADMIN, ROLES.KYC],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
