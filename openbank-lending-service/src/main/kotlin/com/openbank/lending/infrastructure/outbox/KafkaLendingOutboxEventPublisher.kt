@@ -66,6 +66,9 @@ class KafkaLendingOutboxEventPublisher(
     }
 
     private fun validateGraphReference(payload: String) {
+        check(payload.toByteArray(Charsets.UTF_8).size <= MAX_GRAPH_REFERENCE_BYTES) {
+            "Lending graph reference exceeds payload budget"
+        }
         val node = mapper.readTree(payload)
         check(node.isObject && node.fieldNames().asSequence().toSet() == GRAPH_REFERENCE_FIELDS) {
             "Invalid lending graph reference schema"
@@ -83,6 +86,7 @@ class KafkaLendingOutboxEventPublisher(
     }
 
     private companion object {
+        const val MAX_GRAPH_REFERENCE_BYTES = 512
         val GRAPH_REFERENCE_FIELDS = setOf(
             "schemaVersion",
             "eventType",

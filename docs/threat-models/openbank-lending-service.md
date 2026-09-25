@@ -827,9 +827,10 @@ minimal pointer. No proof client credential is provisioned yet. A dedicated
 Kafka topic and literal producer ACL isolate graph references from the broad
 Lending stream. The producer accepts only the exact versioned approved-guarantee
 field set: guarantee and loan UUIDs, revision, bank scope and event time. It
-rejects unknown graph types or extra fields; no guarantor, amount, document or
-staff identity is published. Before enabling a writer, provision the narrow
-proof credential and verify the policy/identity path in a deployed environment.
+rejects unknown graph types, payloads over 512 bytes or extra fields; no
+guarantor, amount, document or staff identity is published. Before enabling a
+writer, provision the narrow proof credential and verify the policy/identity
+path in a deployed environment.
 Source proof failure must propagate; a prior positive result cannot substitute
 for the approval-time check. A later source change requires live revalidation
 at authorized source read time; a Kafka pointer alone establishes no Context

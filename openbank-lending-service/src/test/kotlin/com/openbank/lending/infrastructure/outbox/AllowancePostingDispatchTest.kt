@@ -117,6 +117,19 @@ class AllowancePostingDispatchTest {
     }
 
     @Test
+    fun `oversized graph reference cannot publish`(): Unit = runBlocking {
+        val result = runCatching {
+            publisher.publish(
+                command().copy(eventType = "lending.graph.guarantee.approved", payload = "x".repeat(513)),
+            )
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("payload budget")
+        verify(exactly = 0) { emitter.sendMessage(any()) }
+        verify(exactly = 0) { graphEmitter.sendMessage(any()) }
+    }
+
+    @Test
     fun `unknown graph event fails closed before either topic`(): Unit = runBlocking {
         val result = runCatching {
             publisher.publish(
