@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** Cap bytes before JSON parsing; an upstream Content-Length header is not the limit. */
-export async function readBoundedContextJson(response: Response, maxBytes: number): Promise<unknown> {
-  const length = response.headers.get('content-length')
+export async function readBoundedContextJson(message: Request | Response, maxBytes: number): Promise<unknown> {
+  const length = message.headers.get('content-length')
   if (length !== null && Number(length) > maxBytes) {
-    void response.body?.cancel().catch(() => undefined)
-    throw new Error('Context evidence response exceeds the byte limit')
+    void message.body?.cancel().catch(() => undefined)
+    throw new Error('Context JSON exceeds the byte limit')
   }
-  const reader = response.body?.getReader()
-  if (!reader) throw new Error('Context evidence response has no body')
+  const reader = message.body?.getReader()
+  if (!reader) throw new Error('Context JSON has no body')
   const chunks: Uint8Array[] = []
   let size = 0
   try {
@@ -16,7 +16,7 @@ export async function readBoundedContextJson(response: Response, maxBytes: numbe
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > maxBytes) throw new Error('Context evidence response exceeds the byte limit')
+      if (size > maxBytes) throw new Error('Context JSON exceeds the byte limit')
       chunks.push(value)
     }
   } catch (error) {
