@@ -35,7 +35,10 @@ class LendingBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("lending-events-out").toMutableMap()
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "lending-events-out",
+                "lending-graph-references-out",
+            ).toMutableMap()
             // Disable Kafka dev services — InMemoryConnector replaces the channel; Redpanda is not
             // needed and crashes on CI runners with limited io_uring/aio resources (SIGABRT, iou=65536).
             props["quarkus.kafka.devservices.enabled"] = "false"

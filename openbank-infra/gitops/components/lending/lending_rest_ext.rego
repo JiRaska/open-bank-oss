@@ -218,3 +218,58 @@ prohibited if {
 	startswith(input.action, "lending.ledgerBackfill.")
 	not "ROLE_ADMIN" in input.principal.roles
 }
+
+# Graph source detail is released only after the route rechecks the exact human's
+# live Context assignment. This veto blocks broad base *.read grants and M2M.
+prohibited if {
+    input.action == "lending.graph.read"
+    startswith(input.principal.id, "service-account-")
+}
+
+prohibited if {
+    input.action == "lending.graph.read"
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
+}
+
+allowed_reasons contains "lending-graph-source-read" if {
+    input.action == "lending.graph.read"
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
+}
+
+# Registration is source-owned and four-eyes. These rules mirror method RBAC;
+# broad operator/matrix grants cannot reach either graph write action.
+prohibited if {
+    input.action in {"lending.graph.propose", "lending.graph.decide"}
+    input.principal.type != "HUMAN"
+}
+
+prohibited if {
+    input.action in {"lending.graph.propose", "lending.graph.decide"}
+    startswith(input.principal.id, "service-account-")
+}
+
+prohibited if {
+    input.action == "lending.graph.propose"
+    count({r | r := input.principal.roles[_]; r in {"ROLE_LENDING_OFFICER", "ROLE_ADMIN"}}) == 0
+}
+
+prohibited if {
+    input.action == "lending.graph.decide"
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
+}
+
+allowed_reasons contains "lending-graph-proposer" if {
+    input.action == "lending.graph.propose"
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    count({r | r := input.principal.roles[_]; r in {"ROLE_LENDING_OFFICER", "ROLE_ADMIN"}}) > 0
+}
+
+allowed_reasons contains "lending-graph-checker" if {
+    input.action == "lending.graph.decide"
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
+}

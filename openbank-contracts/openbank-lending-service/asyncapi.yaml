@@ -1,0 +1,151 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank Lending Graph Reference Events
+  version: 1.0.0
+  description: |
+    A bounded pointer to an approved guarantee. The Lending outbox commits the
+    reference with the approval; authorized readers resolve current and historical
+    evidence through the Lending API. This event contains no guarantor identity,
+    amount, narrative, or authorization decision for a consumer.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+x-openbank-not-published:
+  lending.allowance.posting: |
+    Internal outbox command. KafkaLendingOutboxEventPublisher posts it to the
+    ledger through LedgerPostingPort and returns without emitting to Kafka.
+channels:
+  lendingEvents:
+    address: openbank.lending.events
+    description: |
+      Existing lending lifecycle feed. The legacy payloads are hand-built at
+      multiple call sites and are not one uniform envelope; their per-event
+      fields must be read from the producer before a stricter schema is adopted.
+      This channel is already consumed by the Audit service.
+    messages:
+      CreditApplicationTransition:
+        $ref: '#/components/messages/CreditApplicationTransition'
+      CreditDecisionEvaluated:
+        $ref: '#/components/messages/CreditDecisionEvaluated'
+      CreditLoanTransition:
+        $ref: '#/components/messages/CreditLoanTransition'
+      LendingLedgerBackfillTransition:
+        $ref: '#/components/messages/LendingLedgerBackfillTransition'
+      LoanDisbursed:
+        $ref: '#/components/messages/LoanDisbursed'
+      LoanInterestAccrued:
+        $ref: '#/components/messages/LoanInterestAccrued'
+      LoanProvisioned:
+        $ref: '#/components/messages/LoanProvisioned'
+      LoanRescheduled:
+        $ref: '#/components/messages/LoanRescheduled'
+      LoanStageChanged:
+        $ref: '#/components/messages/LoanStageChanged'
+      LoanWrittenOff:
+        $ref: '#/components/messages/LoanWrittenOff'
+  lendingGraphReferences:
+    address: openbank.lending.graph.references
+    description: |
+      The Lending KafkaTopic has one partition, delete retention of seven days,
+      and a dead-letter topic for the Context consumer. The Kafka key is the
+      outbox aggregate id (guarantee contract id), preserving per-contract order.
+      Context consumes this reference for its bounded graph projection. Audit
+      subscription is required by the money-path gate before production rollout.
+    messages:
+      GuaranteeApprovedReference:
+        $ref: '#/components/messages/GuaranteeApprovedReference'
+operations:
+  publishLendingEvents:
+    action: send
+    channel:
+      $ref: '#/channels/lendingEvents'
+    summary: Lending publishes existing lifecycle events through its outbox.
+  publishGuaranteeApprovedReference:
+    action: send
+    channel:
+      $ref: '#/channels/lendingGraphReferences'
+    summary: Lending publishes approved-guarantee pointers from its transactional outbox.
+components:
+  messages:
+    CreditApplicationTransition:
+      name: credit.application.transition
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    CreditDecisionEvaluated:
+      name: credit.decision.evaluated
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    CreditLoanTransition:
+      name: credit.loan.transition
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LendingLedgerBackfillTransition:
+      name: lending.ledger_backfill.transition
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LoanDisbursed:
+      name: loan.disbursed
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LoanInterestAccrued:
+      name: loan.interest_accrued
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LoanProvisioned:
+      name: loan.provisioned
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LoanRescheduled:
+      name: loan.rescheduled
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LoanStageChanged:
+      name: loan.stage_changed
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LoanWrittenOff:
+      name: loan.written_off
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    GuaranteeApprovedReference:
+      name: lending.graph.guarantee.approved
+      payload:
+        $ref: '#/components/schemas/GuaranteeApprovedReference'
+  schemas:
+    LegacyLendingPayload:
+      type: object
+      description: |
+        Existing event-specific JSON. This permissive schema records the
+        published message types without asserting a common field set that the
+        historical hand-built payloads do not have.
+    GuaranteeApprovedReference:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, eventType, guaranteeId, loanId, revision, bankScope, occurredAt]
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        eventType:
+          type: string
+          const: lending.graph.guarantee.approved
+        guaranteeId:
+          type: string
+          format: uuid
+        loanId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        bankScope:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
+        occurredAt:
+          type: string
+          format: date-time

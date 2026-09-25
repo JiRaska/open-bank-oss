@@ -50,7 +50,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "81f10db7a5b5f597"
+        openbank.tech/policy-checksum: "4a2144ab9bc88577"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -98,6 +98,9 @@ spec:
               value: TLSv1.3
             - name: QUARKUS_MANAGEMENT_HOST
               value: "0.0.0.0"
+            # Must equal Context's deployment bank identifier before guarantee proofs are enabled.
+            - name: DOCUMENT_BANK_SCOPE
+              value: openbank-cz
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: QUARKUS_OIDC_CLIENT_ID

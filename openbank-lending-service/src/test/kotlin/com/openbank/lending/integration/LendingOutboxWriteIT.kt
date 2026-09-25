@@ -52,7 +52,10 @@ class LendingOutboxWriteIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("lending-events-out").toMutableMap()
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "lending-events-out",
+                "lending-graph-references-out",
+            ).toMutableMap()
             props["quarkus.kafka.devservices.enabled"] = "false"
             // The scheduled dispatcher would otherwise race this test's assertion, marking the row
             // SENT (or FAILED, with no real broker) before it can be observed as freshly written.

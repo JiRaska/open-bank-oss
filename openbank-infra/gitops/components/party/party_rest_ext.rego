@@ -69,14 +69,34 @@ allowed_reasons contains "service-edge-party-m2m" if {
 	}
 }
 
+# A verified-identity bit is the only Party fact the Lending graph client may
+# read. It does not prove consent or an enforceable guarantee; Document verifies
+# the signed, loan-bound contract separately. The broad operator-party-write
+# rule above would otherwise admit staff and edge tokens for this action.
+allowed_reasons contains "service-lending-guarantor-identity" if {
+    input.principal.id == "service-account-openbank-lending-graph"
+    "ROLE_LENDING_GRAPH_PROOF" in input.principal.roles
+    input.action == "party.guaranteeIdentity.verify"
+}
+
+prohibited if {
+    input.action == "party.guaranteeIdentity.verify"
+    input.principal.id != "service-account-openbank-lending-graph"
+}
+
+prohibited if {
+    input.action == "party.guaranteeIdentity.verify"
+    not "ROLE_LENDING_GRAPH_PROOF" in input.principal.roles
+}
+
 # party.create (POST /api/v1/parties) by a KYC analyst, #10486 batch 3. The endpoint has always
 # admitted ROLE_KYC; operator-party-write above covers OPERATOR/ADMIN but not this persona, so
 # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
 allowed_reasons contains "kyc-party-create" if {
-	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
-	"ROLE_KYC" in input.principal.roles
-	input.action == "party.create"
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    "ROLE_KYC" in input.principal.roles
+    input.action == "party.create"
 }
 
 # kyb-service's OWN machine principal (client `openbank-kyb`, ROLE_API only), #10486 batch 3:
@@ -89,10 +109,10 @@ allowed_reasons contains "kyc-party-create" if {
 # enforcing half for party.create is requireNamedPartyCreateCaller in PartyCreateCallerGuard.kt
 # (PartyCreateCallerGuardTest pins that the two agree).
 allowed_reasons contains "service-kyb-party-m2m" if {
-	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-kyb"
-	input.action in {
-		"party.create",
-		"party.mandate.grant",
-	}
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-kyb"
+    input.action in {
+        "party.create",
+        "party.mandate.grant",
+    }
 }

@@ -72,3 +72,30 @@ test_viewer_may_not_create_party if {
 test_edge_keeps_consent_update if {
 	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}
 }
+
+# The lending proof identity is narrower than the Party operator and shared-service roles.
+lending_graph := {"type": "HUMAN", "id": "service-account-openbank-lending-graph", "roles": ["ROLE_LENDING_GRAPH_PROOF"]}
+
+test_lending_graph_can_verify_guarantor_identity if {
+    "service-lending-guarantor-identity" in allowed_reasons with input as {"principal": lending_graph, "action": "party.guaranteeIdentity.verify"}
+}
+
+test_lending_graph_cannot_use_other_party_writes if {
+    not allow.allow with input as {"principal": lending_graph, "action": "party.update"}
+}
+
+test_shared_service_cannot_verify_guarantor_identity if {
+    not allow.allow with input as {"principal": shared_api_only, "action": "party.guaranteeIdentity.verify"}
+}
+
+test_staff_and_edge_cannot_verify_guarantor_identity if {
+    staff := {"type": "HUMAN", "id": "staff", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN"]}
+    edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+    not allow.allow with input as {"principal": staff, "action": "party.guaranteeIdentity.verify"}
+    not allow.allow with input as {"principal": edge, "action": "party.guaranteeIdentity.verify"}
+}
+
+test_lending_graph_without_narrow_role_is_denied if {
+    no_role := {"type": "HUMAN", "id": "service-account-openbank-lending-graph", "roles": ["ROLE_API"]}
+    not allow.allow with input as {"principal": no_role, "action": "party.guaranteeIdentity.verify"}
+}

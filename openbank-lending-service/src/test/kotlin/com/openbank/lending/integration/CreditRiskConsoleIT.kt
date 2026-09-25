@@ -47,7 +47,10 @@ class CreditRiskConsoleIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("lending-events-out").toMutableMap()
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "lending-events-out",
+                "lending-graph-references-out",
+            ).toMutableMap()
             props["quarkus.kafka.devservices.enabled"] = "false"
             props["openbank.outbox.dispatch-enabled"] = "false"
             return props
@@ -193,11 +196,14 @@ class CreditRiskConsoleIT {
                 statement.executeUpdate()
             }
             connection.createStatement().use { statement ->
+                // The resource uses Clock.systemUTC(); JDBC current_date follows the session time zone.
                 statement.executeUpdate(
                     """
                     INSERT INTO loan_provisioning(id, loan_id, period, as_of, outstanding_balance, currency,
                         days_past_due, bucket, stage, expected_credit_loss, model_version)
-                    SELECT gen_random_uuid(), id, to_char(current_date, 'YYYY-MM-DD'), current_date, 100, 'ZAR',
+                    SELECT gen_random_uuid(), id,
+                        to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'),
+                        (now() AT TIME ZONE 'UTC')::date, 100, 'ZAR',
                         120, 'DPD_90_PLUS', 'STAGE_3', 45, 'test-model-v1' FROM loan WHERE currency = 'ZAR'
                     """.trimIndent(),
                 )
@@ -213,7 +219,9 @@ class CreditRiskConsoleIT {
         assertThat((row["over90Outstanding"] as Number).toDouble()).isEqualTo(100100.0)
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeUpdate("UPDATE loan_provisioning SET as_of = current_date - 1 WHERE currency = 'ZAR'")
+                statement.executeUpdate(
+                    "UPDATE loan_provisioning SET as_of = (now() AT TIME ZONE 'UTC')::date - 1 WHERE currency = 'ZAR'",
+                )
                 statement.executeUpdate(
                     "UPDATE loan SET status = 'CLOSED' WHERE id = (SELECT min(id::text)::uuid FROM loan WHERE currency = 'ZAR')",
                 )

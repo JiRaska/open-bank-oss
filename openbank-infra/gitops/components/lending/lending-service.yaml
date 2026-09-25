@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "47eea62cc20fec93"
+        openbank.tech/policy-checksum: "b77593e6b4b25bca"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -122,6 +122,10 @@ spec:
             # OIDC resource-server: internal http leg avoids the self-signed edge cert.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # Operator-owned bank provenance for future graph facts. The parity gate
+            # requires this to match Context and Document before publisher activation.
+            - name: LENDING_GRAPH_BANK_SCOPE
+              value: openbank-cz
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -172,6 +176,17 @@ spec:
             # by consent_rest_ext.rego's service-consent-m2m rule.
             - name: CONSENT_SERVICE_URL
               value: https://consent-service.consent.svc:8443
+            # Dormant graph-proof clients: these private HTTPS endpoints are explicit so a
+            # future activation cannot silently fall back to localhost in this pod. The
+            # dedicated credential, trust material and egress policy are not provisioned.
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
+            # Dormant investigator Context check. The endpoint is explicit, but the private
+            # HTTPS client identity, trust and network egress are not provisioned yet.
+            - name: CONTEXT_SERVICE_URL
+              value: https://context-service.context.svc:8443
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean

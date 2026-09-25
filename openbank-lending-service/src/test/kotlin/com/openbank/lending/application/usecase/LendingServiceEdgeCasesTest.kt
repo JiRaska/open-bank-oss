@@ -277,9 +277,11 @@ class LendingServiceEdgeCasesTest {
         val app = proposedApplication()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
         every { applications.findByParty(partyId) } returns Uni.createFrom().item(listOf(app))
+        every { applications.findRecentByParty(partyId, 31) } returns Uni.createFrom().item(listOf(app))
 
         assertThat(service.getApplication(app.id).await().indefinitely()).isEqualTo(app)
         assertThat(service.listApplications(partyId).await().indefinitely()).containsExactly(app)
+        assertThat(service.listRecentApplicationsForParty(partyId, 31).await().indefinitely()).containsExactly(app)
     }
 
     // --- Disbursement --------------------------------------------------------------------------

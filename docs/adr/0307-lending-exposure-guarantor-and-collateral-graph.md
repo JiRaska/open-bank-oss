@@ -1,7 +1,8 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
+followup: "#10234 — activate an authorized Lending writer and dedicated reference publisher, audited case-scoped read, Context projection, UI and load qualification"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -62,6 +63,165 @@ conversion, valuation expiry, corrections, cycles, merged parties, unauthorized 
 revocation, missing sources and 10× workload tests. Production pilot is read-only for a
 named portfolio and requires human credit/risk and security review.
 
+## Source readiness and migration sequence
+
+The current Lending source has a borrower `partyId` on each loan and an approved
+`collateral` row tied to exactly one `loan_id`. That row has type, description,
+market value, currency, haircut and valuation time. It has **no verified shared
+asset identity**, secured-allocation amount, allocation priority or independent
+valuation version. No guarantor party or guarantee cap is stored in this service.
+Searching equal descriptions, collateral types, amounts or party names must not
+create graph edges. The existing collateral value contributes to IFRS 9 LGD;
+repurposing or summing it as shared-asset coverage would alter a money-path
+calculation and risk double counting.
+
+The source transition is expand-first and source-owned:
+
+1. Add an immutable, server-assigned asset identity backed by a reviewed source
+   reference, with the source register's two-letter jurisdiction and a versioned
+   identity-evidence hash. This jurisdiction identifies the evidence source, not
+   the physical asset's location. Corrections keep a stable canonical asset ID and
+   advance one approved revision at a time; allocations attach only to that
+   canonical identity, so a corrected observation cannot split one physical asset
+   into multiple graph nodes. A canonical root is unique for the verified
+   jurisdiction/register/record reference tuple. Equal descriptions or references
+   from different registers do not imply the same asset. A new
+   allocation references both that asset and an existing approved collateral row
+   for one loan. Its secured amount, currency, priority and effective interval
+   are explicit; an asset is shared only when two independently approved
+   allocations refer to the **same verified asset ID**. Old collateral rows
+   remain unlinked and are reported as `IDENTITY_UNKNOWN`, never auto-grouped.
+2. Add guarantee contracts separately. Each names a verified guarantor party,
+   one facility, an explicit cap and currency, seniority and effective interval.
+   Registration and approval use different authenticated people. A guarantee
+   of type `CollateralType.GUARANTEE` in the existing table is not by itself a
+   guarantor identity or enforceable guarantee contract.
+3. Persist immutable valuation observations and source corrections. A current
+   value is usable only with an approved valuation basis and unexpired effective
+   date. Corrections append a new version and a reviewed supersession link; they
+   never rewrite evidence that an earlier reviewer saw.
+4. Expose a case/portfolio-scoped Lending read contract and only minimized
+   reference events to Context. Context authorizes each facility and each
+   cross-borrower expansion separately. The source read returns provenance and
+   incomplete-data reasons before any graph edge is drawn. No arbitrary
+   portfolio-wide traversal is introduced.
+5. Reconcile any proposed exposure or coverage figure against the loan book,
+   authoritative accounting/risk snapshot and a declared FX rate/time. Until
+   every contributor is available and reconciled, the UI shows the topology
+   and `TOTAL_UNAVAILABLE`, not a partial or currency-blind total.
+
+For the initial single-facility case read, the investigation `caseId` is the
+source loan UUID and the assignment root is `lending-loan:<loanId>`. Context
+accepts `LENDING_EXPOSURE_REVIEW` only when that case ID, root, purpose and
+investigator match a live approved assignment. Lending receives the
+investigator's bearer and checks Context's live, data-free access decision for
+the exact loan before returning any source detail; it also applies its own
+role and field policy. Unavailable authorization fails closed. A shared
+guarantor or asset does not extend this assignment to another loan: each
+additional facility requires its own access decision and audit. Portfolio
+reads require a separately reviewed portfolio ownership source and assignment
+contract; a caller-supplied list of loan IDs is not such a contract.
+
+Mixed-version rollout leaves the existing `CollateralUseCase`, IFRS 9 LGD and
+ledger postings unchanged. New writers are disabled until their schema, maker/
+checker policy, negative tests and bounded read API are ready. Verify old loan
+and provisioning flows before and after expansion; verify new rows cannot be
+read through a non-approved or cross-portfolio path. Rollback disables the new
+writer and Context consumer while retaining approved source evidence and audit
+history. Dropping populated evidence tables is a separate retention decision,
+not a deployment rollback. A 1×/10× synthetic portfolio with one asset shared
+across facilities, partial guarantees and mixed currencies is required before
+the P3 pilot. Flyway V20 is the **schema-only expand stage** for the four fact
+types; it enforces separate proposal/decision actors, immutable decided facts,
+approved matching legacy collateral on an allocation insert, and a locked
+recheck at allocation approval. A proposal whose collateral was released can
+be rejected but cannot be approved. V20 alone does not deliver the P3 lens.
+An internal guarantee writer now validates loan, Party and signed Document
+evidence on proposal and approval, and persists an approval pointer atomically
+with the decision. A real-PostgreSQL test proves that an outbox insert failure
+rolls back approval and a successful approval commits one minimized reference.
+The loan-scoped maker/checker HTTP routes are also disabled by default. A
+dedicated Kafka publisher and literal topic ACL now route only the approved
+reference away from the broad Lending topic. The pointer carries the source
+loan UUID so Context can bind it to an exact assigned loan; it carries no
+guarantor, amount, document or staff identity. No proof credential is provisioned.
+The publisher rejects unknown graph event types. A bounded,
+loan-scoped approved-guarantee source read is available
+behind a separate disabled-by-default switch. It requires the investigator's
+live Context assignment for the exact loan and purpose, and returns no data if
+that check is denied or unavailable. The Context projector, Lending graph UI
+and measured portfolio workload remain absent.
+The repeatable `openbank-lending-service/e2e/lending-graph-load.js` harness
+requires an isolated synthetic fixture with two assigned loan cases sharing a
+verified guarantor, two currencies and a partial guarantee. Its explicit
+`BASE_RPS` is the approved 1× arrival rate; it then runs 10× for the same
+duration. Both phases require 100% authorization and evidence checks, no
+dropped iterations, under 1% HTTP failures, p95 below 300 ms and p99 below
+1,000 ms. The harness is not a performance result: this stage has no enabled
+source route or Context projection, so qualification remains pending.
+Separately, the existing Customer 360 credit-application overlay uses an optional
+database-bounded `limit` on the party application list. Omitting the parameter
+retains the existing full-list contract. A `(party_id, created_at DESC, id DESC)`
+index supports the newest-first bounded query; on a large live table it must
+be prebuilt concurrently before the Flyway migration so startup does not build
+it under write load. The graph requests one extra row to mark truncation.
+This overlay is not the case-scoped Lending exposure read contract in step 4.
+The database checks proposal/decision separation and local referential lineage.
+ADR-0311 preserves ADR-0152's single-bank-per-deployment boundary for Lending. V20 therefore uses local IDs
+and foreign keys without a per-row bank dimension; the existing `loan` and
+`collateral` tables follow the same boundary. A writer must derive the bank
+identifier for outgoing Context references from trusted deployment configuration,
+never from proposal data, and must reject a mismatch with Document's server-stamped
+provenance. The schema cannot establish
+that a guarantor party is verified, an asset identity is unique across documents,
+or a document hash matches the authoritative file.
+The future source adapter must verify these with their owners and recheck the
+current collateral status at publication/read time. No row in V20 alone is
+eligible to become a Context edge.
+
+### Source proof boundary for the first writer
+
+The writer must derive the outgoing Context `bank_scope` from the Lending
+deployment, never from the proposal body or a tenant claim. On both proposal and approval it
+resolves the loan/collateral in Lending, the guarantor in Party, and the cited
+document in Document. A missing, archived, mismatched or unavailable source
+fails closed; it is not converted into a graph fact. The document check must
+compare `documentId`, expected SHA-256, case/loan reference and bank scope in
+one purpose-limited operation, returning only a match decision. Lending must
+not use the generic document metadata/content endpoints for this check: they
+disclose more than the decision needs, and the current shared backend client
+does not identify Lending uniquely. Provision a dedicated Lending service
+identity and allow only this action in the Document policy. Document compares
+its server-assigned `documents.bank_scope` (nullable for pre-migration rows),
+while Lending resolves the loan in its deployment-local book and stamps the
+configured bank identifier. Keep the document bytes
+and free text out of the graph event. The fact's
+`source_sha256` pins the exact document version the checker verified, so a
+later document change does not retroactively alter what the checker saw.
+For a guarantee, the dedicated boolean proof endpoint checks a `SIGNED`
+document's post-seal SHA-256, the loan `caseRef`, guarantor `partyRef` and bank
+scope. Old documents with a null bank scope fail closed; JSON metadata is never
+used as bank authority. The realm template declares a separate
+`openbank-lending-graph` client with only `ROLE_LENDING_GRAPH_PROOF`; the endpoint
+checks both that role and its exact principal. It remains unusable in a
+deployment until the credential is provisioned and available to Lending. The
+writer remains disabled until that credential, its case-scoped route and a
+dedicated reference channel are reviewed and deployed.
+Party also offers a boolean-only, purpose-limited guarantor identity check to
+that exact client. It returns true only for a real active customer with approved
+KYC and cleared AML; absence or ineligibility returns false. It proves neither
+consent nor the loan-specific guarantee, which still needs the signed Document
+check and separate maker/checker decision. A source outage propagates as failure,
+never as a verified identity.
+
+Approval then rechecks current source state in the same logical decision flow
+and emits the versioned, reference-only event through Lending's transactional
+outbox. Context consumes it idempotently, preserves effective and recorded time,
+and reads detail through the source's case-scoped API under a separate OPA
+decision. Until the dedicated credential, enabled writer route, authorized
+Context consumer and projector are deployed, V20 rows must not be presented as
+verified links. The source read remains disabled while those boundaries are reviewed.
+
 ## Alternatives considered
 
 - **Compute totals from visible canvas nodes:** rejected; pagination/authorization would
@@ -95,6 +255,7 @@ named portfolio and requires human credit/risk and security review.
 
 - [ADR-0303](0303-banking-context-graph-and-authorized-hybrid-retrieval.md)
 - [ADR-0308](0308-effective-time-authorization-evidence-graph.md)
+- [ADR-0311](0311-deployment-bank-provenance-for-context-evidence.md)
 - [ADR-0028](0028-lending-bounded-context.md)
 - [ADR-0037](0037-anacredit-credit-exposure-reporting.md)
 - [Implementation roadmap #9945](https://github.com/JiRaska/open-bank-oss/issues/9945)

@@ -30,7 +30,11 @@ class DocumentSecurityContractTest {
 
     @Test
     fun `every document endpoint is role-gated, never permit-all or unannotated`() {
-        val resources = listOf(DocumentResource::class.java, SignatureCeremonyResource::class.java)
+        val resources = listOf(
+            DocumentResource::class.java,
+            SignatureCeremonyResource::class.java,
+            LendingGuaranteeEvidenceResource::class.java,
+        )
 
         resources.forEach { resource ->
             val endpoints = resource.declaredMethods.filter { it.isHttpEndpoint() }
@@ -90,5 +94,14 @@ class DocumentSecurityContractTest {
                 .describedAs("DocumentResource.%s must gate on the agreed action", methodName)
                 .isEqualTo(expectedAction)
         }
+    }
+
+    @Test
+    fun `lending proof route has its dedicated policy action`() {
+        val method = LendingGuaranteeEvidenceResource::class.java.declaredMethods.single { it.name == "verify" }
+        assertThat(method.getAnnotation(Authorize::class.java)?.action)
+            .isEqualTo("document.guaranteeEvidence.verify")
+        assertThat(method.getAnnotation(RolesAllowed::class.java)?.value?.toList())
+            .containsExactly("ROLE_LENDING_GRAPH_PROOF")
     }
 }

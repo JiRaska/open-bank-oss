@@ -74,3 +74,25 @@ test_other_service_account_denied if {
 test_customer_token_denied if {
 	not decision(customer, "document.business-agreement.ensure").allow
 }
+
+lending_graph := {"type": "HUMAN", "id": "service-account-openbank-lending-graph", "roles": ["ROLE_LENDING_GRAPH_PROOF"]}
+
+test_lending_graph_may_verify_guarantee_only if {
+	decision(lending_graph, "document.guaranteeEvidence.verify").allow == true
+	not decision(lending_graph, "document.readContent").allow
+}
+
+test_shared_backend_and_edge_cannot_verify_guarantee if {
+	not decision(services_m2m, "document.guaranteeEvidence.verify").allow
+	not decision(edge, "document.guaranteeEvidence.verify").allow
+}
+
+test_lending_principal_without_narrow_role_is_denied if {
+	no_role := {"type": "HUMAN", "id": "service-account-openbank-lending-graph", "roles": ["ROLE_API"]}
+	not decision(no_role, "document.guaranteeEvidence.verify").allow
+}
+
+test_staff_cannot_verify_guarantee if {
+	staff := {"type": "HUMAN", "id": "staff-1", "roles": ["ROLE_ADMIN", "ROLE_OPERATOR"]}
+	not decision(staff, "document.guaranteeEvidence.verify").allow
+}

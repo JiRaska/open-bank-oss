@@ -783,6 +783,58 @@ contracts render an error rather than a zero exposure. Override rates require a 
 actor and decision time. Stage 3 uses conditional default probability one; this correction does
 not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).
 
+### Staged Context Graph source boundary (ADR-0307; routes disabled)
+
+The existing approved `collateral` record belongs to one loan and contributes to
+IFRS 9 LGD. It cannot establish that two loans share the same physical asset,
+and `type=GUARANTEE` does not identify a guarantor or enforceable guarantee.
+V20 adds separate source tables for these facts, with no enabled writer or read
+route; no historical row is inferred or backfilled. Deriving links from equal
+descriptions, values or names would
+create a false cross-borrower disclosure. The planned source model therefore
+requires verified IDs, independent maker/checker decisions, effective intervals,
+source hashes and immutable correction lineage before Context receives any P3
+reference. The present collateral/provisioning calculation must remain unchanged
+during an additive migration. Under ADR-0311, the Lending database belongs to one
+bank per deployment: graph facts use local foreign keys, and the writer
+must stamp outgoing Context references from trusted deployment configuration.
+It must compare that identifier with Document's server-stamped provenance; a
+request-supplied bank identifier cannot establish ownership. Cross-borrower expansion and any financial total
+require separate authorization and reconciliation to authoritative snapshots;
+missing data must produce `UNKNOWN` or `TOTAL_UNAVAILABLE`, never a reassuring zero.
+The dedicated Lending graph client has a boolean-only Party endpoint for a
+prospective guarantor's current ACTIVE/KYC-approved/AML-cleared identity state.
+The shared backend account and staff are denied before Party lookup, even while
+OPA is advisory. This bit is not a guarantee contract or consent; a signed,
+loan-bound Document proof and an independent checker are still required.
+
+The internal guarantee-registration use case now implements those source checks
+before both proposal and approval and defaults to `writer-enabled=false`. Its
+repository locks the pending fact, repeats the maker/checker check and inserts
+the minimized approval pointer into Lending's outbox in the same transaction.
+Loan-scoped HTTP proposal and decision routes now exist but return 503 while
+`writer-enabled=false`. A proposal is bound to the path loan, never to a
+caller-supplied bank or actor; the decision route verifies that the guarantee
+belongs to that same loan before any mutation. The maker route admits only
+human lending officers/admins, and the checker route only human credit-risk
+staff/admins. Method RBAC denies operators; explicit principal checks and
+Lending OPA deny service accounts. The service and repository enforce different maker and
+checker identities. The API returns only ID, revision and state, with no
+guarantor or source-document identifiers. Party/Document proof outages return
+503 without a negative or positive decision. A real-PostgreSQL test proves an
+outbox insert failure rolls approval back, while a valid approval commits one
+minimal pointer. No proof client credential is provisioned yet. A dedicated
+Kafka topic and literal producer ACL isolate graph references from the broad
+Lending stream. The producer accepts only the exact versioned approved-guarantee
+field set: guarantee and loan UUIDs, revision, bank scope and event time. It
+rejects unknown graph types, payloads over 512 bytes or extra fields; no
+guarantor, amount, document or staff identity is published. Before enabling a
+writer, provision the narrow proof credential and verify the policy/identity
+path in a deployed environment.
+Source proof failure must propagate; a prior positive result cannot substitute
+for the approval-time check. A later source change requires live revalidation
+at authorized source read time; a Kafka pointer alone establishes no Context
+edge or current guarantee validity.
 - **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `RestCatalogLoanProfilePort`
   now reaches `product-catalog.accounts.svc:8443` with the client certificate `lending-internal-tls`
   (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in

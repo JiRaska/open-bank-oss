@@ -16,6 +16,7 @@ import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
+import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
@@ -45,6 +46,8 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
+
+private const val MAX_PARTY_APPLICATION_LIST_LIMIT = 100
 
 /**
  * Lending REST surface (ADR-0028 D5). Every endpoint is role-gated with raw string literals —
@@ -286,8 +289,17 @@ class LendingResource(
     @Path("/applications")
     @Operation(summary = "List a party's loan applications")
     @Authorize(action = "lending.list", resource = "")
-    fun listApplications(@QueryParam("partyId") partyId: UUID?) =
-        apply.listApplications(requireNotNull(partyId) { "query parameter 'partyId' is required" })
+    fun listApplications(
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("limit") limit: Int?,
+    ): Uni<List<LoanApplication>> {
+        val requiredPartyId = requireNotNull(partyId) { "query parameter 'partyId' is required" }
+        if (limit == null) return apply.listApplications(requiredPartyId)
+        require(limit in 1..MAX_PARTY_APPLICATION_LIST_LIMIT) {
+            "limit must be between 1 and $MAX_PARTY_APPLICATION_LIST_LIMIT"
+        }
+        return apply.listRecentApplicationsForParty(requiredPartyId, limit)
+    }
 
     @GET
     @Path("/applications/recent")

@@ -25,6 +25,9 @@ interface LoanApplicationRepository {
     fun findById(id: LoanApplicationId): Uni<LoanApplication?>
     fun findByParty(partyId: UUID): Uni<List<LoanApplication>>
 
+    /** Newest bounded slice for Customer 360; the existing full list keeps its contract. */
+    fun findRecentByParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>>
+
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>>
 

@@ -68,7 +68,27 @@ quarkus:
         type: client
     tls:
       verification: none
+    lending-graph:
+      client-enabled: ${LENDING_GRAPH_PROOF_ENABLED:false}
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-lending-graph
+      credentials:
+        secret: ${LENDING_GRAPH_OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
+    context-lending-access:
+      url: ${CONTEXT_SERVICE_URL:http://localhost:8145}
+      connect-timeout: 1000
+      read-timeout: 3000
+    lending-graph-party-proof:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 1000
+      read-timeout: 1500
+    lending-graph-document-proof:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 1000
+      read-timeout: 1500
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       connect-timeout: 2000
@@ -182,6 +202,9 @@ openbank:
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-lending}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-lending-origination}
   lending:
+    graph:
+      bank-scope: ${LENDING_GRAPH_BANK_SCOPE:openbank-cz}
+      writer-enabled: ${LENDING_GRAPH_WRITER_ENABLED:false}
     # Temporal timers-worker switch (temporal-worker-switch-naming convention,
     # rules.yaml: temporal_worker_switch_naming). Env var name unchanged.
     worker:
@@ -357,6 +380,12 @@ mp:
         connector: smallrye-kafka
         client.id: lending-service-${quarkus.uuid}
         topic: openbank.lending.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      lending-graph-references-out:
+        connector: smallrye-kafka
+        client.id: lending-graph-service-${quarkus.uuid}
+        topic: openbank.lending.graph.references
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
 

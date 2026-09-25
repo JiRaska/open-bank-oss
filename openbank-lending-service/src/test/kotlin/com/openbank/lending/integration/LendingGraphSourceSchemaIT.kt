@@ -1,0 +1,640 @@
+// SPDX-License-Identifier: Apache-2.0
+package com.openbank.lending.integration
+
+import com.openbank.lending.application.port.out.GraphGuaranteeRepository
+import com.openbank.lending.it.PostgresRedisTestResource
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
+import java.sql.Connection
+import java.sql.Timestamp
+import java.time.Instant
+import java.util.UUID
+import javax.sql.DataSource
+
+/** Real-Postgres proof that a graph fact cannot become an approved or rewritten identity by itself. */
+@QuarkusTest
+@QuarkusTestResource(LendingBootSmokeIT.InMemoryKafkaResource::class)
+@QuarkusTestResource(value = PostgresRedisTestResource::class, restrictToAnnotatedClass = true)
+class LendingGraphSourceSchemaIT {
+    @Inject
+    lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var guarantees: GraphGuaranteeRepository
+
+    @Test
+    fun `approved guarantee reads preserve revisions and are bounded`() {
+        val loanId = dataSource.connection.use(::createLoanForGuarantee)
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val unrelated = UUID.randomUUID()
+        val contractId = UUID.randomUUID()
+        val decidedAt = Instant.now().plusSeconds(1)
+        val effectiveAt = decidedAt.plusSeconds(1)
+        val knownAt = effectiveAt.plusSeconds(1)
+        dataSource.connection.use { connection ->
+            insertPendingGuarantee(connection, first, contractId, loanId, 1, null)
+            approveGuarantee(connection, first, decidedAt)
+            insertPendingGuarantee(connection, second, contractId, loanId, 2, first)
+            approveGuarantee(connection, second, decidedAt)
+            insertPendingGuarantee(connection, unrelated, UUID.randomUUID(), loanId, 1, null)
+            // Leave the unrelated row pending; it must not enter the reviewed source graph.
+        }
+
+        val facts = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoan(loanId, effectiveAt, knownAt, limit = 1)
+            }
+        }
+
+        assertThat(facts).hasSize(2)
+        assertThat(facts.map { it.guaranteeId }).containsExactly(first, second)
+        assertThat(facts.map { it.proposal.revision }).containsExactly(1L, 2L)
+        val notYetKnown = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoan(loanId, effectiveAt, decidedAt.minusSeconds(1), limit = 1)
+            }
+        }
+        val notYetEffective = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoan(loanId, Instant.EPOCH, knownAt, limit = 1)
+            }
+        }
+        assertThat(notYetKnown).isEmpty()
+        assertThat(notYetEffective).isEmpty()
+    }
+
+    @Test
+    fun `shared candidate lookup keeps only approved effective known facts for the root guarantor`() {
+        val candidate = dataSource.connection.use(::createLoanForGuarantee)
+        val sharedParty = UUID.randomUUID()
+        val otherParty = UUID.randomUUID()
+        val shared = UUID.randomUUID()
+        val unrelated = UUID.randomUUID()
+        val pending = UUID.randomUUID()
+        val decidedAt = Instant.now().plusSeconds(1)
+        val effectiveAt = decidedAt.plusSeconds(1)
+        val knownAt = effectiveAt.plusSeconds(1)
+        dataSource.connection.use { connection ->
+            insertPendingGuarantee(connection, shared, UUID.randomUUID(), candidate, 1, null, sharedParty)
+            approveGuarantee(connection, shared, decidedAt)
+            insertPendingGuarantee(connection, unrelated, UUID.randomUUID(), candidate, 1, null, otherParty)
+            approveGuarantee(connection, unrelated, decidedAt)
+            insertPendingGuarantee(connection, pending, UUID.randomUUID(), candidate, 1, null, sharedParty)
+        }
+        fun lookup(effective: Instant, known: Instant) = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoanAndGuarantors(candidate, setOf(sharedParty), effective, known, 20)
+            }
+        }
+        fun preselect(effective: Instant, known: Instant) = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findSharedCandidateLoanIds(listOf(candidate), setOf(sharedParty), effective, known, 5)
+            }
+        }
+        assertThat(lookup(effectiveAt, knownAt).map { it.guaranteeId }).containsExactly(shared)
+        assertThat(lookup(effectiveAt, decidedAt.minusSeconds(1))).isEmpty()
+        assertThat(lookup(Instant.EPOCH, knownAt)).isEmpty()
+        assertThat(preselect(effectiveAt, knownAt)).containsExactly(candidate)
+        assertThat(preselect(effectiveAt, decidedAt.minusSeconds(1))).isEmpty()
+        assertThat(preselect(Instant.EPOCH, knownAt)).isEmpty()
+    }
+
+    @Test
+    fun `reviewed graph facts cannot be inserted without a pending proposal`() {
+        val id = UUID.randomUUID()
+        val relatedId = UUID.randomUUID()
+        val documentId = UUID.randomUUID()
+        val hash = "a".repeat(64)
+        val attemptedApprovals = listOf(
+            """INSERT INTO lending_graph_asset
+               (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                source_register, source_record_ref, source_document_id, source_sha256,
+                proposed_by, proposed_at, status, decided_by, decided_at)
+               VALUES ('$id', '$id', 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', '$id', '$documentId', '$hash',
+                       'maker', now(), 'APPROVED', 'checker', now())""",
+            """INSERT INTO lending_graph_allocation
+               (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+                priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at,
+                status, decided_by, decided_at)
+               VALUES ('$id', '$relatedId', '$relatedId', 1, 100, 'EUR',
+                       1, now(), '$documentId', '$hash', 'maker', now(),
+                       'APPROVED', 'checker', now())""",
+            """INSERT INTO lending_graph_valuation
+               (valuation_id, asset_id, amount, currency, basis, effective_at,
+                source_document_id, source_sha256, proposed_by, proposed_at,
+                status, decided_by, decided_at)
+               VALUES ('$id', '$relatedId', 100, 'EUR', 'MARKET', now(),
+                       '$documentId', '$hash', 'maker', now(),
+                       'APPROVED', 'checker', now())""",
+            """INSERT INTO lending_graph_guarantee
+               (guarantee_id, contract_id, revision, loan_id, guarantor_party_id,
+                cap_amount, currency, coverage_fraction, seniority, valid_from,
+                source_document_id, source_sha256, proposed_by, proposed_at,
+                status, decided_by, decided_at)
+               VALUES ('$id', '$relatedId', 1, '$relatedId', '$relatedId',
+                       100, 'EUR', 1, 1, now(), '$documentId', '$hash', 'maker', now(),
+                       'APPROVED', 'checker', now())""",
+        )
+        dataSource.connection.use { connection ->
+            attemptedApprovals.forEach { sql ->
+                assertThatThrownBy { connection.createStatement().use { it.executeUpdate(sql) } }
+                    .hasMessageContaining("lending graph evidence must start pending")
+            }
+        }
+    }
+
+    @Test
+    fun `an asset requires a different checker and approved evidence cannot be changed`() {
+        val assetId = createPendingAsset()
+        dataSource.connection.use { connection ->
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """UPDATE lending_graph_asset SET status = 'APPROVED',
+                       decided_by = 'maker', decided_at = now() WHERE asset_id = ?""",
+                ).use { statement ->
+                    statement.setObject(1, assetId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("lending_graph_asset_decision")
+
+            connection.prepareStatement(
+                """UPDATE lending_graph_asset SET status = 'APPROVED',
+                   decided_by = 'checker', decided_at = now() WHERE asset_id = ?""",
+            ).use { statement ->
+                statement.setObject(1, assetId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    "UPDATE lending_graph_asset SET source_sha256 = ? WHERE asset_id = ?",
+                ).use { statement ->
+                    statement.setString(1, "b".repeat(64))
+                    statement.setObject(2, assetId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("immutable")
+
+            assertThatThrownBy {
+                connection.prepareStatement("DELETE FROM lending_graph_asset WHERE asset_id = ?").use { statement ->
+                    statement.setObject(1, assetId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("cannot be deleted")
+        }
+    }
+
+    @Test
+    fun `asset identity rejects an invalid register jurisdiction`() {
+        val id = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """INSERT INTO lending_graph_asset
+                       (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                        source_register, source_record_ref, source_document_id,
+                        source_sha256, proposed_by, proposed_at)
+                       VALUES (?, ?, 1, 'REAL_ESTATE', 'g1', 'TEST_REGISTRY', ?, ?, ?, 'maker', now())""",
+                ).use { statement ->
+                    statement.setObject(1, id)
+                    statement.setObject(2, id)
+                    statement.setString(3, id.toString())
+                    statement.setObject(4, UUID.randomUUID())
+                    statement.setString(5, "a".repeat(64))
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("lending_graph_asset_identity_jurisdiction_check")
+        }
+    }
+
+    @Test
+    fun `one register record cannot create two canonical asset roots`() {
+        val firstId = createPendingAsset()
+        val secondId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """INSERT INTO lending_graph_asset
+                       (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                        source_register, source_record_ref, source_document_id, source_sha256,
+                        proposed_by, proposed_at)
+                       VALUES (?, ?, 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, 'other-maker', now())""",
+                ).use { statement ->
+                    statement.setObject(1, secondId)
+                    statement.setObject(2, secondId)
+                    statement.setString(3, firstId.toString())
+                    statement.setObject(4, UUID.randomUUID())
+                    statement.setString(5, "b".repeat(64))
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("uq_lending_graph_asset_source_root")
+        }
+    }
+
+    @Test
+    fun `an allocation cannot point to an invented collateral item`() {
+        val assetId = createPendingAsset()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """UPDATE lending_graph_asset SET status = 'APPROVED',
+                   decided_by = 'checker', decided_at = now() WHERE asset_id = ?""",
+            ).use { statement ->
+                statement.setObject(1, assetId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """INSERT INTO lending_graph_allocation
+                       (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+                        priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
+                       VALUES (?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'maker', now())""",
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setObject(2, assetId)
+                    statement.setObject(3, UUID.randomUUID())
+                    statement.setObject(4, UUID.randomUUID())
+                    statement.setString(5, "c".repeat(64))
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("approved matching collateral evidence is required")
+        }
+    }
+
+    @Test
+    fun `released collateral cannot be approved as a graph allocation`() {
+        val assetId = createPendingAsset()
+        val allocationId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                val collateralId = createApprovedCollateral(connection)
+                connection.prepareStatement(
+                    """UPDATE lending_graph_asset SET status = 'APPROVED',
+                   decided_by = 'asset-checker', decided_at = now() WHERE asset_id = ?""",
+                ).use { statement ->
+                    statement.setObject(1, assetId)
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+                connection.prepareStatement(
+                    """INSERT INTO lending_graph_allocation
+                   (allocation_id, asset_id, collateral_id, revision, secured_amount, currency,
+                    priority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
+                   VALUES (?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'allocation-maker', now())""",
+                ).use { statement ->
+                    statement.setObject(1, allocationId)
+                    statement.setObject(2, assetId)
+                    statement.setObject(3, collateralId)
+                    statement.setObject(4, UUID.randomUUID())
+                    statement.setString(5, "c".repeat(64))
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+                connection.prepareStatement("UPDATE collateral SET released_at = now() WHERE id = ?").use { statement ->
+                    statement.setObject(1, collateralId)
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+                val beforeRejectedApproval = connection.setSavepoint()
+                assertThatThrownBy {
+                    connection.prepareStatement(
+                        """UPDATE lending_graph_allocation SET status = 'APPROVED',
+                       decided_by = 'allocation-checker', decided_at = now() WHERE allocation_id = ?""",
+                    ).use { statement ->
+                        statement.setObject(1, allocationId)
+                        statement.executeUpdate()
+                    }
+                }.hasMessageContaining("approved matching collateral evidence is required at decision")
+                connection.rollback(beforeRejectedApproval)
+                connection.prepareStatement(
+                    """UPDATE lending_graph_allocation SET status = 'REJECTED',
+                   decided_by = 'allocation-checker', decided_at = now() WHERE allocation_id = ?""",
+                ).use { statement ->
+                    statement.setObject(1, allocationId)
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+            } finally {
+                connection.rollback()
+            }
+        }
+    }
+
+    @Test
+    fun `evidence tables reject truncate even with table ownership`() {
+        dataSource.connection.use { connection ->
+            assertThatThrownBy {
+                // V23's receipt FK rejects a plain TRUNCATE before the immutable-evidence
+                // trigger runs; CASCADE proves the trigger still blocks an owning caller.
+                connection.createStatement().use { it.execute("TRUNCATE lending_graph_guarantee CASCADE") }
+            }.hasMessageContaining("cannot be truncated")
+        }
+    }
+
+    @Test
+    fun `a correction cannot supersede an unapproved asset identity`() {
+        val pendingId = createPendingAsset()
+        dataSource.connection.use { connection ->
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """INSERT INTO lending_graph_asset
+                       (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                        source_register, source_record_ref, source_document_id, source_sha256,
+                        supersedes_asset_id, proposed_by, proposed_at)
+                       VALUES (?, ?, 2, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, ?, 'second-maker', now())""",
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setObject(2, pendingId)
+                    statement.setString(3, pendingId.toString())
+                    statement.setObject(4, UUID.randomUUID())
+                    statement.setString(5, "b".repeat(64))
+                    statement.setObject(6, pendingId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("must supersede the approved prior revision")
+        }
+    }
+
+    @Test
+    fun `asset correction keeps one canonical identity and cannot become an allocation root`() {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                val rootId = createPendingAsset(connection)
+                val correctionId = UUID.randomUUID()
+                val collateralId = createApprovedCollateral(connection)
+                approveAsset(connection, rootId, "asset-checker")
+                insertAssetCorrection(connection, rootId, correctionId)
+                approveAsset(connection, correctionId, "second-checker")
+                assertCorrectionIdentity(connection, rootId, correctionId)
+
+                assertCorrectionCannotAllocate(connection, correctionId, collateralId)
+            } finally {
+                connection.rollback()
+            }
+        }
+    }
+
+    private fun approveAsset(connection: Connection, assetId: UUID, checker: String) {
+        connection.prepareStatement(
+            """UPDATE lending_graph_asset SET status = 'APPROVED',
+               decided_by = ?, decided_at = now() WHERE asset_id = ?""",
+        ).use { statement ->
+            statement.setString(1, checker)
+            statement.setObject(2, assetId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+    }
+
+    private fun assertCorrectionIdentity(connection: Connection, rootId: UUID, correctionId: UUID) {
+        connection.prepareStatement(
+            "SELECT canonical_asset_id, revision FROM lending_graph_asset WHERE asset_id = ?",
+        ).use { statement ->
+            statement.setObject(1, correctionId)
+            statement.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                assertThat(rows.getObject(1, UUID::class.java)).isEqualTo(rootId)
+                assertThat(rows.getLong(2)).isEqualTo(2)
+            }
+        }
+    }
+
+    private fun insertAssetCorrection(connection: Connection, rootId: UUID, correctionId: UUID) {
+        connection.prepareStatement(
+            """INSERT INTO lending_graph_asset
+               (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                source_register, source_record_ref, source_document_id, source_sha256,
+                supersedes_asset_id, proposed_by, proposed_at)
+               VALUES (?, ?, 2, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, ?, 'second-maker', now())""",
+        ).use { statement ->
+            statement.setObject(1, correctionId)
+            statement.setObject(2, rootId)
+            statement.setString(3, rootId.toString())
+            statement.setObject(4, UUID.randomUUID())
+            statement.setString(5, "b".repeat(64))
+            statement.setObject(6, rootId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+    }
+
+    private fun assertCorrectionCannotAllocate(connection: Connection, correctionId: UUID, collateralId: UUID) {
+        val beforeRejectedAllocation = connection.setSavepoint()
+        assertThatThrownBy {
+            connection.prepareStatement(
+                """INSERT INTO lending_graph_allocation
+                   (allocation_id, asset_id, collateral_id, revision, secured_amount,
+                    currency, priority, valid_from, source_document_id, source_sha256,
+                    proposed_by, proposed_at)
+                   VALUES (?, ?, ?, 1, 100, 'EUR', 1, now(), ?, ?, 'maker', now())""",
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, correctionId)
+                statement.setObject(3, collateralId)
+                statement.setObject(4, UUID.randomUUID())
+                statement.setString(5, "c".repeat(64))
+                statement.executeUpdate()
+            }
+        }.hasMessageContaining("approved asset identity is required")
+        connection.rollback(beforeRejectedAllocation)
+    }
+
+    private fun createPendingAsset(): UUID = dataSource.connection.use(::createPendingAsset)
+
+    private fun createPendingAsset(connection: Connection): UUID {
+        val id = UUID.randomUUID()
+        connection.prepareStatement(
+            """INSERT INTO lending_graph_asset
+                   (asset_id, canonical_asset_id, revision, asset_type, identity_jurisdiction,
+                    source_register, source_record_ref, source_document_id,
+                    source_sha256, proposed_by, proposed_at)
+                   VALUES (?, ?, 1, 'REAL_ESTATE', 'GB', 'TEST_REGISTRY', ?, ?, ?, 'maker', now())""",
+        ).use { statement ->
+            statement.setObject(1, id)
+            statement.setObject(2, id)
+            statement.setString(3, id.toString())
+            statement.setObject(4, UUID.randomUUID())
+            statement.setString(5, "a".repeat(64))
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        return id
+    }
+
+    private fun createApprovedCollateral(connection: Connection): UUID {
+        val applicationId = UUID.randomUUID()
+        val loanId = UUID.randomUUID()
+        val collateralId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        connection.prepareStatement(
+            """INSERT INTO loan_application
+                   (id, party_id, requested_amount, currency, nominal_annual_rate,
+                    term_periods, first_due_date, proposed_by, status)
+                   VALUES (?, ?, 1000, 'EUR', 0.05, 12, current_date + 30, 'loan-maker', 'SUBMITTED')""",
+        ).use { statement ->
+            statement.setObject(1, applicationId)
+            statement.setObject(2, partyId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        connection.prepareStatement(
+            """INSERT INTO loan
+                   (id, application_id, party_id, principal, currency, nominal_annual_rate,
+                    term_periods, method, first_due_date)
+                   VALUES (?, ?, ?, 1000, 'EUR', 0.05, 12, 'ANNUITY', current_date + 30)""",
+        ).use { statement ->
+            statement.setObject(1, loanId)
+            statement.setObject(2, applicationId)
+            statement.setObject(3, partyId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        connection.prepareStatement(
+            """INSERT INTO collateral
+                   (id, loan_id, type, market_value, currency, status,
+                    registered_by, decided_by, decided_at)
+                   VALUES (?, ?, 'REAL_ESTATE', 1000, 'EUR', 'APPROVED',
+                           'collateral-maker', 'collateral-checker', now())""",
+        ).use { statement ->
+            statement.setObject(1, collateralId)
+            statement.setObject(2, loanId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        return collateralId
+    }
+
+    @Test
+    fun `guarantee requires a different checker and an approved prior revision for correction`() {
+        withRolledBackConnection { connection ->
+            val loanId = createLoanForGuarantee(connection)
+            val contractId = UUID.randomUUID()
+            val firstId = UUID.randomUUID()
+            val correctionId = UUID.randomUUID()
+            insertPendingGuarantee(connection, firstId, contractId, loanId, 1, null)
+            val beforeSelfDecision = connection.setSavepoint()
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    """UPDATE lending_graph_guarantee SET status = 'APPROVED',
+                   decided_by = 'maker', decided_at = now() WHERE guarantee_id = ?""",
+                ).use { statement ->
+                    statement.setObject(1, firstId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("lending_graph_guarantee_decision")
+            connection.rollback(beforeSelfDecision)
+            val beforeUnapprovedCorrection = connection.setSavepoint()
+            assertThatThrownBy { insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId) }
+                .hasMessageContaining("guarantee correction must supersede the approved prior revision")
+            connection.rollback(beforeUnapprovedCorrection)
+
+            connection.prepareStatement(
+                """UPDATE lending_graph_guarantee SET status = 'APPROVED',
+               decided_by = 'checker', decided_at = now() WHERE guarantee_id = ?""",
+            ).use { statement ->
+                statement.setObject(1, firstId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            val beforeMutation = connection.setSavepoint()
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    "UPDATE lending_graph_guarantee SET cap_amount = 600 WHERE guarantee_id = ?",
+                ).use { statement ->
+                    statement.setObject(1, firstId)
+                    statement.executeUpdate()
+                }
+            }.hasMessageContaining("immutable")
+            connection.rollback(beforeMutation)
+            insertPendingGuarantee(connection, correctionId, contractId, loanId, 2, firstId)
+            connection.prepareStatement(
+                "SELECT status, revision, supersedes_guarantee_id FROM lending_graph_guarantee WHERE guarantee_id = ?",
+            ).use { statement ->
+                statement.setObject(1, correctionId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString("status")).isEqualTo("PENDING")
+                    assertThat(rows.getLong("revision")).isEqualTo(2)
+                    assertThat(rows.getObject("supersedes_guarantee_id", UUID::class.java)).isEqualTo(firstId)
+                }
+            }
+        }
+    }
+
+    private fun withRolledBackConnection(block: (Connection) -> Unit) {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                block(connection)
+            } finally {
+                connection.rollback()
+            }
+        }
+    }
+
+    private fun createLoanForGuarantee(connection: Connection): UUID {
+        val applicationId = UUID.randomUUID()
+        val loanId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        connection.prepareStatement(
+            """INSERT INTO loan_application
+               (id, party_id, requested_amount, currency, nominal_annual_rate,
+                term_periods, first_due_date, proposed_by, status)
+               VALUES (?, ?, 1000, 'EUR', 0.05, 12, current_date + 30, 'loan-maker', 'SUBMITTED')""",
+        ).use { statement ->
+            statement.setObject(1, applicationId)
+            statement.setObject(2, partyId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        connection.prepareStatement(
+            """INSERT INTO loan
+               (id, application_id, party_id, principal, currency, nominal_annual_rate,
+                term_periods, method, first_due_date)
+               VALUES (?, ?, ?, 1000, 'EUR', 0.05, 12, 'ANNUITY', current_date + 30)""",
+        ).use { statement ->
+            statement.setObject(1, loanId)
+            statement.setObject(2, applicationId)
+            statement.setObject(3, partyId)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+        return loanId
+    }
+
+    private fun insertPendingGuarantee(
+        connection: Connection,
+        id: UUID,
+        contractId: UUID,
+        loanId: UUID,
+        revision: Int,
+        supersedes: UUID?,
+        guarantorPartyId: UUID = UUID.randomUUID(),
+    ) {
+        connection.prepareStatement(
+            """INSERT INTO lending_graph_guarantee
+               (guarantee_id, contract_id, revision, supersedes_guarantee_id,
+                loan_id, guarantor_party_id, cap_amount, currency, coverage_fraction,
+                seniority, valid_from, source_document_id, source_sha256, proposed_by, proposed_at)
+               VALUES (?, ?, ?, ?, ?, ?, 500, 'EUR', 0.5, 1, now(), ?, ?, 'maker', now())""",
+        ).use { statement ->
+            statement.setObject(1, id)
+            statement.setObject(2, contractId)
+            statement.setInt(3, revision)
+            statement.setObject(4, supersedes)
+            statement.setObject(5, loanId)
+            statement.setObject(6, guarantorPartyId)
+            statement.setObject(7, UUID.randomUUID())
+            statement.setString(8, "a".repeat(64))
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+    }
+
+    private fun approveGuarantee(connection: Connection, id: UUID, decidedAt: Instant) {
+        connection.prepareStatement(
+            "UPDATE lending_graph_guarantee SET status = 'APPROVED', decided_by = 'checker', decided_at = ? " +
+                "WHERE guarantee_id = ?",
+        ).use { statement ->
+            statement.setTimestamp(1, Timestamp.from(decidedAt))
+            statement.setObject(2, id)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+    }
+}

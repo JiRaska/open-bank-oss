@@ -21,7 +21,6 @@ openbank-document-service:openbank.documents.document.event
 openbank-interest-service:openbank.interest.accrual.event
 openbank-kyc-service:openbank.kyc.events
 openbank-ledger-service:openbank.ledger.journal.posted
-openbank-lending-service:openbank.lending.events
 openbank-party-service:openbank.party.events
 openbank-pid-service:openbank.pid.events
 openbank-pid-service:party.events
