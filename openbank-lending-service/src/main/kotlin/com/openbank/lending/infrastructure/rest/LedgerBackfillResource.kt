@@ -113,15 +113,6 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
         backfill.execute(id, execute == true, actor()).map { Response.ok(it.toResponse()).build() }
     }
 
-    private fun scope(cutoverDate: String?, disbursedBefore: String?): BackfillScope {
-        requireNotNull(cutoverDate) { "cutoverDate is required" }
-        requireNotNull(disbursedBefore) { "disbursedBefore is required" }
-        return BackfillScope(parseDate("cutoverDate", cutoverDate), parseDate("disbursedBefore", disbursedBefore))
-    }
-
-    private fun parseDate(name: String, value: String): LocalDate =
-        runCatching { LocalDate.parse(value) }.getOrElse { throw IllegalArgumentException("$name must be an ISO date") }
-
     /** 400 for input errors, 409 for state/hash refusals, 422 for a four-eyes violation. */
     private fun guarded(block: () -> Uni<Response>): Uni<Response> =
         runCatching(block).getOrElse { Uni.createFrom().failure(it) }
@@ -144,6 +135,15 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
         const val HTTP_UNPROCESSABLE = 422
     }
 }
+
+private fun scope(cutoverDate: String?, disbursedBefore: String?): BackfillScope {
+    requireNotNull(cutoverDate) { "cutoverDate is required" }
+    requireNotNull(disbursedBefore) { "disbursedBefore is required" }
+    return BackfillScope(parseDate("cutoverDate", cutoverDate), parseDate("disbursedBefore", disbursedBefore))
+}
+
+private fun parseDate(name: String, value: String): LocalDate =
+    runCatching { LocalDate.parse(value) }.getOrElse { throw IllegalArgumentException("$name must be an ISO date") }
 
 data class BackfillRequestListResponse(val requests: List<BackfillRequestView>)
 
