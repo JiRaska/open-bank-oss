@@ -313,6 +313,9 @@ class ContextGraphRepository(
         maxNodes: Int,
         maxEdges: Int,
     ): ContextNeighborhood? {
+        require(maxNodes in 1..MAX_GRAPH_NODES && maxEdges in 1..MAX_GRAPH_EDGES) {
+            "Graph read limits exceed the approved bounded-query policy"
+        }
         val rootNode = findRoot(namespace, root, asOf) ?: return null
         val firstHop = findRootEdges(namespace, root, asOf, maxEdges + 1)
         val paymentEvidence = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
@@ -505,6 +508,8 @@ class ContextGraphRepository(
     }.awaitSuspending()
 
     private companion object {
+        const val MAX_GRAPH_NODES = 100
+        const val MAX_GRAPH_EDGES = 200
         const val CONCERNS_TRANSACTION = "CONCERNS_TRANSACTION"
         const val DOMESTIC_PAYMENT_SOURCE = "domestic-payment"
         const val TRANSACTION_SOURCE = "transaction-service"
