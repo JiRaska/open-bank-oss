@@ -13,6 +13,22 @@ GUARD = ROOT / '.github/scripts/dependency-resolution-strict.init.gradle'
 
 
 class BuildscriptFreeMarkerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # setup-gradle installs graph init scripts in the runner's Gradle home.
+        # Fixture builds must exercise only our guard, while reusing the already
+        # downloaded Gradle distribution to avoid another network download.
+        cls._home = tempfile.TemporaryDirectory()
+        cls.gradle_home = Path(cls._home.name)
+        distributions = Path(os.environ.get('GRADLE_USER_HOME', Path.home() / '.gradle')) / 'wrapper/dists'
+        (cls.gradle_home / 'wrapper').mkdir()
+        if distributions.is_dir():
+            (cls.gradle_home / 'wrapper/dists').symlink_to(distributions, target_is_directory=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._home.cleanup()
+
     def run_case(self, version, resolver=False):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory)
@@ -34,10 +50,11 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
                 jar.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
             task = ('ForceDependencyResolutionPlugin_resolveProjectDependencies'
                     if resolver else 'VerifyBuildscriptFreeMarker')
+            env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
             return subprocess.run(
                 [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
                  '--offline', task, *(['--dry-run'] if resolver else [])],
-                capture_output=True, text=True, timeout=120, check=False,
+                env=env, capture_output=True, text=True, timeout=120, check=False,
             )
 
     def test_vulnerable_plugin_classpath_fails(self):
