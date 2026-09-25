@@ -45,21 +45,8 @@ class TopicProducersCoverageTest {
             .map { it.trim() }
             .firstOrNull { it.startsWith("topics:") && it.contains("openbank.") }
         assertTrue(line != null, "no `topics:` line naming openbank topics in $path")
-        val sharedTopics = line!!.removePrefix("topics:").trim()
+        return line!!.removePrefix("topics:").trim()
             .split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-        if (!path.contains("openbank-audit-service")) return sharedTopics
-
-        // Fraud lifecycle evidence uses an isolated strict consumer rather than the mixed stream.
-        // Resolve its configured topic from that channel, so renaming or removing it changes the
-        // coverage assertion instead of leaving a stale producer row looking valid.
-        val lines = f.readLines()
-        val channelStart = lines.indexOfFirst { it.trim() == "fraud-case-audit-in:" }
-        assertTrue(channelStart >= 0, "fraud-case-audit-in channel missing from $path")
-        val channelLines = lines.drop(channelStart + 1).takeWhile { it.startsWith("        ") || it.isBlank() }
-        val topic = channelLines.firstOrNull { it.startsWith("        topic: ") }
-            ?.removePrefix("        topic: ")?.trim()
-        assertTrue(!topic.isNullOrBlank(), "fraud-case-audit-in topic missing from $path")
-        return sharedTopics + topic!!
     }
 
     @Test

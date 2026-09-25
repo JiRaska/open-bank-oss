@@ -59,12 +59,6 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
-      - resource:
-          type: topic
-          name: openbank.fraud.investigation.case.audit
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
 ---
 # ── ExternalSecret: fraud-service keystore ──────────────────────────────────
 # Projects the Strimzi-minted KafkaUser secret (user.p12 + user.password)

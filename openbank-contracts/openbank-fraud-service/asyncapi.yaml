@@ -10,7 +10,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Fraud Service — events
-  version: 1.2.0
+  version: 1.1.0
   description: |
     The fraud-hold topic is a marketing-suppression signal. The separate investigation-reference
     topic carries only human-opened case lifecycle references for Context. Scores themselves
@@ -63,26 +63,8 @@ channels:
         $ref: '#/components/messages/fraud.case_opened'
       fraud.case_closed:
         $ref: '#/components/messages/fraud.case_closed'
-  fraudInvestigationCaseAudit:
-    address: openbank.fraud.investigation.case.audit
-    title: Fraud case lifecycle evidence for the Audit service only
-    description: |
-      Separate from the Context reference feed. Fraud has Write/Describe; Audit alone has
-      Read/Describe. No account, counterparty, score, amount or reason is carried.
-    messages:
-      fraud.case_opened.audit:
-        $ref: '#/components/messages/fraud.case_opened.audit'
-      fraud.case_closed.audit:
-        $ref: '#/components/messages/fraud.case_closed.audit'
 
 operations:
-  publishFraudInvestigationCaseAudit:
-    action: send
-    channel:
-      $ref: '#/channels/fraudInvestigationCaseAudit'
-    messages:
-      - $ref: '#/channels/fraudInvestigationCaseAudit/messages/fraud.case_opened.audit'
-      - $ref: '#/channels/fraudInvestigationCaseAudit/messages/fraud.case_closed.audit'
   publishFraudInvestigationCaseReferences:
     action: send
     channel:
@@ -133,19 +115,6 @@ components:
               `active`/`reason` state rather than accumulating.
 
   schemas:
-    fraudCaseAudit:
-      type: object
-      additionalProperties: false
-      required: [eventId, eventType, aggregateId, actorId, revision, occurredAt, aggregateType, sourceService]
-      properties:
-        eventId: { type: string, format: uuid }
-        eventType: { type: string, enum: [fraud.case_opened.audit, fraud.case_closed.audit] }
-        aggregateId: { type: string, format: uuid }
-        actorId: { type: string, minLength: 1 }
-        revision: { type: integer, minimum: 1 }
-        occurredAt: { type: string, format: date-time }
-        aggregateType: { type: string, const: FRAUD_CASE }
-        sourceService: { type: string, const: fraud-service }
     fraudCaseReference:
       type: object
       additionalProperties: false
@@ -174,16 +143,6 @@ components:
       enum: [repeated_review, expired]
 
   messages:
-    fraud.case_opened.audit:
-      name: fraud.case_opened.audit
-      contentType: application/json
-      payload:
-        $ref: '#/components/schemas/fraudCaseAudit'
-    fraud.case_closed.audit:
-      name: fraud.case_closed.audit
-      contentType: application/json
-      payload:
-        $ref: '#/components/schemas/fraudCaseAudit'
     fraud.case_opened:
       name: fraud.case_opened
       contentType: application/json

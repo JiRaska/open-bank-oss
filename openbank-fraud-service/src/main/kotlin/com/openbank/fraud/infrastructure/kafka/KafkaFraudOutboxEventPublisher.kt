@@ -24,7 +24,6 @@ import org.jboss.logging.Logger
 class KafkaFraudOutboxEventPublisher(
     @Channel("fraud-outbox-out") private val holdEmitter: MutinyEmitter<String>,
     @Channel("fraud-case-outbox-out") private val caseEmitter: MutinyEmitter<String>,
-    @Channel("fraud-case-audit-out") private val caseAuditEmitter: MutinyEmitter<String>,
     private val objectMapper: ObjectMapper,
 ) : OutboxEventPublisher {
 
@@ -43,11 +42,6 @@ class KafkaFraudOutboxEventPublisher(
             }
             "fraud.case_opened", "fraud.case_closed" -> {
                 caseEmitter.sendMessage(
-                    Message.of(entry.payload).addMetadata(meta),
-                ).awaitSuspending()
-            }
-            "fraud.case_opened.audit", "fraud.case_closed.audit" -> {
-                caseAuditEmitter.sendMessage(
                     Message.of(entry.payload).addMetadata(meta),
                 ).awaitSuspending()
             }

@@ -120,19 +120,6 @@ class AuditSubscriptionSurfaceIT {
         .filter { it.isNotEmpty() }
 
     @Test
-    fun `fraud lifecycle channel uses an independent group and replays buffered events`() {
-        val config = ConfigProvider.getConfig()
-        assertThat(config.getValue("mp.messaging.incoming.fraud-case-audit-in.topic", String::class.java))
-            .isEqualTo("openbank.fraud.investigation.case.audit")
-        assertThat(config.getValue("mp.messaging.incoming.fraud-case-audit-in.group.id", String::class.java))
-            .isEqualTo("audit-service-fraud-case")
-        assertThat(config.getValue("mp.messaging.incoming.fraud-case-audit-in.auto.offset.reset", String::class.java))
-            .isEqualTo("earliest")
-        assertThat(TopicAttribution.sourceService("openbank.fraud.investigation.case.audit"))
-            .isEqualTo("fraud-service")
-    }
-
-    @Test
     fun `every subscribed topic delivered through the real channel lands an attributed audit row`() {
         val topics = subscribedTopics()
         // A corpus assertion first: an empty or one-element list would make everything below pass

@@ -85,17 +85,6 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
-      # Dedicated strict lifecycle feed; its group and earliest offset are bundled with the image
-      # in application.properties so a GitOps ConfigMap cannot activate an unknown old-image channel.
-      fraud-case-audit-in:
-        connector: smallrye-kafka
-        enabled: ${AUDIT_FRAUD_CASE_KAFKA_ENABLED:true}
-        client.id: audit-service-fraud-case-${quarkus.uuid}
-        topic: openbank.fraud.investigation.case.audit
-        failure-strategy: dead-letter-queue
-        dead-letter-queue:
-          topic: openbank.dlq.audit.fraud-case-audit-in
-        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       context-audit-commitments-in:
         connector: smallrye-kafka
         enabled: ${AUDIT_CONTEXT_COMMITMENT_KAFKA_ENABLED:false}
@@ -252,11 +241,6 @@ mp:
     oidc:
       enabled: false
 "%test":
-  mp:
-    messaging:
-      incoming:
-        fraud-case-audit-in:
-          enabled: false
   quarkus:
     oidc:
       enabled: false

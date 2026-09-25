@@ -166,14 +166,6 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
-      fraud-case-audit-out:
-        connector: smallrye-kafka
-        client.id: fraud-case-audit-${quarkus.uuid}
-        topic: openbank.fraud.investigation.case.audit
-        value:
-          serializer: org.apache.kafka.common.serialization.StringSerializer
-        key:
-          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:

@@ -107,10 +107,10 @@ _GAP_TOPICS: dict[str, str] = {}
 # and it cannot outlive its reason.
 OUT_OF_SCOPE: dict[str, str] = {
     "openbank.fraud.investigation.case.references": (
-        "reference-only Context projection with an exact four-field contract and Context-only "
-        "Read ACL; the same source transactions write separate case lifecycle outbox events "
-        "to openbank.fraud.investigation.case.audit, consumed by Audit on a strict channel. "
-        "Granting Audit access to the Context reference topic would broaden its approved readers."
+        "a reference-only Context projection, not a money-path fact stream: its versioned "
+        "contract carries only case type, ID, revision and time, with Fraud Write and Context "
+        "Read ACLs. Source detail is obtained through a separately authorized case-scoped API. "
+        "Audit Read on this topic would add a reader outside the approved minimal flow."
     ),
     "openbank.notification.requests": (
         "not a domain-event stream: it is notification-service's own INBOX, a fan-in command "
@@ -119,21 +119,6 @@ OUT_OF_SCOPE: dict[str, str] = {
         "- those are already audited on each producer's own event topic."
     ),
 }
-
-# The reference-topic exception is safe only while the same producer declares its
-# separate Audit-only lifecycle stream. Prevent a later config edit from removing the
-# audited twin while leaving this exception apparently clean.
-AUDITED_COMPANION = {
-    "openbank.fraud.investigation.case.references": "openbank.fraud.investigation.case.audit",
-}
-
-
-def missing_audited_companions(topics: set[str]) -> list[tuple[str, str]]:
-    return [
-        (reference, companion)
-        for reference, companion in AUDITED_COMPANION.items()
-        if reference in topics and companion not in topics
-    ]
 
 # Gaps whose fix is an OPEN PR, so this check must accept BOTH states: still a gap while the PR is
 # open, already fixed the moment it merges. Neither is an error - failing on the fixed state would
@@ -397,11 +382,6 @@ def selftest(repo: pathlib.Path) -> int:
     cases.append(("IN_FLIGHT and KNOWN_GAPS do not overlap",
                   not {k.split("#")[1] for k in KNOWN_GAPS} & set(IN_FLIGHT)))
     cases.append(("OUT_OF_SCOPE and IN_FLIGHT do not overlap", not set(OUT_OF_SCOPE) & set(IN_FLIGHT)))
-    ref, audited = next(iter(AUDITED_COMPANION.items()))
-    cases.append(("a reference without its audited twin is rejected",
-                  missing_audited_companions({ref}) == [(ref, audited)]))
-    cases.append(("a reference with its audited twin is accepted",
-                  not missing_audited_companions({ref, audited})))
 
     failed = [name for name, ok in cases if not ok]
     if failed:
@@ -466,13 +446,6 @@ def main() -> int:
             f"::error::stale OUT_OF_SCOPE entry {topic} - no money-path service produces it any "
             f"more. Remove it, so an exclusion cannot outlive its reason.",
         )
-
-    for service in money_path_services(repo):
-        for reference, companion in missing_audited_companions(produced_topics(repo, service)):
-            findings.append(
-                f"::error::{service} still produces excluded reference topic {reference} but no "
-                f"longer produces its required Audit-only companion {companion}.",
-            )
 
     for topic in sorted(excluded):
         print(f"::notice::out of scope {topic}: {OUT_OF_SCOPE[topic]}")
