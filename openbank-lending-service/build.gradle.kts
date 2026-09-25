@@ -106,3 +106,37 @@ tasks.withType<Test> {
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
 }
+
+// These graph ITs own immutable rows in class-scoped PostgreSQL resources. Quarkus must restart
+// the application when entering/leaving each resource; inside the large test JVM its reactive
+// session factory can still be closing during the next boot. Give each class a separate fork
+// while keeping all four in the normal build gate and preserving their isolated databases.
+val graphSourceIntegrationTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the isolated Lending graph source integration tests"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    listOf(
+        "com.openbank.lending.integration.LendingGraphSourceSchemaIT",
+        "com.openbank.lending.integration.LendingGuaranteeOutboxAtomicityIT",
+        "com.openbank.lending.integration.LendingGraphWriterHttpIT",
+        "com.openbank.lending.infrastructure.rest.LendingGraphSourceRouteIT",
+    ).forEach(filter::includeTestsMatching)
+    maxHeapSize = "2g"
+    forkEvery = 1
+    shouldRunAfter(tasks.named("test"))
+}
+
+tasks.named<Test>("test") {
+    listOf(
+        "com.openbank.lending.integration.LendingGraphSourceSchemaIT",
+        "com.openbank.lending.integration.LendingGuaranteeOutboxAtomicityIT",
+        "com.openbank.lending.integration.LendingGraphWriterHttpIT",
+        "com.openbank.lending.infrastructure.rest.LendingGraphSourceRouteIT",
+    ).forEach(filter::excludeTestsMatching)
+}
+
+tasks.named("check") {
+    dependsOn(graphSourceIntegrationTest)
+}
