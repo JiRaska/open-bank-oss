@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.client
 
+import com.openbank.lending.application.port.out.LendingAssignedCandidatesResult
 import com.openbank.lending.application.port.out.LendingGraphAccessDecision
 import com.openbank.lending.application.port.out.LendingGraphAccessPort
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -39,7 +40,19 @@ interface ContextLendingGraphAccessClient {
         @HeaderParam("X-Investigation-Case-Id") caseId: String,
         @HeaderParam("X-Investigation-Purpose") purpose: String,
     ): Uni<Response>
+
+    @GET
+    @Path("/{loanId}/assigned-candidates")
+    @Timeout(ACCESS_TIMEOUT_MILLIS)
+    fun assignedCandidates(
+        @PathParam("loanId") loanId: UUID,
+        @HeaderParam("Authorization") bearer: String,
+        @HeaderParam("X-Investigation-Case-Id") caseId: String,
+        @HeaderParam("X-Investigation-Purpose") purpose: String,
+    ): Uni<Response>
 }
+
+data class ContextAssignedCandidates(val ids: List<UUID>, val truncated: Boolean)
 
 @ApplicationScoped
 class RestLendingGraphAccessAdapter(@param:RestClient private val context: ContextLendingGraphAccessClient) :
@@ -60,6 +73,42 @@ class RestLendingGraphAccessAdapter(@param:RestClient private val context: Conte
         LendingGraphAccessDecision.UNAVAILABLE
     }
 
+    override suspend fun assignedCandidates(rootLoanId: UUID, bearer: String): LendingAssignedCandidatesResult = try {
+        context.assignedCandidates(
+            rootLoanId,
+            bearer,
+            rootLoanId.toString(),
+            PURPOSE,
+        ).awaitSuspending().use { candidateResponse(it, rootLoanId) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: WebApplicationException) {
+        when (decisionFor(e.response?.status)) {
+            LendingGraphAccessDecision.DENIED -> LendingAssignedCandidatesResult.Denied
+            else -> LendingAssignedCandidatesResult.Unavailable
+        }
+    } catch (_: Exception) {
+        LendingAssignedCandidatesResult.Unavailable
+    }
+
+    private fun candidateResponse(response: Response, rootLoanId: UUID): LendingAssignedCandidatesResult =
+        when (response.status) {
+            Response.Status.OK.statusCode -> validCandidates(response, rootLoanId)
+            Response.Status.UNAUTHORIZED.statusCode,
+            Response.Status.FORBIDDEN.statusCode,
+            Response.Status.NOT_FOUND.statusCode,
+            -> LendingAssignedCandidatesResult.Denied
+            else -> LendingAssignedCandidatesResult.Unavailable
+        }
+
+    private fun validCandidates(response: Response, rootLoanId: UUID): LendingAssignedCandidatesResult {
+        val body = response.readEntity(ContextAssignedCandidates::class.java)
+        if (body.ids.size > MAX_CANDIDATES || body.ids.size != body.ids.toSet().size || rootLoanId in body.ids) {
+            return LendingAssignedCandidatesResult.Unavailable
+        }
+        return LendingAssignedCandidatesResult.Available(body.ids, body.truncated)
+    }
+
     private fun decisionFor(status: Int?): LendingGraphAccessDecision = when (status) {
         Response.Status.UNAUTHORIZED.statusCode,
         Response.Status.FORBIDDEN.statusCode,
@@ -70,5 +119,6 @@ class RestLendingGraphAccessAdapter(@param:RestClient private val context: Conte
 
     companion object {
         const val PURPOSE = "LENDING_EXPOSURE_REVIEW"
+        private const val MAX_CANDIDATES = 256
     }
 }

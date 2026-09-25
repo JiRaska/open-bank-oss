@@ -74,6 +74,73 @@ class GraphGuaranteeRepositoryImpl(
         }.map { entities -> entities.map { it.toFact() } }.awaitSuspending()
     }
 
+    override suspend fun findApprovedForLoanAndGuarantors(
+        loanId: UUID,
+        guarantorPartyIds: Set<UUID>,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        limit: Int,
+    ): List<GraphGuaranteeFact> {
+        require(guarantorPartyIds.isNotEmpty() && guarantorPartyIds.size <= MAX_APPROVED_GRAPH_FACTS)
+        require(limit in 1..MAX_APPROVED_GRAPH_FACTS)
+        return sessions.withSession { session ->
+            session.createQuery(
+                """
+                    FROM GraphGuaranteeEntity
+                    WHERE loanId = :loanId
+                      AND guarantorPartyId IN :guarantorPartyIds
+                      AND status = :approved
+                      AND validFrom <= :effectiveAt
+                      AND (validTo IS NULL OR validTo > :effectiveAt)
+                      AND decidedAt <= :knownAt
+                    ORDER BY contractId ASC, revision ASC, guaranteeId ASC
+                """.trimIndent(),
+                GraphGuaranteeEntity::class.java,
+            )
+                .setParameter("loanId", loanId)
+                .setParameter("guarantorPartyIds", guarantorPartyIds)
+                .setParameter("approved", GraphGuaranteeStatus.APPROVED.name)
+                .setParameter("effectiveAt", effectiveAt)
+                .setParameter("knownAt", knownAt)
+                .setMaxResults(limit + 1)
+                .resultList
+        }.map { entities -> entities.map { it.toFact() } }.awaitSuspending()
+    }
+
+    override suspend fun findSharedCandidateLoanIds(
+        candidateLoanIds: List<UUID>,
+        guarantorPartyIds: Set<UUID>,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        limit: Int,
+    ): List<UUID> {
+        require(candidateLoanIds.isNotEmpty() && candidateLoanIds.size <= MAX_CANDIDATES)
+        require(guarantorPartyIds.isNotEmpty() && guarantorPartyIds.size <= MAX_APPROVED_GRAPH_FACTS)
+        require(limit in 1..MAX_APPROVED_GRAPH_FACTS)
+        return sessions.withSession { session ->
+            session.createQuery(
+                """
+                    SELECT DISTINCT g.loanId FROM GraphGuaranteeEntity g
+                    WHERE g.loanId IN :candidateLoanIds
+                      AND g.guarantorPartyId IN :guarantorPartyIds
+                      AND g.status = :approved
+                      AND g.validFrom <= :effectiveAt
+                      AND (g.validTo IS NULL OR g.validTo > :effectiveAt)
+                      AND g.decidedAt <= :knownAt
+                    ORDER BY g.loanId ASC
+                """.trimIndent(),
+                UUID::class.java,
+            )
+                .setParameter("candidateLoanIds", candidateLoanIds)
+                .setParameter("guarantorPartyIds", guarantorPartyIds)
+                .setParameter("approved", GraphGuaranteeStatus.APPROVED.name)
+                .setParameter("effectiveAt", effectiveAt)
+                .setParameter("knownAt", knownAt)
+                .setMaxResults(limit)
+                .resultList
+        }.awaitSuspending()
+    }
+
     override suspend fun decide(
         guaranteeId: UUID,
         decision: GraphGuaranteeStatus,
@@ -135,5 +202,6 @@ class GraphGuaranteeRepositoryImpl(
     private companion object {
         const val APPROVED_EVENT_TYPE = "lending.graph.guarantee.approved"
         const val MAX_APPROVED_GRAPH_FACTS = 100
+        const val MAX_CANDIDATES = 256
     }
 }

@@ -28,6 +28,24 @@ interface GraphGuaranteeRepository {
         limit: Int,
     ): List<GraphGuaranteeFact>
 
+    /** Only approved, effective, known facts on this loan involving a root-loan guarantor. */
+    suspend fun findApprovedForLoanAndGuarantors(
+        loanId: UUID,
+        guarantorPartyIds: Set<UUID>,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        limit: Int,
+    ): List<GraphGuaranteeFact>
+
+    /** Internal preselection from Context's already-assigned IDs; never returned before live rechecks. */
+    suspend fun findSharedCandidateLoanIds(
+        candidateLoanIds: List<UUID>,
+        guarantorPartyIds: Set<UUID>,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        limit: Int,
+    ): List<UUID>
+
     suspend fun decide(
         guaranteeId: UUID,
         decision: GraphGuaranteeStatus,

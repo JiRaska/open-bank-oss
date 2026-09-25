@@ -73,6 +73,42 @@ class LendingGraphSourceSchemaIT {
     }
 
     @Test
+    fun `shared candidate lookup keeps only approved effective known facts for the root guarantor`() {
+        val candidate = dataSource.connection.use(::createLoanForGuarantee)
+        val sharedParty = UUID.randomUUID()
+        val otherParty = UUID.randomUUID()
+        val shared = UUID.randomUUID()
+        val unrelated = UUID.randomUUID()
+        val pending = UUID.randomUUID()
+        val decidedAt = Instant.now().plusSeconds(1)
+        val effectiveAt = decidedAt.plusSeconds(1)
+        val knownAt = effectiveAt.plusSeconds(1)
+        dataSource.connection.use { connection ->
+            insertPendingGuarantee(connection, shared, UUID.randomUUID(), candidate, 1, null, sharedParty)
+            approveGuarantee(connection, shared, decidedAt)
+            insertPendingGuarantee(connection, unrelated, UUID.randomUUID(), candidate, 1, null, otherParty)
+            approveGuarantee(connection, unrelated, decidedAt)
+            insertPendingGuarantee(connection, pending, UUID.randomUUID(), candidate, 1, null, sharedParty)
+        }
+        fun lookup(effective: Instant, known: Instant) = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoanAndGuarantors(candidate, setOf(sharedParty), effective, known, 20)
+            }
+        }
+        fun preselect(effective: Instant, known: Instant) = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findSharedCandidateLoanIds(listOf(candidate), setOf(sharedParty), effective, known, 5)
+            }
+        }
+        assertThat(lookup(effectiveAt, knownAt).map { it.guaranteeId }).containsExactly(shared)
+        assertThat(lookup(effectiveAt, decidedAt.minusSeconds(1))).isEmpty()
+        assertThat(lookup(Instant.EPOCH, knownAt)).isEmpty()
+        assertThat(preselect(effectiveAt, knownAt)).containsExactly(candidate)
+        assertThat(preselect(effectiveAt, decidedAt.minusSeconds(1))).isEmpty()
+        assertThat(preselect(Instant.EPOCH, knownAt)).isEmpty()
+    }
+
+    @Test
     fun `reviewed graph facts cannot be inserted without a pending proposal`() {
         val id = UUID.randomUUID()
         val relatedId = UUID.randomUUID()
@@ -568,6 +604,7 @@ class LendingGraphSourceSchemaIT {
         loanId: UUID,
         revision: Int,
         supersedes: UUID?,
+        guarantorPartyId: UUID = UUID.randomUUID(),
     ) {
         connection.prepareStatement(
             """INSERT INTO lending_graph_guarantee
@@ -581,7 +618,7 @@ class LendingGraphSourceSchemaIT {
             statement.setInt(3, revision)
             statement.setObject(4, supersedes)
             statement.setObject(5, loanId)
-            statement.setObject(6, UUID.randomUUID())
+            statement.setObject(6, guarantorPartyId)
             statement.setObject(7, UUID.randomUUID())
             statement.setString(8, "a".repeat(64))
             assertThat(statement.executeUpdate()).isEqualTo(1)

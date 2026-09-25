@@ -14,6 +14,24 @@ import java.util.UUID
 class LendingGraphSourceRouteIT {
     private val route = "/api/v1/lending/graph/loans/${UUID.randomUUID()}/approved-guarantees"
     private val writerRoute = "/api/v1/lending/graph/loans/${UUID.randomUUID()}/guarantees"
+    private val sharedRoute = "/api/v1/lending/graph/loans/${UUID.randomUUID()}/shared-guarantor-candidates"
+
+    @Test
+    fun `anonymous caller cannot resolve shared guarantors`() {
+        given().get(sharedRoute).then().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "lending-officer", roles = ["ROLE_LENDING_OFFICER"])
+    fun `lending officer cannot resolve shared guarantors`() {
+        given().get(sharedRoute).then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "credit-risk", roles = ["ROLE_CREDIT_RISK"])
+    fun `risk role reaches dormant shared guarantor read without disclosure`() {
+        given().get(sharedRoute).then().statusCode(503)
+    }
 
     @Test
     fun `anonymous investigator cannot read guarantee history`() {

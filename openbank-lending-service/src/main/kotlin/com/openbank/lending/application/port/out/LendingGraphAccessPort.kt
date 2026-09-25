@@ -9,6 +9,16 @@ import java.util.UUID
 /** Live, payload-free authorization against Context for an investigator reading a loan graph. */
 interface LendingGraphAccessPort {
     suspend fun check(loanId: UUID, bearer: String): LendingGraphAccessDecision
+
+    suspend fun assignedCandidates(rootLoanId: UUID, bearer: String): LendingAssignedCandidatesResult
 }
 
 enum class LendingGraphAccessDecision { ALLOWED, DENIED, UNAVAILABLE }
+
+sealed interface LendingAssignedCandidatesResult {
+    data class Available(val ids: List<UUID>, val truncated: Boolean) : LendingAssignedCandidatesResult
+
+    data object Denied : LendingAssignedCandidatesResult
+
+    data object Unavailable : LendingAssignedCandidatesResult
+}

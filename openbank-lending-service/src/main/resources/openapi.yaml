@@ -129,6 +129,46 @@ paths:
         '400': { description: Invalid scope, time or limit }
         '403': { description: Role, live assignment or policy denied }
         '503': { description: Source read disabled or Context authorization unavailable }
+  /api/v1/lending/graph/loans/{loanId}/shared-guarantor-candidates:
+    get:
+      tags: [Lending]
+      operationId: findSharedGuarantorCandidates
+      summary: Resolve shared guarantors among the caller's assigned loans
+      description: >-
+        Requires a human credit-risk or admin role, OPA policy, the exact root-loan
+        case and LENDING_EXPOSURE_REVIEW purpose. Lending obtains up to 256 assigned
+        candidate IDs directly from Context using the caller's bearer. It selects
+        matching loans internally, then rechecks every selected loan's live Context
+        assignment before reading its facts. Any denied or unavailable check fails
+        the entire request without a partial result. Disabled by default.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Case-Id
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Purpose
+          in: header
+          required: true
+          schema: { type: string, enum: [LENDING_EXPOSURE_REVIEW] }
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Bounded related-loan evidence; unrelated candidates are omitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SharedGuarantorCandidateResponse' }
+        '400': { description: Invalid scope or time }
+        '403': { description: Role, policy or live assignment denied }
+        '503': { description: Source disabled, authorization unavailable or time bound exceeded }
   /api/v1/lending/applications:
     post:
       tags: [Lending]
@@ -1311,6 +1351,29 @@ components:
         guarantees:
           type: array
           maxItems: 100
+          items: { $ref: '#/components/schemas/GraphGuaranteeEvidence' }
+        truncated: { type: boolean }
+    SharedGuarantorCandidateResponse:
+      type: object
+      required: [rootLoanId, effectiveAt, knownAt, candidateTruncated, relatedLoansTruncated, relatedLoans]
+      properties:
+        rootLoanId: { type: string, format: uuid }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        candidateTruncated: { type: boolean }
+        relatedLoansTruncated: { type: boolean }
+        relatedLoans:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/SharedGuarantorRelatedLoan' }
+    SharedGuarantorRelatedLoan:
+      type: object
+      required: [loanId, guarantees, truncated]
+      properties:
+        loanId: { type: string, format: uuid }
+        guarantees:
+          type: array
+          maxItems: 20
           items: { $ref: '#/components/schemas/GraphGuaranteeEvidence' }
         truncated: { type: boolean }
     GraphGuaranteeEvidence:
