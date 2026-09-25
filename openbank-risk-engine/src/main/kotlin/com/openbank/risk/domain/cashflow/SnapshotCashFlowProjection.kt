@@ -60,7 +60,7 @@ data class SnapshotCashFlows(
  */
 object SnapshotCashFlowProjection {
 
-    private val LOAN_KINDS = setOf(InstrumentKind.AMORTISING_LOAN, InstrumentKind.BULLET)
+    internal val LOAN_KINDS = setOf(InstrumentKind.AMORTISING_LOAN, InstrumentKind.BULLET)
 
     fun project(
         positions: List<Position>,
@@ -97,11 +97,10 @@ object SnapshotCashFlowProjection {
         )
     }
 
-    private fun loanFlows(instrument: Instrument, curves: CurveSet): List<CashFlow> {
-        if (instrument.outstanding.signum() == 0) return emptyList()
-        val ext = requireNotNull(instrument.extension as? LoanExtension) { "loan ${instrument.id} has no loan terms" }
+    /** The rate terms of a loan instrument as the cash-flow engine needs them. */
+    internal fun loanRate(instrument: Instrument): LoanRate {
         val terms = requireNotNull(instrument.rateTerms) { "loan ${instrument.id} has no rate terms" }
-        val rate = when (terms.rateType) {
+        return when (terms.rateType) {
             RateType.FIXED -> LoanRate.Fixed(requireNotNull(terms.currentAnnualRate) { "fixed loan without a rate" })
             RateType.FLOATING -> LoanRate.Floating(
                 index = requireNotNull(terms.index) { "floating loan ${instrument.id} without an index" },
@@ -111,6 +110,12 @@ object SnapshotCashFlowProjection {
                 nextResetDate = terms.nextResetDate,
             )
         }
+    }
+
+    internal fun loanFlows(instrument: Instrument, curves: CurveSet): List<CashFlow> {
+        if (instrument.outstanding.signum() == 0) return emptyList()
+        val ext = requireNotNull(instrument.extension as? LoanExtension) { "loan ${instrument.id} has no loan terms" }
+        val rate = loanRate(instrument)
         val curve = (rate as? LoanRate.Floating)?.let { f ->
             requireNotNull(curves.curves[f.index]) {
                 "curve set ${curves.id} has no ${f.index.name} curve, which floating loan ${instrument.id} needs"

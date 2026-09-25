@@ -1,0 +1,204 @@
+quarkus:
+  application:
+    name: openbank-treasury-service
+  http:
+    port: 8160
+    test-port: 0
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      Referrer-Policy:
+        value: no-referrer
+      Permissions-Policy:
+        value: geolocation=(), microphone=(), camera=()
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: max-age=31536000; includeSubDomains
+    limits:
+      max-body-size: 1M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_treasury
+    # A LITERAL jdbc url: Flyway migrates the DEFAULT (Agroal/JDBC) datasource (#3080).
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_treasury
+
+  flyway:
+    # Committing migrations does not run them — this key defaults to FALSE (#3350).
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    # No `tls.verification: none` here: %prod keeps the default `required`. The relaxation lives
+    # under "%dev" only (security review, HIGH).
+
+  # The ledger rest-client carries @OidcClientFilter("m2m"): its bearer is minted by the NAMED
+  # client below — Keycloak client `openbank-treasury`, ROLE_API only (#10486) — and
+  # ledger_rest_ext.rego grants that principal exactly ledger.create. The default client exists
+  # because quarkus-oidc-client expects one; no rest-client here uses it.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-treasury
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
+
+  rest-client:
+    ledger-service:
+      # Local default only. The in-cluster URL (ledger's mTLS listener, 8443) is declared in the
+      # gitops Deployment env where gen-network-policies.py can see the edge.
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    console:
+      format: '%d{HH:mm:ss} %-5p [%c{3.}] %s%e%n'
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-treasury-service
+
+  management:
+    enabled: true
+    port: 8090
+    host: 0.0.0.0
+    root-path: /q
+
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      treasury-events-out:
+        connector: smallrye-kafka
+        client.id: treasury-service-${quarkus.uuid}
+        topic: openbank.treasury.deal.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
+openbank:
+  outbox:
+    # Defaults to FALSE fleet-wide. Without this line no treasury.deal.* event ever leaves
+    # treasury_outbox: no error, attempt_count stays 0, the audit trail stays empty.
+    dispatch-enabled: true
+  treasury:
+    simulated-market:
+      # ADR-0315 D9: SYNTHETIC counterparties that settle and mature booked deals in the sandbox.
+      # On by default because the sandbox is the only environment; an environment with real
+      # market connectivity sets OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED=false.
+      enabled: ${OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED:true}
+      interval: 60s
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
+
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%prod":
+  quarkus:
+    # ledger-service's 8443 listener is private-CA mTLS with client auth REQUIRED; the
+    # treasury-internal-tls certificate is mounted at /mnt/ledger-tls in the cluster only.
+    tls:
+      ledger-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      ledger-service:
+        tls-configuration-name: ledger-authority
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+      tls:
+        verification: none
+  authz:
+    enforce: "false"
+
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+  authz:
+    enforce: "false"
+  openbank:
+    treasury:
+      simulated-market:
+        enabled: false

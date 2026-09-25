@@ -15,7 +15,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "17ad8161dfe2666a" }
+      annotations: { openbank.tech/policy-checksum: "d3a224ffcb5c2031" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:

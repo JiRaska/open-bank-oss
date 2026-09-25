@@ -403,3 +403,10 @@ money_path_accountability:
         the journey that exercises it is the card-processing path (#8809): issue → authorise →
         clear → posted journal. Until then the accountable surface is the SCA-gated card
         operations (ADR-0194).
+    - service: openbank-treasury-service
+      note: >-
+        ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
+        to the bank's own nostro and placement accounts; until the SYNTHETIC taint reaches the
+        ledger that is a synthetic movement in the balance sheet. The sandbox simulated market
+        (ADR-0315 D9) already drives settle/mature end to end, so the journey, when it lands,
+        should assert the posted journal by its idempotency key, not the HTTP status.
