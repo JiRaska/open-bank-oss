@@ -152,12 +152,7 @@ data class Deal(
     fun approve(actor: Actor, check: LimitCheck, at: Instant): Deal {
         requireHuman(actor, "approve")
         requireState(DealState.PENDING_APPROVAL, "approve")
-        if (actor.id == createdBy.id) {
-            throw FourEyesViolationException("four-eyes: the approver must not be the deal's creator")
-        }
-        if (actor.id == submittedBy?.id) {
-            throw FourEyesViolationException("four-eyes: the approver must not be the deal's submitter")
-        }
+        requireSecondPerson(actor)
         // ADR-0315 D4: a breach blocks booking. The senior-approver override is not built yet.
         if (check.breached) throw LimitBreachedException(check)
         return transition(DealState.BOOKED, actor, at, limitNote(check)).copy(approvedBy = actor, limitCheck = check)
@@ -218,6 +213,16 @@ data class Deal(
         updatedAt = at,
         history = history + DealTransition(from = state, to = to, actor = actor, at = at, note = note),
     )
+
+    /** Four-eyes: the approver is neither the creator nor the submitter. */
+    private fun requireSecondPerson(actor: Actor) {
+        val role = when (actor.id) {
+            createdBy.id -> "creator"
+            submittedBy?.id -> "submitter"
+            else -> return
+        }
+        throw FourEyesViolationException("four-eyes: the approver must not be the deal's $role")
+    }
 
     private fun requireState(expected: DealState, action: String) =
         check(state == expected) { "cannot $action a deal in state $state (expected $expected)" }

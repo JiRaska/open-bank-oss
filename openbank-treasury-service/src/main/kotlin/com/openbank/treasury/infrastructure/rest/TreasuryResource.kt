@@ -74,7 +74,7 @@ class TreasuryResource {
     @RolesAllowed(DEALER)
     @Operation(summary = "Draft a deal (DRAFT); nothing posts")
     @Authorize(action = "treasury.deal.draft")
-    suspend fun draft(@HeaderParam(IDEMPOTENCY_KEY) key: String?, request: DraftDealRequest): Response {
+    suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
         val deal = deals.draft(
             DraftDealCommand(
                 product = requireNotNull(request.product) { "product is required" },
@@ -105,7 +105,7 @@ class TreasuryResource {
     @RolesAllowed(DEALER)
     @Operation(summary = "Submit for approval (PENDING_APPROVAL); runs the counterparty-limit check")
     @Authorize(action = "treasury.deal.submit", resource = "#id")
-    suspend fun submit(@PathParam("id") id: UUID, @HeaderParam(IDEMPOTENCY_KEY) key: String?): DealResponse =
+    suspend fun submit(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         DealResponse.from(deals.submit(id, actor(), requireKey(key)))
 
     @POST
@@ -113,7 +113,7 @@ class TreasuryResource {
     @RolesAllowed(DEALER, APPROVER)
     @Operation(summary = "Cancel a DRAFT or PENDING_APPROVAL deal")
     @Authorize(action = "treasury.deal.cancel", resource = "#id")
-    suspend fun cancel(@PathParam("id") id: UUID, @HeaderParam(IDEMPOTENCY_KEY) key: String?): DealResponse =
+    suspend fun cancel(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         DealResponse.from(deals.cancel(id, actor(), requireKey(key)))
 
     @POST
@@ -123,7 +123,7 @@ class TreasuryResource {
         summary = "Four-eyes approval, books the deal (422: approver is creator/submitter, or limit breach)",
     )
     @Authorize(action = "treasury.deal.approve", resource = "#id")
-    suspend fun approve(@PathParam("id") id: UUID, @HeaderParam(IDEMPOTENCY_KEY) key: String?): DealResponse =
+    suspend fun approve(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         DealResponse.from(deals.approve(id, actor(), requireKey(key)))
 
     @POST
@@ -133,7 +133,7 @@ class TreasuryResource {
     @Authorize(action = "treasury.deal.reject", resource = "#id")
     suspend fun reject(
         @PathParam("id") id: UUID,
-        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
         request: ReasonRequest,
     ): DealResponse = DealResponse.from(
         deals.reject(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key)),
@@ -144,7 +144,7 @@ class TreasuryResource {
     @RolesAllowed(APPROVER)
     @Operation(summary = "Settle a BOOKED deal on or after its value date; posts the settlement journal")
     @Authorize(action = "treasury.deal.settle", resource = "#id")
-    suspend fun settle(@PathParam("id") id: UUID, @HeaderParam(IDEMPOTENCY_KEY) key: String?): DealResponse =
+    suspend fun settle(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         deals.settle(id, actor(), requireKey(key)).let { view(id) }
 
     @POST
@@ -152,7 +152,7 @@ class TreasuryResource {
     @RolesAllowed(APPROVER)
     @Operation(summary = "Mature a SETTLED deal on or after its maturity date; posts principal and interest")
     @Authorize(action = "treasury.deal.mature", resource = "#id")
-    suspend fun mature(@PathParam("id") id: UUID, @HeaderParam(IDEMPOTENCY_KEY) key: String?): DealResponse =
+    suspend fun mature(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         deals.mature(id, actor(), requireKey(key)).let { view(id) }
 
     @POST
@@ -162,7 +162,7 @@ class TreasuryResource {
     @Authorize(action = "treasury.deal.reverse", resource = "#id")
     suspend fun reverse(
         @PathParam("id") id: UUID,
-        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
         request: ReasonRequest,
     ): DealResponse =
         deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key))
