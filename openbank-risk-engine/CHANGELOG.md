@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.8.0...risk-engine-v0.9.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** LCR and NSFR on BCBS factors, with an admin-ui page (ADR-0313 phase 1) ([#10860](https://github.com/JiRaska/open-bank-oss/issues/10860)) ([6998a83](https://github.com/JiRaska/open-bank-oss/commit/6998a831635be984d661da2cb89f4aa9c5f469dd))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.7.0...risk-engine-v0.8.0) (2026-09-25)
 
 
