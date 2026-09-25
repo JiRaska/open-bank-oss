@@ -118,6 +118,7 @@ class SnapshotServiceProducer {
      * domain and a producer bean is lazy — so parse once at startup, or a bad factor would surface
      * on the first request instead of failing the deploy.
      */
+    @Suppress("UnusedParameter") // the event only schedules the call
     fun validateLiquidityParameters(@Observes event: StartupEvent, config: LiquidityConfig) {
         config.toParameters()
     }

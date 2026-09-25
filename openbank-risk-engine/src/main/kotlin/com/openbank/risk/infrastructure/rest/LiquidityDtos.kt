@@ -172,7 +172,6 @@ fun CurrencyLiquidity.toDto() = CurrencyLiquidityDto(
 private fun GlClass.mapping(key: String) = GlMappingDto(key, wire, description)
 
 fun LiquidityAnalysis.toResponse(): LiquidityResponse {
-    val c = parameters.classification
     val perCurrency = result.currencies.map { it.toDto() }
     return LiquidityResponse(
         runId = run.id,
@@ -186,51 +185,56 @@ fun LiquidityAnalysis.toResponse(): LiquidityResponse {
             UnclassifiedBalanceDto(it.glAccountCode, it.glAccountType, it.currency, it.amount.money(), it.reason)
         },
         notes = result.notes,
-        assumptions = LiquidityAssumptionsDto(
-            parameterSetId = parameters.id,
-            parameterSetVersion = parameters.version,
-            source = parameters.source,
-            scope = "BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.",
-            factors = LiquidityFactor.entries.map { FactorDto(it.key, parameters[it], it.citation) },
-            classification = LiquidityClassificationDto(
-                retailStableShare = c.retailStableShare,
-                operationalDepositShare = c.operationalDepositShare,
-                tier2OverOneYearShare = c.tier2OverOneYearShare,
-                loansQualifyForLowRiskWeight = c.loansQualifyForLowRiskWeight,
-                glAccounts = c.glAccounts.toSortedMap().map { (k, v) -> v.mapping(k) },
-                glAccountTypes = c.glAccountTypes.toSortedMap().map { (k, v) -> v.mapping(k) },
-                choices = listOf(
-                    "Customer balances on deposit control are treated as RETAIL deposits " +
-                        "(natural persons, d238 ¶73): " +
-                        "the snapshot carries no party type. Wholesale run-off (d238 ¶107-109: 40% / 100%) " +
-                        "is not applied.",
-                    "Stable share ${c.retailStableShare}: deposit-insurance coverage and relationships are not " +
-                        "in the data, " +
-                        "so d238 ¶80 places the whole amount in 'less stable' unless configured otherwise.",
-                    "Operational share ${c.operationalDepositShare}: none unless configured (d238 ¶93-104).",
-                    "Only GL accounts named in the mapping are classified; nothing else is counted, and every other " +
-                        "non-zero balance is listed as not classified. Nostro at a commercial bank is never HQLA.",
-                    "Customer overdrafts: open maturity, no LCR inflow (d238 ¶152); RSF as a loan ≥ 1 year.",
-                ),
+        assumptions = assumptions(),
+    )
+}
+
+private fun LiquidityAnalysis.assumptions(): LiquidityAssumptionsDto {
+    val c = parameters.classification
+    return LiquidityAssumptionsDto(
+        parameterSetId = parameters.id,
+        parameterSetVersion = parameters.version,
+        source = parameters.source,
+        scope = "BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.",
+        factors = LiquidityFactor.entries.map { FactorDto(it.key, parameters[it], it.citation) },
+        classification = LiquidityClassificationDto(
+            retailStableShare = c.retailStableShare,
+            operationalDepositShare = c.operationalDepositShare,
+            tier2OverOneYearShare = c.tier2OverOneYearShare,
+            loansQualifyForLowRiskWeight = c.loansQualifyForLowRiskWeight,
+            glAccounts = c.glAccounts.toSortedMap().map { (k, v) -> v.mapping(k) },
+            glAccountTypes = c.glAccountTypes.toSortedMap().map { (k, v) -> v.mapping(k) },
+            choices = listOf(
+                "Customer balances on deposit control are treated as RETAIL deposits " +
+                    "(natural persons, d238 ¶73): " +
+                    "the snapshot carries no party type. Wholesale run-off (d238 ¶107-109: 40% / 100%) " +
+                    "is not applied.",
+                "Stable share ${c.retailStableShare}: deposit-insurance coverage and relationships are not " +
+                    "in the data, " +
+                    "so d238 ¶80 places the whole amount in 'less stable' unless configured otherwise.",
+                "Operational share ${c.operationalDepositShare}: none unless configured (d238 ¶93-104).",
+                "Only GL accounts named in the mapping are classified; nothing else is counted, and every other " +
+                    "non-zero balance is listed as not classified. Nostro at a commercial bank is never HQLA.",
+                "Customer overdrafts: open maturity, no LCR inflow (d238 ¶152); RSF as a loan ≥ 1 year.",
             ),
-            hqlaCapMethod =
-            "d238 Annex 1 ¶5: stock = L1 + L2A + L2B − adj(15%) − adj(40%), with 15/85, 15/60 and 2/3 " +
-                "derived from the configured caps. No securities financing or collateral swaps in the " +
-                "snapshot, so the " +
-                "'adjusted' amounts (Annex 1 ¶4) equal the unadjusted ones.",
-            loanInflows =
-            "Contractual principal + interest of installments due in (asOf, asOf + 30 days] from lending's own " +
-                "schedule, at the retail / non-financial rate (d238 ¶153); loans in IFRS 9 stage 3 are " +
-                "treated as not " +
-                "fully performing and give no inflow (d238 ¶142, ¶151). Borrowers are assumed not to be financial " +
-                "institutions (the ¶154 100% rate would otherwise apply).",
-            loanRsf = "Amortising split (d295 ¶29): principal due within one year at 50% (¶40(e)), the rest at 85% " +
-                "(¶42(b)) unless loans are configured as ≤ 35% risk weight (65%, ¶41(b)); stage 3 as non-performing, " +
-                "100% (¶43(c)) — a proxy for d295 footnote 19's > 90 days past due, which the data does not carry.",
-            notInData =
-            "No undrawn committed facilities (d238 ¶131), no term deposits, no issued debt, no derivatives and " +
-                "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, not zero-weighted.",
-            currencyAggregation = Liquidity.AGGREGATION_NOTE,
         ),
+        hqlaCapMethod =
+        "d238 Annex 1 ¶5: stock = L1 + L2A + L2B − adj(15%) − adj(40%), with 15/85, 15/60 and 2/3 " +
+            "derived from the configured caps. No securities financing or collateral swaps in the " +
+            "snapshot, so the " +
+            "'adjusted' amounts (Annex 1 ¶4) equal the unadjusted ones.",
+        loanInflows =
+        "Contractual principal + interest of installments due in (asOf, asOf + 30 days] from lending's own " +
+            "schedule, at the retail / non-financial rate (d238 ¶153); loans in IFRS 9 stage 3 are " +
+            "treated as not " +
+            "fully performing and give no inflow (d238 ¶142, ¶151). Borrowers are assumed not to be financial " +
+            "institutions (the ¶154 100% rate would otherwise apply).",
+        loanRsf = "Amortising split (d295 ¶29): principal due within one year at 50% (¶40(e)), the rest at 85% " +
+            "(¶42(b)) unless loans are configured as ≤ 35% risk weight (65%, ¶41(b)); stage 3 as non-performing, " +
+            "100% (¶43(c)) — a proxy for d295 footnote 19's > 90 days past due, which the data does not carry.",
+        notInData =
+        "No undrawn committed facilities (d238 ¶131), no term deposits, no issued debt, no derivatives and " +
+            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, not zero-weighted.",
+        currencyAggregation = Liquidity.AGGREGATION_NOTE,
     )
 }

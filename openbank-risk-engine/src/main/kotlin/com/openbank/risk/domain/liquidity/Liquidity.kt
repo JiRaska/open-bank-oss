@@ -342,26 +342,9 @@ object Liquidity {
             val asset = p.amount
             val liability = p.amount.negate()
             when (c) {
-                GlClass.HQLA_L1_CASH_OR_RESERVES -> {
-                    hqla += HqlaLine(HqlaLevel.LEVEL_1, c, code, asset, params[LiquidityFactor.LCR_L1_HAIRCUT])
-                    rsf += line(label, code, asset, LiquidityFactor.NSFR_RSF_CASH_AND_RESERVES)
-                }
-                GlClass.HQLA_L1_SECURITIES -> {
-                    hqla += HqlaLine(HqlaLevel.LEVEL_1, c, code, asset, params[LiquidityFactor.LCR_L1_HAIRCUT])
-                    rsf += line(label, code, asset, LiquidityFactor.NSFR_RSF_L1_SECURITIES)
-                }
-                GlClass.HQLA_L2A -> {
-                    hqla += HqlaLine(HqlaLevel.LEVEL_2A, c, code, asset, params[LiquidityFactor.LCR_L2A_HAIRCUT])
-                    rsf += line(label, code, asset, LiquidityFactor.NSFR_RSF_L2A)
-                }
-                GlClass.HQLA_L2B_RMBS -> {
-                    hqla += HqlaLine(HqlaLevel.LEVEL_2B, c, code, asset, params[LiquidityFactor.LCR_L2B_RMBS_HAIRCUT])
-                    rsf += line(label, code, asset, LiquidityFactor.NSFR_RSF_L2B)
-                }
-                GlClass.HQLA_L2B_OTHER -> {
-                    hqla += HqlaLine(HqlaLevel.LEVEL_2B, c, code, asset, params[LiquidityFactor.LCR_L2B_OTHER_HAIRCUT])
-                    rsf += line(label, code, asset, LiquidityFactor.NSFR_RSF_L2B)
-                }
+                GlClass.HQLA_L1_CASH_OR_RESERVES, GlClass.HQLA_L1_SECURITIES, GlClass.HQLA_L2A,
+                GlClass.HQLA_L2B_RMBS, GlClass.HQLA_L2B_OTHER,
+                -> hqlaAccount(code, label, asset, c)
                 GlClass.DEPOSIT_AT_FI_OPERATIONAL -> {
                     inflows += line(label, code, asset, LiquidityFactor.LCR_OPERATIONAL_DEPOSIT_INFLOW)
                     rsf += line(label, code, asset, LiquidityFactor.NSFR_RSF_OPERATIONAL_DEPOSIT_AT_FI)
@@ -399,6 +382,30 @@ object Liquidity {
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
             }
+        }
+
+        /** An HQLA account: its level and haircut (d238 ¶49-54) and its RSF (d295 ¶36-40). */
+        private fun hqlaAccount(code: String, label: String, value: BigDecimal, c: GlClass) {
+            val (level, haircut, rsfFactor) = when (c) {
+                GlClass.HQLA_L1_CASH_OR_RESERVES ->
+                    Triple(
+                        HqlaLevel.LEVEL_1,
+                        LiquidityFactor.LCR_L1_HAIRCUT,
+                        LiquidityFactor.NSFR_RSF_CASH_AND_RESERVES,
+                    )
+                GlClass.HQLA_L1_SECURITIES ->
+                    Triple(HqlaLevel.LEVEL_1, LiquidityFactor.LCR_L1_HAIRCUT, LiquidityFactor.NSFR_RSF_L1_SECURITIES)
+                GlClass.HQLA_L2A -> Triple(
+                    HqlaLevel.LEVEL_2A,
+                    LiquidityFactor.LCR_L2A_HAIRCUT,
+                    LiquidityFactor.NSFR_RSF_L2A,
+                )
+                GlClass.HQLA_L2B_RMBS ->
+                    Triple(HqlaLevel.LEVEL_2B, LiquidityFactor.LCR_L2B_RMBS_HAIRCUT, LiquidityFactor.NSFR_RSF_L2B)
+                else -> Triple(HqlaLevel.LEVEL_2B, LiquidityFactor.LCR_L2B_OTHER_HAIRCUT, LiquidityFactor.NSFR_RSF_L2B)
+            }
+            hqla += HqlaLine(level, c, code, value, params[haircut])
+            rsf += line(label, code, value, rsfFactor)
         }
 
         fun lcr() = LcrResult(

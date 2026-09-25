@@ -55,7 +55,7 @@ class RiskLiquidityApiIT {
     )
 
     @Test
-    @TestSecurity(user = "risk", roles = ["ROLE_FINANCE"])
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
     fun `a tied book gets LCR and NSFR with components, unclassified balances and the parameter set`() {
         val loan = lendingLoan(principal = "12000.00", currency = "CZK", term = 24, paid = 6)
         val l = loan.outstandingPrincipal.toPlainString()
@@ -72,7 +72,7 @@ class RiskLiquidityApiIT {
             subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
         )
         lending.loans = listOf(loan)
-        val body = liquidity(snapshot("2026-03-31", "TIED_OUT"))
+        val body = liquidity(snapshot("2026-09-30", "TIED_OUT"))
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d238-d295")
         assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
