@@ -18,12 +18,15 @@ Run each variant in an otherwise idle, isolated host, with the same resources:
 ```sh
 RUN_SEPA_OBSERVATION_BENCHMARK=true \
 SEPA_WORKFLOW_OBSERVATIONS_ENABLED=false \
+OPENBANK_ENVIRONMENT=test \
 SEPA_BENCHMARK_BASE_RPS=5 SEPA_BENCHMARK_SECONDS=10 \
 ./gradlew --no-daemon :openbank-sepa-payment:test \
   --tests 'com.openbank.sepa.integration.SepaWorkflowObservationBenchmarkIT' --rerun-tasks
 ```
 
 Repeat with `SEPA_WORKFLOW_OBSERVATIONS_ENABLED=true`, then repeat the disabled control.
+The environment variable is required only for the enabled write and fixes the source scope;
+the earlier A–B–A probe ran before this additive V11 scope migration.
 The test prints `SEPA_OBSERVATION_BENCH` lines to its JUnit XML `system-out`.
 
 ## First A–B–A sequence

@@ -13,10 +13,13 @@ enum class WorkflowHistoryCoverage { COMPLETE, PARTIAL, UNKNOWN }
 data class WorkflowObservation(
     val eventId: UUID,
     val revision: Long,
+    val environment: String?,
+    val sourceService: String,
     val eventType: String,
     val status: String,
     val contentDigest: String,
     val observedAt: Instant,
+    val workflowStartedAt: Instant?,
     val recordedAt: Instant,
     val synthetic: Boolean,
 )
@@ -67,6 +70,9 @@ class SepaWorkflowObservationSource {
             retained.zipWithNext().all { (older, newer) -> newer.paymentRevision == older.paymentRevision + 1 }
         val coverage = when {
             retained.isEmpty() || !contiguousTail -> WorkflowHistoryCoverage.UNKNOWN
+            retained.any { it.environment == null || it.workflowStartedAt == null } -> WorkflowHistoryCoverage.UNKNOWN
+            retained.mapNotNull { it.environment }.distinct().size > 1 -> WorkflowHistoryCoverage.UNKNOWN
+            retained.any { it.workflowStartedAt?.isAfter(it.observedAt) == true } -> WorkflowHistoryCoverage.UNKNOWN
             truncated -> WorkflowHistoryCoverage.PARTIAL
             retained.first().paymentRevision == 0L -> WorkflowHistoryCoverage.COMPLETE
             else -> WorkflowHistoryCoverage.UNKNOWN
@@ -78,10 +84,13 @@ class SepaWorkflowObservationSource {
                 WorkflowObservation(
                     it.eventId,
                     it.paymentRevision,
+                    it.environment,
+                    SOURCE_SERVICE,
                     it.eventType,
                     it.paymentStatus,
                     it.contentDigest,
                     it.observedAt,
+                    it.workflowStartedAt,
                     it.recordedAt,
                     it.synthetic,
                 )
@@ -93,5 +102,6 @@ class SepaWorkflowObservationSource {
 
     private companion object {
         const val MAX_OBSERVATIONS = 100
+        const val SOURCE_SERVICE = "openbank-sepa-payment"
     }
 }

@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.HexFormat
 import java.util.UUID
 import javax.sql.DataSource
@@ -78,6 +80,7 @@ class SepaPaymentOutboxAtomicityIT {
     class ObservationEnabledProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.sepa.workflow-observations.enabled" to "true",
+            "openbank.environment" to "test",
             "quarkus.http.test-port" to "0",
         )
     }
@@ -116,6 +119,9 @@ class SepaPaymentOutboxAtomicityIT {
         val observation = requireNotNull(history?.observations?.single())
         val after = Instant.now().plusSeconds(60)
         assertThat(observation.observedAt).isBetween(before, after)
+        assertThat(observation.environment).isEqualTo("test")
+        assertThat(observation.sourceService).isEqualTo("openbank-sepa-payment")
+        assertThat(observation.workflowStartedAt).isBetween(before, after)
         assertThat(observation.recordedAt).isBetween(before, after)
     }
 
@@ -179,6 +185,75 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.UNKNOWN)
         assertThat(history?.truncated).isFalse()
         assertThat(history?.observations?.map { it.revision }).containsExactly(0L)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    fun `a pre-V11 observation keeps its missing environment unknown`() {
+        val paymentId = createPayment()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE sepa_payments SET aggregate_revision = 1 WHERE payment_id = ?",
+            ).use { statement ->
+                statement.setObject(1, paymentId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            connection.prepareStatement(
+                """INSERT INTO sepa_payment_workflow_observations
+                   (event_id, payment_id, payment_revision, event_type, payment_status,
+                    content_digest, observed_at, synthetic)
+                   VALUES (?, ?, 1, 'payment.status-changed', 'VALIDATED', ?, ?, true)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, paymentId)
+                statement.setString(3, "0".repeat(64))
+                statement.setObject(4, java.time.OffsetDateTime.now())
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        val history = requireNotNull(onEventLoop { observations.history(paymentId) })
+        assertThat(history.coverage).isEqualTo(WorkflowHistoryCoverage.UNKNOWN)
+        assertThat(history.observations.map { it.revision }).containsExactly(0L, 1L)
+        assertThat(history.observations.last().environment).isNull()
+        assertThat(history.observations.last().workflowStartedAt).isNull()
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    fun `cross-environment and backwards-time histories remain unknown`() {
+        val now = Instant.now()
+        for ((environment, startedAt, observedAt) in listOf(
+            Triple("prod", now.minusSeconds(60), now),
+            Triple("test", now.plusSeconds(60), now),
+        )) {
+            val paymentId = createPayment()
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "UPDATE sepa_payments SET aggregate_revision = 1 WHERE payment_id = ?",
+                ).use { statement ->
+                    statement.setObject(1, paymentId)
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+                connection.prepareStatement(
+                    """INSERT INTO sepa_payment_workflow_observations
+                       (event_id, payment_id, payment_revision, environment, event_type, payment_status,
+                        content_digest, observed_at, workflow_started_at, synthetic)
+                       VALUES (?, ?, 1, ?, 'payment.status-changed', 'VALIDATED', ?, ?, ?, true)
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setObject(2, paymentId)
+                    statement.setString(3, environment)
+                    statement.setString(4, "0".repeat(64))
+                    statement.setObject(5, OffsetDateTime.ofInstant(observedAt, ZoneOffset.UTC))
+                    statement.setObject(6, OffsetDateTime.ofInstant(startedAt, ZoneOffset.UTC))
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+            }
+            val history = requireNotNull(onEventLoop { observations.history(paymentId) })
+            assertThat(history.coverage).describedAs(environment).isEqualTo(WorkflowHistoryCoverage.UNKNOWN)
+        }
     }
 
     @Test

@@ -23,6 +23,9 @@ class SepaWorkflowObservationEntity : PanacheEntityBase {
     @Column(name = "payment_revision", nullable = false)
     var paymentRevision: Long = 0
 
+    @Column(name = "environment")
+    var environment: String? = null
+
     @Column(name = "event_type", nullable = false)
     lateinit var eventType: String
 
@@ -34,6 +37,9 @@ class SepaWorkflowObservationEntity : PanacheEntityBase {
 
     @Column(name = "observed_at", nullable = false)
     lateinit var observedAt: Instant
+
+    @Column(name = "workflow_started_at")
+    var workflowStartedAt: Instant? = null
 
     @Column(name = "synthetic", nullable = false)
     var synthetic: Boolean = false

@@ -15,21 +15,37 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.HexFormat
+import java.util.Optional
 import java.util.UUID
 
 @ApplicationScoped
+@Startup
 class SepaPaymentRepositoryImpl(
     private val outboxRepository: SepaPaymentOutboxRepositoryImpl,
     @ConfigProperty(name = "openbank.sepa.workflow-observations.enabled", defaultValue = "false")
     private val workflowObservationsEnabled: Boolean,
+    @ConfigProperty(name = "openbank.environment")
+    private val observationEnvironment: Optional<String>,
 ) : SepaPaymentRepository,
     PanacheRepository<SepaPaymentEntity> {
+
+    init {
+        if (workflowObservationsEnabled) {
+            require(observationEnvironment.isPresent) {
+                "openbank.environment is required when SEPA workflow observations are enabled"
+            }
+            require(ENVIRONMENT_PATTERN.matches(observationEnvironment.get())) {
+                "openbank.environment must be a lowercase environment identifier"
+            }
+        }
+    }
 
     override suspend fun save(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
         Panache.withTransaction {
@@ -124,19 +140,26 @@ class SepaPaymentRepositoryImpl(
         return Panache.getSession().flatMap { session ->
             session.createNativeMutationQuery(
                 """INSERT INTO sepa_payment_workflow_observations
-                   (event_id, payment_id, payment_revision, event_type, payment_status, content_digest,
-                    observed_at, synthetic)
-                   VALUES (:eventId, :paymentId, :revision, :eventType, :status, :digest, :observedAt, :synthetic)
+                   (event_id, payment_id, payment_revision, environment, event_type, payment_status,
+                    content_digest, observed_at, workflow_started_at, synthetic)
+                   VALUES (:eventId, :paymentId, :revision, :environment, :eventType, :status,
+                    :digest, :observedAt, :workflowStartedAt, :synthetic)
                 """.trimIndent(),
             ).setParameter("eventId", message.eventId)
                 .setParameter("paymentId", payment.id)
                 .setParameter("revision", payment.revision)
+                .setParameter("environment", observationEnvironment.get())
                 .setParameter("eventType", message.eventType)
                 .setParameter("status", payment.status.name)
                 .setParameter("digest", contentDigest)
                 .setParameter("observedAt", message.createdAt)
+                .setParameter("workflowStartedAt", payment.createdAt)
                 .setParameter("synthetic", message.synthetic)
                 .executeUpdate()
         }
+    }
+
+    private companion object {
+        val ENVIRONMENT_PATTERN = Regex("^[a-z][a-z0-9-]{0,39}$")
     }
 }
