@@ -9,7 +9,9 @@ info:
   # 1.3.0: bounded run and curve-set lists (GET /snapshots, GET /curve-sets) for the admin console
   #        (#10618) — additive. Readable by ROLE_RISK / ROLE_FINANCE as well as operators; writes
   #        by ROLE_RISK / ROLE_OPERATOR / ROLE_ADMIN humans only.
-  version: 1.3.0
+  # 1.4.0: IRRBB read GET /snapshots/{id}/irrbb (ADR-0313 phase 1) — repricing gap, ΔEVE under the
+  #        six BCBS d368 scenarios, ΔNII, optional caller-supplied Tier 1. Additive.
+  version: 1.4.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -207,6 +209,55 @@ paths:
                 $ref: '#/components/schemas/CashFlows'
         '400':
           description: Missing or malformed `curveSetId`, or a curve set for another as-of date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run or curve set
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/irrbb:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotIrrbb
+      summary: IRRBB of a TIED_OUT run under a curve set
+      description: |
+        Repricing gap per currency (by repricing date), ΔEVE per currency under the six BCBS d368
+        Annex 2 scenarios (`deltaEve = PV(shocked) − PV(base)`, negative is a loss), ΔNII over 12
+        months under parallel up/down, the worst case, and the assumptions that produced them.
+        Shock sizes are configuration: a currency without them is listed in `shockNotConfigured`
+        and gets no scenarios. `tier1Capital` is optional and only ever the caller's; without it
+        the supervisory outlier ratio is not computed. Derived on request, never stored.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: curveSetId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tier1Capital
+          in: query
+          required: false
+          description: Tier 1 capital in the book's currency, positive. Never defaulted.
+          schema:
+            type: string
+            pattern: '^[0-9]+(\.[0-9]+)?$'
+      responses:
+        '200':
+          description: The run's IRRBB figures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Irrbb'
+        '400':
+          description: Missing or malformed `curveSetId` / `tier1Capital`, or a curve set for another as-of date
         '401':
           description: Unauthenticated
         '403':
@@ -767,3 +818,125 @@ components:
           type: array
           items:
             type: string
+
+    GapBucket:
+      type: object
+      required: [bucket, assets, liabilities, gap, cumulativeGap]
+      properties:
+        bucket: {type: string}
+        assets: {type: number}
+        liabilities: {type: number, description: Magnitude of liabilities repricing in the bucket}
+        gap: {type: number}
+        cumulativeGap: {type: number}
+
+    CurrencyGap:
+      type: object
+      required: [currency, buckets, totalAssets, totalLiabilities, totalGap]
+      properties:
+        currency: {type: string}
+        buckets:
+          type: array
+          items: {$ref: '#/components/schemas/GapBucket'}
+        totalAssets: {type: number}
+        totalLiabilities: {type: number}
+        totalGap: {type: number}
+
+    CurrencyScenario:
+      type: object
+      required: [currency, basePv, shockedPv, deltaEve, eveLoss]
+      properties:
+        currency: {type: string}
+        basePv: {type: number}
+        shockedPv: {type: number}
+        deltaEve: {type: number, description: PV(shocked) − PV(base); negative is a loss}
+        eveLoss: {type: number, description: max(0, −deltaEve) — the d368 sign convention}
+        deltaNii: {type: [number, 'null'], description: Parallel up/down only}
+
+    Scenario:
+      type: object
+      required: [scenario, currencies]
+      properties:
+        scenario:
+          type: string
+          enum: [parallel-up, parallel-down, steepener, flattener, short-up, short-down]
+        currencies:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyScenario'}
+        aggregateLoss: {type: [number, 'null'], description: Sum of currency losses; single-currency books only}
+
+    IrrbbAssumptions:
+      type: object
+      required: [model, shockSizes, shockSource, shortDecayYears, postShockFloorSource, nmdRepricing,
+        floatingRepricing, eveBasis, niiBasis, niiHorizonMonths, currencyAggregation]
+      properties:
+        model: {$ref: '#/components/schemas/BehaviouralModel'}
+        shockSizes:
+          type: array
+          items:
+            type: object
+            required: [currency, parallelBp, shortBp, longBp]
+            properties:
+              currency: {type: string}
+              parallelBp: {type: number}
+              shortBp: {type: number}
+              longBp: {type: number}
+        shockSource: {type: string}
+        shortDecayYears: {type: number}
+        postShockFloor:
+          type: [object, 'null']
+          properties:
+            atZeroBp: {type: number}
+            slopeBpPerYear: {type: number}
+        postShockFloorSource: {type: string}
+        nmdRepricing: {type: string}
+        floatingRepricing: {type: string}
+        eveBasis: {type: string}
+        niiBasis: {type: string}
+        niiHorizonMonths: {type: integer}
+        currencyAggregation: {type: string}
+
+    Irrbb:
+      type: object
+      required: [runId, asOf, provenance, curveSetId, curveSetProvenance, curveSetSource, gaps, scenarios,
+        worstCase, outlierTest, shockNotConfigured, unpriced, assumptions]
+      properties:
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        provenance: {type: string}
+        curveSetId: {type: string, format: uuid}
+        curveSetProvenance: {type: string}
+        curveSetSource: {type: string}
+        gaps:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyGap'}
+        scenarios:
+          type: array
+          items: {$ref: '#/components/schemas/Scenario'}
+        worstCase:
+          type: object
+          required: [byCurrency]
+          properties:
+            scenario: {type: [string, 'null']}
+            loss: {type: [number, 'null']}
+            currency: {type: [string, 'null']}
+            byCurrency:
+              type: object
+              additionalProperties: {type: string}
+        outlierTest:
+          type: object
+          required: [tier1Supplied, threshold, note]
+          properties:
+            tier1Supplied: {type: boolean}
+            tier1Capital: {type: [number, 'null']}
+            currency: {type: [string, 'null']}
+            threshold: {type: number}
+            ratio: {type: [number, 'null']}
+            breached: {type: [boolean, 'null']}
+            note: {type: string}
+        shockNotConfigured:
+          type: array
+          items: {type: string}
+        unpriced:
+          type: array
+          items: {type: string}
+        assumptions: {$ref: '#/components/schemas/IrrbbAssumptions'}

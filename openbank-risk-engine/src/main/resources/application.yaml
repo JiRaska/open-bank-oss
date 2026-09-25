@@ -151,6 +151,17 @@ openbank:
       # ADR-0314 D4: read lending's loan book into every snapshot (loans become contract-level
       # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
       enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
+    # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
+    # EUR is BCBS d368 (April 2016) Annex 2 Table 1. CZK is NOT in that table and is deliberately
+    # absent: its sizes must be taken from the EBA supervisory-outlier-test RTS by the operator
+    # (e.g. OPENBANK_RISK_IRRBB_SHOCK_SIZES="EUR=200/250/100;CZK=<from the RTS>"). Until then CZK
+    # is reported "shock sizes not configured", never shocked with a guess.
+    irrbb:
+      shock-sizes: ${OPENBANK_RISK_IRRBB_SHOCK_SIZES:EUR=200/250/100}
+      shock-source: ${OPENBANK_RISK_IRRBB_SHOCK_SOURCE:BCBS d368 (Apr 2016) Annex 2 Table 1 and shock formulas (x=4)}
+      # Post-shock floor `atZeroBp/slopeBpPerYear` is optional and unset here: d368 leaves floors
+      # to national supervisors (not above zero). Set OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR and
+      # OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE from the applicable supervisory text.
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

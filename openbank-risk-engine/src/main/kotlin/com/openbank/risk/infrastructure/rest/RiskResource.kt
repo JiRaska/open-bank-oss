@@ -7,6 +7,7 @@ package com.openbank.risk.infrastructure.rest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
+import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -47,6 +48,9 @@ class RiskResource {
 
     @Inject
     lateinit var cashFlows: CashFlowUseCase
+
+    @Inject
+    lateinit var irrbb: IrrbbUseCase
 
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
@@ -105,13 +109,35 @@ class RiskResource {
     @Path("/{id}/cash-flows")
     @Operation(summary = "Bucketed cash flows and PV of a TIED_OUT run under a curve set; 409 for an UNTIED one")
     @Authorize(action = "risk.snapshot.read", resource = "#id")
-    suspend fun cashFlows(@PathParam("id") id: UUID, @QueryParam("curveSetId") curveSetId: String?): Response {
+    suspend fun cashFlows(@PathParam("id") id: UUID, @QueryParam("curveSetId") curveSetId: String?): Response =
+        Response.ok(cashFlows.project(id, parseCurveSetId(curveSetId)).toResponse()).build()
+
+    /**
+     * IRRBB of a TIED_OUT run (ADR-0313 phase 1): repricing gap, ΔEVE under the six BCBS d368
+     * scenarios, ΔNII (parallel up/down). `tier1Capital` is optional and only ever the caller's:
+     * without it the outlier ratio is not computed. Same gates as cash flows: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/irrbb")
+    @Operation(summary = "IRRBB (repricing gap, ΔEVE, ΔNII) of a TIED_OUT run under a curve set; 409 for an UNTIED one")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun irrbb(
+        @PathParam("id") id: UUID,
+        @QueryParam("curveSetId") curveSetId: String?,
+        @QueryParam("tier1Capital") tier1Capital: String?,
+    ): Response {
+        val tier1 = tier1Capital?.takeIf { it.isNotBlank() }?.let {
+            requireNotNull(it.trim().toBigDecimalOrNull()) { "query parameter 'tier1Capital' must be a decimal number" }
+        }
+        return Response.ok(irrbb.analyse(id, parseCurveSetId(curveSetId), tier1).toResponse()).build()
+    }
+
+    private fun parseCurveSetId(curveSetId: String?): UUID {
         val raw = requireNotNull(curveSetId) { "query parameter 'curveSetId' is required" }
-        val setId = try {
+        return try {
             UUID.fromString(raw)
         } catch (e: IllegalArgumentException) {
             throw IllegalArgumentException("query parameter 'curveSetId' must be a UUID", e)
         }
-        return Response.ok(cashFlows.project(id, setId).toResponse()).build()
     }
 }

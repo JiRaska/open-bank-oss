@@ -9,6 +9,16 @@ import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
+/**
+ * A tenor-dependent change applied on top of a curve's interpolated zero rate (IRRBB non-parallel
+ * scenarios, ADR-0313 phase 1). [adjust] receives the ACT/365F year fraction from as-of and the
+ * BASE zero rate at that tenor and returns the SHIFTED zero rate — the base is passed so a
+ * post-shock floor that must not push a rate already below it further down can be expressed.
+ */
+fun interface ZeroRateAdjustment {
+    fun adjust(yearFraction: BigDecimal, baseRate: BigDecimal): BigDecimal
+}
+
 /** One node of a [Curve]: the continuously-compounded zero rate to [date], as a fraction. */
 data class CurvePillar(val date: LocalDate, val zeroRate: BigDecimal)
 
@@ -27,7 +37,17 @@ data class CurvePillar(val date: LocalDate, val zeroRate: BigDecimal)
  * Validation is strict: at least one pillar, every pillar strictly after [asOf] (so `DF(asOf) = 1`
  * holds by construction rather than by a stored point), dates strictly increasing.
  */
-class Curve(val index: CurveIndex, val asOf: LocalDate, pillars: List<CurvePillar>) {
+class Curve(
+    val index: CurveIndex,
+    val asOf: LocalDate,
+    pillars: List<CurvePillar>,
+    /**
+     * Applied to the interpolated zero rate at every date, so a shape that is not linear between
+     * pillars (the exponential short/long shocks) is exact at each flow's own tenor rather than
+     * sampled at the pillars and re-interpolated. Null for an unshocked curve.
+     */
+    val adjustment: ZeroRateAdjustment? = null,
+) {
 
     val pillars: List<CurvePillar> = pillars.toList()
 
@@ -47,6 +67,11 @@ class Curve(val index: CurveIndex, val asOf: LocalDate, pillars: List<CurvePilla
     fun yearFraction(date: LocalDate): BigDecimal = yearFraction(asOf, date)
 
     fun zeroRate(date: LocalDate): BigDecimal {
+        val base = baseZeroRate(date)
+        return adjustment?.adjust(yearFraction(maxOf(date, asOf)), base) ?: base
+    }
+
+    private fun baseZeroRate(date: LocalDate): BigDecimal {
         val first = pillars.first()
         val last = pillars.last()
         if (!date.isAfter(first.date)) return first.zeroRate
@@ -93,10 +118,24 @@ class Curve(val index: CurveIndex, val asOf: LocalDate, pillars: List<CurvePilla
             .setScale(RATE_SCALE, RoundingMode.HALF_EVEN)
     }
 
+    /**
+     * A new curve with [shift] applied at every tenor on top of this curve's own rates. Composes
+     * with an adjustment this curve already carries.
+     */
+    fun shifted(shift: ZeroRateAdjustment): Curve {
+        val inner = adjustment
+        val composed = if (inner == null) {
+            shift
+        } else {
+            ZeroRateAdjustment { t, base -> shift.adjust(t, inner.adjust(t, base)) }
+        }
+        return Curve(index, asOf, pillars, composed)
+    }
+
     /** A new curve with every zero rate moved by [basisPoints] (IRRBB parallel scenarios). */
     fun parallelShift(basisPoints: BigDecimal): Curve {
         val shift = basisPoints.movePointLeft(BP_DECIMALS)
-        return Curve(index, asOf, pillars.map { it.copy(zeroRate = it.zeroRate.add(shift)) })
+        return Curve(index, asOf, pillars.map { it.copy(zeroRate = it.zeroRate.add(shift)) }, adjustment)
     }
 
     companion object {
