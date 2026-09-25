@@ -126,7 +126,7 @@ survives in it.
    ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
-   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... \
+   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
@@ -343,6 +343,19 @@ tool whose capability no charter holds (agent-service's interest tools, mcp-serv
 confirmation) moves to the agent's identity with **no** upstream grant, so it stays denied end to end.
 If a charter later gains that capability, add the upstream read rule in the same change;
 `AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
+
+### Treasury deal postings (ADR-0315)
+
+Same recipe, same script, one client — created with the service it serves, not in a later sweep.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-treasury` | `keycloak/treasury` | `treasury-service-m2m-oidc` (treasury) | `TREASURY_CLIENT_SECRET` |
+
+Its whole upstream grant is `service-treasury-ledger-post` in `ledger_rest_ext.rego`: `ledger.create`
+and nothing else. Treasury reverses a settled deal by posting an offsetting journal, so it never needs
+`ledger.reverse`. Provision BEFORE the treasury component first syncs: the env ref is
+`optional: false`, so a missing KV entry holds the pod in `CreateContainerConfigError`.
 
 ### Synthetic journey identity: Product Catalog read (#7324)
 

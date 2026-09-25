@@ -1,0 +1,11 @@
+# Treasury domain (ADR-0037: domain = namespace). App plane. Holds treasury-service plus its
+# single-owner CNPG Postgres. MONEY-PATH (ADR-0315): the bank's own deals post to the ledger.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: treasury
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

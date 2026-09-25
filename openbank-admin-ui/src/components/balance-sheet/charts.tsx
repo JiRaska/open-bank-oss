@@ -6,7 +6,7 @@
 
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { cumulativeGap, type LadderRow } from './model'
+import { cumulativeGap, type GapRow, type LadderRow } from './model'
 import { C_GAP, C_INFLOW, C_OUTFLOW } from './palette'
 
 const axisTick = { fontSize: 11, fill: 'var(--text-tertiary)' }
@@ -34,6 +34,29 @@ export function MaturityLadder({ rows, locale }: { rows: LadderRow[]; locale: st
           <Bar dataKey="inflow" stackId="flow" name={t('Přítok', 'Inflow')} fill={C_INFLOW} />
           <Bar dataKey="outflow" stackId="flow" name={t('Odtok', 'Outflow')} fill={C_OUTFLOW} />
           <Line dataKey="gap" name={t('Kumulativní mezera', 'Cumulative gap')} stroke={C_GAP} dot={false} strokeWidth={2} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+/** Repricing gap for ONE currency: assets up, liabilities down, cumulative gap as a line. */
+export function RepricingGapChart({ rows, locale }: { rows: GapRow[]; locale: string }) {
+  const { t } = useLanguage()
+  const fmt = (v: number) => v.toLocaleString(locale, { maximumFractionDigits: 0 })
+  return (
+    <div style={{ height: 280 }}>
+      <ResponsiveContainer>
+        <ComposedChart data={rows} margin={{ top: 8, right: 8, left: 8, bottom: 4 }} stackOffset="sign">
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+          <XAxis dataKey="bucket" tick={axisTick} />
+          <YAxis tick={axisTick} width={72} tickFormatter={fmt} />
+          <Tooltip formatter={v => fmt(Number(v))} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <ReferenceLine y={0} stroke="var(--border)" />
+          <Bar dataKey="assets" stackId="gap" name={t('Aktiva', 'Assets')} fill={C_INFLOW} />
+          <Bar dataKey="liabilities" stackId="gap" name={t('Pasiva', 'Liabilities')} fill={C_OUTFLOW} />
+          <Line dataKey="cumulativeGap" name={t('Kumulativní mezera', 'Cumulative gap')} stroke={C_GAP} dot={false} strokeWidth={2} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

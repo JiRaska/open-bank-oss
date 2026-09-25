@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for treasury-service's east-west mTLS call to ledger-service's
+# 8443 listener (client auth REQUIRED). ASVS V9.1 forbids a new plaintext inter-service edge, so
+# journal posting never uses the legacy HTTP/8101 port. Same shape as risk-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: treasury-internal-tls
+  namespace: treasury
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: treasury-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: treasury-service.treasury.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
