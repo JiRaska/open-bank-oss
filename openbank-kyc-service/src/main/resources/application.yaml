@@ -44,8 +44,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound service-to-service token for the PEP screening call to openbank-sanctions-service
   # (ADR-0116 first-increment PEP check). Mirrors the same oidc-client block already used by
   # openbank-domestic-payment / openbank-sepa-payment / openbank-fx-service / openbank-account-service
@@ -153,6 +151,8 @@ mp:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

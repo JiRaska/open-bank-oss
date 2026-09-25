@@ -14,8 +14,6 @@ quarkus:
     client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-services}
     credentials:
       secret: ${QUARKUS_OIDC_CREDENTIALS_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # OIDC CLIENT (outbound M2M) — the token this service PRESENTS when it calls another.
   # Distinct from `quarkus.oidc` above, which is the inbound resource-server side that VALIDATES
@@ -81,3 +79,9 @@ openbank:
       enabled: false
     devservices:
       enabled: false
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none

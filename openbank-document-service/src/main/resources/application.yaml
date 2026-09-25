@@ -46,8 +46,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound service-to-service token (ADR-0162 D4): ScaVerificationAdapter's REST client mints an
   # openbank-services M2M token via this oidc-client so sca-service's GET challenge endpoint accepts
   # the call. Disabled under %test (unit tests mock SignerVerificationPort directly).
@@ -124,6 +122,8 @@ quarkus:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
   openbank:
     signature:

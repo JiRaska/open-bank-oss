@@ -63,8 +63,6 @@ quarkus:
     client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-services}
     credentials:
       secret: ${QUARKUS_OIDC_CREDENTIALS_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   opentelemetry:
     tracer:
@@ -221,3 +219,9 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none

@@ -36,7 +36,7 @@ quarkus:
     grant:
       type: client
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
     # #10486 batch 7: the MCP read ports whose upstream grant depended on the shared client's
     # ROLE_OPERATOR (transaction list, SEPA and domestic payment confirmation) mint from this NAMED client
     # instead, so the upstream sees service-account-openbank-mcp (ROLE_API only) and grants it only what the
@@ -121,3 +121,9 @@ openbank:
       enabled: ${MCP_RATE_LIMIT_ENABLED:true}
       calls-per-minute: ${MCP_RATE_LIMIT_PER_MINUTE:60}
       calls-per-day: ${MCP_RATE_LIMIT_PER_DAY:1000}
+
+"%dev":
+  quarkus:
+    oidc-client:
+      tls:
+        verification: none

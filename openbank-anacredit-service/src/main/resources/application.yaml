@@ -29,8 +29,6 @@ quarkus:
     client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-services}
     credentials:
       secret: ${QUARKUS_OIDC_CREDENTIALS_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # Single datasource backing both the CreditExposure store (ADR-0037 v2) and the
   # loan_stage_projection read-model (ADR-0037 follow-up, issue #638) — same physical DB
@@ -132,3 +130,9 @@ authz:
       enabled: false
     devservices:
       enabled: false
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none

@@ -46,8 +46,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # LedgerClient carries OidcClientRequestReactiveFilter, which mints its bearer token from HERE.
   # Without an oidc-client the ledger call leaves unauthenticated and ledger answers 401
@@ -321,6 +319,8 @@ authz:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
   authz:
     enforce: "false"

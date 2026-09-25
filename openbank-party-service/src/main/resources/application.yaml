@@ -62,8 +62,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Shared outbound M2M client (client_credentials grant), reused by two independent callers:
   # - ADR-0179: the merge account guard calls account-service; the token resolves to
   #   ROLE_OPERATOR, which is what account-service's list endpoint actually accepts.
@@ -232,6 +230,8 @@ mp:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
     oidc-client:
       enabled: false

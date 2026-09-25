@@ -4582,6 +4582,22 @@ gates:
     selftest_inputs: [".github/scripts/check-oidc-client-configured.py"]
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
+  # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
+  # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
+  # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  - id: oidc-tls-verification-profile-scoped
+    name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
+    group: security
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A top-level `tls.verification: none` silently switches off certificate validation in production the moment any environment moves the Keycloak leg to https; it spreads by copying a template application.yaml, so only a gate stops the next service reintroducing it."
+    review_after: "2027-03-25"
+    min_subjects: 400   # 884 files today (application yaml/properties + gitops manifests, 2026-09-25)
+    selftest: python3 .github/scripts/check-oidc-tls-verification-profile.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-oidc-tls-verification-profile.py"]
+    run: |
+      python3 .github/scripts/check-oidc-tls-verification-profile.py
   - id: pr-build-cloud-credentials
     name: "reusable PR build lane carries no cloud credentials (enforced)"
     group: security

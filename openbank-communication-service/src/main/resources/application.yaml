@@ -32,8 +32,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   swagger-ui:
     always-include: true
     path: /api/docs
@@ -58,6 +56,8 @@ authz:
 "%dev":
   quarkus:
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%test":

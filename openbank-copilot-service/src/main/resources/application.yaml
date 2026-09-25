@@ -66,7 +66,7 @@ quarkus:
       # public issuer (kc.open-bank.tech). Must match the customer-edge pattern (ADR-0065).
       issuer: ${QUARKUS_OIDC_TOKEN_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
 
   # Client-credentials principal for the two calls that do NOT propagate the customer's own
   # bearer (see the rule-5 comment below): ConsentQueryClient and CreditProfileReadClient both
@@ -81,7 +81,7 @@ quarkus:
     grant:
       type: client
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
     # #10486 batch 6: the credit-profile read (analytics-sink) no longer rides the shared
     # openbank-services principal. CreditProfileReadClient selects this NAMED client (@OidcClientFilter("m2m")),
     # so its principal is service-account-openbank-copilot (ROLE_API only), admitted by analytics-sink's
@@ -290,3 +290,12 @@ authz:
     rest-client:
       consent-service:
         tls-configuration-name: consent-authority
+
+"%dev":
+  quarkus:
+    oidc-client:
+      tls:
+        verification: none
+    oidc:
+      tls:
+        verification: none

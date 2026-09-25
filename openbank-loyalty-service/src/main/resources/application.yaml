@@ -37,8 +37,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   swagger-ui:
     always-include: true
     path: /api/docs
@@ -90,3 +88,9 @@ openbank:
       outgoing:
         loyalty-outbox-out:
           connector: smallrye-in-memory
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none
