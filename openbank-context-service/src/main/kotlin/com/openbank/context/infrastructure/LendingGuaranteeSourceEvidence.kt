@@ -94,7 +94,8 @@ interface LendingGuaranteeSourceClient {
 @ApplicationScoped
 class LendingGuaranteeSourceEvidence(
     @param:RestClient private val client: LendingGuaranteeSourceClient,
-    @ConfigProperty(name = "LENDING_GRAPH_SOURCE_URL") private val sourceUrl: Optional<String>,
+    // Check the effective REST-client destination, including higher-priority config overrides.
+    @ConfigProperty(name = "quarkus.rest-client.lending-service.url") private val sourceUrl: Optional<String>,
 ) {
     private val inFlight = Semaphore(MAX_INFLIGHT)
 
