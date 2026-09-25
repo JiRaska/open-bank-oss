@@ -78,10 +78,12 @@
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -100,6 +102,13 @@ DEFAULT_MAX_DISPATCH = 8
 
 # Enough of a broker error body to name the rejected selector; not enough to paste a page of HTML.
 HTTP_ERROR_DETAIL_CHARS = 400
+
+# Run names are queryable in the workflow-runs API; workflow_dispatch inputs are not.
+RUN_NAME_PREFIX = "pact-verify:"
+HISTORY_START = "2026-09-25T00:00:00Z"
+HISTORY_PAGE_SIZE = 100
+HISTORY_MAX_PAGES = 20
+RUN_NAME = re.compile(r"^pact-verify:(openbank-[a-z0-9-]+):([0-9a-f]{64}|manual):(auto|manual)$")
 
 
 def redact_origin(url: str) -> str:
@@ -247,9 +256,9 @@ def matrix_summary(broker, consumer, provider, user, password, branch=DEFAULT_BR
     return http_json(url, user, password).get("summary") or {}
 
 
-def dispatch(repo, workflow, ref, service, token):
+def dispatch(repo, workflow, ref, service, key, token):
     url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/dispatches"
-    body = json.dumps({"ref": ref, "inputs": {"service": service}}).encode()
+    body = json.dumps({"ref": ref, "inputs": {"service": service, "reconcile_key": key}}).encode()
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Accept", "application/vnd.github+json")
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
@@ -257,6 +266,154 @@ def dispatch(repo, workflow, ref, service, token):
     req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.status
+
+
+def verification_key(root: pathlib.Path, provider: str, consumers: list[str], broker: str, user: str, password: str, branch: str, fetch=None, tree_oid=None) -> str:
+    """Hash the inputs whose changes can make a failed provider run worth retrying.
+
+    Git tree IDs avoid reading entire services on every tick and do not change for
+    unrelated main commits. The broker pact CONTENT matters, not its consumer app
+    version: Pact inherits verification for identical content republished by a new
+    consumer version. Missing evidence is an error, not a reason to send a build.
+    """
+    fetch = fetch or http_json
+    tree_oid = tree_oid or (lambda worktree, path: subprocess.check_output(
+        ["git", "rev-parse", f"HEAD:{path}"], cwd=worktree, text=True,
+    ).strip())
+    shared = sorted(p.name for p in root.glob("openbank-libs*") if p.is_dir())
+    paths = [provider, *shared, "build-logic", "gradle", "settings.gradle.kts",
+             "build.gradle.kts", "gradle.properties", ".github/workflows/verify-provider.yml",
+             ".github/workflows/_service-ci.yml"]
+    digest = hashlib.sha256()
+    for path in paths:
+        if not (root / path).exists():
+            continue
+        oid = tree_oid(root, path)
+        digest.update(f"git:{path}:{oid}\n".encode())
+    selected = set(consumers)
+    pact_count = 0
+    for path in sorted((root / "pacts").glob("*.json")):
+        doc = json.loads(path.read_text())
+        if ((doc.get("provider") or {}).get("name") == provider
+                and (doc.get("consumer") or {}).get("name") in selected):
+            digest.update(f"pact:{path.name}:".encode())
+            digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode())
+            digest.update(b"\n")
+            pact_count += 1
+    if pact_count < len(selected):
+        raise ValueError(f"{provider}: missing committed pact for an owed consumer")
+    for consumer in sorted(selected):
+        url = (f"{broker.rstrip('/')}/pacticipants/{urllib.parse.quote(consumer)}"
+               f"/branches/{urllib.parse.quote(branch)}/latest-version")
+        version = fetch(url, user, password).get("number")
+        if not isinstance(version, str) or not version:
+            raise ValueError(f"{consumer}: latest {branch} broker version has no number")
+        pact_url = (f"{broker.rstrip('/')}/pacts/provider/{urllib.parse.quote(provider)}"
+                    f"/consumer/{urllib.parse.quote(consumer)}"
+                    f"/version/{urllib.parse.quote(version)}")
+        pact = fetch(pact_url, user, password)
+        if ((pact.get("consumer") or {}).get("name") != consumer
+                or (pact.get("provider") or {}).get("name") != provider
+                or not ("interactions" in pact or "messages" in pact)):
+            raise ValueError(f"{consumer} -> {provider}: broker pact content is incomplete")
+        contract = {name: pact[name] for name in
+                    ("consumer", "provider", "interactions", "messages", "metadata", "pluginData")
+                    if name in pact}
+        content = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+        digest.update(f"broker-pact:{consumer}:".encode())
+        digest.update(hashlib.sha256(content).hexdigest().encode())
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def github_json(url: str, token: str) -> dict:
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return json.loads(response.read().decode())
+
+
+def complete_run_history(repo: str, workflow: str, token: str, fetch=None) -> list[dict]:
+    """Fetch every run in the migration window, or refuse to decide.
+
+    The hard page cap limits API work during a storm. Exceeding it pauses automated
+    dispatch and leaves the broker debt visible; it must not silently forget a failure.
+    """
+    fetch = fetch or github_json
+    runs = []
+    first_count = None
+    first_ids = None
+    for page in range(1, HISTORY_MAX_PAGES + 1):
+        query = urllib.parse.urlencode({
+            "event": "workflow_dispatch", "created": f">={HISTORY_START}",
+            "per_page": HISTORY_PAGE_SIZE, "page": page,
+        })
+        url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?{query}"
+        doc = fetch(url, token)
+        count, batch = doc.get("total_count"), doc.get("workflow_runs")
+        if not isinstance(count, int) or not isinstance(batch, list):
+            raise TypeError("incomplete Actions run-history response")
+        ids = [r.get("id") for r in batch if isinstance(r, dict)]
+        if len(ids) != len(batch) or any(not isinstance(i, int) for i in ids):
+            raise TypeError("Actions run history has missing run IDs")
+        if first_count is None:
+            first_count, first_ids = count, ids
+        elif count != first_count:
+            raise ValueError("Actions run count changed during pagination")
+        if count > HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES:
+            raise ValueError(f"Actions run history exceeds {HISTORY_MAX_PAGES} pages")
+        runs.extend(batch)
+        if len(runs) >= count:
+            if len(runs) != count or len({r["id"] for r in runs}) != count:
+                raise ValueError("Actions run-history pages overlap or omit runs")
+            if page > 1:
+                first_url = url.replace(f"page={page}", "page=1")
+                fresh = fetch(first_url, token)
+                fresh_runs = fresh.get("workflow_runs")
+                if (fresh.get("total_count") != first_count or not isinstance(fresh_runs, list)
+                        or [r.get("id") for r in fresh_runs] != first_ids):
+                    raise ValueError("Actions first page changed during pagination")
+            return runs
+        if not batch:
+            raise ValueError("Actions run-history pagination ended early")
+    raise ValueError("Actions run-history page cap reached")
+
+
+def admit_provider(provider: str, key: str, runs: list[dict]) -> tuple[bool, str]:
+    """Admit one new run only when complete history proves no same-input attempt exists."""
+    named_dates = [r.get("created_at") for r in runs if RUN_NAME.fullmatch(str(r.get("display_title", "")))]
+    first_named_at = min(named_dates) if named_dates else None
+    for run in runs:
+        title = run.get("display_title")
+        created = run.get("created_at")
+        status = run.get("status")
+        conclusion = run.get("conclusion")
+        link = run.get("html_url")
+        if not all(isinstance(x, str) and x for x in (title, created, status, link)):
+            return False, "malformed Actions run evidence"
+        if status == "completed" and not isinstance(conclusion, str):
+            return False, f"terminal Actions run has no conclusion: {link}"
+        match = RUN_NAME.fullmatch(title)
+        if match:
+            seen_provider, seen_key, origin = match.groups()
+            if seen_provider != provider:
+                continue
+            if status != "completed":
+                return False, f"{provider}: verification already {status}: {link}"
+            if origin == "auto" and seen_key == key:
+                return False, f"{provider}: unchanged inputs already attempted ({conclusion}): {link}"
+        elif title == "Verify one provider":
+            # Legacy run-list entries have inputs=null and cannot be attributed. A
+            # live one may still be this provider; stop until it reaches terminal.
+            if status != "completed":
+                return False, f"unattributed legacy verification still {status}: {link}"
+            if first_named_at is not None and created > first_named_at:
+                return False, f"unattributed verification after migration marker: {link}"
+        else:
+            return False, f"unrecognized verification run title: {link}"
+    return True, "no matching active or terminal attempt"
 
 
 def _defer(provider: str, message: str, deferred: list) -> bool:
@@ -363,7 +520,7 @@ def main() -> int:
             else:
                 owed.setdefault(provider, []).append(consumer)
 
-    print(f"{len(edges)} integration(s) checked against {args.broker}")
+    print(f"{len(edges)} integration(s) checked against Pact Broker")
     if errors:
         print(f"  {errors} could not be queried (see warnings above) — NOT counted as owed")
     for pair in failing:
@@ -396,18 +553,8 @@ def main() -> int:
     for p in providers:
         print(f"  OWED  {p}  <- {', '.join(sorted(owed[p]))}")
 
-    todo = providers[: args.max_dispatch]
-    if len(providers) > len(todo):
-        # Name what is dropped. A cap that reports only what it did is indistinguishable
-        # from having had nothing more to do.
-        dropped = providers[args.max_dispatch:]
-        print(
-            f"::warning::capped at {args.max_dispatch} dispatches this run; NOT dispatched "
-            f"and still owed: {', '.join(dropped)} — they will be picked up next run"
-        )
-
     if not args.dispatch:
-        print(f"\n(report only — would dispatch {args.workflow} for: {', '.join(todo)})")
+        print("\n(report only — owed providers listed above; Actions history admission was not run)")
         return 0
 
     token = os.environ.get("GITHUB_TOKEN", "")
@@ -415,11 +562,40 @@ def main() -> int:
         sys.stderr.write("::error::--dispatch needs GITHUB_TOKEN and GITHUB_REPOSITORY\n")
         return 2
 
+    try:
+        # Complete every evidence check BEFORE the first POST. A partial history or
+        # broker answer must not permit a subset of the fleet to escape admission.
+        keys = {
+            p: verification_key(root, p, owed[p], args.broker, user, password, args.branch)
+            for p in providers
+        }
+        runs = complete_run_history(args.repo, args.workflow, token)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+            OSError, subprocess.CalledProcessError, TypeError, ValueError) as e:
+        sys.stderr.write(f"::error::verification admission evidence incomplete: {e} — no dispatch\n")
+        return 2
+
+    eligible = []
+    for p in providers:
+        allowed, reason = admit_provider(p, keys[p], runs)
+        if allowed:
+            eligible.append(p)
+        else:
+            print(f"  HELD  {reason}; broker verification remains owed")
+
+    todo = eligible[: args.max_dispatch]
+    if len(eligible) > len(todo):
+        dropped = eligible[args.max_dispatch:]
+        print(
+            f"::warning::capped at {args.max_dispatch} dispatches this run; NOT dispatched "
+            f"and still owed: {', '.join(dropped)} — they will be picked up next run"
+        )
+
     bad = 0
     deferred = []
     for p in todo:
         try:
-            status = dispatch(args.repo, args.workflow, args.branch, p, token)
+            status = dispatch(args.repo, args.workflow, args.branch, p, keys[p], token)
             print(f"  dispatched {args.workflow} for {p} (HTTP {status})")
         except urllib.error.HTTPError as e:
             msg = f"HTTP {e.code} {e.read()[:200]!r}"
@@ -523,6 +699,144 @@ def self_test() -> int:
     if not pub:
         bad.append("no provider in the repo can publish — the check answers False for everything")
 
+    print("\nself-test: unchanged failed inputs never redispatch; new inputs and manual retry work")
+    provider = "openbank-ledger-service"
+    key_a, key_b = "a" * 64, "b" * 64
+    def run(name, status="completed", conclusion="failure", when="2026-09-25T02:00:00Z"):
+        return {"display_title": name, "status": status, "conclusion": conclusion,
+                "created_at": when, "html_url": "https://github.com/example/repo/actions/runs/42",
+                "id": 42}
+    auto_a = run(f"{RUN_NAME_PREFIX}{provider}:{key_a}:auto")
+    auto_b = run(f"{RUN_NAME_PREFIX}{provider}:{key_b}:auto")
+    manual = run(f"{RUN_NAME_PREFIX}{provider}:manual:manual")
+    legacy = run("Verify one provider", when="2026-09-25T01:00:00Z")
+    admission_cases = [
+        ([auto_a], key_a, False, "unchanged terminal failure is held"),
+        ([auto_a], key_b, True, "new pact or provider inputs are eligible"),
+        ([auto_a | {"status": "in_progress", "conclusion": None}], key_b, False,
+         "active provider run blocks duplicate work even on changed inputs"),
+        ([manual | {"status": "queued", "conclusion": None}], key_b, False,
+         "explicit manual retry can run, but reconciler does not duplicate it"),
+        ([manual], key_b, True, "finished manual retry does not poison a new auto fingerprint"),
+        ([legacy, auto_b], key_a, True, "older unattributed terminal legacy run is tolerated"),
+        ([legacy | {"status": "in_progress", "conclusion": None}], key_b, False,
+         "active unattributed legacy run fails closed"),
+        ([legacy | {"created_at": "2026-09-25T03:00:00Z"}, auto_b], key_a, False,
+         "unattributed run after named migration marker fails closed"),
+        ([auto_a | {"conclusion": None}], key_a, False,
+         "terminal run without a conclusion fails closed"),
+        ([auto_a | {"display_title": "unknown title"}], key_b, False,
+         "unrecognized run metadata fails closed"),
+    ]
+    for history, queried_key, expected, why in admission_cases:
+        got, _ = admit_provider(provider, queried_key, history)
+        print(f"  {'ok ' if got == expected else 'BAD'} {why}")
+        if got != expected:
+            bad.append(why)
+
+    # A new consumer app version with unchanged Pact CONTENT must not restart a
+    # failed verification. Pact itself inherits results for identical content.
+    consumer, sample_provider = edges[0]
+    def broker_fixture(number, interaction="unchanged"):
+        def answer(url, *_):
+            if url.endswith("latest-version"):
+                return {"number": number}
+            return {"consumer": {"name": consumer}, "provider": {"name": sample_provider},
+                    "interactions": [{"description": interaction}],
+                    "_links": {"self": {"href": url}}}
+        return answer
+    key1 = verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture("1"))
+    key1_again = verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture("1"))
+    key2 = verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture("2"))
+    key_changed = verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture("2", "new interaction"))
+    stable_trees = lambda _root, path: path
+    testing_fixed = lambda _root, path: path + ("-fixed" if path == "openbank-libs-testing" else "")
+    shared_before = verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture("1"), stable_trees)
+    shared_after = verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture("1"), testing_fixed)
+    fingerprint_checks = [
+        ("unchanged verification inputs produce the same key", key1 == key1_again),
+        ("new app version with identical Pact content keeps the key", key1 == key2),
+        ("changed broker Pact content changes the key", key1 != key_changed),
+        ("shared testing code change resets a failed-run key", shared_before != shared_after),
+    ]
+    try:
+        verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_fixture(None))
+    except ValueError:
+        fingerprint_checks.append(("missing broker version fails closed", True))
+    else:
+        fingerprint_checks.append(("missing broker version fails closed", False))
+    for why, okay in fingerprint_checks:
+        print(f"  {'ok ' if okay else 'BAD'} {why}")
+        if not okay:
+            bad.append(why)
+
+    # The API count, not a short first page, defines complete history. Failure
+    # here must stop every POST rather than treat a missing older failure as fresh.
+    history_checks = []
+    one_page = complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda *_: {
+        "total_count": 1, "workflow_runs": [auto_a],
+    })
+    history_checks.append(("complete one-page history is accepted", len(one_page) == 1))
+    page_one = [run(f"{RUN_NAME_PREFIX}{provider}:{key_a}:auto") | {"id": i}
+                for i in range(1, HISTORY_PAGE_SIZE + 1)]
+    def history_fixture(url, _token, second_count=101, second_id=101):
+        page_number = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"][0]
+        if page_number == "1":
+            return {"total_count": 101, "workflow_runs": page_one.copy()}
+        return {"total_count": second_count,
+                "workflow_runs": [run(f"{RUN_NAME_PREFIX}{provider}:{key_a}:auto") | {"id": second_id}]}
+    complete = complete_run_history("org/repo", "verify-provider.yml", "x",
+                                    fetch=history_fixture)
+    history_checks.append(("two stable pages are accepted", len(complete) == 101))
+    for why, fetcher in (
+        ("run inserted between pages fails closed",
+         lambda url, token: history_fixture(url, token, second_count=102)),
+        ("overlapping pages fail closed",
+         lambda url, token: history_fixture(url, token, second_id=100)),
+    ):
+        try:
+            complete_run_history("org/repo", "verify-provider.yml", "x", fetch=fetcher)
+        except ValueError:
+            history_checks.append((why, True))
+        else:
+            history_checks.append((why, False))
+    first_page_reads = 0
+    def shifted_first_page(url, token):
+        nonlocal first_page_reads
+        answer = history_fixture(url, token)
+        if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"]:
+            first_page_reads += 1
+            if first_page_reads == 2:
+                answer["workflow_runs"][0] = answer["workflow_runs"][0] | {"id": 999}
+        return answer
+    try:
+        complete_run_history("org/repo", "verify-provider.yml", "x", fetch=shifted_first_page)
+    except ValueError:
+        history_checks.append(("first page changed during scan fails closed", True))
+    else:
+        history_checks.append(("first page changed during scan fails closed", False))
+    try:
+        complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda url, _token: {
+            "total_count": 2,
+            "workflow_runs": [auto_a] if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"] else [],
+        })
+    except ValueError:
+        history_checks.append(("missing second page fails closed", True))
+    else:
+        history_checks.append(("missing second page fails closed", False))
+    try:
+        complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda *_: {
+            "total_count": HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES + 1, "workflow_runs": [],
+        })
+    except ValueError:
+        history_checks.append(("history beyond the hard cap fails closed", True))
+    else:
+        history_checks.append(("history beyond the hard cap fails closed", False))
+    for why, okay in history_checks:
+        print(f"  {'ok ' if okay else 'BAD'} {why}")
+        if not okay:
+            bad.append(why)
+
     # ---- The dispatch-failure classification (#9750).
     # The load-bearing asymmetry: a quota answer must DEFER (the debt survives to the next
     # run), a real answer must FAIL THIS RUN. Both directions are asserted, because a
@@ -617,7 +931,8 @@ def self_test() -> int:
 
     # The floor run-gates holds this gate to: every decision case evaluated above. An emptied
     # table must not pass as a clean one.
-    gatelib.subjects(len(cases) + len(checks) + len(dispatch_cases) + 1 + len(classify))
+    gatelib.subjects(len(cases) + len(checks) + len(dispatch_cases) + 1 + len(classify)
+                     + len(admission_cases) + len(fingerprint_checks) + len(history_checks))
     if bad:
         print("\n::error::self-test FAILED: " + "; ".join(bad))
         return 1
