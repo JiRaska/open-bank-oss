@@ -109,6 +109,18 @@ class RefusesSilentSuccessTest(unittest.TestCase):
             with self.assertRaises(cfc.CollectError):
                 cfc.load_env_breakdowns(Path(d), RULES["environments"])
 
+    def test_project_load_error_is_an_error_with_its_message(self):
+        # Shape of the live failure (#10858 follow-up): infracost exit 0, error only in metadata.
+        broken = {"projects": [{"name": "envs/web-prod", "metadata": {"errors": [
+            {"code": 102, "message": "Error loading Terraform modules: could not load modules", "isError": True}]},
+            "breakdown": {"resources": []}}]}
+        with tempfile.TemporaryDirectory() as d:
+            for env in RULES["environments"]:
+                Path(d, f"{env}.json").write_text(json.dumps(POSITIVE))
+            Path(d, f"{RULES['environments'][-1]}.json").write_text(json.dumps(broken))
+            with self.assertRaisesRegex(cfc.CollectError, "Error loading Terraform modules"):
+                cfc.load_env_breakdowns(Path(d), RULES["environments"])
+
     def test_missing_env_output_is_an_error(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(cfc.CollectError):
