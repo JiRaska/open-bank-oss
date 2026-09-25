@@ -382,6 +382,12 @@ mp:
         topic: openbank.lending.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      lending-graph-references-out:
+        connector: smallrye-kafka
+        client.id: lending-graph-service-${quarkus.uuid}
+        topic: openbank.lending.graph.references
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

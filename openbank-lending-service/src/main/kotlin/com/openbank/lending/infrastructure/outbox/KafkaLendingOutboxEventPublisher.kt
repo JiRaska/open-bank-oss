@@ -19,18 +19,26 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
+import java.time.Instant
+import java.util.UUID
 
 @ApplicationScoped
 class KafkaLendingOutboxEventPublisher(
     @Channel("lending-events-out") private val emitter: MutinyEmitter<String>,
+    @Channel("lending-graph-references-out") private val graphEmitter: MutinyEmitter<String>,
     private val ledger: LedgerPostingPort,
     private val mapper: ObjectMapper,
 ) : OutboxEventPublisher {
     override suspend fun publish(entry: OutboxEntry) {
-        // The shared Lending topic has broad existing readers. Graph pointers need their own
-        // topic and ACL before this disabled writer can be activated; fail closed until then.
-        check(!entry.eventType.startsWith("lending.graph.")) {
-            "Lending graph reference topic is not configured"
+        val destination = when (entry.eventType) {
+            "lending.graph.guarantee.approved" -> {
+                validateGraphReference(entry.payload)
+                graphEmitter
+            }
+            else -> {
+                check(!entry.eventType.startsWith("lending.graph.")) { "Unknown lending graph event type" }
+                emitter
+            }
         }
         if (entry.eventType == "lending.allowance.posting") {
             val command = mapper.readValue(entry.payload, AllowancePostingCommand::class.java)
@@ -54,6 +62,34 @@ class KafkaLendingOutboxEventPublisher(
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        emitter.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+        destination.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+    }
+
+    private fun validateGraphReference(payload: String) {
+        val node = mapper.readTree(payload)
+        check(node.isObject && node.fieldNames().asSequence().toSet() == GRAPH_REFERENCE_FIELDS) {
+            "Invalid lending graph reference schema"
+        }
+        val validValues = node.path("schemaVersion").isIntegralNumber &&
+            node.path("schemaVersion").intValue() == 1 &&
+            node.path("eventType").textValue() == "lending.graph.guarantee.approved" &&
+            node.path("revision").isIntegralNumber &&
+            node.path("revision").longValue() > 0 &&
+            node.path("bankScope").textValue()?.matches(BANK_SCOPE_PATTERN) == true
+        check(validValues) { "Invalid lending graph reference values" }
+        UUID.fromString(node.path("guaranteeId").textValue())
+        Instant.parse(node.path("occurredAt").textValue())
+    }
+
+    private companion object {
+        val GRAPH_REFERENCE_FIELDS = setOf(
+            "schemaVersion",
+            "eventType",
+            "guaranteeId",
+            "revision",
+            "bankScope",
+            "occurredAt",
+        )
+        val BANK_SCOPE_PATTERN = Regex("[a-z0-9][a-z0-9-]{0,63}")
     }
 }

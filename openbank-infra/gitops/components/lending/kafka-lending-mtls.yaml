@@ -40,6 +40,12 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      - resource:
+          type: topic
+          name: openbank.lending.graph.references
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # Keystore ExternalSecret: projects the `lending-service` Strimzi secret
 # (PKCS#12 keystore + password) from `messaging` into `lending`.

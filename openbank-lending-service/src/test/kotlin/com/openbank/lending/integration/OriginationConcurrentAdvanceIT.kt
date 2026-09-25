@@ -80,7 +80,10 @@ class OriginationConcurrentAdvanceIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("lending-events-out").toMutableMap()
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "lending-events-out",
+                "lending-graph-references-out",
+            ).toMutableMap()
             props["quarkus.kafka.devservices.enabled"] = "false"
             props["openbank.outbox.dispatch-enabled"] = "false"
             return props

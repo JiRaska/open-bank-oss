@@ -140,9 +140,10 @@ An internal guarantee writer now validates loan, Party and signed Document
 evidence on proposal and approval, and persists an approval pointer atomically
 with the decision. A real-PostgreSQL test proves that an outbox insert failure
 rolls back approval and a successful approval commits one minimized reference.
-The loan-scoped maker/checker HTTP routes are also disabled by default; there
-is still no dedicated Kafka publisher or provisioned proof credential. The
-existing broad Lending publisher refuses the graph event type. A bounded,
+The loan-scoped maker/checker HTTP routes are also disabled by default. A
+dedicated Kafka publisher and literal topic ACL now route only the approved
+reference away from the broad Lending topic; no proof credential is provisioned.
+The publisher rejects unknown graph event types. A bounded,
 loan-scoped approved-guarantee source read is available
 behind a separate disabled-by-default switch. It requires the investigator's
 live Context assignment for the exact loan and purpose, and returns no data if
@@ -215,8 +216,8 @@ Approval then rechecks current source state in the same logical decision flow
 and emits the versioned, reference-only event through Lending's transactional
 outbox. Context consumes it idempotently, preserves effective and recorded time,
 and reads detail through the source's case-scoped API under a separate OPA
-decision. Until the dedicated credential, enabled writer route, reference
-publisher and Context projector are deployed, V20 rows must not be presented as
+decision. Until the dedicated credential, enabled writer route, authorized
+Context consumer and projector are deployed, V20 rows must not be presented as
 verified links. The source read remains disabled while those boundaries are reviewed.
 
 ## Alternatives considered

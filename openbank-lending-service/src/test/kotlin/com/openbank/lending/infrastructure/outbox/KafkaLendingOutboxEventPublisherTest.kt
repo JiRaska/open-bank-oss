@@ -51,6 +51,7 @@ class KafkaLendingOutboxEventPublisherTest {
         KafkaLendingOutboxEventPublisher(
             emitter,
             mockk(),
+            mockk(),
             com.fasterxml.jackson.databind.ObjectMapper(),
         ).publish(entry)
 
