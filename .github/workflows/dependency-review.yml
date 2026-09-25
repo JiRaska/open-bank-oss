@@ -28,11 +28,10 @@ jobs:
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
     # became queryable ~24 min after this job started (GitHub indexes the submitted graph
     # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
-    # slow queue away from a spurious red on an honest PR. 50 also contains the bounded
-    # installation-quota recovery below plus the final basis retry: a 15.5 min API wait,
-    # a measured 24 min snapshot/indexing path and ~5 min basis retry fit without turning
-    # a transient GitHub 403 into a timeout.
-    # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
+    # slow queue away from a spurious red on an honest PR. 50 contains the bounded
+    # 30-minute sparse snapshot wait and the final ~5-minute basis retry. An exhausted
+    # installation quota fails promptly instead of burning the remainder of the job.
+    # Only dependency-touching PRs wait; the rest finish in seconds.
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,7 +39,7 @@ jobs:
       # Whether to wait for a Gradle snapshot depends on whether one is coming: the retry
       # below must be armed ONLY when dependency-submission.yml is also running for this PR,
       # i.e. when the same paths it filters on changed. Measured the hard way — with the
-      # retry armed unconditionally this job sat >11 min on a PR that touched no manifest
+      # a wait armed unconditionally this job sat >11 min on a PR that touched no manifest
       # at all, because GitHub reports a snapshot warning for the head SHA regardless (the
       # Gradle graph is inherited from main, never submitted for this SHA). That would have
       # taxed the ~93% of PRs this feature has nothing to say about.
@@ -49,7 +48,9 @@ jobs:
       # reason: pull_request.base.sha is frozen at PR creation and misclassifies once a
       # competing PR merges first.
       - name: Test dependency review basis guard
-        run: python3 .github/scripts/tests/test_dependency_review_basis.py
+        run: |
+          python3 .github/scripts/tests/test_dependency_review_basis.py
+          python3 .github/scripts/tests/test_wait_dependency_review_snapshot.py
 
       - name: Detect dependency-manifest changes
         id: deps
@@ -77,8 +78,8 @@ jobs:
           fi
 
       # A completed failed producer on the immutable merge-base cannot be repaired by
-      # waiting for the PR head. Reject that proven state before the action's 30-minute
-      # snapshot retry. A pending producer or transient Checks API failure still takes
+      # waiting for the PR head. Reject that proven state before the bounded snapshot
+      # wait. A pending producer or transient Checks API failure still takes
       # the normal bounded review path, which retains the final fail-closed basis check.
       - name: Reject known failed base dependency graph
         if: ${{ steps.deps.outputs.changed == 'true' }}
@@ -115,6 +116,17 @@ jobs:
           fi
           echo "merge-base $mb producer verdict: $verdict; continuing full dependency review."
 
+      # The action's 10-second snapshot poll exhausted this installation's API quota
+      # on #9971 (2026-09-25): ~160 requests before GitHub indexed the accepted head
+      # snapshot. Probe seven times over 30 minutes instead, then run policy once.
+      - name: Wait for indexed dependency snapshots
+        if: ${{ steps.deps.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/wait_dependency_review_snapshot.py
+
       - name: Dependency Review
         id: review
         continue-on-error: true
@@ -128,16 +140,9 @@ jobs:
           # every PR was invisible here and vulnerable deps landed unreviewed, to surface
           # later as Dependabot alerts on main.
           #
-          # Armed only on dependency-touching PRs (see the detect step above): there the
-          # submission job runs concurrently with this one, so the head-SHA snapshot does
-          # not exist yet when this starts ("No snapshots were found for the head SHA")
-          # and we must wait for it.
-          #
-          # gradle/actions documents 600 s. Measured end-to-end on a real dependency PR,
-          # the snapshot only became queryable ~24 min in (734 s resolve + GitHub's own
-          # indexing lag afterwards), so 600 — and even 1200 — undershoot reality. 1800.
-          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
-          retry-on-snapshot-warnings-timeout: 1800
+          # The sparse preflight above waits for both indexed snapshots on dependency-
+          # touching PRs. The action must not restart its own ten-second polling loop.
+          retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
           # allow-dependencies-licenses: none currently — the schemathesis 3.39.16 rfc3987
           # (GPL-3.0-or-later) suppression that used to live here was retired once the
@@ -217,8 +222,7 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
-          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
-          retry-on-snapshot-warnings-timeout: 1800
+          retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
 
       # A successful review attempt above can still PROCEED on an invalid basis instead of
