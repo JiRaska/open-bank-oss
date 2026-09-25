@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-823c1a777-run36067939865
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-3cf55f5d4-run36077585264
           ports:
             - name: http
               containerPort: 3000
