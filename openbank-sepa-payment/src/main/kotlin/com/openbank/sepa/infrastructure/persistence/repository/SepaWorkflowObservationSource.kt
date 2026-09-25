@@ -62,13 +62,13 @@ class SepaWorkflowObservationSource {
     ): WorkflowObservationHistory {
         val truncated = rows.size > MAX_OBSERVATIONS
         val retained = rows.take(MAX_OBSERVATIONS).asReversed()
-        val contiguous = retained.firstOrNull()?.paymentRevision == 0L &&
-            retained.lastOrNull()?.paymentRevision == sourceRevision &&
+        val contiguousTail = retained.lastOrNull()?.paymentRevision == sourceRevision &&
             retained.zipWithNext().all { (older, newer) -> newer.paymentRevision == older.paymentRevision + 1 }
         val coverage = when {
-            retained.isEmpty() || !contiguous && !truncated -> WorkflowHistoryCoverage.UNKNOWN
+            retained.isEmpty() || !contiguousTail -> WorkflowHistoryCoverage.UNKNOWN
             truncated -> WorkflowHistoryCoverage.PARTIAL
-            else -> WorkflowHistoryCoverage.COMPLETE
+            retained.first().paymentRevision == 0L -> WorkflowHistoryCoverage.COMPLETE
+            else -> WorkflowHistoryCoverage.UNKNOWN
         }
         return WorkflowObservationHistory(
             paymentId,

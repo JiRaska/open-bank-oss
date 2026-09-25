@@ -162,6 +162,40 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(history?.observations?.map { it.revision }).containsExactly(0L)
     }
 
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    fun `bounded history with an internal gap remains unknown`() {
+        val paymentId = createPayment()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE sepa_payments SET aggregate_revision = 103 WHERE payment_id = ?",
+            ).use { statement ->
+                statement.setObject(1, paymentId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            connection.prepareStatement(
+                """INSERT INTO sepa_payment_workflow_observations
+                   (event_id, payment_id, payment_revision, event_type, payment_status,
+                    content_digest, observed_at, synthetic)
+                   VALUES (?, ?, ?, 'test.corrupt-history', 'RECEIVED', repeat('0', 64), now(), true)
+                """.trimIndent(),
+            ).use { statement ->
+                (1L..103L).filterNot { it == 50L }.forEach { revision ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setObject(2, paymentId)
+                    statement.setLong(3, revision)
+                    statement.addBatch()
+                }
+                assertThat(statement.executeBatch()).hasSize(102)
+            }
+        }
+
+        val history = onEventLoop { observations.history(paymentId) }
+        assertThat(history?.truncated).isTrue()
+        assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.UNKNOWN)
+        assertThat(history?.observations?.map { it.revision }).doesNotContain(50L)
+    }
+
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
