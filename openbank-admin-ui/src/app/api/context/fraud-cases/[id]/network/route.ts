@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { contextServiceUrl } from '@/lib/context/server'
 import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { parseFraudCaseNetwork } from '@/lib/context/fraudCaseNetwork'
+import { readBoundedOwnershipJson } from '@/lib/context/kybOwnershipServer'
 
 export const dynamic = 'force-dynamic'
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (!response.ok) return fail('context_unavailable', [401, 403, 503].includes(response.status) ? response.status : 502)
     let network
     try {
-      network = parseFraudCaseNetwork(await response.json())
+      network = parseFraudCaseNetwork(await readBoundedOwnershipJson(response, 256 * 1024))
       if (network.root.caseId !== rootId) throw new Error('Scope mismatch')
     } catch { return fail('invalid_response', 502) }
     return NextResponse.json(network, { headers: { 'Cache-Control': 'no-store' } })

@@ -41,4 +41,19 @@ describe('Fraud network BFF', () => {
     fetcher.mockResolvedValue(new Response(JSON.stringify({ root: { ...root, caseId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }, related: [], inspectedCandidates: 0, candidateTruncated: false })))
     expect((await route()).status).toBe(502)
   })
+
+  it('rejects oversized streamed evidence before parsing it', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'admin-token', roles: ['ROLE_ADMIN'] } } as never)
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(256 * 1024 + 1))
+        controller.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+
+    const response = await route()
+    expect(response.status).toBe(502)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+  })
 })
