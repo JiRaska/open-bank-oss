@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.253.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.1...admin-ui-v0.253.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** explain and expose every CI quality gate ([#10828](https://github.com/JiRaska/open-bank-oss/issues/10828)) ([8c46ca2](https://github.com/JiRaska/open-bank-oss/commit/8c46ca2828271e0e1646cde891f60f9c992661ef))
+
 ## [0.252.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.0...admin-ui-v0.252.1) (2026-09-24)
 
 
