@@ -82,6 +82,7 @@ class SepaPaymentOutboxAtomicityIT {
             .describedAs("outbox event types written for payment %s", paymentId)
             .containsExactly(CREATED_EVENT)
         assertSameTransaction(paymentId, CREATED_EVENT)
+        assertThat(writers.getValue(CREATED_EVENT).observedStatus).isEqualTo("RECEIVED")
     }
 
     @Test
@@ -99,6 +100,7 @@ class SepaPaymentOutboxAtomicityIT {
         val writers = writersOf(paymentId)
         assertThat(writers.keys).contains(CREATED_EVENT, STATUS_CHANGED_EVENT)
         assertSameTransaction(paymentId, STATUS_CHANGED_EVENT)
+        assertThat(writers.getValue(STATUS_CHANGED_EVENT).observedStatus).isEqualTo("VALIDATED")
 
         // The control: the same comparison, in the same run, on a pair that genuinely was written
         // by two different transactions. Without it, `assertSameTransaction` above could be passing
@@ -131,24 +133,41 @@ class SepaPaymentOutboxAtomicityIT {
                 pair.outboxXmin,
             )
             .isEqualTo(pair.paymentXmin)
+        assertThat(pair.observationXmin)
+            .describedAs("the source workflow observation must commit with the payment and outbox")
+            .isEqualTo(pair.paymentXmin)
     }
 
-    private data class WriterPair(val paymentXmin: String, val outboxXmin: String)
+    private data class WriterPair(
+        val paymentXmin: String,
+        val outboxXmin: String,
+        val observationXmin: String,
+        val observedStatus: String,
+    )
 
     /** Per event type: the transaction ids (`xmin`) that wrote the aggregate row and that outbox row. */
     private fun writersOf(paymentId: UUID): Map<String, WriterPair> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
-            SELECT o.event_type, p.xmin::text AS payment_xmin, o.xmin::text AS outbox_xmin
+            SELECT o.event_type, p.xmin::text AS payment_xmin, o.xmin::text AS outbox_xmin,
+                   w.xmin::text AS observation_xmin, w.payment_status
             FROM sepa_payments p
             JOIN sepa_payment_outbox o ON o.aggregate_id = p.payment_id
+            JOIN sepa_payment_workflow_observations w ON w.event_id = o.event_id
             WHERE p.payment_id = ?
             """.trimIndent(),
         ).use { statement ->
             statement.setObject(1, paymentId)
             statement.executeQuery().use { rows ->
                 generateSequence { if (rows.next()) rows else null }
-                    .map { it.getString(1) to WriterPair(it.getString(2), it.getString(3)) }
+                    .map {
+                        it.getString(1) to WriterPair(
+                            it.getString(2),
+                            it.getString(3),
+                            it.getString(4),
+                            it.getString(5),
+                        )
+                    }
                     .toMap()
             }
         }

@@ -27,7 +27,8 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
     override suspend fun save(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
         Panache.withTransaction {
             persist(payment.toEntity())
-                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
+                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage) }
+                .flatMap { persistWorkflowObservation(payment, outboxMessage).replaceWith(payment) }
         }.awaitSuspending()
 
     override suspend fun findById(paymentId: UUID): SepaPayment? =
@@ -94,7 +95,27 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
             .flatMap {
                 outboxMessages.fold(Uni.createFrom().voidItem()) { chain, message ->
                     chain.flatMap { outboxRepository.persistWithinCurrentTransaction(message).replaceWithVoid() }
-                }.replaceWith(payment)
+                }.flatMap { persistWorkflowObservation(payment, outboxMessages.first()).replaceWith(payment) }
             }
     }.awaitSuspending()
+
+    /** A source outcome, not an incident attribution; committed with its payment and outbox event. */
+    private fun persistWorkflowObservation(payment: SepaPayment, message: SepaPaymentOutboxMessage): Uni<Int> {
+        require(message.aggregateId == payment.id) { "workflow observation must belong to this payment" }
+        return Panache.getSession().flatMap { session ->
+            session.createNativeMutationQuery(
+                """INSERT INTO sepa_payment_workflow_observations
+                   (event_id, payment_id, payment_revision, event_type, payment_status, observed_at, synthetic)
+                   VALUES (:eventId, :paymentId, :revision, :eventType, :status, :observedAt, :synthetic)
+                """.trimIndent(),
+            ).setParameter("eventId", message.eventId)
+                .setParameter("paymentId", payment.id)
+                .setParameter("revision", payment.revision)
+                .setParameter("eventType", message.eventType)
+                .setParameter("status", payment.status.name)
+                .setParameter("observedAt", message.createdAt)
+                .setParameter("synthetic", message.synthetic)
+                .executeUpdate()
+        }
+    }
 }
