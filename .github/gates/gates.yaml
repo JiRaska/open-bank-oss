@@ -714,6 +714,22 @@ gates:
   # against the DDL. Deriving "does this column exist" needs real DDL parsing — partitioned tables,
   # custom enum types, ALTER/RENAME chains — and two attempts at it produced 12 and then ~40 false
   # findings against correct code. A gate that cries wolf gets ignored. ENFORCED.
+  - id: otel-exporter-endpoint
+    name: "Quarkus Deployments with quarkus-opentelemetry set the OTLP endpoint (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Without QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT a pod exports spans to the localhost:4317 default,
+      logs Connection refused on every batch and ships no traces, while staying Ready; 21
+      Deployments were in that state on 2026-09-24.
+    review_after: 2027-03-24
+    budget_seconds: 15   # 4.3 s measured locally 2026-09-24
+    min_subjects: 30   # 39 containers today (2026-09-24)
+    selftest_inputs: [".github/scripts/check-otel-exporter-endpoint.py"]
+    selftest: |
+      python3 .github/scripts/check-otel-exporter-endpoint.py --self-test
+    run: |
+      python3 .github/scripts/check-otel-exporter-endpoint.py
   - id: entity-column-names
     name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
     group: gitops
