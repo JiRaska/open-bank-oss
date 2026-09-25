@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# The HTTPS endpoint stays in the secret store; this public manifest exposes no address.
+# Optional at the workload until the source endpoint and mTLS path have been verified.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: context-lending-source-discovery
+  namespace: context
+  annotations:
+    openbank.io/rotation-deadline: "2027-09-25"
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: vault-kv, kind: ClusterSecretStore }
+  target: { name: context-lending-source-discovery, creationPolicy: Owner }
+  data:
+    - secretKey: LENDING_GRAPH_SOURCE_URL
+      remoteRef: { key: context-lending-source-discovery, property: LENDING_GRAPH_SOURCE_URL }

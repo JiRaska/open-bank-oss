@@ -29,6 +29,23 @@ class ContextApiContractTest {
     }
 
     @Test
+    fun `Lending candidate contract returns only bounded assigned loan IDs`() {
+        val operation = contract.substringAfter("/api/v1/context/lending-loans/{loanId}/assigned-candidates:")
+            .substringBefore("/api/v1/context/fraud-cases/{caseId}/network:")
+        assertThat(operation).contains(
+            "getAssignedLendingCandidates",
+            "LendingAssignedCandidates",
+            "'200'",
+            "'403'",
+            "'503'",
+        )
+        assertThat(operation).doesNotContain("guarantorPartyId", "capAmount", "sourceDocumentId")
+        val schema = contract.substringAfter("    LendingAssignedCandidates:")
+            .substringBefore("    LendingGuaranteeHistory:")
+        assertThat(schema).contains("maxItems: 256", "uniqueItems: true", "truncated:")
+    }
+
+    @Test
     fun `KYB source access check has a data-free success response`() {
         val operation = contract.substringAfter("/api/v1/context/kyb-cases/{id}/access:")
             .substringBefore("/api/v1/context/kyb-cases/{id}/ownership-observations:")

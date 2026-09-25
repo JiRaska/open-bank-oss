@@ -55,6 +55,10 @@ spec:
               valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
             - name: FRAUD_CASE_SOURCE_URL
               valueFrom: { secretKeyRef: { name: context-fraud-source-discovery, key: FRAUD_CASE_SOURCE_URL } }
+            # The loan evidence route stays off until this optional HTTPS source URL,
+            # client certificate and the source image are verified together.
+            - name: LENDING_GRAPH_SOURCE_URL
+              valueFrom: { secretKeyRef: { name: context-lending-source-discovery, key: LENDING_GRAPH_SOURCE_URL, optional: true } }
             - { name: KAFKA_BOOTSTRAP_SERVERS, value: openbank-cluster-kafka-bootstrap.messaging.svc:9093 }
             - { name: KAFKA_SECURITY_PROTOCOL, value: SSL }
             - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: /mnt/kafka-user/user.p12 }
@@ -80,6 +84,7 @@ spec:
             - { name: tmp, mountPath: /tmp }
             - { name: context-tls, mountPath: /mnt/context-tls, readOnly: true }
             - { name: fraud-tls-trust, mountPath: /mnt/fraud-tls/ca.crt, subPath: ca.crt, readOnly: true }
+            - { name: lending-client-tls, mountPath: /mnt/lending-client-tls, readOnly: true }
             - { name: kafka-user, mountPath: /mnt/kafka-user, readOnly: true }
             - { name: kafka-ca, mountPath: /mnt/kafka-ca, readOnly: true }
             - { name: msg-override, mountPath: /mnt/msg-config, readOnly: true }
@@ -110,6 +115,7 @@ spec:
         - { name: opa-tmp, emptyDir: {} }
         - { name: context-tls, secret: { secretName: context-service-internal-tls } }
         - { name: fraud-tls-trust, secret: { secretName: context-fraud-trust } }
+        - { name: lending-client-tls, secret: { secretName: context-lending-client-tls, optional: true } }
         - { name: kafka-user, secret: { secretName: context-service-kafka-keystore } }
         - { name: kafka-ca, secret: { secretName: kafka-cluster-ca-truststore } }
         - { name: msg-override, configMap: { name: context-service-msg-override } }

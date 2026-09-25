@@ -11,13 +11,27 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
+import java.util.Optional
 import java.util.UUID
 
 class LendingGuaranteeSourceEvidenceTest {
     private val client = mockk<LendingGuaranteeSourceClient>()
-    private val source = LendingGuaranteeSourceEvidence(client)
+    private val source = LendingGuaranteeSourceEvidence(client, Optional.of("https://source.invalid:8443"))
     private val loanId = UUID.randomUUID()
     private val bearer = "Bearer investigator-token"
+
+    @Test
+    fun `source URL must use the mTLS listener before any bearer is forwarded`() {
+        assertThat(isTrustedLendingSourceUrl("http://source.invalid:8126")).isFalse()
+        assertThat(isTrustedLendingSourceUrl("https://source.invalid:443")).isFalse()
+        assertThat(isTrustedLendingSourceUrl("https://user@source.invalid:8443")).isFalse()
+        assertThat(isTrustedLendingSourceUrl("https://source.invalid:8443/path")).isFalse()
+        assertThat(isTrustedLendingSourceUrl("https://source.invalid:8443")).isTrue()
+        assertThatThrownBy {
+            runBlocking { LendingGuaranteeSourceEvidence(client, Optional.empty()).read(loanId, bearer) }
+        }.isInstanceOf(LendingGuaranteeSourceUnavailable::class.java)
+        io.mockk.verify(exactly = 0) { client.approvedGuarantees(any(), any(), any(), any(), any()) }
+    }
 
     @Test
     fun `forwards exact investigator scope and accepts one loan evidence`(): Unit = runBlocking {

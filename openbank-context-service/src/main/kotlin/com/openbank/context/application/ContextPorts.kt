@@ -47,7 +47,7 @@ data class ContextReadAudit(
     val id: UUID = Ids.newId(),
 )
 
-/** Records materialized responses; candidate reads and failed queries are not disclosures. */
+/** Records materialized responses, including returned candidate IDs; failed queries are not disclosures. */
 data class ContextDisclosure(
     val evidenceRefs: List<String>,
     val evidenceCount: Int,

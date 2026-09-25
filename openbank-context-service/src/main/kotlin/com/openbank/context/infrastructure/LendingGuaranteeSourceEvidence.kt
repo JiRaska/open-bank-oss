@@ -14,12 +14,15 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import kotlinx.coroutines.CancellationException
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
+import java.net.URI
 import java.time.Duration
 import java.time.Instant
+import java.util.Optional
 import java.util.UUID
 import java.util.concurrent.Semaphore
 
@@ -65,11 +68,15 @@ interface LendingGuaranteeSourceClient {
 }
 
 @ApplicationScoped
-class LendingGuaranteeSourceEvidence(@param:RestClient private val client: LendingGuaranteeSourceClient) {
+class LendingGuaranteeSourceEvidence(
+    @param:RestClient private val client: LendingGuaranteeSourceClient,
+    @ConfigProperty(name = "LENDING_GRAPH_SOURCE_URL") private val sourceUrl: Optional<String>,
+) {
     private val inFlight = Semaphore(MAX_INFLIGHT)
 
     @Suppress("TooGenericExceptionCaught", "ThrowsCount")
     suspend fun read(loanId: UUID, bearer: String): LendingGuaranteeHistory {
+        if (!isTrustedLendingSourceUrl(sourceUrl.orElse(null))) throw LendingGuaranteeSourceUnavailable()
         if (!inFlight.tryAcquire()) throw LendingGuaranteeSourceUnavailable()
         try {
             val history = try {
@@ -121,6 +128,24 @@ class LendingGuaranteeSourceEvidence(@param:RestClient private val client: Lendi
         const val TIMEOUT_SECONDS = 4L
         val DENIED_STATUSES = setOf(401, 403, 404)
         val SHA256_PATTERN = Regex("[0-9a-fA-F]{64}")
+    }
+}
+
+private const val LENDING_MTLS_PORT = 8443
+
+internal fun isTrustedLendingSourceUrl(value: String?): Boolean {
+    if (value == null) return false
+    return try {
+        val uri = URI(value)
+        uri.scheme == "https" &&
+            uri.host != null &&
+            uri.port == LENDING_MTLS_PORT &&
+            uri.userInfo == null &&
+            uri.rawPath.isNullOrEmpty() &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null
+    } catch (_: IllegalArgumentException) {
+        false
     }
 }
 
