@@ -29,8 +29,12 @@ internal fun secureFraudSourceUrl(value: String): Boolean = runCatching {
     URI(value).let {
         it.scheme == "https" &&
             it.host != null &&
+            it.port == FRAUD_MTLS_PORT &&
             it.userInfo == null &&
+            it.rawPath.isNullOrEmpty() &&
             it.rawQuery == null &&
             it.rawFragment == null
     }
 }.getOrDefault(false)
+
+private const val FRAUD_MTLS_PORT = 8443
