@@ -34,7 +34,10 @@ import java.util.UUID
 
 /**
  * One-off ledger backfill for loans whose GL history never reached the ledger (#10746, root cause
- * #6057). ROLE_ADMIN only; OPA additionally vetoes every service account (lending_rest_ext.rego).
+ * #6057). ROLE_FINANCE (the finance department, #10618) or ROLE_ADMIN, humans only: OPA additionally
+ * vetoes every service account and every human holding neither role (lending_rest_ext.rego).
+ * Maker != checker is enforced in [LedgerBackfillService]; execution is open to either role because
+ * the control is the approval, which is bound to the plan hash and re-checked at execution.
  *
  * Operator flow: `GET /plan` (dry-run, writes nothing) -> `POST /requests` (maker) ->
  * `POST /requests/{id}/decide` (checker, must differ) -> `POST /requests/{id}/execute?execute=true`.
@@ -43,7 +46,7 @@ import java.util.UUID
 @Path("/api/v1/lending/ledger-backfill")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Ledger Backfill", description = "Four-eyes back-posting of loan GL history that never reached the ledger")
-@RolesAllowed("ROLE_ADMIN")
+@RolesAllowed("ROLE_ADMIN", "ROLE_FINANCE")
 class LedgerBackfillResource(private val backfill: LedgerBackfillService, private val identity: SecurityIdentity) {
     private fun actor(): String = identity.principal?.name.orEmpty()
 

@@ -139,7 +139,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(2)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `2 - the dry-run returns the journal set and ties out, and writes nothing`() {
         val before = ledger.recorded.size
         val body =
@@ -165,7 +165,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(3)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `3 - maker proposes, and cannot execute or approve their own request`() {
         requestId = Given {
             contentType("application/json")
@@ -207,7 +207,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(5)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `5 - without execute=true the approved request only returns its plan`() {
         Given { queryParam("execute", false) } When {
             post("/api/v1/lending/ledger-backfill/requests/$requestId/execute")
@@ -220,7 +220,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(6)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `6 - a failed leg stops that loan only and leaves the request re-runnable`() {
         ledger.failOnce += "loan:$czkLoan:inst:1:principal"
         val body = Given { queryParam("execute", true) } When {
@@ -239,7 +239,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(7)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `7 - the re-run completes with exactly one journal per leg, value-dated, and ties out`() {
         val attemptsBefore = ledger.recorded.count {
             it.reference.contains(czkLoan.toString()) ||
@@ -301,11 +301,24 @@ class LedgerBackfillIT {
 
     @Test
     @Order(8)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `8 - an executed request cannot run again`() {
         Given { queryParam("execute", true) } When {
             post("/api/v1/lending/ledger-backfill/requests/$requestId/execute")
         } Then { statusCode(422) }
+    }
+
+    // #10618: the maker above is ROLE_FINANCE and the checker ROLE_ADMIN; roles outside the pair get 403.
+    @Test
+    @Order(9)
+    @TestSecurity(user = "desk-operator", roles = ["ROLE_OPERATOR", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"])
+    fun `9 - a role outside finance and admin is refused the dry-run`() {
+        Given {
+            queryParam("cutoverDate", cutover.toString())
+            queryParam("disbursedBefore", "2020-02-01")
+        } When {
+            get("/api/v1/lending/ledger-backfill/plan")
+        } Then { statusCode(403) }
     }
 
     /** The IT database is shared by every @QuarkusTest: leave nothing behind for book-wide counts (LendingSummaryIT). */

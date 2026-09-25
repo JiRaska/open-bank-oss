@@ -1021,6 +1021,7 @@ paths:
       tags: [Lending]
       operationId: planLedgerBackfill
       summary: "Dry-run of the one-off ledger backfill (#10746): exact journal set, GL totals, tie-out. Writes nothing."
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       parameters:
         - name: cutoverDate
           in: query
@@ -1047,6 +1048,7 @@ paths:
       tags: [Lending]
       operationId: proposeLedgerBackfill
       summary: Propose a ledger backfill (maker); the approval binds to the plan hash
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       requestBody:
         required: true
         content:
@@ -1072,6 +1074,7 @@ paths:
       tags: [Lending]
       operationId: decideLedgerBackfill
       summary: Approve or reject a ledger backfill request (checker, must differ from the maker)
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       parameters:
         - name: id
           in: path
@@ -1106,6 +1109,7 @@ paths:
       tags: [Lending]
       operationId: executeLedgerBackfill
       summary: Execute an APPROVED ledger backfill; without execute=true only returns the plan
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       parameters:
         - name: id
           in: path
