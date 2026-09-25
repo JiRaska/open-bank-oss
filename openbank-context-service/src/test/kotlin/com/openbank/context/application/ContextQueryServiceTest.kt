@@ -231,9 +231,10 @@ class ContextQueryServiceTest {
         val investigation = InvestigationContext("case-42", "FRAUD_INVESTIGATION", now)
         coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
         coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "fraud-policy-1")
+        val disclosure = ContextDisclosure(listOf("fraud-case:case-42"), 1, false)
 
         assertThat(
-            service.fraudCaseEvidence("case-42", admin, investigation) { ContextReadResult("allowed", null) },
+            service.fraudCaseEvidence("case-42", admin, investigation) { ContextReadResult("allowed", disclosure) },
         ).isEqualTo("allowed")
         coVerify {
             pdp.allow(
@@ -246,6 +247,9 @@ class ContextQueryServiceTest {
             )
         }
         coVerify { audit.record(match { it.decision == "ALLOWED" && it.policyVersion == "fraud-policy-1" }) }
+        coVerify {
+            audit.recordDisclosure(match { it.disclosure == disclosure && it.queryHash.length == 64 })
+        }
     }
 
     private fun node(key: String, type: String) = ContextNode(
