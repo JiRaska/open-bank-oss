@@ -87,8 +87,8 @@ class LendingLoanCandidatesResourceTest {
         every { identity.roles } returns setOf("ROLE_CREDIT_RISK")
     }
 
-    private fun request(caseId: String, purpose: String) = runBlocking {
-        resource.assignedCandidates(loanId, caseId, purpose)
+    private fun request(caseId: String, purpose: String): Response {
+        return runBlocking { resource.assignedCandidates(loanId, caseId, purpose) }
     }
 
     private companion object {
