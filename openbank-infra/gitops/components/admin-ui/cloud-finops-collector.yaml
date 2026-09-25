@@ -124,6 +124,13 @@ spec:
                   git clone --quiet --depth 1 --filter=blob:none --sparse "$REPO_URL" /tmp/repo
                   git -C /tmp/repo sparse-checkout set openbank-infra/aws openbank-infra/scripts
                   echo "repo at $(git -C /tmp/repo rev-parse HEAD)"
+                  # Drop .git BEFORE infracost sees the tree. Inside a git repo infracost
+                  # rewrites a local module source (`../../modules/x`) into a remote
+                  # `git::<origin>?ref=<sha>&subdir=../../modules/x` and fetches it, which fails
+                  # ("could not normalize path") and leaves that env with ZERO resources while
+                  # infracost still exits 0. Measured: sparse clone -> sandbox-substrate 0 and
+                  # web-prod 0 resources, same tree with no .git -> 23 and 7.
+                  rm -rf /tmp/repo/.git
                   RULES=/tmp/repo/openbank-infra/aws/finops/cloud-finops-rules.json
                   COLLECT=/tmp/repo/openbank-infra/scripts/cloud-finops-collect.py
 

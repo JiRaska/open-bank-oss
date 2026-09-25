@@ -240,7 +240,21 @@ def load_env_breakdowns(infracost_dir: Path, envs: list[str]) -> dict[str, list[
         path = infracost_dir / f"{env}.json"
         if not path.is_file():
             raise CollectError(f"no infracost output for env {env} at {path}")
-        resources = flatten(json.loads(path.read_text()))
+        doc = json.loads(path.read_text())
+        # infracost exits 0 and writes a well-formed document when a project fails to LOAD
+        # (e.g. "Error loading Terraform modules"): the failure is only in
+        # projects[].metadata.errors, and the breakdown is simply empty. Any isError entry is a
+        # failed estimate, even if other projects in the file priced fine — surface its message,
+        # so the Job log says WHY instead of only "zero resources".
+        load_errors = [
+            f"{p.get('name', '?')}: {e.get('message', '').strip()[:400]}"
+            for p in doc.get("projects") or []
+            for e in (p.get("metadata") or {}).get("errors") or []
+            if e.get("isError", True)
+        ]
+        if load_errors:
+            raise CollectError(f"infracost could not load env {env}: " + " | ".join(load_errors))
+        resources = flatten(doc)
         if not resources:
             # An empty breakdown is what a wrong --path, an HCL parse failure or a pricing-API
             # outage all look like. Reporting it as $0 would be the successful-no-op defect.
