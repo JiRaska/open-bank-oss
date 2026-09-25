@@ -10,7 +10,8 @@ info:
   # 1.26.0 -> 1.27.0: additive — bounded party application slice for Customer 360.
   # 1.27.0 -> 1.28.0: additive — case-scoped, bounded approved guarantee history.
   # 1.28.0 -> 1.29.0: additive — disabled-by-default loan-scoped guarantee maker/checker routes.
-  version: 1.29.0
+  # 1.29.0 -> 1.30.0: additive — bounded shared-guarantor candidate evidence for assigned loans.
+  version: 1.30.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
