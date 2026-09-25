@@ -2,7 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
-followup: "#9945 — add durable incident emission and aggregate revisions, then correlate incident windows with observed business workflows and case-level evidence"
+followup: "#10868 — correlate incident windows with observed business workflows and case-level evidence; #9945 — shared graph roadmap"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -168,3 +168,4 @@ cover these distinctions; this does not activate business-case drill-down.
 - [ADR-0146](0146-incident-response-and-security-operations-framework.md)
 - [ADR-0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md)
 - [Implementation roadmap #9945](https://github.com/JiRaska/open-bank-oss/issues/9945)
+- [Observed business-case impact #10868](https://github.com/JiRaska/open-bank-oss/issues/10868)
