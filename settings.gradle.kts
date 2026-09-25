@@ -27,6 +27,15 @@ pluginManagement {
 // before it tries to resolve the `id("openbank.quarkus-service")` plugin id.
 includeBuild("build-logic")
 
+// Convention-plugin dependencies enter each project's buildscript classpath separately
+// from build-logic's own runtimeClasspath. Floor Kover's transitive FreeMarker there
+// too, before a project resolves its plugin classpath (Dependabot alert #151).
+gradle.beforeProject {
+    buildscript.configurations.getByName("classpath").resolutionStrategy.force(
+        "org.freemarker:freemarker:2.3.35"
+    )
+}
+
 rootProject.name = "openbank"
 
 plugins {
