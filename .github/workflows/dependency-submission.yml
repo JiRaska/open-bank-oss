@@ -210,14 +210,13 @@ jobs:
           # `detachedConfiguration11` would silently stop matching.
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
-      # assemble resolves runtimeClasspath (what actually ships); testClasses additionally
-      # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
-      # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
-      # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
+      # The setup-gradle plugin's resolveAllDependencies task resolves every project's
+      # resolvable configuration, including runtime and test classpaths, without compiling
+      # the fleet. Building assemble + testClasses exhausted the runner's 6 GiB daemon heap
+      # even with two workers, before the snapshot could be submitted. Keep the extractor's
+      # detached/buildscript configuration filter above; it applies to this task too.
       - name: Resolve fleet dependency graph
-        # The complete fleet reached the daemon's 6 GiB heap with the default worker count.
-        # Limit concurrent task models without omitting any runtime or test classpath.
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon --max-workers=2
+        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew --no-configure-on-demand :ForceDependencyResolutionPlugin_resolveAllDependencies --no-daemon --max-workers=2
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
