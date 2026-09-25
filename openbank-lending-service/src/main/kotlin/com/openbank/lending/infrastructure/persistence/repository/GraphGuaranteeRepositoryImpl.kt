@@ -172,11 +172,11 @@ class GraphGuaranteeRepositoryImpl(
         check(bankScope.matches(Regex("[a-z0-9][a-z0-9-]{0,63}"))) { "invalid deployment bank scope" }
         outbox.eventId = Ids.newId()
         outbox.aggregateId = entity.contractId
-        outbox.eventType = APPROVED_EVENT_TYPE
+        outbox.eventType = GuaranteeApprovedReference.EVENT_TYPE
         outbox.payload = mapper.writeValueAsString(
             GuaranteeApprovedReference(
                 schemaVersion = 1,
-                eventType = APPROVED_EVENT_TYPE,
+                eventType = GuaranteeApprovedReference.EVENT_TYPE,
                 guaranteeId = entity.guaranteeId,
                 loanId = entity.loanId,
                 revision = entity.revision,
@@ -189,19 +189,22 @@ class GraphGuaranteeRepositoryImpl(
         outbox.updatedAt = at
     }
 
-    private data class GuaranteeApprovedReference(
-        val schemaVersion: Int,
-        val eventType: String,
-        val guaranteeId: UUID,
-        val loanId: UUID,
-        val revision: Long,
-        val bankScope: String,
-        val occurredAt: Instant,
-    )
-
     private companion object {
-        const val APPROVED_EVENT_TYPE = "lending.graph.guarantee.approved"
         const val MAX_APPROVED_GRAPH_FACTS = 100
         const val MAX_CANDIDATES = 256
+    }
+}
+
+private data class GuaranteeApprovedReference(
+    val schemaVersion: Int,
+    val eventType: String,
+    val guaranteeId: UUID,
+    val loanId: UUID,
+    val revision: Long,
+    val bankScope: String,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "lending.graph.guarantee.approved"
     }
 }

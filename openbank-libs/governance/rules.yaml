@@ -483,6 +483,8 @@ change_requirements:
     ci_producer: ".github/scripts/check-event-consumer-liveness.py"
     # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
     allowlist:
+      - topic: "openbank.lending.graph.references"
+        reason: "Sequenced source-first rollout for Context Graph: #10266 publishes bounded approved-guarantee references, while the real Context @Incoming consumer is in dependent PR #10273. This is a tracked temporary gap, not a claim that the source is ready for production alone. Remove this entry when #10273 lands; the enforced stale-entry check will then require its removal."
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
       # openbank.kyb.events left the allowlist here: it now has TWO consumers, which is what the
