@@ -32,9 +32,22 @@ data class WorkflowObservationHistory(
     val truncated: Boolean,
 )
 
+data class WorkflowObservationRecord(val paymentId: UUID, val observation: WorkflowObservation)
+
 /** Bounded internal read; no endpoint grants case access until incident assignment policy exists. */
 @ApplicationScoped
 class SepaWorkflowObservationSource {
+    /** Exact source lookup for a future case-scoped access check; never a public enumeration API. */
+    suspend fun find(eventId: UUID): WorkflowObservationRecord? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "from SepaWorkflowObservationEntity where eventId = :eventId",
+                SepaWorkflowObservationEntity::class.java,
+            ).setParameter("eventId", eventId).singleResultOrNull
+                .map { row -> row?.let { WorkflowObservationRecord(it.paymentId, it.toObservation()) } }
+        }
+    }.awaitSuspending()
+
     suspend fun history(paymentId: UUID): WorkflowObservationHistory? = Panache.withSession {
         Panache.getSession().flatMap { session ->
             session.createQuery(
@@ -80,25 +93,25 @@ class SepaWorkflowObservationSource {
         return WorkflowObservationHistory(
             paymentId,
             sourceRevision,
-            retained.map {
-                WorkflowObservation(
-                    it.eventId,
-                    it.paymentRevision,
-                    it.environment,
-                    SOURCE_SERVICE,
-                    it.eventType,
-                    it.paymentStatus,
-                    it.contentDigest,
-                    it.observedAt,
-                    it.workflowStartedAt,
-                    it.recordedAt,
-                    it.synthetic,
-                )
-            },
+            retained.map { it.toObservation() },
             coverage,
             truncated,
         )
     }
+
+    private fun SepaWorkflowObservationEntity.toObservation() = WorkflowObservation(
+        eventId,
+        paymentRevision,
+        environment,
+        SOURCE_SERVICE,
+        eventType,
+        paymentStatus,
+        contentDigest,
+        observedAt,
+        workflowStartedAt,
+        recordedAt,
+        synthetic,
+    )
 
     private companion object {
         const val MAX_OBSERVATIONS = 100

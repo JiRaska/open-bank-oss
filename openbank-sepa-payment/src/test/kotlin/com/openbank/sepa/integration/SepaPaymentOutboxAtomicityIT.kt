@@ -123,6 +123,9 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(observation.sourceService).isEqualTo("openbank-sepa-payment")
         assertThat(observation.workflowStartedAt).isBetween(before, after)
         assertThat(observation.recordedAt).isBetween(before, after)
+        val exact = requireNotNull(onEventLoop { observations.find(observation.eventId) })
+        assertThat(exact.paymentId).isEqualTo(paymentId)
+        assertThat(exact.observation).isEqualTo(observation)
     }
 
     @Test
@@ -165,6 +168,7 @@ class SepaPaymentOutboxAtomicityIT {
         val missing = UUID.randomUUID()
         assertThat(writersOf(missing)).isEmpty()
         assertThat(onEventLoop { observations.history(missing) }).isNull()
+        assertThat(onEventLoop { observations.find(missing) }).isNull()
     }
 
     @Test
