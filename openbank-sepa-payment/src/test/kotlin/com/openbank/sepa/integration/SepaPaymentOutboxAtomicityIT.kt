@@ -98,6 +98,8 @@ class SepaPaymentOutboxAtomicityIT {
         val history = onEventLoop { observations.history(paymentId) }
         assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.COMPLETE)
         assertThat(history?.observations?.map { it.revision to it.status }).containsExactly(0L to "RECEIVED")
+        val observation = requireNotNull(history?.observations?.single())
+        assertThat(observation.recordedAt).isAfterOrEqualTo(observation.observedAt)
     }
 
     @Test

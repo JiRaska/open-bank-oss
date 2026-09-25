@@ -17,6 +17,7 @@ data class WorkflowObservation(
     val status: String,
     val contentDigest: String,
     val observedAt: Instant,
+    val recordedAt: Instant,
     val synthetic: Boolean,
 )
 
@@ -81,6 +82,7 @@ class SepaWorkflowObservationSource {
                     it.paymentStatus,
                     it.contentDigest,
                     it.observedAt,
+                    it.recordedAt,
                     it.synthetic,
                 )
             },
