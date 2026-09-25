@@ -147,6 +147,14 @@ behind a separate disabled-by-default switch. It requires the investigator's
 live Context assignment for the exact loan and purpose, and returns no data if
 that check is denied or unavailable. The Context projector, Lending graph UI
 and measured portfolio workload remain absent.
+The repeatable `openbank-lending-service/e2e/lending-graph-load.js` harness
+requires an isolated synthetic fixture with two assigned loan cases sharing a
+verified guarantor, two currencies and a partial guarantee. Its explicit
+`BASE_RPS` is the approved 1× arrival rate; it then runs 10× for the same
+duration. Both phases require 100% authorization and evidence checks, no
+dropped iterations, under 1% HTTP failures, p95 below 300 ms and p99 below
+1,000 ms. The harness is not a performance result: this stage has no enabled
+source route or Context projection, so qualification remains pending.
 Separately, the existing Customer 360 credit-application overlay uses an optional
 database-bounded `limit` on the party application list. Omitting the parameter
 retains the existing full-list contract. A `(party_id, created_at DESC, id DESC)`
