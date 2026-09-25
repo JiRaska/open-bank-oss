@@ -123,9 +123,11 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(observation.sourceService).isEqualTo("openbank-sepa-payment")
         assertThat(observation.workflowStartedAt).isBetween(before, after)
         assertThat(observation.recordedAt).isBetween(before, after)
-        val exact = requireNotNull(onEventLoop { observations.find(observation.eventId) })
+        val exact = requireNotNull(onEventLoop { observations.find(observation.eventId, paymentId, "test") })
         assertThat(exact.paymentId).isEqualTo(paymentId)
         assertThat(exact.observation).isEqualTo(observation)
+        assertThat(onEventLoop { observations.find(observation.eventId, UUID.randomUUID(), "test") }).isNull()
+        assertThat(onEventLoop { observations.find(observation.eventId, paymentId, "prod") }).isNull()
     }
 
     @Test
@@ -168,7 +170,7 @@ class SepaPaymentOutboxAtomicityIT {
         val missing = UUID.randomUUID()
         assertThat(writersOf(missing)).isEmpty()
         assertThat(onEventLoop { observations.history(missing) }).isNull()
-        assertThat(onEventLoop { observations.find(missing) }).isNull()
+        assertThat(onEventLoop { observations.find(missing, missing, "test") }).isNull()
     }
 
     @Test
@@ -195,6 +197,7 @@ class SepaPaymentOutboxAtomicityIT {
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
     fun `a pre-V11 observation keeps its missing environment unknown`() {
         val paymentId = createPayment()
+        val legacyEventId = UUID.randomUUID()
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 "UPDATE sepa_payments SET aggregate_revision = 1 WHERE payment_id = ?",
@@ -209,7 +212,7 @@ class SepaPaymentOutboxAtomicityIT {
                    VALUES (?, ?, 1, 'payment.status-changed', 'VALIDATED', ?, ?, true)
                 """.trimIndent(),
             ).use { statement ->
-                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(1, legacyEventId)
                 statement.setObject(2, paymentId)
                 statement.setString(3, "0".repeat(64))
                 statement.setObject(4, java.time.OffsetDateTime.now())
@@ -221,6 +224,7 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(history.observations.map { it.revision }).containsExactly(0L, 1L)
         assertThat(history.observations.last().environment).isNull()
         assertThat(history.observations.last().workflowStartedAt).isNull()
+        assertThat(onEventLoop { observations.find(legacyEventId, paymentId, "test") }).isNull()
     }
 
     @Test

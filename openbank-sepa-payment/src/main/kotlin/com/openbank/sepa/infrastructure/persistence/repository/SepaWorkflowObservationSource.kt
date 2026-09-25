@@ -37,16 +37,20 @@ data class WorkflowObservationRecord(val paymentId: UUID, val observation: Workf
 /** Bounded internal read; no endpoint grants case access until incident assignment policy exists. */
 @ApplicationScoped
 class SepaWorkflowObservationSource {
-    /** Exact source lookup for a future case-scoped access check; never a public enumeration API. */
-    suspend fun find(eventId: UUID): WorkflowObservationRecord? = Panache.withSession {
-        Panache.getSession().flatMap { session ->
-            session.createQuery(
-                "from SepaWorkflowObservationEntity where eventId = :eventId",
-                SepaWorkflowObservationEntity::class.java,
-            ).setParameter("eventId", eventId).singleResultOrNull
-                .map { row -> row?.let { WorkflowObservationRecord(it.paymentId, it.toObservation()) } }
-        }
-    }.awaitSuspending()
+    /** Exact source lookup after a separate incident-case authorization; no cross-case enumeration. */
+    suspend fun find(eventId: UUID, paymentId: UUID, environment: String): WorkflowObservationRecord? =
+        Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    """from SepaWorkflowObservationEntity
+                       where eventId = :eventId and paymentId = :paymentId and environment = :environment
+                    """.trimIndent(),
+                    SepaWorkflowObservationEntity::class.java,
+                ).setParameter("eventId", eventId).setParameter("paymentId", paymentId)
+                    .setParameter("environment", environment).singleResultOrNull
+                    .map { row -> row?.let { WorkflowObservationRecord(it.paymentId, it.toObservation()) } }
+            }
+        }.awaitSuspending()
 
     suspend fun history(paymentId: UUID): WorkflowObservationHistory? = Panache.withSession {
         Panache.getSession().flatMap { session ->
