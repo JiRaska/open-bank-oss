@@ -46,6 +46,18 @@ class ContextApiContractTest {
     }
 
     @Test
+    fun `Lending shared guarantor contract bounds independently authorized related loans`() {
+        val operation = contract.substringAfter("/api/v1/context/lending-loans/{loanId}/shared-guarantors:")
+            .substringBefore("/api/v1/context/fraud-cases/{caseId}/network:")
+        assertThat(
+            operation,
+        ).contains("getAssignedLendingSharedGuarantors", "LendingSharedGuarantorHistory", "'403'", "'503'")
+        val schema = contract.substringAfter("    LendingSharedGuarantorHistory:")
+            .substringBefore("    LendingAssignedCandidates:")
+        assertThat(schema).contains("maxItems: 4", "maxItems: 20", "candidateTruncated", "relatedLoansTruncated")
+    }
+
+    @Test
     fun `KYB source access check has a data-free success response`() {
         val operation = contract.substringAfter("/api/v1/context/kyb-cases/{id}/access:")
             .substringBefore("/api/v1/context/kyb-cases/{id}/ownership-observations:")

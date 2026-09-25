@@ -34,4 +34,13 @@
 .detail dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .hash{font-size:11px}
 .caveat{color:var(--text-secondary);font-size:12px;line-height:1.6;margin-top:22px}
+.related{margin-top:48px;padding-top:32px;border-top:1px solid var(--border)}
+.related h2{font-size:24px;margin:0 0 12px}
+.relatedCard{border:1px solid var(--border);border-radius:18px;background:var(--surface);padding:22px;margin:16px 0}
+.relatedCard h3{display:flex;flex-wrap:wrap;gap:10px;font-size:16px;margin:0 0 12px}
+.relatedCard h3 code,.relatedEvidence code{overflow-wrap:anywhere}
+.relatedCard>a{font-size:13px;color:var(--accent)}
+.relatedEvidence{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;padding:0;margin:20px 0 0}
+.relatedEvidence li{display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--border);border-radius:12px;font-size:12px;color:var(--text-secondary)}
+.relatedEvidence strong{color:var(--text-primary);font-size:14px}
 @media(max-width:700px){.shell{padding:24px 16px 50px}.detail dl{grid-template-columns:1fr;gap:5px}.detail dd{margin-bottom:9px}.scopeBadge{margin-left:0}}

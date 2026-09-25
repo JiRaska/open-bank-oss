@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { parseApprovedGuaranteeHistory, type ApprovedGuaranteeHistory } from '@/lib/context/lendingGuarantees'
+import { parseSharedGuarantorRelationships, type SharedGuarantorRelationships } from '@/lib/context/sharedGuarantors'
 import styles from './LendingGuaranteeView.module.css'
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`
@@ -15,6 +16,8 @@ export function LendingGuaranteeView({ loanId }: { loanId: string }) {
   const [history, setHistory] = useState<ApprovedGuaranteeHistory | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'denied' | 'unavailable'>('loading')
   const [selected, setSelected] = useState(0)
+  const [relationships, setRelationships] = useState<SharedGuarantorRelationships | null>(null)
+  const [relationshipStatus, setRelationshipStatus] = useState<'loading' | 'ready' | 'denied' | 'unavailable'>('loading')
   const validLoanId = AUTHORITY_UUID.test(loanId)
   useEffect(() => {
     if (!validLoanId) return
@@ -29,6 +32,24 @@ export function LendingGuaranteeView({ loanId }: { loanId: string }) {
         if (result.loanId !== loanId.toLowerCase()) throw new Error('Scope mismatch')
         if (!controller.signal.aborted) { setHistory(result); setStatus('ready') }
       } catch { if (!controller.signal.aborted) setStatus('unavailable') }
+    }
+    void load()
+    return () => controller.abort()
+  }, [loanId, validLoanId])
+
+  useEffect(() => {
+    if (!validLoanId) return
+    const controller = new AbortController()
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/context/lending-loans/${loanId.toLowerCase()}/shared-guarantors`, { cache: 'no-store', signal: controller.signal })
+        if (controller.signal.aborted) return
+        if (response.status === 401 || response.status === 403) { setRelationshipStatus('denied'); return }
+        if (!response.ok) { setRelationshipStatus('unavailable'); return }
+        const result = parseSharedGuarantorRelationships(await response.json())
+        if (result.rootLoanId !== loanId.toLowerCase()) throw new Error('Scope mismatch')
+        if (!controller.signal.aborted) { setRelationships(result); setRelationshipStatus('ready') }
+      } catch { if (!controller.signal.aborted) setRelationshipStatus('unavailable') }
     }
     void load()
     return () => controller.abort()
@@ -83,5 +104,36 @@ export function LendingGuaranteeView({ loanId }: { loanId: string }) {
       </>}
       <p className={styles.caveat}>{t('Záznamy jsou schválené zdrojové záruky. Graf neodvozuje další úvěry, skutečnou vymahatelnost ani dostupný zůstatek krytí.', 'Records are source-approved guarantees. This graph does not infer other loans, enforceability, or remaining coverage.')}</p>
     </>}
+    {validLoanId && <section className={styles.related} aria-labelledby="shared-guarantors-heading">
+      <h2 id="shared-guarantors-heading">{t('Úvěry se společným ručitelem', 'Loans with a shared guarantor')}</h2>
+      <p className={styles.intro}>{t('Zdrojově doložené vztahy mezi tímto úvěrem a dalšími přiřazenými úvěry. Zobrazené záruky mají společného ručitele; nejde o součet dostupného krytí.', 'Source-backed relationships between this loan and other assigned loans. The shown guarantees share a guarantor; they do not show available combined coverage.')}</p>
+      {relationshipStatus === 'loading' && <p role="status" className={styles.notice}>{t('Načítám související úvěry…', 'Loading related loans…')}</p>}
+      {relationshipStatus === 'denied' && <p role="alert" className={styles.error}>{t('K souvisejícím úvěrům nemáte aktuální oprávnění.', 'You do not have current access to related loans.')}</p>}
+      {relationshipStatus === 'unavailable' && <p role="alert" className={styles.error}>{t('Ověřené vztahy nyní nejsou dostupné. Zdroj může být vypnutý nebo nedostupný.', 'Verified relationships are unavailable. The source may be disabled or unreachable.')}</p>}
+      {relationshipStatus === 'ready' && relationships && <>
+        <div className={styles.meta}>
+          <span>{t('Účinné k', 'Effective at')} <strong>{date(relationships.effectiveAt)}</strong></span>
+          <span>{t('Známé k', 'Known at')} <strong>{date(relationships.knownAt)}</strong></span>
+          <span>{t('Vrácené související úvěry', 'Returned related loans')} <strong>{relationships.relatedLoans.length}{relationships.relatedLoansTruncated ? '+' : ''}</strong></span>
+        </div>
+        {relationships.candidateTruncated && <p role="status" className={styles.warning}>{t('Částečný pohled: výběr kandidátních úvěrů byl omezen. Další vztahy mohou chybět.', 'Partial view: candidate loan selection was limited. Other relationships may be missing.')}</p>}
+        {relationships.relatedLoansTruncated && <p role="status" className={styles.warning}>{t('Částečný pohled: seznam souvisejících úvěrů byl omezen. Další úvěry mohou chybět.', 'Partial view: the related loan list was limited. Other loans may be missing.')}</p>}
+        {relationships.relatedLoans.length === 0 && <p className={styles.notice}>{t('Zdroj nevrátil související přiřazený úvěr v daném čase. Tento výsledek nevylučuje jiné vztahy.', 'The source returned no related assigned loan at this time. This result does not rule out other relationships.')}</p>}
+        {relationships.relatedLoans.map(related => <article className={styles.relatedCard} key={related.loanId}>
+          <h3>{t('Související přiřazený úvěr', 'Related assigned loan')} <code>{related.loanId}</code></h3>
+          <Link href={`/lending/loans/${related.loanId}/guarantees`}>{t('Otevřít evidenci úvěru', 'Open loan evidence')} →</Link>
+          {related.truncated && <p role="status" className={styles.warning}>{t('Částečný pohled: záruky tohoto úvěru byly omezeny.', 'Partial view: guarantees for this loan were limited.')}</p>}
+          <ul className={styles.relatedEvidence}>{related.guarantees.map(guarantee => <li key={guarantee.guaranteeId}>
+            <strong>{t('Záruka', 'Guarantee')} {short(guarantee.guaranteeId)}</strong>
+            <span>{t('Ručitel · ID strany', 'Guarantor · party ID')} <code>{guarantee.guarantorPartyId}</code></span>
+            <span>{t('Smlouva', 'Contract')} <code>{guarantee.contractId}</code> · {t('Revize', 'Revision')} {guarantee.revision}</span>
+            <span>{t('Zdrojový dokument', 'Source document')} <code>{guarantee.sourceDocumentId}</code></span>
+            <span>SHA-256 <code className={styles.hash}>{guarantee.sourceSha256}</code></span>
+            <span>{t('Limit záruky', 'Guarantee cap')} {guarantee.capAmount.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')} {guarantee.currency} · {t('Podíl krytí', 'Coverage fraction')} {guarantee.coverageFraction}</span>
+          </li>)}</ul>
+        </article>)}
+        <p className={styles.caveat}>{t('Zobrazeny jsou jen vrácené přiřazené úvěry a zdrojové záruky. Chybějící vztahy nelze považovat za neexistující.', 'Only returned assigned loans and source guarantees are shown. Missing relationships do not establish absence.')}</p>
+      </>}
+    </section>}
   </main>
 }

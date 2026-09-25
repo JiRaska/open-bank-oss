@@ -51,6 +51,21 @@ data class LendingGuaranteeHistory(
     val truncated: Boolean?,
 )
 
+data class LendingSharedGuarantorHistory(
+    val rootLoanId: UUID?,
+    val effectiveAt: Instant?,
+    val knownAt: Instant?,
+    val candidateTruncated: Boolean?,
+    val relatedLoansTruncated: Boolean?,
+    val relatedLoans: List<LendingRelatedLoanEvidence>?,
+)
+
+data class LendingRelatedLoanEvidence(
+    val loanId: UUID?,
+    val guarantees: List<LendingGuaranteeEvidence>?,
+    val truncated: Boolean?,
+)
+
 @RegisterRestClient(configKey = "lending-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/lending/graph/loans")
@@ -65,6 +80,15 @@ interface LendingGuaranteeSourceClient {
         @HeaderParam("X-Investigation-Purpose") purpose: String,
         @QueryParam("limit") limit: Int,
     ): Uni<LendingGuaranteeHistory>
+
+    @GET
+    @Path("/{loanId}/shared-guarantor-candidates")
+    fun sharedGuarantorCandidates(
+        @PathParam("loanId") loanId: UUID,
+        @HeaderParam("Authorization") bearer: String,
+        @HeaderParam("X-Investigation-Case-Id") caseId: String,
+        @HeaderParam("X-Investigation-Purpose") purpose: String,
+    ): Uni<LendingSharedGuarantorHistory>
 }
 
 @ApplicationScoped
@@ -97,6 +121,51 @@ class LendingGuaranteeSourceEvidence(
         }
     }
 
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount")
+    suspend fun readShared(loanId: UUID, bearer: String): LendingSharedGuarantorHistory {
+        if (!isTrustedLendingSourceUrl(sourceUrl.orElse(null))) throw LendingGuaranteeSourceUnavailable()
+        if (!inFlight.tryAcquire()) throw LendingGuaranteeSourceUnavailable()
+        try {
+            val history = try {
+                client.sharedGuarantorCandidates(loanId, bearer, loanId.toString(), "LENDING_EXPOSURE_REVIEW")
+                    .ifNoItem().after(Duration.ofSeconds(TIMEOUT_SECONDS)).fail().awaitSuspending()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: WebApplicationException) {
+                if (exception.response.status in DENIED_STATUSES) throw LendingGuaranteeSourceDenied()
+                throw LendingGuaranteeSourceUnavailable(exception)
+            } catch (exception: Exception) {
+                throw LendingGuaranteeSourceUnavailable(exception)
+            }
+            if (!validSharedHistory(history, loanId)) throw LendingGuaranteeSourceUnavailable()
+            return history
+        } finally {
+            inFlight.release()
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod")
+    private fun validSharedHistory(history: LendingSharedGuarantorHistory?, root: UUID): Boolean {
+        val related = history?.relatedLoans ?: return false
+        val ids = related.map { it.loanId }
+        return history.rootLoanId == root &&
+            history.effectiveAt != null &&
+            history.knownAt != null &&
+            history.candidateTruncated != null &&
+            history.relatedLoansTruncated != null &&
+            related.size <= MAX_RELATED_LOANS &&
+            ids.none { it == null || it == root } &&
+            ids.distinct().size == ids.size &&
+            related.all { loan ->
+                val facts = loan.guarantees ?: return@all false
+                loan.truncated != null &&
+                    facts.isNotEmpty() &&
+                    facts.size <= MAX_RELATED_FACTS &&
+                    facts.map { it.guaranteeId }.distinct().size == facts.size &&
+                    facts.all(::validFact)
+            }
+    }
+
     private fun validHistory(history: LendingGuaranteeHistory?, loanId: UUID): Boolean {
         val facts = history?.guarantees ?: return false
         return history.loanId == loanId &&
@@ -124,6 +193,8 @@ class LendingGuaranteeSourceEvidence(
 
     private companion object {
         const val MAX_RECORDS = 100
+        const val MAX_RELATED_LOANS = 4
+        const val MAX_RELATED_FACTS = 20
         const val MAX_INFLIGHT = 8
         const val TIMEOUT_SECONDS = 4L
         val DENIED_STATUSES = setOf(401, 403, 404)

@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.9.0
+  version: 1.10.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/lending-loans/{loanId}/access:
@@ -75,6 +75,31 @@ paths:
         '400': { description: Case or purpose mismatch }
         '403': { description: Role, bearer, assignment or policy denied }
         '503': { description: Feature disabled, authorization or assignment store unavailable }
+  /api/v1/context/lending-loans/{loanId}/shared-guarantors:
+    get:
+      operationId: getAssignedLendingSharedGuarantors
+      summary: Explore approved shared guarantors among independently authorized loans
+      description: >-
+        Disabled by default. Lending matches approved source facts within at most 256 loans
+        currently assigned to the same human investigator. Context rechecks each returned loan
+        before disclosing bounded evidence. A match is an investigative lead, not a statement
+        of current enforceability, exposure, or wrongdoing. Truncation makes the view partial.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most four independently authorized related loans and their source evidence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LendingSharedGuarantorHistory' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Root or related loan authorization denied }
+        '503': { description: Feature disabled, authorization or source unavailable }
   /api/v1/context/fraud-cases/{caseId}/network:
     get:
       operationId: getAssignedFraudCaseNetwork
@@ -368,6 +393,31 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    LendingSharedGuarantorHistory:
+      type: object
+      required: [rootLoanId, effectiveAt, knownAt, candidateTruncated, relatedLoansTruncated, relatedLoans]
+      properties:
+        rootLoanId: { type: string, format: uuid }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        candidateTruncated: { type: boolean }
+        relatedLoansTruncated: { type: boolean }
+        relatedLoans:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LendingRelatedLoanEvidence' }
+    LendingRelatedLoanEvidence:
+      type: object
+      required: [loanId, guarantees, truncated]
+      properties:
+        loanId: { type: string, format: uuid }
+        truncated: { type: boolean }
+        guarantees:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/LendingGuaranteeEvidence' }
     LendingAssignedCandidates:
       type: object
       required: [ids, truncated]

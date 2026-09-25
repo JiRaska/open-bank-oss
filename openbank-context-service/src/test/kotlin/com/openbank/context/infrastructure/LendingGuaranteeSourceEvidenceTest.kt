@@ -75,6 +75,49 @@ class LendingGuaranteeSourceEvidenceTest {
         assertUnavailable()
     }
 
+    @Test
+    fun `shared response must be bounded source evidence for distinct other loans`(): Unit = runBlocking {
+        val related = UUID.randomUUID()
+        val valid = LendingSharedGuarantorHistory(
+            loanId,
+            Instant.parse("2026-09-20T00:00:00Z"),
+            Instant.parse("2026-09-20T00:00:00Z"),
+            false,
+            false,
+            listOf(LendingRelatedLoanEvidence(related, listOf(guarantee()), false)),
+        )
+        every {
+            client.sharedGuarantorCandidates(loanId, bearer, loanId.toString(), "LENDING_EXPOSURE_REVIEW")
+        } returns Uni.createFrom().item(valid)
+        assertThat(source.readShared(loanId, bearer).relatedLoans).hasSize(1)
+
+        listOf(
+            valid.copy(rootLoanId = UUID.randomUUID()),
+            valid.copy(relatedLoans = listOf(LendingRelatedLoanEvidence(loanId, listOf(guarantee()), false))),
+            valid.copy(
+                relatedLoans = List(5) {
+                    LendingRelatedLoanEvidence(UUID.randomUUID(), listOf(guarantee()), false)
+                },
+            ),
+            valid.copy(relatedLoans = listOf(LendingRelatedLoanEvidence(related, emptyList(), false))),
+            valid.copy(relatedLoans = List(2) { LendingRelatedLoanEvidence(related, listOf(guarantee()), false) }),
+        ).forEach { invalid ->
+            every {
+                client.sharedGuarantorCandidates(loanId, bearer, loanId.toString(), "LENDING_EXPOSURE_REVIEW")
+            } returns Uni.createFrom().item(invalid)
+            assertThatThrownBy { runBlocking { source.readShared(loanId, bearer) } }
+                .isInstanceOf(LendingGuaranteeSourceUnavailable::class.java)
+        }
+    }
+
+    @Test
+    fun `shared read never sends bearer to an unconfigured source`() {
+        assertThatThrownBy {
+            runBlocking { LendingGuaranteeSourceEvidence(client, Optional.empty()).readShared(loanId, bearer) }
+        }.isInstanceOf(LendingGuaranteeSourceUnavailable::class.java)
+        io.mockk.verify(exactly = 0) { client.sharedGuarantorCandidates(any(), any(), any(), any()) }
+    }
+
     private fun assertUnavailable() {
         assertThatThrownBy { runBlocking { source.read(loanId, bearer) } }
             .isInstanceOf(LendingGuaranteeSourceUnavailable::class.java)
