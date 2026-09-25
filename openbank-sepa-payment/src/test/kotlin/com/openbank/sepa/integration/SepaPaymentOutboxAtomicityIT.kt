@@ -22,6 +22,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.HexFormat
 import java.util.UUID
 import javax.sql.DataSource
@@ -87,6 +88,7 @@ class SepaPaymentOutboxAtomicityIT {
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
     fun `creating a payment commits the payment row and its created event in one transaction`() {
+        val before = Instant.now().minusSeconds(60)
         val paymentId = createPayment()
 
         val writers = writersOf(paymentId)
@@ -99,7 +101,9 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.COMPLETE)
         assertThat(history?.observations?.map { it.revision to it.status }).containsExactly(0L to "RECEIVED")
         val observation = requireNotNull(history?.observations?.single())
-        assertThat(observation.recordedAt).isAfterOrEqualTo(observation.observedAt)
+        val after = Instant.now().plusSeconds(60)
+        assertThat(observation.observedAt).isBetween(before, after)
+        assertThat(observation.recordedAt).isBetween(before, after)
     }
 
     @Test
