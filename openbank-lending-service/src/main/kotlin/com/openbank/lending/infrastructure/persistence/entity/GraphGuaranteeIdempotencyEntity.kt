@@ -4,6 +4,7 @@ package com.openbank.lending.infrastructure.persistence.entity
 import com.openbank.lending.application.port.out.GraphGuaranteeIdempotencyConflict
 import com.openbank.lending.application.port.out.GraphGuaranteeReceipt
 import com.openbank.lending.domain.model.GraphGuaranteeStatus
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
@@ -16,7 +17,7 @@ import java.util.UUID
 class GraphGuaranteeIdempotencyEntity {
     @Id
     @Column(name = "receipt_id")
-    var receiptId: UUID = UUID.randomUUID()
+    var receiptId: UUID = Ids.newId()
 
     @Column(name = "operation", length = 16)
     lateinit var operation: String
