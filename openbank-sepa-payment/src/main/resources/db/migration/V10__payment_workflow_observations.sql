@@ -12,13 +12,11 @@ CREATE TABLE sepa_payment_workflow_observations (
     observed_at TIMESTAMPTZ NOT NULL,
     synthetic BOOLEAN NOT NULL DEFAULT FALSE,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- This unique btree also serves bounded payment history reads in reverse order.
     CONSTRAINT uq_sepa_workflow_observation_revision UNIQUE (payment_id, payment_revision),
     CONSTRAINT fk_sepa_workflow_observation_payment FOREIGN KEY (payment_id)
         REFERENCES sepa_payments(payment_id) DEFERRABLE INITIALLY DEFERRED
 );
-
-CREATE INDEX idx_sepa_workflow_observation_payment_history
-    ON sepa_payment_workflow_observations (payment_id, payment_revision DESC);
 
 CREATE FUNCTION reject_sepa_workflow_observation_mutation() RETURNS trigger AS $$
 BEGIN
