@@ -69,8 +69,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network", "lending-guarantees"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network, kyb, fraud-network or lending-guarantees");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network", "lending-guarantees", "lending-shared"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS is not a supported graph lens");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -92,12 +92,15 @@ export function setup() {
       fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
     }
   }
-  if (lens === "lending-guarantees" &&
+  if (["lending-guarantees", "lending-shared"].includes(lens) &&
       (!UUID.test(__ENV.CONTEXT_PERF_REFERENCE) ||
        __ENV.CONTEXT_PERF_CASE_ID.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
        __ENV.CONTEXT_PERF_PURPOSE !== "LENDING_EXPOSURE_REVIEW" ||
        !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID || ""))) {
     fail("Lending baseline requires an assigned loan and one synthetic approved guarantee fixture");
+  }
+  if (lens === "lending-shared" && !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_RELATED_LOAN_ID || "")) {
+    fail("Shared lending baseline requires a synthetic related loan fixture");
   }
   if (lens === "complaint" && __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID &&
       !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID)) {
@@ -117,6 +120,7 @@ export default function () {
     kyb: `/api/v1/context/kyb-cases/${reference}/ownership-observations`,
     "fraud-network": `/api/v1/context/fraud-cases/${reference}/network`,
     "lending-guarantees": `/api/v1/context/lending-loans/${reference}/approved-guarantees`,
+    "lending-shared": `/api/v1/context/lending-loans/${reference}/shared-guarantors`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -179,6 +183,7 @@ export default function () {
       }
       if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
       if (lens === "lending-guarantees") return hasLendingGuaranteeEvidence(body);
+      if (lens === "lending-shared") return hasLendingSharedEvidence(body);
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
@@ -196,6 +201,21 @@ function hasLendingGuaranteeEvidence(body) {
       UUID.test(fact.contractId) && UUID.test(fact.guarantorPartyId) &&
       UUID.test(fact.sourceDocumentId) && /^[0-9a-f]{64}$/i.test(fact.sourceSha256) &&
       Number.isInteger(fact.revision) && fact.revision > 0);
+}
+
+function hasLendingSharedEvidence(body) {
+  const expectedLoan = __ENV.CONTEXT_PERF_EXPECTED_RELATED_LOAN_ID.toLowerCase();
+  const expectedGuarantee = __ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID.toLowerCase();
+  if (!body || body.rootLoanId?.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+      typeof body.effectiveAt !== "string" || typeof body.knownAt !== "string" ||
+      typeof body.candidateTruncated !== "boolean" || typeof body.relatedLoansTruncated !== "boolean" ||
+      !Array.isArray(body.relatedLoans) || body.relatedLoans.length < 1 || body.relatedLoans.length > 4) return false;
+  return body.relatedLoans.some((loan) => loan.loanId?.toLowerCase() === expectedLoan &&
+    typeof loan.truncated === "boolean" && Array.isArray(loan.guarantees) &&
+    loan.guarantees.length > 0 && loan.guarantees.length <= 20 &&
+    loan.guarantees.some((fact) => fact.guaranteeId?.toLowerCase() === expectedGuarantee &&
+      UUID.test(fact.guarantorPartyId) && UUID.test(fact.sourceDocumentId) &&
+      /^[0-9a-f]{64}$/i.test(fact.sourceSha256)));
 }
 
 function hasFraudNetworkEvidence(body) {
