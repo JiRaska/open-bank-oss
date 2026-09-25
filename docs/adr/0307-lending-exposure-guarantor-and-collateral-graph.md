@@ -138,10 +138,15 @@ recheck at allocation approval. A proposal whose collateral was released can
 be rejected but cannot be approved. V20 alone does not deliver the P3 lens.
 An internal guarantee writer now validates loan, Party and signed Document
 evidence on proposal and approval, and persists an approval pointer atomically
-with the decision. It is disabled by default and has no HTTP route, dedicated
-Kafka publisher or credential; the existing broad Lending publisher refuses its
-event type. There is still no case-scoped source read contract, Context projector,
-UI or measured portfolio workload.
+with the decision. A real-PostgreSQL test proves that an outbox insert failure
+rolls back approval and a successful approval commits one minimized reference.
+The writer is disabled by default and has no HTTP route, dedicated Kafka
+publisher or credential; the existing broad Lending publisher refuses its
+event type. A bounded, loan-scoped approved-guarantee source read is available
+behind a separate disabled-by-default switch. It requires the investigator's
+live Context assignment for the exact loan and purpose, and returns no data if
+that check is denied or unavailable. The Context projector, Lending graph UI
+and measured portfolio workload remain absent.
 Separately, the existing Customer 360 credit-application overlay uses an optional
 database-bounded `limit` on the party application list. Omitting the parameter
 retains the existing full-list contract. A `(party_id, created_at DESC, id DESC)`
@@ -201,9 +206,9 @@ Approval then rechecks current source state in the same logical decision flow
 and emits the versioned, reference-only event through Lending's transactional
 outbox. Context consumes it idempotently, preserves effective and recorded time,
 and reads detail through the source's case-scoped API under a separate OPA
-decision. Until the dedicated credential, source check, writer and outbox exist,
-the V20 rows must not be projected or presented as verified links. This
-deliberately leaves the schema-and-proof stage dark rather than inventing evidence.
+decision. Until the dedicated credential, authorized writer route, reference
+publisher and Context projector exist, V20 rows must not be presented as verified
+links. The source read remains disabled while those deployment boundaries are reviewed.
 
 ## Alternatives considered
 
