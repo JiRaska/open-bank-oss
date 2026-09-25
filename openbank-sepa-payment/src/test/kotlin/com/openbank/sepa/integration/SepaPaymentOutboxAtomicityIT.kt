@@ -4,14 +4,20 @@
 
 package com.openbank.sepa.integration
 
+import com.openbank.sepa.infrastructure.persistence.repository.SepaWorkflowObservationSource
+import com.openbank.sepa.infrastructure.persistence.repository.WorkflowHistoryCoverage
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured
 import io.restassured.response.Response
+import io.smallrye.mutiny.coroutines.uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
@@ -75,6 +81,9 @@ class SepaPaymentOutboxAtomicityIT {
     @Inject
     lateinit var dataSource: DataSource
 
+    @Inject
+    lateinit var observations: SepaWorkflowObservationSource
+
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
     fun `creating a payment commits the payment row and its created event in one transaction`() {
@@ -86,6 +95,9 @@ class SepaPaymentOutboxAtomicityIT {
             .containsExactly(CREATED_EVENT)
         assertSameTransaction(paymentId, CREATED_EVENT)
         assertThat(writers.getValue(CREATED_EVENT).observedStatus).isEqualTo("RECEIVED")
+        val history = onEventLoop { observations.history(paymentId) }
+        assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.COMPLETE)
+        assertThat(history?.observations?.map { it.revision to it.status }).containsExactly(0L to "RECEIVED")
     }
 
     @Test
@@ -104,6 +116,10 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(writers.keys).contains(CREATED_EVENT, STATUS_CHANGED_EVENT)
         assertSameTransaction(paymentId, STATUS_CHANGED_EVENT)
         assertThat(writers.getValue(STATUS_CHANGED_EVENT).observedStatus).isEqualTo("VALIDATED")
+        val history = onEventLoop { observations.history(paymentId) }
+        assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.COMPLETE)
+        assertThat(history?.observations?.map { it.revision to it.status })
+            .containsExactly(0L to "RECEIVED", 1L to "VALIDATED")
 
         // The control: the same comparison, in the same run, on a pair that genuinely was written
         // by two different transactions. Without it, `assertSameTransaction` above could be passing
@@ -121,8 +137,13 @@ class SepaPaymentOutboxAtomicityIT {
      */
     @Test
     fun `the atomicity query returns nothing for a payment that was never written`() {
-        assertThat(writersOf(UUID.randomUUID())).isEmpty()
+        val missing = UUID.randomUUID()
+        assertThat(writersOf(missing)).isEmpty()
+        assertThat(onEventLoop { observations.history(missing) }).isNull()
     }
+
+    private fun <T> onEventLoop(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     private fun assertSameTransaction(paymentId: UUID, eventType: String) {
         val pair = writersOf(paymentId).getValue(eventType)
