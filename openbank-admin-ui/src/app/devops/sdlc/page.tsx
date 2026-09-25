@@ -35,6 +35,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { GateCatalogExplorer } from '@/components/devops/GateCatalogExplorer'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import styles from './page.module.css'
 
@@ -269,6 +270,19 @@ const GATES: Gate[] = [
   },
 ]
 
+// Concrete manifest examples for the teaching lenses. Admission is a separate
+// post-merge/runtime control, so it is intentionally not mapped to a CI gate.
+const GATE_EXAMPLES: Record<string, string[]> = {
+  compile: ['domain-purity-gate', 'yamllint'],
+  tests: ['test-intelligence-ecosystem', 'scheduler-exercised-in-tests'],
+  contracts: ['api-contract-gate', 'db-migration-gate', 'schema-compat-gate'],
+  governance: ['adr-registry-integrity-check', 'release-scope-mismatch-gate'],
+  security: ['threat-model-coverage', 'workflow-supply-chain'],
+  manifests: ['gitops-ref-integrity-guard', 'duplicate-yaml-key-guard'],
+  review: ['ruleset-context-parity', 'security-checklist-money-path'],
+  admission: [],
+}
+
 const DIFFERENTIATORS: Array<{
   id: string
   index: string
@@ -412,7 +426,7 @@ export default function SdlcPage() {
         <div className={styles.metrics} aria-label={t('Hlavní principy procesu', 'Core process principles')}>
           <div><strong>7</strong><span>{t('navazujících fází', 'connected stages')}</span></div>
           <div><strong>1</strong><span>{t('dohledatelný řetězec důkazů', 'traceable chain of evidence')}</span></div>
-          <div><strong>8</strong><span>{t('vysvětlených quality gates', 'explained quality gates')}</span></div>
+          <div><strong>8</strong><span>{t('učebních otázek · úplný katalog níže', 'learning questions · full catalog below')}</span></div>
         </div>
 
         <div className={styles.journeyScroll}>
@@ -525,8 +539,8 @@ export default function SdlcPage() {
             <span>{t('GATE ATLAS', 'GATE ATLAS')}</span>
             <h2 id="gates-title">{t('Osm otázek, které musí změna ustát', 'Eight questions every change must answer')}</h2>
             <p>{t(
-              'Klikněte na bránu. Uvidíte její skutečný účel, důkaz i to, co její červený výsledek znamená — bez CI žargonu.',
-              'Select a gate to see its real purpose, evidence, and what a red result means — without CI jargon.',
+              'Toto je osm tematických otázek, nikoli osm CI bran. Klikněte pro smysl kontroly; úplný katalog všech skutečných bran i jejich zdrojové příkazy najdete níže.',
+              'These are eight thematic questions, not eight CI gates. Select one for its purpose; the full catalog of actual gates and source commands follows below.',
             )}</p>
           </div>
           <div className={styles.gateLegend} aria-label={t('Typy quality gates', 'Quality gate types')}>
@@ -573,8 +587,14 @@ export default function SdlcPage() {
           <Link href={activeGate.href} className={styles.gateLink}>
             {t('Otevřít související důkazy', 'Open related evidence')} <ArrowRight aria-hidden="true" size={14} />
           </Link>
+          {GATE_EXAMPLES[activeGate.id].length > 0 && <div className={styles.gateExamples}>
+            <span>{t('Příklady skutečných CI bran:', 'Examples of actual CI gates:')}</span>
+            {GATE_EXAMPLES[activeGate.id].map(id => <a key={id} href={`/devops/sdlc?gate=${id}#gate-catalog`}>{id} <ArrowRight aria-hidden="true" size={12} /></a>)}
+          </div>}
         </div>
       </section>
+
+      <GateCatalogExplorer />
 
       <section className={styles.principles} aria-labelledby="principles-title">
         <div className={styles.sectionIntro}>
