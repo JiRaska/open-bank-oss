@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Treasury Service API
+  # 1.0.0: first contract (ADR-0315 MVP, issue #10618) — money-market deals (MM_PLACEMENT,
+  #        MM_BORROWING, CNB_DEPOSIT_FACILITY) with four-eyes booking, counterparty limits and
+  #        per-currency daily positions.
+  version: 1.0.0
+  description: |
+    The bank's own money-market deals (ADR-0315). A deal moves
+    `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
+    `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason on its
+    timeline.
+
+    **Four-eyes is enforced in the domain**: the approver must be neither the deal's creator nor
+    its submitter (422 `FOUR_EYES_VIOLATION`), and only a human may submit, approve, reject,
+    cancel, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
+    refused with 403 `ACTOR_NOT_PERMITTED`. An AI agent may draft, and must then supply a
+    `rationale`.
+
+    **Counterparty limits** cap outstanding PLACED principal per counterparty and currency
+    (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
+    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior-approver override
+    is not built yet.
+
+    **Interest** is ACT/360 simple interest at maturity (the CZK and EUR money-market
+    convention); `rate` is an annual percentage. **Overnight** means the next business day,
+    Monday-Friday — there is no holiday calendar yet. The ČNB deposit facility is always
+    overnight and CZK only.
+
+    **Ledger postings** go through ledger-service's journal API only, keyed
+    `treasury:<dealId>:<event>` and balanced per currency: settlement, maturity (principal plus
+    interest) and, for a settled deal, reversal. Nothing posts before `BOOKED`; booking itself
+    posts nothing. Each posted journal is listed on the deal as `journals[]`.
+
+    **Sandbox**: a SYNTHETIC simulated counterparty set settles booked deals on their value date
+    and matures settled deals on their maturity date (ADR-0315 D9). Real market connectivity is
+    out of scope.
+servers:
+  - url: http://localhost:8160
+tags:
+  - name: Treasury
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/treasury/deals:
+    get:
+      tags: [Treasury]
+      operationId: listDeals
+      summary: Dealer blotter — deals, newest first, optionally filtered by state
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DealState'
+      responses:
+        '200':
+          description: Deals (without journal references; see GET /deals/{id})
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deal'
+        '401': { description: Unauthenticated }
+        '403': { description: Requires ROLE_TREASURY_DEALER, ROLE_TREASURY_APPROVER or ROLE_ADMIN }
+    post:
+      tags: [Treasury]
+      operationId: draftDeal
+      summary: Draft a deal (ROLE_TREASURY_DEALER). Nothing posts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftDealRequest'
+      responses:
+        '201':
+          description: The new DRAFT deal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deal'
+        '400': { description: Invalid deal (dates, currency, product/counterparty mismatch, unknown counterparty) }
+        '403': { description: Not a dealer, or a service account }
+
+  /api/v1/treasury/deals/{id}:
+    get:
+      tags: [Treasury]
+      operationId: getDeal
+      summary: One deal with its lifecycle timeline and ledger journal references
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200':
+          description: The deal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deal'
+        '404': { description: No such deal }
+
+  /api/v1/treasury/deals/{id}/submit:
+    post:
+      tags: [Treasury]
+      operationId: submitDeal
+      summary: Submit a DRAFT for approval (ROLE_TREASURY_DEALER); records the limit check
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such deal }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /api/v1/treasury/deals/{id}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveDeal
+      summary: Four-eyes approval — books the deal (ROLE_TREASURY_APPROVER)
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such deal }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: FOUR_EYES_VIOLATION (approver created or submitted the deal) or LIMIT_BREACHED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/deals/{id}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectDeal
+      summary: Reject a PENDING_APPROVAL deal back to DRAFT (ROLE_TREASURY_APPROVER)
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '400': { description: Missing reason }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /api/v1/treasury/deals/{id}/cancel:
+    post:
+      tags: [Treasury]
+      operationId: cancelDeal
+      summary: Cancel a DRAFT or PENDING_APPROVAL deal
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /api/v1/treasury/deals/{id}/settle:
+    post:
+      tags: [Treasury]
+      operationId: settleDeal
+      summary: Settle a BOOKED deal on or after its value date; posts the settlement journal
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /api/v1/treasury/deals/{id}/mature:
+    post:
+      tags: [Treasury]
+      operationId: matureDeal
+      summary: Mature a SETTLED deal on or after its maturity date; posts principal and interest
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /api/v1/treasury/deals/{id}/reverse:
+    post:
+      tags: [Treasury]
+      operationId: reverseDeal
+      summary: Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: FOUR_EYES_VIOLATION (the creator may not reverse their own deal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/counterparties:
+    get:
+      tags: [Treasury]
+      operationId: listCounterparties
+      summary: Counterparty limits with current exposure and headroom, one row per currency line
+      responses:
+        '200':
+          description: Counterparty limit lines
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CounterpartyLimit'
+
+  /api/v1/treasury/positions:
+    get:
+      tags: [Treasury]
+      operationId: getPositions
+      summary: Daily position per currency — placed, borrowed, at ČNB, net
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Defaults to today. A deal counts when it has settled and valueDate <= asOf < maturityDate.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Positions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Positions'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DealId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    DealOk:
+      description: The deal after the transition
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Deal'
+    Forbidden:
+      description: Wrong role, or ACTOR_NOT_PERMITTED (an AI agent or service account attempting a person's step)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InvalidState:
+      description: INVALID_STATE — the transition is not allowed from the deal's current state or date
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    ProductType:
+      type: string
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY]
+    DealState:
+      type: string
+      enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: FOUR_EYES_VIOLATION, LIMIT_BREACHED, ACTOR_NOT_PERMITTED, INVALID_STATE, NOT_FOUND
+        message:
+          type: [string, 'null']
+    DraftDealRequest:
+      type: object
+      required: [product, counterpartyId, currency, principal, rate, valueDate]
+      properties:
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string, examples: [SIMBK-A] }
+        currency: { type: string, enum: [CZK, EUR] }
+        principal: { type: number, exclusiveMinimum: 0 }
+        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360' }
+        tradeDate: { type: string, format: date, description: Defaults to today }
+        valueDate: { type: string, format: date }
+        maturityDate:
+          type: string
+          format: date
+          description: Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY.
+        rationale:
+          type: string
+          description: Required when an AI agent drafts (ADR-0315 D10).
+    ReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1 }
+    LimitCheck:
+      type: object
+      properties:
+        currency: { type: string }
+        limit: { type: number }
+        exposureBefore: { type: number }
+        exposureAfter: { type: number }
+        headroomAfter: { type: number }
+        breached: { type: boolean }
+    Transition:
+      type: object
+      properties:
+        from: { oneOf: [{ $ref: '#/components/schemas/DealState' }, { type: 'null' }] }
+        to: { $ref: '#/components/schemas/DealState' }
+        actor: { type: string }
+        actorType: { type: string, enum: [HUMAN, AI_AGENT, SERVICE, SYSTEM] }
+        at: { type: string, format: date-time }
+        note: { type: [string, 'null'] }
+    JournalRef:
+      type: object
+      properties:
+        event: { type: string, enum: [settled, matured, reversed] }
+        idempotencyKey: { type: string, examples: ['treasury:0191c0de-0000-7000-8000-000000000001:settled'] }
+        journalId: { type: string, format: uuid }
+        postedAt: { type: string, format: date-time }
+    Deal:
+      type: object
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string }
+        currency: { type: string }
+        principal: { type: number }
+        rate: { type: number }
+        dayCount: { type: string, enum: [ACT/360] }
+        days: { type: integer }
+        interest: { type: number, description: 'ACT/360 interest at maturity, 2 dp half-up' }
+        tradeDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        maturityDate: { type: string, format: date }
+        state: { $ref: '#/components/schemas/DealState' }
+        createdBy: { type: string }
+        createdByType: { type: string }
+        submittedBy: { type: [string, 'null'] }
+        approvedBy: { type: [string, 'null'] }
+        rationale: { type: [string, 'null'] }
+        limitCheck:
+          oneOf:
+            - $ref: '#/components/schemas/LimitCheck'
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        history:
+          type: array
+          items: { $ref: '#/components/schemas/Transition' }
+        journals:
+          type: array
+          items: { $ref: '#/components/schemas/JournalRef' }
+    CounterpartyLimit:
+      type: object
+      properties:
+        counterpartyId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [BANK, CENTRAL_BANK] }
+        synthetic: { type: boolean }
+        currency: { type: string }
+        limit: { type: number }
+        exposure: { type: number }
+        headroom: { type: number }
+    Positions:
+      type: object
+      properties:
+        asOf: { type: string, format: date }
+        positions:
+          type: array
+          items:
+            type: object
+            properties:
+              currency: { type: string }
+              placed: { type: number }
+              borrowed: { type: number }
+              atCnb: { type: number }
+              net: { type: number, description: placed + atCnb − borrowed }
