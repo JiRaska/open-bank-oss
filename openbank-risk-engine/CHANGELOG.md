@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.5.0...risk-engine-v0.6.0) (2026-09-25)
+
+
+### Features
+
+* **infra:** risk, finance and treasury department roles ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10833](https://github.com/JiRaska/open-bank-oss/issues/10833)) ([43a94a2](https://github.com/JiRaska/open-bank-oss/commit/43a94a2cfb0267d53c7573a33b592df9b474d77c))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.4.0...risk-engine-v0.5.0) (2026-09-24)
 
 
