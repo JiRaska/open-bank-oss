@@ -58,11 +58,9 @@ class LendingGraphWriterResource(
     ): Response {
         if (!writerEnabled) return unavailable()
         val actor = humanActor() ?: return forbidden()
-        val decision = when (request.decision) {
-            "APPROVED" -> GraphGuaranteeStatus.APPROVED
-            "REJECTED" -> GraphGuaranteeStatus.REJECTED
-            else -> throw IllegalArgumentException("decision must be APPROVED or REJECTED")
-        }
+        val decision = GraphGuaranteeDecision.entries.firstOrNull { it.name == request.decision }
+            ?.let { GraphGuaranteeStatus.valueOf(it.name) }
+            ?: throw IllegalArgumentException("decision must be APPROVED or REJECTED")
         val existing = guarantees.find(guaranteeId)
         if (existing?.proposal?.loanId != loanId) {
             return Response.status(Response.Status.NOT_FOUND).header("Cache-Control", "no-store").build()
@@ -106,6 +104,9 @@ data class GuaranteeProposalRequest(
 }
 
 data class GuaranteeDecisionRequest(val decision: String?)
+
+/** The API accepts a decision, while the stored guarantee has an additional PENDING lifecycle state. */
+enum class GraphGuaranteeDecision { APPROVED, REJECTED }
 
 data class GuaranteeWriteResult(val guaranteeId: UUID, val revision: Long, val status: GraphGuaranteeStatus) {
     companion object {
