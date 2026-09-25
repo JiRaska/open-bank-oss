@@ -142,6 +142,26 @@ class SepaPaymentOutboxAtomicityIT {
         assertThat(onEventLoop { observations.history(missing) }).isNull()
     }
 
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    fun `missing source observation cannot be reported as complete history`() {
+        val paymentId = createPayment()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE sepa_payments SET aggregate_revision = aggregate_revision + 1 WHERE payment_id = ?",
+            ).use { statement ->
+                statement.setObject(1, paymentId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+
+        val history = onEventLoop { observations.history(paymentId) }
+        assertThat(history?.sourceRevision).isEqualTo(1L)
+        assertThat(history?.coverage).isEqualTo(WorkflowHistoryCoverage.UNKNOWN)
+        assertThat(history?.truncated).isFalse()
+        assertThat(history?.observations?.map { it.revision }).containsExactly(0L)
+    }
+
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
