@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.lending.integration
 
+import com.openbank.lending.application.port.out.GraphGuaranteeRepository
 import com.openbank.lending.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.sql.Connection
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -19,6 +26,51 @@ import javax.sql.DataSource
 class LendingGraphSourceSchemaIT {
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var guarantees: GraphGuaranteeRepository
+
+    @Test
+    fun `approved guarantee reads preserve revisions and are bounded`() {
+        val loanId = dataSource.connection.use(::createLoanForGuarantee)
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val unrelated = UUID.randomUUID()
+        val contractId = UUID.randomUUID()
+        val decidedAt = Instant.now().plusSeconds(1)
+        val effectiveAt = decidedAt.plusSeconds(1)
+        val knownAt = effectiveAt.plusSeconds(1)
+        dataSource.connection.use { connection ->
+            insertPendingGuarantee(connection, first, contractId, loanId, 1, null)
+            approveGuarantee(connection, first, decidedAt)
+            insertPendingGuarantee(connection, second, contractId, loanId, 2, first)
+            approveGuarantee(connection, second, decidedAt)
+            insertPendingGuarantee(connection, unrelated, UUID.randomUUID(), loanId, 1, null)
+            // Leave the unrelated row pending; it must not enter the reviewed source graph.
+        }
+
+        val facts = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoan(loanId, effectiveAt, knownAt, limit = 1)
+            }
+        }
+
+        assertThat(facts).hasSize(2)
+        assertThat(facts.map { it.guaranteeId }).containsExactly(first, second)
+        assertThat(facts.map { it.proposal.revision }).containsExactly(1L, 2L)
+        val notYetKnown = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoan(loanId, effectiveAt, decidedAt.minusNanos(1), limit = 1)
+            }
+        }
+        val notYetEffective = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                guarantees.findApprovedForLoan(loanId, Instant.EPOCH, knownAt, limit = 1)
+            }
+        }
+        assertThat(notYetKnown).isEmpty()
+        assertThat(notYetEffective).isEmpty()
+    }
 
     @Test
     fun `reviewed graph facts cannot be inserted without a pending proposal`() {
@@ -532,6 +584,17 @@ class LendingGraphSourceSchemaIT {
             statement.setObject(6, UUID.randomUUID())
             statement.setObject(7, UUID.randomUUID())
             statement.setString(8, "a".repeat(64))
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+    }
+
+    private fun approveGuarantee(connection: Connection, id: UUID, decidedAt: Instant) {
+        connection.prepareStatement(
+            "UPDATE lending_graph_guarantee SET status = 'APPROVED', decided_by = 'checker', decided_at = ? " +
+                "WHERE guarantee_id = ?",
+        ).use { statement ->
+            statement.setTimestamp(1, Timestamp.from(decidedAt))
+            statement.setObject(2, id)
             assertThat(statement.executeUpdate()).isEqualTo(1)
         }
     }

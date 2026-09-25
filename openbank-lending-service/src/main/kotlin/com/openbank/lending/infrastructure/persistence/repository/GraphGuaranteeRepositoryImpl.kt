@@ -45,6 +45,35 @@ class GraphGuaranteeRepositoryImpl(
         session.find(GraphGuaranteeEntity::class.java, guaranteeId).map { it?.toFact() }
     }.awaitSuspending()
 
+    override suspend fun findApprovedForLoan(
+        loanId: UUID,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        limit: Int,
+    ): List<GraphGuaranteeFact> {
+        require(limit in 1..MAX_APPROVED_GRAPH_FACTS) { "limit must be between 1 and $MAX_APPROVED_GRAPH_FACTS" }
+        return sessions.withSession { session ->
+            session.createQuery(
+                """
+                    FROM GraphGuaranteeEntity
+                    WHERE loanId = :loanId
+                      AND status = :approved
+                      AND validFrom <= :effectiveAt
+                      AND (validTo IS NULL OR validTo > :effectiveAt)
+                      AND decidedAt <= :knownAt
+                    ORDER BY contractId ASC, revision ASC, guaranteeId ASC
+                """.trimIndent(),
+                GraphGuaranteeEntity::class.java,
+            )
+                .setParameter("loanId", loanId)
+                .setParameter("approved", GraphGuaranteeStatus.APPROVED.name)
+                .setParameter("effectiveAt", effectiveAt)
+                .setParameter("knownAt", knownAt)
+                .setMaxResults(limit + 1)
+                .resultList
+        }.map { entities -> entities.map { it.toFact() } }.awaitSuspending()
+    }
+
     override suspend fun decide(
         guaranteeId: UUID,
         decision: GraphGuaranteeStatus,
@@ -103,5 +132,6 @@ class GraphGuaranteeRepositoryImpl(
 
     private companion object {
         const val APPROVED_EVENT_TYPE = "lending.graph.guarantee.approved"
+        const val MAX_APPROVED_GRAPH_FACTS = 100
     }
 }

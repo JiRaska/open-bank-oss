@@ -16,6 +16,18 @@ interface GraphGuaranteeRepository {
 
     suspend fun find(guaranteeId: UUID): GraphGuaranteeFact?
 
+    /**
+     * Approved guarantee facts effective at [effectiveAt] and known by [knownAt].
+     * Returns at most [limit] + 1 rows so callers can detect truncation without
+     * loading an unbounded graph. Results retain every qualifying revision.
+     */
+    suspend fun findApprovedForLoan(
+        loanId: UUID,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        limit: Int,
+    ): List<GraphGuaranteeFact>
+
     suspend fun decide(
         guaranteeId: UUID,
         decision: GraphGuaranteeStatus,
