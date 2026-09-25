@@ -48,3 +48,23 @@ not record resource utilization or an incident-read workload. Next: run repeated
 on/off pairs on a stable, dedicated host; capture achieved throughput, CPU, DB waits and pool
 pressure; include real OIDC/OPA and authenticated incident-read traffic. Keep the flag off until
 the 1×/10× payment-control comparison is stable and reviewed.
+
+## Instrumentation smoke check (2026-09-26)
+
+The updated probe completed an A–B–A sequence at 2 and 20 offered requests/s for five
+seconds per rate. Every request returned 201. Each variant ran in the same local host but
+restarted the test application; this is a smoke check of the measurements, not a go-live
+performance qualification.
+
+| Variant | Offered | Completed | Achieved | Service p95 | Client queue p95 | End-to-end p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A1: disabled | 2/s | 10 | 2.2/s | 44 ms | 5 ms | 49 ms |
+| A1: disabled | 20/s | 100 | 20.1/s | 50 ms | 5 ms | 53 ms |
+| B: enabled | 2/s | 10 | 2.2/s | 65 ms | 5 ms | 69 ms |
+| B: enabled | 20/s | 100 | 20.1/s | 105 ms | 6 ms | 108 ms |
+| A2: disabled | 2/s | 10 | 2.2/s | 126 ms | 16 ms | 133 ms |
+| A2: disabled | 20/s | 100 | 20.0/s | 38 ms | 5 ms | 40 ms |
+
+The 20/s enabled p95 was higher than both controls, but the 2/s control varied more than
+the enabled result. Neither short sample establishes a reliable regression or headroom.
+The default-off flag remains unchanged.
