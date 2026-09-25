@@ -29,6 +29,13 @@ export const ROLES = {
   // draft, enforced server-side (CommunicationStyleService.publish).
   COMMS_EDITOR: "ROLE_COMMS_EDITOR",
   COMMS_APPROVER: "ROLE_COMMS_APPROVER",
+  // #10618 department roles (realm-template.json). RISK and FINANCE drive the "Balance sheet &
+  // risk" section; the two treasury roles are declared in the realm only — no service grants
+  // them yet, so no permission below names them.
+  RISK:       "ROLE_RISK",
+  FINANCE:    "ROLE_FINANCE",
+  TREASURY_DEALER:   "ROLE_TREASURY_DEALER",
+  TREASURY_APPROVER: "ROLE_TREASURY_APPROVER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -40,7 +47,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -71,6 +78,20 @@ export const PERMISSIONS = {
   // Credit-risk console (ADR-0230 D1): the same set CreditRiskResource admits — the desk that may
   // read the ADR-0214 evidence bundle, and nobody wider (it exposes every applicant's income).
   "lending:risk:view":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
+  // Balance sheet & risk (#10618). Reads mirror RiskResource/CurveSetResource's class-level
+  // @RolesAllowed minus OPERATOR/API — the section belongs to the two departments and ADMIN. The
+  // writes mirror the method-level @RolesAllowed on POST /snapshots and POST /curve-sets: FINANCE
+  // reads, only RISK (and ADMIN) produces. OPA additionally refuses every service account.
+  "balance-sheet:view":            [ROLES.ADMIN, ROLES.RISK, ROLES.FINANCE],
+  "balance-sheet:snapshot:create": [ROLES.ADMIN, ROLES.RISK],
+  "balance-sheet:curves:upload":   [ROLES.ADMIN, ROLES.RISK],
+  // Lending ledger backfill (#10746/#10618): exactly LedgerBackfillResource's @RolesAllowed. One
+  // role set for every step on purpose — the four-eyes split is maker != checker between two
+  // PEOPLE (LedgerBackfillService, 422), not two roles, so the UI cannot express it as a grant.
+  "ledger-backfill:view":          [ROLES.ADMIN, ROLES.FINANCE],
+  "ledger-backfill:propose":       [ROLES.ADMIN, ROLES.FINANCE],
+  "ledger-backfill:decide":        [ROLES.ADMIN, ROLES.FINANCE],
+  "ledger-backfill:execute":       [ROLES.ADMIN, ROLES.FINANCE],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -304,6 +325,8 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['campaign:create', ['/campaigns/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
   ['lending:risk:view', ['/lending/risk']],
+  ['balance-sheet:view', ['/balance-sheet']],
+  ['ledger-backfill:view', ['/balance-sheet/ledger-backfill']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
@@ -359,4 +382,6 @@ export const ROLE_LABELS: Record<string, { label: string; color: string; bg: str
   ROLE_KYC_OPENER: { label: "KYC Opener", color: "#0d9488", bg: "#f0fdfa" },
   ROLE_KYC_REVIEWER: { label: "KYC Reviewer", color: "#115e59", bg: "#ccfbf1" },
   ROLE_DEMO:       { label: "Demo",       color: "#64748b", bg: "#f8fafc" },
+  ROLE_RISK:       { label: "Risk",       color: "#be185d", bg: "#fdf2f8" },
+  ROLE_FINANCE:    { label: "Finance",    color: "#04815a", bg: "#f0fdf4" },
 }

@@ -145,6 +145,35 @@ class RiskSnapshotApiIT {
     }
 
     @Test
+    @TestSecurity(user = "risk-analyst", roles = ["ROLE_RISK"])
+    fun `the run and curve-set lists are newest first, bounded, and validate their limit`() {
+        ledger.inputs = Fixtures.tiedOut().copy(subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00")))
+        val untied = create("2026-09-30").then().statusCode(201).extract().path<String>("id")
+        val setId = given().contentType("application/json").body(curveSetBody("2026-09-30"))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(201).extract().path<String>("id")
+
+        given().`when`().get("/api/v1/risk/snapshots?limit=1").then().statusCode(200)
+            .body("runs", hasSize<Any>(1))
+            .body("runs[0].id", equalTo(untied))
+            .body("runs[0].status", equalTo("UNTIED"))
+            .body("runs[0].mismatchCount", equalTo(1))
+            .body("runs[0].provenance", equalTo("synthetic"))
+        given().`when`().get("/api/v1/risk/curve-sets?limit=1").then().statusCode(200)
+            .body("curveSets", hasSize<Any>(1))
+            .body("curveSets[0].id", equalTo(setId))
+            .body("curveSets[0].indices[0]", equalTo("CZEONIA"))
+        given().`when`().get("/api/v1/risk/snapshots?limit=0").then().statusCode(400)
+        given().`when`().get("/api/v1/risk/curve-sets?limit=101").then().statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "fin-reader", roles = ["ROLE_FINANCE"])
+    fun `the finance department may list runs and curve sets`() {
+        given().`when`().get("/api/v1/risk/snapshots").then().statusCode(200)
+        given().`when`().get("/api/v1/risk/curve-sets").then().statusCode(200)
+    }
+
+    @Test
     fun `an unauthenticated caller is refused`() {
         create("2026-04-30").then().statusCode(401)
     }

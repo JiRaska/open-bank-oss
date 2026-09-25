@@ -20,6 +20,8 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -319,6 +321,31 @@ class LedgerBackfillIT {
         } When {
             get("/api/v1/lending/ledger-backfill/plan")
         } Then { statusCode(403) }
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "backfill-auditor", roles = ["ROLE_FINANCE"])
+    fun `10 - the request history shows who proposed, approved and executed it`() {
+        Given { queryParam("limit", 5) } When {
+            get("/api/v1/lending/ledger-backfill/requests")
+        } Then {
+            statusCode(200)
+            body("requests[0].id", equalTo(requestId))
+            body("requests[0].state", equalTo("EXECUTED"))
+            body("requests[0].proposedBy", equalTo("backfill-maker"))
+            body("requests[0].decidedBy", equalTo("backfill-checker"))
+            body("requests[0].proposedAt", notNullValue())
+        }
+        Given { this } When { get("/api/v1/lending/ledger-backfill/requests/$requestId") } Then {
+            statusCode(200)
+            body("executedBy", equalTo("backfill-maker"))
+        }
+        Given { this } When { get("/api/v1/lending/ledger-backfill/requests/${UUID.randomUUID()}") } Then
+            { statusCode(404) }
+        Given { queryParam("limit", 0) } When { get("/api/v1/lending/ledger-backfill/requests") } Then {
+            statusCode(400)
+        }
     }
 
     /** The IT database is shared by every @QuarkusTest: leave nothing behind for book-wide counts (LendingSummaryIT). */

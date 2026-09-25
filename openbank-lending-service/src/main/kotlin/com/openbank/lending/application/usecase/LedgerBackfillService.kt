@@ -43,6 +43,9 @@ data class BackfillRequestView(
     val decisionReason: String?,
     val executedBy: String?,
     val lastResult: String?,
+    val proposedAt: OffsetDateTime? = null,
+    val decidedAt: OffsetDateTime? = null,
+    val executedAt: OffsetDateTime? = null,
 )
 
 /** Outcome of one leg in an execution run. */
@@ -94,6 +97,13 @@ class LedgerBackfillService(
         }
         return book.load(scope).map { book -> LedgerBackfillPlanner.plan(scope.cutoverDate, book, BUSINESS_ZONE) }
     }
+
+    /** Request history, newest first (#10618). Read-only; the four-eyes state lives on each row. */
+    fun list(limit: Int): Uni<List<BackfillRequestView>> =
+        requests.listRecent(limit).map { rows -> rows.map { it.toView() } }
+
+    /** `null` for an unknown id; the resource answers 404. */
+    fun get(id: UUID): Uni<BackfillRequestView?> = requests.findById(id).map { it?.toView() }
 
     fun propose(scope: BackfillScope, maker: String): Uni<BackfillRequestView> {
         require(maker.isNotBlank()) { "Proposer identity is required" }
@@ -318,6 +328,9 @@ private fun LedgerBackfillRequestEntity.toView() = BackfillRequestView(
     decisionReason = decisionReason,
     executedBy = executedBy,
     lastResult = lastResult,
+    proposedAt = proposedAt,
+    decidedAt = decidedAt,
+    executedAt = executedAt,
 )
 
 private fun disbursedBefore(entity: LedgerBackfillRequestEntity): LocalDate = LocalDate.parse(

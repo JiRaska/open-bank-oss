@@ -31,7 +31,31 @@ interface LendingPort {
     suspend fun readLoanBook(asOf: LocalDate): List<LoanContract>
 }
 
+/** A run's manifest without its mismatch rows, for the run list. */
+data class SnapshotRunSummary(
+    val id: UUID,
+    val asOf: LocalDate,
+    val recordedAt: Instant,
+    val provenance: String,
+    val status: String,
+    val positionCount: Int,
+    val mismatchCount: Int,
+)
+
+/** A curve set without its pillars, for the curve-set list. */
+data class CurveSetSummary(
+    val id: UUID,
+    val asOf: LocalDate,
+    val provenance: String,
+    val source: String,
+    val recordedAt: Instant,
+    val indices: List<String>,
+)
+
 interface SnapshotRepository {
+    /** The [limit] most recently recorded runs, newest first. */
+    suspend fun listRecent(limit: Int): List<SnapshotRunSummary>
+
     suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun?
 
     suspend fun findById(id: UUID): SnapshotRun?
@@ -77,6 +101,9 @@ class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismat
     RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")
 
 interface CurveSetRepository {
+    /** The [limit] most recently recorded curve sets, newest first. */
+    suspend fun listRecent(limit: Int): List<CurveSetSummary>
+
     /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
     suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
 

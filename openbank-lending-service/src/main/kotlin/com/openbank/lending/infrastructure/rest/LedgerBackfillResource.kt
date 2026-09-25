@@ -7,6 +7,7 @@ package com.openbank.lending.infrastructure.rest
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.usecase.BackfillExecution
 import com.openbank.lending.application.usecase.BackfillPlan
+import com.openbank.lending.application.usecase.BackfillRequestView
 import com.openbank.lending.application.usecase.BackfillScope
 import com.openbank.lending.application.usecase.LedgerBackfillService
 import com.openbank.lending.infrastructure.client.LendingGlChart
@@ -61,6 +62,27 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
         backfill.dryRun(scope(cutoverDate, disbursedBefore)).map { Response.ok(it.toResponse()).build() }
     }
 
+    @GET
+    @Path("/requests")
+    @Authorize(action = "lending.ledgerBackfill.read", resource = "")
+    @Operation(summary = "Request history, newest first (limit 1..100, default 25)")
+    fun list(@QueryParam("limit") limit: Int?): Uni<Response> = guarded {
+        val size = limit ?: DEFAULT_LIMIT
+        require(size in 1..MAX_LIMIT) { "limit must be between 1 and $MAX_LIMIT" }
+        backfill.list(size).map { Response.ok(BackfillRequestListResponse(it)).build() }
+    }
+
+    @GET
+    @Path("/requests/{id}")
+    @Authorize(action = "lending.ledgerBackfill.read", resource = "#id")
+    @Operation(summary = "One backfill request with its four-eyes state")
+    fun get(@PathParam("id") id: UUID): Uni<Response> = guarded {
+        backfill.get(id).map { view ->
+            view?.let { Response.ok(it).build() }
+                ?: error(HTTP_NOT_FOUND, IllegalArgumentException("Backfill request not found: $id"))
+        }
+    }
+
     @POST
     @Path("/requests")
     @Consumes(MediaType.APPLICATION_JSON)
@@ -91,15 +113,6 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
         backfill.execute(id, execute == true, actor()).map { Response.ok(it.toResponse()).build() }
     }
 
-    private fun scope(cutoverDate: String?, disbursedBefore: String?): BackfillScope {
-        requireNotNull(cutoverDate) { "cutoverDate is required" }
-        requireNotNull(disbursedBefore) { "disbursedBefore is required" }
-        return BackfillScope(parseDate("cutoverDate", cutoverDate), parseDate("disbursedBefore", disbursedBefore))
-    }
-
-    private fun parseDate(name: String, value: String): LocalDate =
-        runCatching { LocalDate.parse(value) }.getOrElse { throw IllegalArgumentException("$name must be an ISO date") }
-
     /** 400 for input errors, 409 for state/hash refusals, 422 for a four-eyes violation. */
     private fun guarded(block: () -> Uni<Response>): Uni<Response> =
         runCatching(block).getOrElse { Uni.createFrom().failure(it) }
@@ -113,12 +126,26 @@ class LedgerBackfillResource(private val backfill: LedgerBackfillService, privat
     private fun error(status: Int, e: Throwable) = Response.status(status).entity(mapOf("error" to e.message)).build()
 
     private companion object {
+        const val DEFAULT_LIMIT = 25
+        const val MAX_LIMIT = 100
         const val HTTP_CREATED = 201
+        const val HTTP_NOT_FOUND = 404
         const val HTTP_BAD_REQUEST = 400
         const val HTTP_CONFLICT = 409
         const val HTTP_UNPROCESSABLE = 422
     }
 }
+
+private fun scope(cutoverDate: String?, disbursedBefore: String?): BackfillScope {
+    requireNotNull(cutoverDate) { "cutoverDate is required" }
+    requireNotNull(disbursedBefore) { "disbursedBefore is required" }
+    return BackfillScope(parseDate("cutoverDate", cutoverDate), parseDate("disbursedBefore", disbursedBefore))
+}
+
+private fun parseDate(name: String, value: String): LocalDate =
+    runCatching { LocalDate.parse(value) }.getOrElse { throw IllegalArgumentException("$name must be an ISO date") }
+
+data class BackfillRequestListResponse(val requests: List<BackfillRequestView>)
 
 data class ProposeBackfillRequest(val cutoverDate: String? = null, val disbursedBefore: String? = null)
 
