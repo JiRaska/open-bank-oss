@@ -69,7 +69,7 @@ quarkus:
     tls:
       verification: none
     lending-graph:
-      enabled: ${LENDING_GRAPH_PROOF_ENABLED:false}
+      client-enabled: ${LENDING_GRAPH_PROOF_ENABLED:false}
       auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
       client-id: openbank-lending-graph
       credentials:

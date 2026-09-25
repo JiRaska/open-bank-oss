@@ -9,7 +9,8 @@ info:
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4).
   # 1.26.0 -> 1.27.0: additive — bounded party application slice for Customer 360.
   # 1.27.0 -> 1.28.0: additive — case-scoped, bounded approved guarantee history.
-  version: 1.28.0
+  # 1.28.0 -> 1.29.0: additive — disabled-by-default loan-scoped guarantee maker/checker routes.
+  version: 1.29.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -26,6 +27,67 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /api/v1/lending/graph/loans/{loanId}/guarantees:
+    post:
+      tags: [Lending]
+      operationId: proposeGraphGuarantee
+      summary: Propose loan-bound guarantee evidence as a lending officer or admin
+      description: >-
+        Disabled by default until dedicated Party/Document proof credentials and the
+        reference publisher are deployed. The actor comes from the authenticated
+        principal; the proposal cannot supply a bank scope or approval state.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GraphGuaranteeProposalRequest' }
+      responses:
+        '201':
+          description: Pending proposal recorded after source proofs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphGuaranteeWriteResult' }
+        '400': { description: Invalid proposal or unmatched source proof }
+        '403': { description: Role or policy denied }
+        '503': { description: Writer disabled or a source proof unavailable }
+  /api/v1/lending/graph/loans/{loanId}/guarantees/{guaranteeId}/decision:
+    post:
+      tags: [Lending]
+      operationId: decideGraphGuarantee
+      summary: Approve or reject a loan-bound guarantee as a different checker
+      description: >-
+        The authenticated checker must differ from the maker. Approval rechecks
+        current Party and signed Document evidence before an atomic source fact
+        and minimized outbox-reference commit.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: guaranteeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GraphGuaranteeDecisionRequest' }
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphGuaranteeWriteResult' }
+        '400': { description: Invalid decision, four-eyes violation or already decided }
+        '403': { description: Role or policy denied }
+        '404': { description: Guarantee does not belong to the loan }
+        '503': { description: Writer disabled or a source proof unavailable }
   /api/v1/lending/graph/loans/{loanId}/approved-guarantees:
     get:
       tags: [Lending]
@@ -1210,6 +1272,35 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    GraphGuaranteeProposalRequest:
+      type: object
+      required: [contractId, revision, guarantorPartyId, capAmount, currency, coverageFraction,
+        seniority, validFrom, sourceDocumentId, sourceSha256]
+      properties:
+        contractId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        supersedesGuaranteeId: { type: [string, 'null'], format: uuid }
+        guarantorPartyId: { type: string, format: uuid }
+        capAmount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        coverageFraction: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        seniority: { type: integer, minimum: 1 }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: [string, 'null'], format: date-time }
+        sourceDocumentId: { type: string, format: uuid }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    GraphGuaranteeDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+    GraphGuaranteeWriteResult:
+      type: object
+      required: [guaranteeId, revision, status]
+      properties:
+        guaranteeId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
     ApprovedGuaranteeHistory:
       type: object
       required: [loanId, effectiveAt, knownAt, guarantees, truncated]

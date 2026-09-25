@@ -18,3 +18,6 @@ interface LendingGraphProofPort {
         sealedSha256: String,
     ): Boolean
 }
+
+/** A proof owner could not give a decision. Never turn this into a negative or verified fact. */
+class LendingGraphProofUnavailable(cause: Throwable) : RuntimeException("Lending graph source proof unavailable", cause)

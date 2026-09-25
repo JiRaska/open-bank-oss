@@ -783,7 +783,7 @@ contracts render an error rather than a zero exposure. Override rates require a 
 actor and decision time. Stage 3 uses conditional default probability one; this correction does
 not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).
 
-### Planned Context Graph source boundary (ADR-0307; no new route yet)
+### Staged Context Graph source boundary (ADR-0307; routes disabled)
 
 The existing approved `collateral` record belongs to one loan and contributes to
 IFRS 9 LGD. It cannot establish that two loans share the same physical asset,
@@ -795,8 +795,8 @@ create a false cross-borrower disclosure. The planned source model therefore
 requires verified IDs, independent maker/checker decisions, effective intervals,
 source hashes and immutable correction lineage before Context receives any P3
 reference. The present collateral/provisioning calculation must remain unchanged
-during an additive migration. Under ADR-0152, the Lending database belongs to one
-bank per deployment: graph facts use local foreign keys, and the future writer
+during an additive migration. Under ADR-0311, the Lending database belongs to one
+bank per deployment: graph facts use local foreign keys, and the writer
 must stamp outgoing Context references from trusted deployment configuration.
 It must compare that identifier with Document's server-stamped provenance; a
 request-supplied bank identifier cannot establish ownership. Cross-borrower expansion and any financial total
@@ -812,14 +812,26 @@ The internal guarantee-registration use case now implements those source checks
 before both proposal and approval and defaults to `writer-enabled=false`. Its
 repository locks the pending fact, repeats the maker/checker check and inserts
 the minimized approval pointer into Lending's outbox in the same transaction.
-There is **no HTTP route** or client credential for this use case yet. The shared
+Loan-scoped HTTP proposal and decision routes now exist but return 503 while
+`writer-enabled=false`. A proposal is bound to the path loan, never to a
+caller-supplied bank or actor; the decision route verifies that the guarantee
+belongs to that same loan before any mutation. The maker route admits only
+human lending officers/admins, and the checker route only human credit-risk
+staff/admins. Method RBAC denies operators; explicit principal checks and
+Lending OPA deny service accounts. The service and repository enforce different maker and
+checker identities. The API returns only ID, revision and state, with no
+guarantor or source-document identifiers. Party/Document proof outages return
+503 without a negative or positive decision. A real-PostgreSQL test proves an
+outbox insert failure rolls approval back, while a valid approval commits one
+minimal pointer. No proof client credential is provisioned yet. The shared
 Lending Kafka publisher explicitly rejects `lending.graph.*` messages, so an
 accidental internal call cannot disclose graph references on the broad existing
-topic. Before enabling a writer, add a dedicated topic and ACL, a case-scoped
-authorization decision, route and real-DB atomicity tests. Source proof failure
-must propagate; a prior positive result cannot substitute for the approval-time
-check. A post-approval source change still requires revalidation at publication
-and source read time, so no Context edge is currently authorized from these rows.
+topic. Before enabling a writer, add a dedicated topic and ACL, provision the
+narrow proof credential and verify the policy/identity path in a deployed
+environment. Source proof failure must propagate; a prior positive result
+cannot substitute for the approval-time check. A post-approval source change
+still requires revalidation at publication and source read time, so no Context
+edge is currently authorized from these rows.
 - **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `RestCatalogLoanProfilePort`
   now reaches `product-catalog.accounts.svc:8443` with the client certificate `lending-internal-tls`
   (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in

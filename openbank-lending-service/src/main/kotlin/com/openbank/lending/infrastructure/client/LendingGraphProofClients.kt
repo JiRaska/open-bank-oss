@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.client
 
 import com.openbank.lending.application.port.out.LendingGraphProofPort
+import com.openbank.lending.application.port.out.LendingGraphProofUnavailable
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
@@ -15,6 +16,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -65,7 +67,7 @@ class RestLendingGraphProofAdapter(
     @param:RestClient private val document: LendingGraphDocumentProofClient,
 ) : LendingGraphProofPort {
     override suspend fun hasVerifiedGuarantorIdentity(partyId: UUID): Boolean =
-        party.verify(GuarantorIdentityProofRequest(partyId)).awaitSuspending().verified
+        proof { party.verify(GuarantorIdentityProofRequest(partyId)).awaitSuspending().verified }
 
     override suspend fun matchesSignedGuarantee(
         documentId: UUID,
@@ -73,7 +75,19 @@ class RestLendingGraphProofAdapter(
         guarantorPartyId: UUID,
         bankScope: String,
         sealedSha256: String,
-    ): Boolean = document.verify(
-        SignedGuaranteeProofRequest(documentId, loanId, guarantorPartyId, bankScope, sealedSha256),
-    ).awaitSuspending().matches
+    ): Boolean = proof {
+        document.verify(
+            SignedGuaranteeProofRequest(documentId, loanId, guarantorPartyId, bankScope, sealedSha256),
+        ).awaitSuspending().matches
+    }
+
+    // REST, token acquisition and decoding fail with different exception types; all mean no proof.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun proof(read: suspend () -> Boolean): Boolean = try {
+        read()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        throw LendingGraphProofUnavailable(e)
+    }
 }

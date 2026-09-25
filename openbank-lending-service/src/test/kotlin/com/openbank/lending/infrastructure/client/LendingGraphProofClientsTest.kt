@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.client
 
+import com.openbank.lending.application.port.out.LendingGraphProofUnavailable
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.oidc.client.filter.OidcClientFilter
@@ -48,7 +49,8 @@ class LendingGraphProofClientsTest {
         every { party.verify(GuarantorIdentityProofRequest(partyId)) } returns
             Uni.createFrom().failure(IllegalStateException("source unavailable"))
         assertThatThrownBy { runBlocking { adapter.hasVerifiedGuarantorIdentity(partyId) } }
-            .isInstanceOf(IllegalStateException::class.java)
-            .hasMessageContaining("source unavailable")
+            .isInstanceOf(LendingGraphProofUnavailable::class.java)
+            .hasMessageContaining("source proof unavailable")
+            .hasCauseInstanceOf(IllegalStateException::class.java)
     }
 }

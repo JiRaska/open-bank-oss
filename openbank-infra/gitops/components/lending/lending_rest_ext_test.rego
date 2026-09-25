@@ -260,3 +260,37 @@ test_graph_source_read_denies_operator_compliance_and_service_account if {
         } with data.rules as rules_mock
     }
 }
+
+test_graph_writer_separates_maker_and_checker if {
+    every item in [
+        {"role": "ROLE_LENDING_OFFICER", "action": "lending.graph.propose"},
+        {"role": "ROLE_CREDIT_RISK", "action": "lending.graph.decide"},
+        {"role": "ROLE_ADMIN", "action": "lending.graph.propose"},
+        {"role": "ROLE_ADMIN", "action": "lending.graph.decide"},
+    ] {
+        result := rest.allow with input as {
+            "principal": {"type": "HUMAN", "id": "graph-reviewer", "roles": [item.role]},
+            "action": item.action,
+        } with data.rules as rules_mock
+        result.allow
+    }
+}
+
+test_graph_writer_denies_operator_wrong_role_and_service_identity if {
+    every item in [
+        {"principal": {"type": "HUMAN", "id": "operator", "roles": ["ROLE_OPERATOR"]},
+         "action": "lending.graph.propose"},
+        {"principal": {"type": "HUMAN", "id": "operator", "roles": ["ROLE_OPERATOR"]},
+         "action": "lending.graph.decide"},
+        {"principal": {"type": "HUMAN", "id": "maker", "roles": ["ROLE_LENDING_OFFICER"]},
+         "action": "lending.graph.decide"},
+        {"principal": {"type": "HUMAN", "id": "checker", "roles": ["ROLE_CREDIT_RISK"]},
+         "action": "lending.graph.propose"},
+        {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_ADMIN"]},
+         "action": "lending.graph.propose"},
+        {"principal": {"type": "SERVICE", "id": "other-service", "roles": ["ROLE_ADMIN"]},
+         "action": "lending.graph.decide"},
+    ] {
+        not rest.allow with input as item with data.rules as rules_mock
+    }
+}

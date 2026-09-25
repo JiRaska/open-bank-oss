@@ -140,9 +140,10 @@ An internal guarantee writer now validates loan, Party and signed Document
 evidence on proposal and approval, and persists an approval pointer atomically
 with the decision. A real-PostgreSQL test proves that an outbox insert failure
 rolls back approval and a successful approval commits one minimized reference.
-The writer is disabled by default and has no HTTP route, dedicated Kafka
-publisher or credential; the existing broad Lending publisher refuses its
-event type. A bounded, loan-scoped approved-guarantee source read is available
+The loan-scoped maker/checker HTTP routes are also disabled by default; there
+is still no dedicated Kafka publisher or provisioned proof credential. The
+existing broad Lending publisher refuses the graph event type. A bounded,
+loan-scoped approved-guarantee source read is available
 behind a separate disabled-by-default switch. It requires the investigator's
 live Context assignment for the exact loan and purpose, and returns no data if
 that check is denied or unavailable. The Context projector, Lending graph UI
@@ -201,7 +202,7 @@ used as bank authority. The realm template declares a separate
 `openbank-lending-graph` client with only `ROLE_LENDING_GRAPH_PROOF`; the endpoint
 checks both that role and its exact principal. It remains unusable in a
 deployment until the credential is provisioned and available to Lending. The
-internal writer stays disabled until that credential, a case-scoped route and
+writer remains disabled until that credential, its case-scoped route and a
 dedicated reference channel are reviewed and deployed.
 Party also offers a boolean-only, purpose-limited guarantor identity check to
 that exact client. It returns true only for a real active customer with approved
@@ -214,9 +215,9 @@ Approval then rechecks current source state in the same logical decision flow
 and emits the versioned, reference-only event through Lending's transactional
 outbox. Context consumes it idempotently, preserves effective and recorded time,
 and reads detail through the source's case-scoped API under a separate OPA
-decision. Until the dedicated credential, authorized writer route, reference
-publisher and Context projector exist, V20 rows must not be presented as verified
-links. The source read remains disabled while those deployment boundaries are reviewed.
+decision. Until the dedicated credential, enabled writer route, reference
+publisher and Context projector are deployed, V20 rows must not be presented as
+verified links. The source read remains disabled while those boundaries are reviewed.
 
 ## Alternatives considered
 
