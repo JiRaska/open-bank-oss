@@ -22,7 +22,7 @@ import javax.sql.DataSource
 /** Real-Postgres proof that a graph fact cannot become an approved or rewritten identity by itself. */
 @QuarkusTest
 @QuarkusTestResource(LendingBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(value = PostgresRedisTestResource::class, restrictToAnnotatedClass = true)
 class LendingGraphSourceSchemaIT {
     @Inject
     lateinit var dataSource: DataSource
@@ -60,7 +60,7 @@ class LendingGraphSourceSchemaIT {
         assertThat(facts.map { it.proposal.revision }).containsExactly(1L, 2L)
         val notYetKnown = VertxContextSupport.subscribeAndAwait {
             uni(CoroutineScope(Dispatchers.Unconfined)) {
-                guarantees.findApprovedForLoan(loanId, effectiveAt, decidedAt.minusNanos(1), limit = 1)
+                guarantees.findApprovedForLoan(loanId, effectiveAt, decidedAt.minusSeconds(1), limit = 1)
             }
         }
         val notYetEffective = VertxContextSupport.subscribeAndAwait {
