@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.252.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.0...admin-ui-v0.252.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish enforced SDLC controls from policy goals ([#10800](https://github.com/JiRaska/open-bank-oss/issues/10800)) ([a71a92c](https://github.com/JiRaska/open-bank-oss/commit/a71a92c2ed5c5008973a5ab03ebd858417b25bd3))
+
+## [0.252.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.1...admin-ui-v0.252.0) (2026-09-24)
+
+
+### Features
+
+* **admin-ui:** explain SDLC and quality gates ([#10790](https://github.com/JiRaska/open-bank-oss/issues/10790)) ([a7810fa](https://github.com/JiRaska/open-bank-oss/commit/a7810fa74ff124c35971e3d301ea4046aa674cc3))
+
 ## [0.251.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.0...admin-ui-v0.251.1) (2026-09-24)
 
 
