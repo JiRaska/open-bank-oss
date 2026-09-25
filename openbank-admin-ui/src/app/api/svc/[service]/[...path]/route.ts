@@ -43,6 +43,9 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'interest-service':       { container: 'openbank-interest-service',       port: 8125 },
   'lending-service':        { container: 'openbank-lending-service',        port: 8126 },
   'risk-engine':            { container: 'openbank-risk-engine',            port: 8159 },
+  // ADR-0315: money-market deals for the treasury desk (#10618). Not in gitops yet — the
+  // service-registry guard lists it in SERVICE_MAP_NOT_YET_DEPLOYED until its workload lands.
+  'treasury-service':       { container: 'openbank-treasury-service',       port: 8160 },
   'campaign-service':       { container: 'openbank-campaign-service',       port: 8128 },
   'sdd-service':            { container: 'openbank-sdd-service',            port: 8129 },
   'fraud-service':          { container: 'openbank-fraud-service',          port: 8133 },

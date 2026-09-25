@@ -70,10 +70,10 @@ describe('balance sheet & risk — route and page gates', () => {
     }
   })
 
-  it('treasury roles are declared only: they unlock no permission at all', () => {
+  it('treasury roles unlock only the Treasury section and the workspace landing (ADR-0315)', () => {
     for (const role of [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER]) {
       const unlocked = (Object.keys(PERMISSIONS) as Permission[]).filter(p => hasPermission([role], p))
-      expect(unlocked, role).toEqual([])
+      expect(unlocked.every(p => p === 'dashboard:view' || p.startsWith('treasury:')), `${role}: ${unlocked.join(',')}`).toBe(true)
     }
   })
 

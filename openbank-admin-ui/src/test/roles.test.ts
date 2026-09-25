@@ -3,10 +3,15 @@ import { describe, it, expect } from 'vitest'
 import { hasPermission, hasRole, hasAnyRole, ROLES, PERMISSIONS } from '@/lib/auth/roles'
 
 describe('hasPermission', () => {
-  it('returns true for admin on any permission', () => {
+  // The one deliberate gap: treasury deal WRITES. TreasuryResource's method-level @RolesAllowed
+  // admits only the desk roles (ADR-0315), so a UI grant to ADMIN would render buttons that 403.
+  // treasury-rbac.guard.test.ts ties these to the Kotlin annotations.
+  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel'])
+
+  it('returns true for admin on any permission, except the service-excluded treasury writes', () => {
     const admin = [ROLES.ADMIN]
     for (const perm of Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[]) {
-      expect(hasPermission(admin, perm)).toBe(true)
+      expect(hasPermission(admin, perm), perm).toBe(!ADMIN_EXCLUDED_BY_SERVICE.has(perm))
     }
   })
 

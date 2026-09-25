@@ -10,6 +10,11 @@ import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import {
   Activity,
+  FilePlus,
+  Handshake,
+  Inbox,
+  Landmark,
+  Wallet,
   AlertOctagon,
   ArrowLeftRight,
   Banknote,
@@ -108,6 +113,16 @@ const balanceSheetNav: NavItem[] = [
   { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view' },
   { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view' },
   { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view' },
+]
+
+// ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
+// permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
+const treasuryNav: NavItem[] = [
+  { nameCs: 'Obchody',          nameEn: 'Deal blotter',     href: '/treasury/deals',          icon: Landmark,  permission: 'treasury:view' },
+  { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create' },
+  { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve' },
+  { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view' },
+  { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view' },
 ]
 
 const customerNav: NavItem[] = [
@@ -226,7 +241,7 @@ const sysNav: NavItem[] = [
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...balanceSheetNav, ...customerNav, ...paymentsNav,
+  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...customerNav, ...paymentsNav,
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
@@ -368,6 +383,12 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
           <>
             <SectionLabel>{t('Rozvaha a riziko', 'Balance sheet & risk')}</SectionLabel>
             <NavSection items={filter(balanceSheetNav)} currentHref={currentHref} />
+          </>
+        )}
+        {filter(treasuryNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Treasury', 'Treasury')}</SectionLabel>
+            <NavSection items={filter(treasuryNav)} currentHref={currentHref} />
           </>
         )}
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
