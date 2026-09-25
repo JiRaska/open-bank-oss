@@ -94,6 +94,46 @@ export const backfillExecutionSchema = z.object({
   }),
 })
 
+// IRRBB (risk-engine GET /snapshots/{id}/irrbb, ADR-0313 phase 1).
+export const SCENARIOS = ['parallel-up', 'parallel-down', 'steepener', 'flattener', 'short-up', 'short-down'] as const
+const nullableMoney = money.nullable()
+export const gapBucketSchema = z.object({ bucket: z.string(), assets: money, liabilities: money, gap: money, cumulativeGap: money })
+export const currencyGapSchema = z.object({
+  currency: z.string(), buckets: z.array(gapBucketSchema), totalAssets: money, totalLiabilities: money, totalGap: money,
+})
+export const currencyScenarioSchema = z.object({
+  currency: z.string(), basePv: money, shockedPv: money, deltaEve: money, eveLoss: money, deltaNii: nullableMoney.optional(),
+})
+export const scenarioSchema = z.object({
+  scenario: z.enum(SCENARIOS), currencies: z.array(currencyScenarioSchema), aggregateLoss: nullableMoney.optional(),
+})
+export const irrbbSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, curveSetId: z.string(), curveSetProvenance: provenance, curveSetSource: z.string(),
+  gaps: z.array(currencyGapSchema),
+  scenarios: z.array(scenarioSchema),
+  worstCase: z.object({
+    scenario: z.enum(SCENARIOS).nullable().optional(), loss: nullableMoney.optional(), currency: z.string().nullable().optional(),
+    byCurrency: z.record(z.string(), z.enum(SCENARIOS)),
+  }),
+  outlierTest: z.object({
+    tier1Supplied: z.boolean(), tier1Capital: nullableMoney.optional(), currency: z.string().nullable().optional(),
+    threshold: money, ratio: nullableMoney.optional(), breached: z.boolean().nullable().optional(), note: z.string(),
+  }),
+  shockNotConfigured: z.array(z.string()),
+  unpriced: z.array(z.string()),
+  assumptions: z.object({
+    model: z.object({ id: z.string(), version: z.string() }).passthrough(),
+    shockSizes: z.array(z.object({ currency: z.string(), parallelBp: money, shortBp: money, longBp: money })),
+    shockSource: z.string(), shortDecayYears: money,
+    postShockFloor: z.object({ atZeroBp: money, slopeBpPerYear: money }).nullable().optional(),
+    postShockFloorSource: z.string(), nmdRepricing: z.string(), floatingRepricing: z.string(),
+    eveBasis: z.string(), niiBasis: z.string(), niiHorizonMonths: z.number().int(), currencyAggregation: z.string(),
+  }),
+})
+
+export type Irrbb = z.infer<typeof irrbbSchema>
+export type CurrencyGap = z.infer<typeof currencyGapSchema>
+export type ScenarioName = typeof SCENARIOS[number]
 export type SnapshotSummary = z.infer<typeof snapshotSummarySchema>
 export type SnapshotRun = z.infer<typeof snapshotRunSchema>
 export type Instrument = z.infer<typeof instrumentSchema>

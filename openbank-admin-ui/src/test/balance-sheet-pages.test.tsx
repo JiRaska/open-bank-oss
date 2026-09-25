@@ -29,6 +29,7 @@ vi.mock('recharts', () => {
 
 import LedgerBackfillPage from '@/app/balance-sheet/ledger-backfill/page'
 import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
+import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
 
 const json = (body: unknown, status = 200) =>
@@ -157,5 +158,62 @@ describe('snapshots', () => {
     expect(screen.getByText(/USD/)).toBeTruthy()
     expect(screen.getByText(/GL_ACCOUNT positions carry no contract terms/)).toBeTruthy()
     expect(calls.some(c => c.url.includes('/cash-flows?curveSetId=cs-1'))).toBe(true)
+  })
+})
+
+const IRRBB = (ratio: number | null, tier1: boolean) => ({
+  runId: 'run-3', asOf: '2026-09-30', provenance: 'synthetic', curveSetId: 'cs-1', curveSetProvenance: 'synthetic', curveSetSource: 'desk',
+  gaps: [{ currency: 'EUR', buckets: [{ bucket: 'overnight', assets: 0, liabilities: 60, gap: -60, cumulativeGap: -60 }, { bucket: '1-2Y', assets: 1000, liabilities: 0, gap: 1000, cumulativeGap: 940 }], totalAssets: 1000, totalLiabilities: 60, totalGap: 940 }],
+  scenarios: [
+    { scenario: 'parallel-up', currencies: [{ currency: 'EUR', basePv: 950, shockedPv: 930, deltaEve: -20, eveLoss: 20, deltaNii: 3.5 }], aggregateLoss: 20 },
+    { scenario: 'steepener', currencies: [{ currency: 'EUR', basePv: 950, shockedPv: 945, deltaEve: -5, eveLoss: 5, deltaNii: null }], aggregateLoss: 5 },
+  ],
+  worstCase: { scenario: 'parallel-up', loss: 20, currency: 'EUR', byCurrency: { EUR: 'parallel-up' } },
+  outlierTest: { tier1Supplied: tier1, tier1Capital: tier1 ? 100 : null, currency: 'EUR', threshold: 0.15, ratio, breached: ratio === null ? null : ratio > 0.15, note: tier1 ? 'ratio note' : 'Tier 1 not supplied' },
+  shockNotConfigured: ['CZK'], unpriced: [],
+  assumptions: {
+    model: { id: 'nmd-linear-core', version: '1.0.0', coreRatio: 0.7, coreRunoffYears: 5, annualDepositRate: 0 },
+    shockSizes: [{ currency: 'EUR', parallelBp: 200, shortBp: 250, longBp: 100 }], shockSource: 'BCBS d368 Annex 2', shortDecayYears: 4,
+    postShockFloor: null, postShockFloorSource: 'No post-shock floor configured', nmdRepricing: 'repricing = run-off', floatingRepricing: 'next reset',
+    eveBasis: 'run-off', niiBasis: 'constant balance sheet', niiHorizonMonths: 12, currencyAggregation: 'd368',
+  },
+})
+
+describe('IRRBB', () => {
+  const route = (url: string) => {
+    if (url.includes('/curve-sets')) return json({ curveSets: [{ id: 'cs-1', asOf: '2026-09-30', provenance: 'synthetic', source: 'desk', recordedAt: '2026-09-30T06:00:00Z', indices: ['ESTR'] }] })
+    if (url.includes('tier1Capital=100')) return json(IRRBB(0.2, true))
+    return json(IRRBB(null, false))
+  }
+
+  it('without Tier 1 shows no ratio, never sends one, and states not-configured currencies', async () => {
+    router = route
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: 'run-3' })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    const irrbbCalls = calls.filter(c => c.url.includes('/irrbb'))
+    expect(irrbbCalls.length).toBeGreaterThan(0)
+    expect(irrbbCalls.every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/snapshots/run-3/irrbb?') && !c.url.includes('tier1Capital'))).toBe(true)
+    expect(screen.queryByText(/Breached|Překročeno/)).toBeNull()
+    expect(screen.getByText(/No shock sizes are configured|nejsou nastaveny/).textContent).toContain('CZK')
+    expect(document.querySelectorAll('tr[data-worst="true"]').length).toBe(1)
+    expect(screen.getByText(/BCBS d368 Annex 2/)).toBeTruthy()
+  })
+
+  it('shows the outlier ratio only after the user supplies Tier 1', async () => {
+    router = route
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: 'run-3' })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    fireEvent.change(screen.getByLabelText(/^(Tier 1 capital|Kapitál Tier 1)$/), { target: { value: '100' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Apply|Použít/ })) })
+    await screen.findByText(/Breached|Překročeno/)
+    expect(calls.some(c => c.url.includes('tier1Capital=100'))).toBe(true)
+  })
+
+  it('an invalid Tier 1 cannot be applied', async () => {
+    router = route
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: 'run-3' })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    fireEvent.change(screen.getByLabelText(/^(Tier 1 capital|Kapitál Tier 1)$/), { target: { value: '-5' } })
+    expect((screen.getByRole('button', { name: /Apply|Použít/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

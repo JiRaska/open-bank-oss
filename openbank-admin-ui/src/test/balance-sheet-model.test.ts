@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  backfillActions, bankToday, cumulativeGap, isIsoDate, ladderRows, parseQuotes, principalNameFromToken,
+  backfillActions, bankToday, cumulativeGap, gapRows, isIsoDate, ladderRows, parseQuotes, parseTier1, principalNameFromToken,
 } from '@/components/balance-sheet/model'
 import { backfillPlanSchema, cashFlowsSchema, snapshotListSchema } from '@/components/balance-sheet/contracts'
 import type { BackfillRequest } from '@/components/balance-sheet/contracts'
@@ -108,5 +108,18 @@ describe('wire contracts accept the backends’ documented shapes', () => {
       plan: { cutoverDate: '2026-09-25', planHash: 'h', tieOut: [{ currency: 'CZK', loansReceivableAfter: 100, lendingUnpaidPrincipal: 100, ties: true }], loans: [{ loanId: 'l', currency: 'CZK', status: 'ACTIVE', unpaidPrincipal: 100, unsupportedReason: null, legs: [] }], legs: [], unsupported: [], executable: true },
       executable: true, journalCount: 13, glTotals: [{ code: '1200', currency: 'CZK', debit: 300, credit: 200, net: 100 }],
     }).success).toBe(true)
+  })
+})
+
+describe('IRRBB derivations', () => {
+  it('parseTier1 accepts only a positive decimal and never invents one', () => {
+    expect(parseTier1('1 250 000,50')).toBe('1250000.50')
+    expect(parseTier1('100')).toBe('100')
+    for (const bad of ['', '0', '-5', 'abc', '1e9', '1.2.3']) expect(parseTier1(bad), bad).toBeNull()
+  })
+
+  it('gapRows draws liabilities down and keeps the engine totals', () => {
+    const rows = gapRows({ currency: 'EUR', buckets: [{ bucket: 'overnight', assets: 5, liabilities: 60, gap: -55, cumulativeGap: -55 }], totalAssets: 5, totalLiabilities: 60, totalGap: -55 })
+    expect(rows).toEqual([{ bucket: 'overnight', assets: 5, liabilities: -60, gap: -55, cumulativeGap: -55 }])
   })
 })

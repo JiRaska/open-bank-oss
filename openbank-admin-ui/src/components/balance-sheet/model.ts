@@ -4,7 +4,7 @@
 
 // Pure derivations for the "Balance sheet & risk" section (#10618). No React, no fetch — every
 // rule the pages rely on is here so it can be unit-tested against the wire contracts.
-import { BUCKETS, type BackfillRequest, type CurrencyFlows } from './contracts'
+import { BUCKETS, type BackfillRequest, type CurrencyFlows, type CurrencyGap, type Irrbb } from './contracts'
 
 /** Curve indices risk-engine accepts (CurveIndex.kt). An unknown one is a 400 there. */
 export const CURVE_INDICES = ['CZEONIA', 'PRIBOR_1M', 'PRIBOR_3M', 'PRIBOR_6M', 'ESTR', 'EURIBOR_3M'] as const
@@ -142,4 +142,29 @@ export function isIsoDate(value: string): boolean {
 /** Today in Europe/Prague as YYYY-MM-DD — the bank's accounting day, which the backfill cut-over must not precede. */
 export function bankToday(now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
+}
+
+// ── IRRBB ─────────────────────────────────────────────────────────────────────────────────────
+
+export type GapRow = { bucket: string; assets: number; liabilities: number; gap: number; cumulativeGap: number }
+
+/** Repricing-gap rows in the engine's order; liabilities drawn DOWN (negated) so the bars read as a ladder. */
+export function gapRows(gap: CurrencyGap): GapRow[] {
+  return gap.buckets.map(b => ({ bucket: b.bucket, assets: b.assets, liabilities: -b.liabilities, gap: b.gap, cumulativeGap: b.cumulativeGap }))
+}
+
+/**
+ * A caller-typed Tier 1 figure, or null. Only a positive decimal is accepted; anything else means
+ * "not supplied" — the page never substitutes a figure, so the outlier ratio stays unshown.
+ */
+export function parseTier1(raw: string): string | null {
+  const v = raw.trim().replace(/\s/g, '').replace(',', '.')
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(v)) return null
+  return Number(v) > 0 ? v : null
+}
+
+/** The outlier ratio to SHOW: only when Tier 1 was supplied and the engine computed a ratio. */
+export function outlierRatio(irrbb: Irrbb): number | null {
+  const o = irrbb.outlierTest
+  return o.tier1Supplied && typeof o.ratio === 'number' ? o.ratio : null
 }
