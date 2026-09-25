@@ -14,6 +14,7 @@ import com.openbank.context.domain.ContextNode
 import com.openbank.context.domain.DataClassification
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
@@ -290,6 +291,13 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
     lateinit var updatedAt: Instant
 }
 
+/** The reactive timeout bounds the caller; PostgreSQL must stop the query as well. */
+internal fun <T> Mutiny.SessionFactory.boundedGraphRead(timeoutMs: Int, block: (Mutiny.Session) -> Uni<T>): Uni<T> =
+    withTransaction { session, _ ->
+        session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
+            .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
+    }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+
 @ApplicationScoped
 class ContextGraphRepository(
     private val sessions: Mutiny.SessionFactory,
@@ -369,7 +377,7 @@ class ContextGraphRepository(
     }
 
     private suspend fun findRoot(namespace: ContextNamespace, root: String, asOf: Instant): ContextNodeEntity? =
-        sessions.withSession { session ->
+        sessions.boundedGraphRead(queryTimeoutMs) { session ->
             session.createQuery(
                 "from ContextNodeEntity where key = :root and bankScope = :bankScope and " +
                     "projectionGeneration = :generation and namespace = :namespace and validFrom <= :asOf and " +
@@ -378,14 +386,14 @@ class ContextGraphRepository(
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
                 .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
                 .setParameter("root", root).singleResultOrNull
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
 
     private suspend fun findRootEdges(
         namespace: ContextNamespace,
         root: String,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> = sessions.withSession { session ->
+    ): List<ContextEdgeEntity> = sessions.boundedGraphRead(queryTimeoutMs) { session ->
         session.createQuery(
             "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
                 "namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and " +
@@ -394,7 +402,7 @@ class ContextGraphRepository(
         ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
             .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
             .setParameter("root", root).setMaxResults(limit).resultList
-    }.bounded().awaitSuspending()
+    }.awaitSuspending()
 
     private suspend fun findComplaintPaymentEvidenceEdges(
         transactionKeys: List<String>,
@@ -402,7 +410,7 @@ class ContextGraphRepository(
         limit: Int,
     ): List<ContextEdgeEntity> {
         if (transactionKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.withSession { session ->
+        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
             session.createQuery(
                 "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
                     "namespace = 'COMPLAINT' and fromKey in (:keys) and " +
@@ -435,7 +443,7 @@ class ContextGraphRepository(
                 .setParameter("keys", transactionKeys)
                 .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
     }
 
     private suspend fun findComplaintBookingEvidenceEdges(
@@ -447,7 +455,7 @@ class ContextGraphRepository(
         limit: Int,
     ): List<ContextEdgeEntity> {
         if (bookingTransactionKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.withSession { session ->
+        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
             session.createQuery(
                 "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
                     "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
@@ -458,7 +466,7 @@ class ContextGraphRepository(
                 .setParameter("source", source).setParameter("keys", bookingTransactionKeys)
                 .setParameter("bookingPrefix", toPrefix).setParameter("relation", relation)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
     }
 
     private suspend fun findComplaintClearingEvidenceEdges(
@@ -467,7 +475,7 @@ class ContextGraphRepository(
         limit: Int,
     ): List<ContextEdgeEntity> {
         if (clearingItemKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.withSession { session ->
+        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
             session.createQuery(
                 "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
                     "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
@@ -478,14 +486,14 @@ class ContextGraphRepository(
                 .setParameter("source", CLEARING_SOURCE).setParameter("keys", clearingItemKeys)
                 .setParameter("evidencePrefix", CLEARING_EVIDENCE_PREFIX).setParameter("relation", SETTLED)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
     }
 
     private suspend fun findNodes(
         namespace: ContextNamespace,
         keys: List<String>,
         asOf: Instant,
-    ): List<ContextNodeEntity> = sessions.withSession { session ->
+    ): List<ContextNodeEntity> = sessions.boundedGraphRead(queryTimeoutMs) { session ->
         session.createQuery(
             "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
                 "namespace = :namespace and key in (:keys) and validFrom <= :asOf and " +
@@ -494,10 +502,7 @@ class ContextGraphRepository(
         ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
             .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
             .setParameter("keys", keys).resultList
-    }.bounded().awaitSuspending()
-
-    private fun <T> io.smallrye.mutiny.Uni<T>.bounded(): io.smallrye.mutiny.Uni<T> =
-        ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail()
+    }.awaitSuspending()
 
     private companion object {
         const val CONCERNS_TRANSACTION = "CONCERNS_TRANSACTION"
