@@ -17,6 +17,11 @@ import time
 
 DELAYS = (0, 60, 120, 240, 480, 600, 300)  # 30 minutes, seven probes
 WARNING = "x-github-dependency-graph-snapshot-warnings"
+PRODUCER = "Submit fleet dependency graph"
+
+
+class TerminalBaseGraphError(RuntimeError):
+    """The immutable comparison base has no successful graph producer."""
 
 
 def _gh(*args: str) -> str:
@@ -61,13 +66,48 @@ def _indexed(response: str) -> bool:
     return True
 
 
-def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS) -> bool:
+def _base_producer_verdict(response: str) -> str:
+    """Classify all pages of Checks API results without mistaking absence for failure."""
+    decoder = json.JSONDecoder()
+    pages = []
+    offset = 0
+    while offset < len(response):
+        while offset < len(response) and response[offset].isspace():
+            offset += 1
+        if offset == len(response):
+            break
+        page, offset = decoder.raw_decode(response, offset)
+        if not isinstance(page, dict) or not isinstance(page.get("check_runs"), list):
+            raise ValueError("invalid base producer checks response")
+        pages.append(page)
+    if not pages:
+        raise ValueError("empty base producer checks response")
+    matches = [
+        run
+        for page in pages
+        for run in page["check_runs"]
+        if isinstance(run, dict) and run.get("name") == PRODUCER
+    ]
+    if any(run.get("conclusion") == "success" for run in matches):
+        return "success"
+    if any(run.get("status") != "completed" for run in matches):
+        return "pending"
+    return "terminal" if matches else "unknown"
+
+
+def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS, base_verdict=None) -> bool:
     for delay in delays:
         if delay:
             sleep(delay)
         try:
             if _indexed(query()):
                 return True
+            if base_verdict is not None and base_verdict() == "terminal":
+                raise TerminalBaseGraphError(
+                    "merge-base producer finished without a successful dependency graph"
+                )
+        except TerminalBaseGraphError:
+            raise
         except RuntimeError as exc:
             if "quota is exhausted" in str(exc):
                 raise
@@ -89,7 +129,10 @@ def main() -> int:
         query = lambda: _gh(
             "-i", f"repos/{repo}/dependency-graph/compare/{merge_base}...{head}"
         )
-        if wait_for_snapshot(query):
+        base_verdict = lambda: _base_producer_verdict(
+            _gh("--paginate", f"repos/{repo}/commits/{merge_base}/check-runs?per_page=100")
+        )
+        if wait_for_snapshot(query, base_verdict=base_verdict):
             print(
                 "Both dependency snapshots are indexed; running the full policy review."
             )

@@ -48,6 +48,10 @@ rows=[dict(name=name,conclusion='success')]
 if case=='missing' or (case=='missing-head' and any('/head/' in a for a in args)):
  rows=[]
 if case=='failed-submission': rows=[dict(name=name,conclusion='failure',status='completed')]
+if case=='cancelled-submission': rows=[dict(name=name,conclusion='cancelled',status='completed')]
+if case=='timed-out-submission': rows=[dict(name=name,conclusion='timed_out',status='completed')]
+if case=='skipped-submission': rows=[dict(name=name,conclusion='skipped',status='completed')]
+if case=='mixed-terminal-pending': rows=[dict(name=name,conclusion='cancelled',status='completed'),dict(name=name,conclusion=None,status='in_progress')]
 if case=='pending-base': rows=[dict(name=name,conclusion=None,status='in_progress')]
 if case=='wrong-job': rows=[dict(name='Other job',conclusion='success')]
 if case=='paginated':
@@ -58,13 +62,15 @@ print(json.dumps(dict(check_runs=rows)))
 
 
 class BasisTests(unittest.TestCase):
-    def test_known_failed_base_is_rejected_before_snapshot_wait(self):
-        failed, _ = self.run_base_case("failed-submission")
-        self.assertNotEqual(failed.returncode, 0)
-        self.assertIn("Base dependency graph failed", failed.stdout)
+    def test_terminal_unsuccessful_base_is_rejected_before_snapshot_wait(self):
+        for case in ["failed-submission", "cancelled-submission", "timed-out-submission", "skipped-submission"]:
+            with self.subTest(case=case):
+                failed, _ = self.run_base_case(case)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("Base dependency graph failed", failed.stdout)
 
     def test_base_preflight_defers_uncertain_state_to_final_guard(self):
-        for case in ["valid", "pending-base", "missing", "api-failure", "malformed"]:
+        for case in ["valid", "pending-base", "mixed-terminal-pending", "missing", "api-failure", "malformed"]:
             with self.subTest(case=case):
                 result, _ = self.run_base_case(case)
                 self.assertEqual(result.returncode, 0, result.stderr + result.stdout)

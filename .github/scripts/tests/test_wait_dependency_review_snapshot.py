@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import base64
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 
@@ -68,6 +69,76 @@ class SnapshotWaitTests(unittest.TestCase):
 
     def test_nonzero_snapshot_warning_is_not_missing_basis(self):
         self.assertTrue(MODULE._indexed(response(1, 2)))
+
+    def test_terminal_base_stops_after_first_missing_comparison(self):
+        calls = []
+
+        def verdict():
+            calls.append(1)
+            return "terminal"
+
+        with self.assertRaises(MODULE.TerminalBaseGraphError):
+            MODULE.wait_for_snapshot(
+                lambda: response(0, 1), lambda _: None, (0, 60), verdict
+            )
+        self.assertEqual(len(calls), 1)
+
+    def test_pending_base_can_finish_during_sparse_wait(self):
+        verdicts = iter(["pending", "terminal"])
+        calls = []
+
+        def query():
+            calls.append(1)
+            return response(0, 1)
+
+        with self.assertRaises(MODULE.TerminalBaseGraphError):
+            MODULE.wait_for_snapshot(
+                query, lambda _: None, (0, 60, 120), lambda: next(verdicts)
+            )
+        self.assertEqual(len(calls), 2)
+
+    def test_transient_checks_api_error_keeps_bounded_wait(self):
+        def verdict():
+            raise RuntimeError("GitHub dependency API unavailable")
+
+        self.assertFalse(
+            MODULE.wait_for_snapshot(
+                lambda: response(0, 1), lambda _: None, (0, 60), verdict
+            )
+        )
+
+    def test_successful_base_does_not_hide_missing_head(self):
+        self.assertFalse(
+            MODULE.wait_for_snapshot(
+                lambda: response(1, 0), lambda _: None, (0,), lambda: "success"
+            )
+        )
+
+    def test_base_producer_verdict_requires_success_or_all_terminal(self):
+        def page(*runs):
+            return json.dumps({"check_runs": list(runs)})
+
+        producer = MODULE.PRODUCER
+        other = {"name": "other", "status": "completed", "conclusion": "failure"}
+        cancelled = {"name": producer, "status": "completed", "conclusion": "cancelled"}
+        timed_out = {"name": producer, "status": "completed", "conclusion": "timed_out"}
+        pending = {"name": producer, "status": "in_progress", "conclusion": None}
+        success = {"name": producer, "status": "completed", "conclusion": "success"}
+        cases = [
+            (page(other), "unknown"),
+            (page(cancelled, timed_out), "terminal"),
+            (page(cancelled, pending), "pending"),
+            (page(cancelled) + page(other, success), "success"),
+        ]
+        for payload, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(MODULE._base_producer_verdict(payload), expected)
+
+    def test_malformed_checks_response_is_not_terminal_proof(self):
+        for payload in ["", "{}", '{"check_runs":null}', "not-json"]:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    MODULE._base_producer_verdict(payload)
 
 
 if __name__ == "__main__":

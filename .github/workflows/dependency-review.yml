@@ -77,7 +77,7 @@ jobs:
             echo "No dependency submission input touched — no Gradle submission runs for this PR, so nothing to wait for."
           fi
 
-      # A completed failed producer on the immutable merge-base cannot be repaired by
+      # A terminal unsuccessful producer on the immutable merge-base cannot be repaired by
       # waiting for the PR head. Reject that proven state before the bounded snapshot
       # wait. A pending producer or transient Checks API failure still takes
       # the normal bounded review path, which retains the final fail-closed basis check.
@@ -103,7 +103,7 @@ jobs:
               [.[] | .check_runs[] | select(.name == $name)] |
               if any(.[]; .conclusion == "success") then "success"
               elif any(.[]; .status != "completed") then "pending"
-              elif any(.[]; .conclusion == "failure") then "failure"
+              elif length > 0 and all(.[]; .status == "completed") then "failure"
               else "unknown" end
             else error("invalid check-run response") end
           ' <<< "$response" 2>/dev/null)" || {
@@ -111,7 +111,7 @@ jobs:
             exit 0
           }
           if [ "$verdict" = failure ]; then
-            echo "::error title=Base dependency graph failed::Merge-base $mb has only failed dependency-submission checks. Waiting for a PR-head snapshot cannot repair its missing base graph. See #10145."
+            echo "::error title=Base dependency graph failed::Merge-base $mb has only terminal unsuccessful dependency-submission checks. Waiting for a PR-head snapshot cannot repair its missing base graph. See #10145."
             exit 1
           fi
           echo "merge-base $mb producer verdict: $verdict; continuing full dependency review."
