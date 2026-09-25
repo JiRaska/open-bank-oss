@@ -10,6 +10,11 @@ kind: ExternalSecret
 metadata:
   name: cloud-finops-infracost
   namespace: admin-ui
+  annotations:
+    # ADR-0279 #18: static vendor API key (Infracost pricing API), no expiry of its own and no
+    # automated rotation. Rotate in the Infracost dashboard and re-seed OpenBao by this date,
+    # together with the GitHub Actions secret INFRACOST_API_KEY (the same key).
+    openbank.io/rotation-deadline: "2027-09-25"
 spec:
   refreshInterval: 1h
   secretStoreRef:
