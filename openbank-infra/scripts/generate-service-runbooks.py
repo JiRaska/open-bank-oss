@@ -27,6 +27,7 @@ import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -748,10 +749,11 @@ def self_test() -> int:
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
     # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
-    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
-    # automated sync while this exact distinction is under rollout review.
+    # that Argo has ever created a pod. Exercise that state explicitly: the incentive Application
+    # may change its real sync policy without making this failure-path self-test vacuous.
     if "incentive" in deployed:
-        incentive = render("incentive")
+        with patch.object(sys.modules[__name__], "application_automated", return_value=False):
+            incentive = render("incentive")
         case("a manual-sync workload is explicitly live-unverified",
              says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
         case("a manual-sync workload does not present declared metrics as a live scrape",
