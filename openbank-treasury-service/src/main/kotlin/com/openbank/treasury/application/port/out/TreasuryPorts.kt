@@ -32,6 +32,12 @@ data class LedgerJournalRef(
     val postedAt: Instant,
 )
 
+/**
+ * A client's `Idempotency-Key` for one command, stored with the state change it produced (same
+ * transaction). A replay of the key returns the deal as it now stands instead of acting twice.
+ */
+data class CommandKey(val key: String, val action: String, val dealId: UUID)
+
 /** An outbox event to commit with the deal row. */
 data class DealEvent(val eventType: String, val payload: String)
 
@@ -40,7 +46,15 @@ interface DealRepository {
      * Persist the deal (row + new timeline entries), an optional ledger journal reference and an
      * optional outbox event in ONE transaction (ADR-0003).
      */
-    suspend fun save(deal: Deal, journal: LedgerJournalRef? = null, event: DealEvent? = null): Deal
+    suspend fun save(
+        deal: Deal,
+        journal: LedgerJournalRef? = null,
+        event: DealEvent? = null,
+        command: CommandKey? = null,
+    ): Deal
+
+    /** The command previously recorded under [key], if any. */
+    suspend fun findCommand(key: String): CommandKey?
 
     suspend fun findById(dealId: UUID): Deal?
 

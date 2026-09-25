@@ -161,6 +161,23 @@ class DealJournalEntity : PanacheEntity() {
     lateinit var postedAt: Instant
 }
 
+/** A client Idempotency-Key and the command it produced; unique on the key. */
+@Entity
+@Table(name = "deal_commands")
+class DealCommandEntity : PanacheEntity() {
+    @Column(name = "idempotency_key", nullable = false, unique = true)
+    lateinit var idempotencyKey: String
+
+    @Column(name = "action", nullable = false)
+    lateinit var action: String
+
+    @Column(name = "deal_id", nullable = false)
+    lateinit var dealId: UUID
+
+    @Column(name = "created_at", nullable = false)
+    lateinit var createdAt: Instant
+}
+
 @Entity
 @Table(name = "treasury_outbox")
 class TreasuryOutboxEntity : PanacheOutboxEntity() {

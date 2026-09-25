@@ -48,8 +48,8 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
+    # No `tls.verification: none` here: %prod keeps the default `required`. The relaxation lives
+    # under "%dev" only (security review, HIGH).
 
   # The ledger rest-client carries @OidcClientFilter("m2m"): its bearer is minted by the NAMED
   # client below — Keycloak client `openbank-treasury`, ROLE_API only (#10486) — and
@@ -183,6 +183,8 @@ authz:
       level: DEBUG
     oidc:
       enabled: false
+      tls:
+        verification: none
   authz:
     enforce: "false"
 

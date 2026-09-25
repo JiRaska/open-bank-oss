@@ -526,3 +526,12 @@ set) apply equally to the new `ledger.approval.decide` action.
   ledger already authorizes for `ledger.read`. No rego, RBAC or listener change here. **STRIDE-I:**
   one more reader of per-customer deposit-control balances; it writes nothing to the ledger.
   Rollback: remove the risk-engine Deployment env and regenerate the policies.
+- **2026-09-25** — **New caller: treasury-service on its own identity (ADR-0315).** `service-treasury-ledger-post` (`service-account-openbank-treasury`, Keycloak client `openbank-treasury`, ROLE_API only) is gated on `input.principal.id` and on `ledger.create` alone; it posts deal settlement, maturity and reversal journals (idempotency key `treasury:<dealId>:<settled|matured|reversed>`) and reverses by posting an offsetting journal, so it holds no `ledger.reverse`, `ledger.read` or any other ledger action. The edge is the private-CA mTLS listener on 8443 (client cert `treasury-internal-tls`), and the ledger ingress allow-list gains the `treasury` namespace. **STRIDE-E:** one more money-path writer, bounded to balanced journal creation by identity. Measured with `opa test`: the identity is DENIED reverse/trigger/replay/approve/close.draft/read, and the rule admits no other ROLE_API account; replacing its `principal.id` line with a `service-account-` prefix match turns three must-deny tests red. Rollback: remove the rule and the treasury Deployment env, regenerate bundles and policies.
+- **2026-09-25 — treasury chart (ADR-0315, #10618).** `V29__treasury_money_market_accounts.sql` seeds
+  14 leaf accounts with fixed ids (EUR nostro 1002; MM placements 1500/1501; deposit facility at ČNB
+  1510; accrued interest 1520/1521 and 2310/2311; MM borrowings 2300/2301; MM interest income
+  4200/4201 and expense 5200/5201) and re-keys CZK nostro 1001 to its fixed id ONLY while nothing
+  references it (journal lines, child accounts, frozen-period trial-balance lines); otherwise it
+  leaves 1001 untouched and treasury's CZK postings fail with 422 rather than land elsewhere.
+  **STRIDE-T:** no validation or posting path changes — the accounts are ordinary leaves under the
+  same currency-match and balance checks, written only through `postJournal`.

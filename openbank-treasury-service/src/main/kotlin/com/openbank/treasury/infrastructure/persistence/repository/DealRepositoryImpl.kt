@@ -5,6 +5,7 @@
 package com.openbank.treasury.infrastructure.persistence.repository
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
@@ -21,6 +22,7 @@ import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.infrastructure.persistence.entity.CounterpartyEntity
+import com.openbank.treasury.infrastructure.persistence.entity.DealCommandEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealJournalEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealTransitionEntity
@@ -39,6 +41,9 @@ class DealTransitionPanacheRepository : PanacheRepository<DealTransitionEntity>
 
 @ApplicationScoped
 class DealJournalPanacheRepository : PanacheRepository<DealJournalEntity>
+
+@ApplicationScoped
+class DealCommandPanacheRepository : PanacheRepository<DealCommandEntity>
 
 @ApplicationScoped
 class CounterpartyRepositoryImpl :
@@ -71,6 +76,7 @@ class DealRepositoryImpl(
     private val outbox: TreasuryOutboxRepository,
     private val transitions: DealTransitionPanacheRepository,
     private val journals: DealJournalPanacheRepository,
+    private val commands: DealCommandPanacheRepository,
     private val clock: Clock,
 ) : DealRepository,
     PanacheRepository<DealEntity> {
@@ -80,7 +86,7 @@ class DealRepositoryImpl(
      * transaction (ADR-0003). Timeline rows already stored are counted and skipped, so the table
      * stays append-only.
      */
-    override suspend fun save(deal: Deal, journal: LedgerJournalRef?, event: DealEvent?): Deal {
+    override suspend fun save(deal: Deal, journal: LedgerJournalRef?, event: DealEvent?, command: CommandKey?): Deal {
         Panache.withTransaction {
             find("dealId", deal.id).firstResult().flatMap { existing ->
                 val entity = existing ?: DealEntity().apply {
@@ -93,6 +99,7 @@ class DealRepositoryImpl(
                     .flatMap { transitions.count("dealId", deal.id) }
                     .flatMap { stored -> appendTransitions(deal, stored.toInt()) }
                     .flatMap { journal?.let { persistJournal(it) } ?: Uni.createFrom().voidItem() }
+                    .flatMap { command?.let { persistCommand(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap {
                         event?.let {
                             outbox.persistInTransaction(
@@ -135,6 +142,19 @@ class DealRepositoryImpl(
             postedAt = ref.postedAt
         },
     ).replaceWithVoid()
+
+    private fun persistCommand(c: CommandKey): Uni<Void> = commands.persist(
+        DealCommandEntity().apply {
+            idempotencyKey = c.key
+            action = c.action
+            dealId = c.dealId
+            createdAt = clock.instant()
+        },
+    ).replaceWithVoid()
+
+    override suspend fun findCommand(key: String): CommandKey? = Panache.withSession {
+        commands.find("idempotencyKey", key).firstResult()
+    }.awaitSuspending()?.let { CommandKey(it.idempotencyKey, it.action, it.dealId) }
 
     override suspend fun findById(dealId: UUID): Deal? {
         val entity = Panache.withSession { find("dealId", dealId).firstResult() }.awaitSuspending() ?: return null

@@ -20,6 +20,7 @@ class TopicProducersTest {
     fun `a topic resolves to the module that declares its outgoing channel`() {
         assertEquals("card-issuance-service", TopicProducers.sourceService("openbank.cards.events"))
         assertEquals("standing-order-service", TopicProducers.sourceService("openbank.standing-orders.order.event"))
+        assertEquals("treasury-service", TopicProducers.sourceService("openbank.treasury.deal.events"))
         assertEquals("lending-service", TopicProducers.sourceService("openbank.lending.events"))
         assertEquals("fx-service", TopicProducers.sourceService("openbank.fx.conversion.completed"))
         assertEquals("transaction-service", TopicProducers.sourceService("openbank.transactions.transaction.initiated"))

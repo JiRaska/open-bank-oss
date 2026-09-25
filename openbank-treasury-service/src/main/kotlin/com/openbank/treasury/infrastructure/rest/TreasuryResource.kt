@@ -15,6 +15,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -50,6 +51,15 @@ class TreasuryResource {
     @Inject
     lateinit var identity: SecurityIdentity
 
+    /** After a journal-posting transition, answer with the journal references too. */
+    private suspend fun view(id: UUID): DealResponse = deals.get(id).let { DealResponse.from(it.deal, it.journals) }
+
+    /**
+     * Money-path idempotency (#8351): every command POST requires `Idempotency-Key`. Declared
+     * nullable and checked here — a non-null Kotlin header parameter is a 500 for the absent case.
+     */
+    private fun requireKey(key: String?): String = requireNotNull(key) { "header '$IDEMPOTENCY_KEY' is required" }
+
     private fun actor(): Actor = Actor.fromPrincipalName(identity.principal.name)
 
     @GET
@@ -64,7 +74,7 @@ class TreasuryResource {
     @RolesAllowed(DEALER)
     @Operation(summary = "Draft a deal (DRAFT); nothing posts")
     @Authorize(action = "treasury.deal.draft")
-    suspend fun draft(request: DraftDealRequest): Response {
+    suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
         val deal = deals.draft(
             DraftDealCommand(
                 product = requireNotNull(request.product) { "product is required" },
@@ -78,6 +88,7 @@ class TreasuryResource {
                 rationale = request.rationale,
             ),
             actor(),
+            requireKey(key),
         )
         return Response.status(Response.Status.CREATED).entity(DealResponse.from(deal)).build()
     }
@@ -86,58 +97,76 @@ class TreasuryResource {
     @Path("/deals/{id}")
     @Operation(summary = "One deal with its lifecycle timeline and ledger journal references")
     @Authorize(action = "treasury.deal.read", resource = "#id")
-    suspend fun get(@PathParam("id") id: UUID): DealResponse = deals.get(id).let { DealResponse.from(it.deal, it.journals) }
+    suspend fun get(@PathParam("id") id: UUID): DealResponse =
+        deals.get(id).let { DealResponse.from(it.deal, it.journals) }
 
     @POST
     @Path("/deals/{id}/submit")
     @RolesAllowed(DEALER)
     @Operation(summary = "Submit for approval (PENDING_APPROVAL); runs the counterparty-limit check")
     @Authorize(action = "treasury.deal.submit", resource = "#id")
-    suspend fun submit(@PathParam("id") id: UUID): DealResponse = DealResponse.from(deals.submit(id, actor()))
+    suspend fun submit(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
+        DealResponse.from(deals.submit(id, actor(), requireKey(key)))
 
     @POST
     @Path("/deals/{id}/cancel")
     @RolesAllowed(DEALER, APPROVER)
     @Operation(summary = "Cancel a DRAFT or PENDING_APPROVAL deal")
     @Authorize(action = "treasury.deal.cancel", resource = "#id")
-    suspend fun cancel(@PathParam("id") id: UUID): DealResponse = DealResponse.from(deals.cancel(id, actor()))
+    suspend fun cancel(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
+        DealResponse.from(deals.cancel(id, actor(), requireKey(key)))
 
     @POST
     @Path("/deals/{id}/approve")
     @RolesAllowed(APPROVER)
-    @Operation(summary = "Four-eyes approval: books the deal. 422 when the approver created or submitted it, or the limit is breached")
+    @Operation(
+        summary = "Four-eyes approval, books the deal (422: approver is creator/submitter, or limit breach)",
+    )
     @Authorize(action = "treasury.deal.approve", resource = "#id")
-    suspend fun approve(@PathParam("id") id: UUID): DealResponse = DealResponse.from(deals.approve(id, actor()))
+    suspend fun approve(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
+        DealResponse.from(deals.approve(id, actor(), requireKey(key)))
 
     @POST
     @Path("/deals/{id}/reject")
     @RolesAllowed(APPROVER)
     @Operation(summary = "Reject a pending deal back to DRAFT with a reason")
     @Authorize(action = "treasury.deal.reject", resource = "#id")
-    suspend fun reject(@PathParam("id") id: UUID, request: ReasonRequest): DealResponse =
-        DealResponse.from(deals.reject(id, requireNotNull(request.reason) { "reason is required" }, actor()))
+    suspend fun reject(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ReasonRequest,
+    ): DealResponse = DealResponse.from(
+        deals.reject(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key)),
+    )
 
     @POST
     @Path("/deals/{id}/settle")
     @RolesAllowed(APPROVER)
     @Operation(summary = "Settle a BOOKED deal on or after its value date; posts the settlement journal")
     @Authorize(action = "treasury.deal.settle", resource = "#id")
-    suspend fun settle(@PathParam("id") id: UUID): DealResponse = DealResponse.from(deals.settle(id, actor()))
+    suspend fun settle(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
+        deals.settle(id, actor(), requireKey(key)).let { view(id) }
 
     @POST
     @Path("/deals/{id}/mature")
     @RolesAllowed(APPROVER)
     @Operation(summary = "Mature a SETTLED deal on or after its maturity date; posts principal and interest")
     @Authorize(action = "treasury.deal.mature", resource = "#id")
-    suspend fun mature(@PathParam("id") id: UUID): DealResponse = DealResponse.from(deals.mature(id, actor()))
+    suspend fun mature(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
+        deals.mature(id, actor(), requireKey(key)).let { view(id) }
 
     @POST
     @Path("/deals/{id}/reverse")
     @RolesAllowed(APPROVER)
     @Operation(summary = "Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal")
     @Authorize(action = "treasury.deal.reverse", resource = "#id")
-    suspend fun reverse(@PathParam("id") id: UUID, request: ReasonRequest): DealResponse =
-        DealResponse.from(deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor()))
+    suspend fun reverse(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ReasonRequest,
+    ): DealResponse =
+        deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key))
+            .let { view(id) }
 
     @GET
     @Path("/counterparties")
@@ -157,4 +186,5 @@ class TreasuryResource {
 
 /** Realm roles (#10618), literal like risk-engine's: adding them to libs Roles.ALL is fleet-wide. */
 const val DEALER = "ROLE_TREASURY_DEALER"
+const val IDEMPOTENCY_KEY = "Idempotency-Key"
 const val APPROVER = "ROLE_TREASURY_APPROVER"

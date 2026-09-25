@@ -56,12 +56,19 @@ data class JournalSpec(val dealId: UUID, val event: PostingEvent, val lines: Lis
 object TreasuryChart {
     private val byCurrency: Map<String, Map<String, String>> = mapOf(
         Deal.CZK to mapOf(
-            "nostro" to "1001", "placement" to "1500", "cnb" to "1510",
-            "borrowing" to "2300", "income" to "4200", "expense" to "5200",
+            "nostro" to "1001",
+            "placement" to "1500",
+            "cnb" to "1510",
+            "borrowing" to "2300",
+            "income" to "4200",
+            "expense" to "5200",
         ),
         Deal.EUR to mapOf(
-            "nostro" to "1002", "placement" to "1501",
-            "borrowing" to "2301", "income" to "4201", "expense" to "5201",
+            "nostro" to "1002",
+            "placement" to "1501",
+            "borrowing" to "2301",
+            "income" to "4201",
+            "expense" to "5201",
         ),
     )
 
@@ -119,7 +126,16 @@ object PostingRules {
         val hasInterest = i.signum() > 0
         val lines = when (deal.product) {
             ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> {
-                val asset = TreasuryChart.code(ccy, if (deal.product == ProductType.MM_PLACEMENT) "placement" else "cnb")
+                val asset = TreasuryChart.code(
+                    ccy,
+                    if (deal.product ==
+                        ProductType.MM_PLACEMENT
+                    ) {
+                        "placement"
+                    } else {
+                        "cnb"
+                    },
+                )
                 listOfNotNull(
                     PostingLine(nostro, Side.DEBIT, p + i, ccy),
                     PostingLine(asset, Side.CREDIT, p, ccy),
