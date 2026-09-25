@@ -5,11 +5,14 @@
 package com.openbank.lending.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.lending.application.port.out.GraphGuaranteeNotFound
+import com.openbank.lending.application.port.out.GraphGuaranteeReceipt
 import com.openbank.lending.application.port.out.GraphGuaranteeRepository
 import com.openbank.lending.domain.model.GraphGuaranteeFact
 import com.openbank.lending.domain.model.GraphGuaranteeProposal
 import com.openbank.lending.domain.model.GraphGuaranteeStatus
 import com.openbank.lending.infrastructure.persistence.entity.GraphGuaranteeEntity
+import com.openbank.lending.infrastructure.persistence.entity.GraphGuaranteeIdempotencyEntity
 import com.openbank.lending.infrastructure.persistence.entity.LendingOutboxEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanEntity
 import com.openbank.libs.domain.identifiers.Ids
@@ -20,6 +23,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -29,6 +35,74 @@ class GraphGuaranteeRepositoryImpl(
     private val mapper: ObjectMapper,
     @ConfigProperty(name = "openbank.lending.graph.bank-scope") private val bankScope: String,
 ) : GraphGuaranteeRepository {
+    override suspend fun findReceipt(operation: String, key: String, fingerprint: String): GraphGuaranteeReceipt? =
+        sessions.withTransaction { session -> lockedReceipt(session, operation, key, fingerprint) }.awaitSuspending()
+
+    override suspend fun proposeIdempotent(
+        proposal: GraphGuaranteeProposal,
+        actor: String,
+        at: Instant,
+        key: String,
+        fingerprint: String,
+    ): GraphGuaranteeReceipt = sessions.withTransaction { session ->
+        lockedReceipt(session, PROPOSE, key, fingerprint).chain { previous ->
+            if (previous != null) return@chain Uni.createFrom().item(previous)
+            session.find(LoanEntity::class.java, proposal.loanId).chain { loan ->
+                requireNotNull(loan) { "loan does not exist" }
+                val entity = GraphGuaranteeEntity.pending(proposal, actor, at)
+                val response = GraphGuaranteeReceipt(entity.guaranteeId, entity.revision, GraphGuaranteeStatus.PENDING)
+                val stored = GraphGuaranteeIdempotencyEntity.completed(PROPOSE, key, fingerprint, response, at)
+                session.persist(entity).replaceWith(response)
+                    .call { _: GraphGuaranteeReceipt -> session.flush() }
+                    .call { _: GraphGuaranteeReceipt -> session.persist(stored) }
+            }
+        }
+    }.awaitSuspending()
+
+    override suspend fun decideIdempotent(
+        loanId: UUID,
+        guaranteeId: UUID,
+        decision: GraphGuaranteeStatus,
+        actor: String,
+        at: Instant,
+        key: String,
+        fingerprint: String,
+    ): GraphGuaranteeReceipt = sessions.withTransaction { session ->
+        lockedReceipt(session, DECIDE, key, fingerprint).chain { previous ->
+            if (previous != null) {
+                Uni.createFrom().item(previous)
+            } else {
+                session.createQuery(
+                    "FROM GraphGuaranteeEntity WHERE guaranteeId = :id",
+                    GraphGuaranteeEntity::class.java,
+                )
+                    .setParameter("id", guaranteeId)
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .singleResultOrNull
+                    .chain { entity ->
+                        if (entity?.loanId != loanId) throw GraphGuaranteeNotFound()
+                        require(entity.status == GraphGuaranteeStatus.PENDING.name) {
+                            "guarantee is already decided"
+                        }
+                        require(actor != entity.proposedBy) { "maker cannot decide own guarantee" }
+                        require(decision != GraphGuaranteeStatus.PENDING) { "a decision is required" }
+                        entity.status = decision.name
+                        entity.decidedBy = actor
+                        entity.decidedAt = at
+                        val response = GraphGuaranteeReceipt(entity.guaranteeId, entity.revision, decision)
+                        val stored = GraphGuaranteeIdempotencyEntity.completed(DECIDE, key, fingerprint, response, at)
+                        val result = Uni.createFrom().item(response)
+                        val withOutbox = if (decision == GraphGuaranteeStatus.APPROVED) {
+                            result.call { _: GraphGuaranteeReceipt -> session.persist(approvedReference(entity, at)) }
+                        } else {
+                            result
+                        }
+                        withOutbox.call { _: GraphGuaranteeReceipt -> session.persist(stored) }
+                    }
+            }
+        }
+    }.awaitSuspending()
+
     override suspend fun propose(proposal: GraphGuaranteeProposal, actor: String, at: Instant): GraphGuaranteeFact =
         sessions.withTransaction { session ->
             session.find(LoanEntity::class.java, proposal.loanId).flatMap { loan ->
@@ -190,9 +264,39 @@ class GraphGuaranteeRepositoryImpl(
     }
 
     private companion object {
+        const val PROPOSE = "PROPOSE"
+        const val DECIDE = "DECIDE"
         const val MAX_APPROVED_GRAPH_FACTS = 100
         const val MAX_CANDIDATES = 256
     }
+}
+
+/** Serializes one operation/key pair across pods until its transaction commits or rolls back. */
+private fun lockedReceipt(
+    session: Mutiny.Session,
+    operation: String,
+    key: String,
+    fingerprint: String,
+): Uni<GraphGuaranteeReceipt?> {
+    val bytes = MessageDigest.getInstance("SHA-256")
+        .digest("$operation\u0000$key".toByteArray(StandardCharsets.UTF_8))
+    val lockKey = ByteBuffer.wrap(bytes).long
+    return session.createNativeQuery(
+        "SELECT 1 FROM (SELECT pg_advisory_xact_lock(:lockKey)) AS held",
+        Integer::class.java,
+    )
+        .setParameter("lockKey", lockKey)
+        .singleResult
+        .flatMap { _: Integer ->
+            session.createQuery(
+                "FROM GraphGuaranteeIdempotencyEntity WHERE operation = :operation AND idempotencyKey = :key",
+                GraphGuaranteeIdempotencyEntity::class.java,
+            )
+                .setParameter("operation", operation)
+                .setParameter("key", key)
+                .singleResultOrNull
+                .map { it?.receiptFor(fingerprint) }
+        }
 }
 
 private data class GuaranteeApprovedReference(

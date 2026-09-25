@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.lending.infrastructure.rest
 
-import com.openbank.lending.application.port.out.GraphGuaranteeRepository
+import com.openbank.lending.application.port.out.GraphGuaranteeIdempotencyConflict
+import com.openbank.lending.application.port.out.GraphGuaranteeNotFound
+import com.openbank.lending.application.port.out.GraphGuaranteeReceipt
 import com.openbank.lending.application.port.out.LendingGraphProofUnavailable
 import com.openbank.lending.application.usecase.GraphGuaranteeRegistrationService
 import com.openbank.lending.domain.model.GraphGuaranteeFact
@@ -39,14 +41,14 @@ class LendingGraphWriterResourceTest {
         null,
     )
     private val registration = mockk<GraphGuaranteeRegistrationService>()
-    private val guarantees = mockk<GraphGuaranteeRepository>()
     private val identity = mockk<SecurityIdentity>()
 
     @Test
     fun `enabled route derives loan and actor and returns only a reference`(): Unit = runBlocking {
         every { identity.principal } returns Principal { "maker" }
-        coEvery { registration.propose(proposal, "maker") } returns pending
-        val response = resource().propose(loanId, request())
+        coEvery { registration.proposeIdempotent(proposal, "maker", "proposal-1", any()) } returns
+            GraphGuaranteeReceipt(pending.guaranteeId, 1, GraphGuaranteeStatus.PENDING)
+        val response = resource().propose(loanId, "proposal-1", request())
         assertThat(response.status).isEqualTo(201)
         assertThat(response.getHeaderString("Cache-Control")).isEqualTo("no-store")
         assertThat(response.entity).isEqualTo(
@@ -59,20 +61,34 @@ class LendingGraphWriterResourceTest {
     @Test
     fun `decision refuses a guarantee from another loan before registration`(): Unit = runBlocking {
         every { identity.principal } returns Principal { "checker" }
-        coEvery { guarantees.find(pending.guaranteeId) } returns
-            pending.copy(proposal = proposal.copy(loanId = UUID.randomUUID()))
-        assertThat(resource().decide(loanId, pending.guaranteeId, GuaranteeDecisionRequest("APPROVED")).status)
+        coEvery {
+            registration.decideIdempotent(
+                loanId,
+                pending.guaranteeId,
+                GraphGuaranteeStatus.APPROVED,
+                "checker",
+                "d1",
+                any(),
+            )
+        } throws GraphGuaranteeNotFound()
+        assertThat(resource().decide(loanId, pending.guaranteeId, "d1", GuaranteeDecisionRequest("APPROVED")).status)
             .isEqualTo(404)
-        coVerify(exactly = 0) { registration.decide(any(), any(), any()) }
     }
 
     @Test
     fun `checker decision uses the authenticated actor and returns a minimal result`(): Unit = runBlocking {
         every { identity.principal } returns Principal { "checker" }
-        coEvery { guarantees.find(pending.guaranteeId) } returns pending
-        val approved = pending.copy(status = GraphGuaranteeStatus.APPROVED, decidedBy = "checker")
-        coEvery { registration.decide(pending.guaranteeId, GraphGuaranteeStatus.APPROVED, "checker") } returns approved
-        val response = resource().decide(loanId, pending.guaranteeId, GuaranteeDecisionRequest("APPROVED"))
+        coEvery {
+            registration.decideIdempotent(
+                loanId,
+                pending.guaranteeId,
+                GraphGuaranteeStatus.APPROVED,
+                "checker",
+                "d1",
+                any(),
+            )
+        } returns GraphGuaranteeReceipt(pending.guaranteeId, 1, GraphGuaranteeStatus.APPROVED)
+        val response = resource().decide(loanId, pending.guaranteeId, "d1", GuaranteeDecisionRequest("APPROVED"))
         assertThat(response.status).isEqualTo(200)
         assertThat(response.entity).isEqualTo(
             GuaranteeWriteResult(pending.guaranteeId, 1, GraphGuaranteeStatus.APPROVED),
@@ -82,20 +98,39 @@ class LendingGraphWriterResourceTest {
     @Test
     fun `disabled route and service identity never reach source proofs or repository`(): Unit = runBlocking {
         every { identity.principal } returns Principal { "service-account-openbank-services" }
-        assertThat(resource(enabled = false).propose(loanId, request()).status).isEqualTo(503)
-        assertThat(resource().propose(loanId, request()).status).isEqualTo(403)
-        coVerify(exactly = 0) { registration.propose(any(), any()) }
-        coVerify(exactly = 0) { guarantees.find(any()) }
+        assertThat(resource(enabled = false).propose(loanId, "p1", request()).status).isEqualTo(503)
+        assertThat(resource().propose(loanId, "p1", request()).status).isEqualTo(403)
+        coVerify(exactly = 0) { registration.proposeIdempotent(any(), any(), any(), any()) }
     }
 
     @Test
     fun `unavailable proof fails closed without exposing source details`(): Unit = runBlocking {
         every { identity.principal } returns Principal { "maker" }
-        coEvery { registration.propose(proposal, "maker") } throws
+        coEvery { registration.proposeIdempotent(proposal, "maker", "p1", any()) } throws
             LendingGraphProofUnavailable(IllegalStateException("private source detail"))
-        val response = resource().propose(loanId, request())
+        val response = resource().propose(loanId, "p1", request())
         assertThat(response.status).isEqualTo(503)
         assertThat(response.entity).isNull()
+    }
+
+    @Test
+    fun `missing or malformed retry key is rejected before registration`(): Unit = runBlocking {
+        every { identity.principal } returns Principal { "maker" }
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { resource().propose(loanId, null, request()) }
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("Idempotency-Key")
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { resource().propose(loanId, "has space", request()) }
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("Idempotency-Key")
+        coVerify(exactly = 0) { registration.proposeIdempotent(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `same key with different request is a conflict`(): Unit = runBlocking {
+        every { identity.principal } returns Principal { "maker" }
+        coEvery { registration.proposeIdempotent(proposal, "maker", "p1", any()) } throws
+            GraphGuaranteeIdempotencyConflict()
+        assertThat(resource().propose(loanId, "p1", request()).status).isEqualTo(409)
     }
 
     @Test
@@ -111,11 +146,11 @@ class LendingGraphWriterResourceTest {
             "$base/{guaranteeId}/decision:",
             "proposeGraphGuarantee",
             "decideGraphGuarantee",
+            "Idempotency-Key",
         )
     }
 
-    private fun resource(enabled: Boolean = true) =
-        LendingGraphWriterResource(registration, guarantees, identity, enabled)
+    private fun resource(enabled: Boolean = true) = LendingGraphWriterResource(registration, identity, enabled)
 
     private fun request() = GuaranteeProposalRequest(
         proposal.contractId, proposal.revision, proposal.supersedesGuaranteeId,

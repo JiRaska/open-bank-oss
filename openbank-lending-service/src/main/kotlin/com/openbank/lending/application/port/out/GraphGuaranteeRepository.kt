@@ -12,6 +12,28 @@ import java.util.UUID
 
 /** Decision and outbox persistence must share one transaction in the implementation. */
 interface GraphGuaranteeRepository {
+    /** Returns a completed response, or throws if this key was bound to different input. */
+    suspend fun findReceipt(operation: String, key: String, fingerprint: String): GraphGuaranteeReceipt?
+
+    /** The receipt and source fact (including any approval outbox row) commit in one transaction. */
+    suspend fun proposeIdempotent(
+        proposal: GraphGuaranteeProposal,
+        actor: String,
+        at: Instant,
+        key: String,
+        fingerprint: String,
+    ): GraphGuaranteeReceipt
+
+    suspend fun decideIdempotent(
+        loanId: UUID,
+        guaranteeId: UUID,
+        decision: GraphGuaranteeStatus,
+        actor: String,
+        at: Instant,
+        key: String,
+        fingerprint: String,
+    ): GraphGuaranteeReceipt
+
     suspend fun propose(proposal: GraphGuaranteeProposal, actor: String, at: Instant): GraphGuaranteeFact
 
     suspend fun find(guaranteeId: UUID): GraphGuaranteeFact?
@@ -53,3 +75,9 @@ interface GraphGuaranteeRepository {
         at: Instant,
     ): GraphGuaranteeFact
 }
+
+data class GraphGuaranteeReceipt(val guaranteeId: UUID, val revision: Long, val status: GraphGuaranteeStatus)
+
+class GraphGuaranteeIdempotencyConflict : RuntimeException("Idempotency-Key has already been used for another request")
+
+class GraphGuaranteeNotFound : RuntimeException("guarantee does not belong to the loan")

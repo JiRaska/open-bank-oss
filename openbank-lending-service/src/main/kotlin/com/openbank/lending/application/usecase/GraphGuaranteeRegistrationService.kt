@@ -4,6 +4,7 @@
 
 package com.openbank.lending.application.usecase
 
+import com.openbank.lending.application.port.out.GraphGuaranteeReceipt
 import com.openbank.lending.application.port.out.GraphGuaranteeRepository
 import com.openbank.lending.application.port.out.LendingGraphProofPort
 import com.openbank.lending.application.port.out.LoanRepository
@@ -37,6 +38,54 @@ class GraphGuaranteeRegistrationService(
         proposal.validate()
         verifyCurrentSources(proposal)
         return guarantees.propose(proposal, actor, Instant.now(clock))
+    }
+
+    suspend fun proposeIdempotent(
+        proposal: GraphGuaranteeProposal,
+        actor: String,
+        key: String,
+        fingerprint: String,
+    ): GraphGuaranteeReceipt {
+        requireEnabled()
+        requireHumanActor(actor)
+        proposal.validate()
+        guarantees.findReceipt("PROPOSE", key, fingerprint)?.let { return it }
+        verifyCurrentSources(proposal)
+        return guarantees.proposeIdempotent(proposal, actor, Instant.now(clock), key, fingerprint)
+    }
+
+    suspend fun decideIdempotent(
+        loanId: UUID,
+        guaranteeId: UUID,
+        decision: GraphGuaranteeStatus,
+        actor: String,
+        key: String,
+        fingerprint: String,
+    ): GraphGuaranteeReceipt {
+        requireEnabled()
+        requireHumanActor(actor)
+        require(decision != GraphGuaranteeStatus.PENDING) { "a decision is required" }
+        guarantees.findReceipt("DECIDE", key, fingerprint)?.let { return it }
+        val proposed = guarantees.find(guaranteeId)
+        if (proposed?.proposal?.loanId != loanId) {
+            throw com.openbank.lending.application.port.out.GraphGuaranteeNotFound()
+        }
+        if (proposed.status != GraphGuaranteeStatus.PENDING) {
+            // A same-key request may have committed between the first receipt read and this fact read.
+            guarantees.findReceipt("DECIDE", key, fingerprint)?.let { return it }
+            throw IllegalArgumentException("guarantee is already decided")
+        }
+        require(actor != proposed.proposedBy) { "maker cannot decide own guarantee" }
+        if (decision == GraphGuaranteeStatus.APPROVED) verifyCurrentSources(proposed.proposal)
+        return guarantees.decideIdempotent(
+            loanId,
+            guaranteeId,
+            decision,
+            actor,
+            Instant.now(clock),
+            key,
+            fingerprint,
+        )
     }
 
     suspend fun decide(guaranteeId: UUID, decision: GraphGuaranteeStatus, actor: String): GraphGuaranteeFact {

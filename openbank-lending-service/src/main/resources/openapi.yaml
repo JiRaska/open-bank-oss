@@ -42,6 +42,11 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Stable retry key for this proposal; 1–128 URL-safe ASCII characters.
+          schema: { type: string, pattern: '^[A-Za-z0-9._~-]{1,128}$', maxLength: 128 }
       requestBody:
         required: true
         content:
@@ -54,6 +59,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GraphGuaranteeWriteResult' }
         '400': { description: Invalid proposal or unmatched source proof }
+        '409': { description: Key already used for a different proposal }
         '403': { description: Role or policy denied }
         '503': { description: Writer disabled or a source proof unavailable }
   /api/v1/lending/graph/loans/{loanId}/guarantees/{guaranteeId}/decision:
@@ -74,6 +80,11 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Stable retry key for this decision; 1–128 URL-safe ASCII characters.
+          schema: { type: string, pattern: '^[A-Za-z0-9._~-]{1,128}$', maxLength: 128 }
       requestBody:
         required: true
         content:
@@ -86,6 +97,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GraphGuaranteeWriteResult' }
         '400': { description: Invalid decision, four-eyes violation or already decided }
+        '409': { description: Key already used for a different decision }
         '403': { description: Role or policy denied }
         '404': { description: Guarantee does not belong to the loan }
         '503': { description: Writer disabled or a source proof unavailable }

@@ -4,6 +4,7 @@
 
 package com.openbank.lending.application.usecase
 
+import com.openbank.lending.application.port.out.GraphGuaranteeReceipt
 import com.openbank.lending.application.port.out.GraphGuaranteeRepository
 import com.openbank.lending.application.port.out.LendingGraphProofPort
 import com.openbank.lending.application.port.out.LoanRepository
@@ -119,5 +120,30 @@ class GraphGuaranteeRegistrationServiceTest {
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("source unavailable")
         coVerify(exactly = 1) { guarantees.decide(pending.guaranteeId, GraphGuaranteeStatus.APPROVED, "checker", now) }
+    }
+
+    @Test
+    fun `completed proposal retry returns saved pending receipt without source access`() {
+        val receipt = GraphGuaranteeReceipt(pending.guaranteeId, 1, GraphGuaranteeStatus.PENDING)
+        coEvery { guarantees.findReceipt("PROPOSE", "p1", "fingerprint") } returns receipt
+        assertThat(runBlocking { service().proposeIdempotent(proposal, "maker", "p1", "fingerprint") })
+            .isEqualTo(receipt)
+        coVerify(exactly = 0) { proofs.hasVerifiedGuarantorIdentity(any()) }
+        coVerify(exactly = 0) { guarantees.proposeIdempotent(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new proposal proves sources before opening its write transaction`() {
+        verifiedSources()
+        coEvery { guarantees.findReceipt("PROPOSE", "p2", "fingerprint") } returns null
+        val receipt = GraphGuaranteeReceipt(pending.guaranteeId, 1, GraphGuaranteeStatus.PENDING)
+        coEvery { guarantees.proposeIdempotent(proposal, "maker", now, "p2", "fingerprint") } returns receipt
+        assertThat(runBlocking { service().proposeIdempotent(proposal, "maker", "p2", "fingerprint") })
+            .isEqualTo(receipt)
+        coVerify(ordering = io.mockk.Ordering.ORDERED) {
+            proofs.hasVerifiedGuarantorIdentity(proposal.guarantorPartyId)
+            proofs.matchesSignedGuarantee(any(), any(), any(), any(), any())
+            guarantees.proposeIdempotent(proposal, "maker", now, "p2", "fingerprint")
+        }
     }
 }
