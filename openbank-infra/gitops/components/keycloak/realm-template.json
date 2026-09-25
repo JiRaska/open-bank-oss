@@ -1061,6 +1061,25 @@
       "secret": "__LENDING_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-treasury",
+      "name": "OpenBank Treasury Service",
+      "description": "Per-service M2M client for treasury deal settlement, maturity and reversal journals (ledger.create only) (ADR-0315, #10486 pattern). Holds ROLE_API only; its action is granted by identity in ledger_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__TREASURY_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-clearing",
       "name": "OpenBank Clearing Service",
       "description": "Per-service M2M client for clearing's net-settlement journal (ledger.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1718,6 +1737,14 @@
       "username": "service-account-openbank-lending",
       "enabled": true,
       "serviceAccountClientId": "openbank-lending",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-treasury",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-treasury",
       "realmRoles": [
         "ROLE_API"
       ]

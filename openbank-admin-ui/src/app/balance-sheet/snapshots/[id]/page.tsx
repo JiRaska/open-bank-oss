@@ -133,6 +133,16 @@ function SnapshotDetail({ id }: { id: string }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <StatusBadge status={run.status} tone={tied ? 'success' : 'danger'} label={tied ? t('Odsouhlaseno s hlavní knihou', 'Tied out to the ledger') : t('Neodsouhlaseno s hlavní knihou', 'Did not tie out to the ledger')} />
         <ProvenanceBadge provenance={run.provenance} />
+        {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/irrbb`} className="btn btn-secondary btn-sm">
+            {t('Úrokové riziko (IRRBB)', 'Interest-rate risk (IRRBB)')}
+          </Link>
+        )}
+        {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/liquidity`} className="btn btn-secondary btn-sm">
+            {t('Likvidita (LCR/NSFR)', 'Liquidity (LCR/NSFR)')}
+          </Link>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>

@@ -238,6 +238,9 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 # new edge, the same one three other callers already have.
 V9.1 openbank-infra/gitops/components/analytics/ci-gate-runs-schema-apply-job.yaml:56: plaintext http:// env value http://clickhouse.analytics.svc:8123
 V9.1 openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml:82: plaintext http:// env value http://clickhouse.analytics.svc:8123
+# cloud-finops-collector (ADR-0316) -> ClickHouse: the same no-TLS-listener edge as the two lines above
+# and admin-ui's own BFF (same namespace, same Secret). Not a new edge class.
+V9.1 openbank-infra/gitops/components/admin-ui/cloud-finops-collector.yaml:104: plaintext http:// env value http://clickhouse.analytics.svc:8123
 # analytics-sink -> Apicurio schema registry (issue #1916). Same declared debt as every other
 # in-cluster edge here: the Service exposes exactly one port, named `http`, on 8080
 # (gitops/components/apicurio/registry.yaml) — there is no TLS listener to point at, so https
@@ -310,6 +313,7 @@ V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:73: plaintext http://
 V9.1 openbank-infra/gitops/components/loyalty/loyalty-service.yaml:119: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/referral/referral-service.yaml:42: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/risk/risk-engine.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/treasury/treasury-service.yaml:66: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/wealth/wealth-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/authz-policy-auditor/authz-policy-auditor.yaml:83: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/control-liveness-sentinel/control-liveness-sentinel.yaml:107: plaintext http:// env value http://tempo.observability.svc:4317

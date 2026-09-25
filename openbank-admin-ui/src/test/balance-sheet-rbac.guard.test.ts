@@ -19,6 +19,8 @@ const backfillResource = read('../../openbank-lending-service/src/main/kotlin/co
 const PAGES: [string, string, string][] = [
   ['app/balance-sheet/snapshots/page.tsx', '/balance-sheet/snapshots', 'balance-sheet:view'],
   ['app/balance-sheet/snapshots/[id]/page.tsx', '/balance-sheet/snapshots/sample', 'balance-sheet:view'],
+  ['app/balance-sheet/snapshots/[id]/irrbb/page.tsx', '/balance-sheet/snapshots/sample/irrbb', 'balance-sheet:view'],
+  ['app/balance-sheet/snapshots/[id]/liquidity/page.tsx', '/balance-sheet/snapshots/sample/liquidity', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/page.tsx', '/balance-sheet/curve-sets', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/[id]/page.tsx', '/balance-sheet/curve-sets/sample', 'balance-sheet:view'],
   ['app/balance-sheet/ledger-backfill/page.tsx', '/balance-sheet/ledger-backfill', 'ledger-backfill:view'],
@@ -105,5 +107,37 @@ describe('balance sheet & risk — UI grants never exceed the service', () => {
       const granted = Object.values(ROLES).filter(r => hasPermission([r], p)).sort()
       expect(granted, p).toEqual(['ROLE_ADMIN', 'ROLE_FINANCE'])
     }
+  })
+})
+
+describe('IRRBB read — ADR-0313 phase 1', () => {
+  it('the IRRBB endpoint is a plain read: risk.snapshot.read, no method-level role widening', () => {
+    const at = riskResource.indexOf('@Path("/{id}/irrbb")')
+    expect(at).toBeGreaterThan(0)
+    const block = riskResource.slice(at, riskResource.indexOf('suspend fun irrbb', at))
+    expect(block).toContain('@Authorize(action = "risk.snapshot.read", resource = "#id")')
+    expect(block).not.toContain('@RolesAllowed')
+  })
+
+  it('the IRRBB page is visible to risk, finance and admin only', () => {
+    const p = permissionForPath('/balance-sheet/snapshots/x/irrbb')!
+    const granted = Object.values(ROLES).filter(r => hasPermission([r], p)).sort()
+    expect(granted).toEqual([ROLES.ADMIN, ROLES.FINANCE, ROLES.RISK].sort())
+  })
+})
+
+describe('LCR / NSFR read — ADR-0313 phase 1', () => {
+  it('the liquidity endpoint is a plain read: risk.snapshot.read, no method-level role widening', () => {
+    const at = riskResource.indexOf('@Path("/{id}/liquidity")')
+    expect(at).toBeGreaterThan(0)
+    const block = riskResource.slice(at, riskResource.indexOf('suspend fun liquidity', at))
+    expect(block).toContain('@Authorize(action = "risk.snapshot.read", resource = "#id")')
+    expect(block).not.toContain('@RolesAllowed')
+  })
+
+  it('the liquidity page is visible to risk, finance and admin only', () => {
+    const p = permissionForPath('/balance-sheet/snapshots/x/liquidity')!
+    const granted = Object.values(ROLES).filter(r => hasPermission([r], p)).sort()
+    expect(granted).toEqual([ROLES.ADMIN, ROLES.FINANCE, ROLES.RISK].sort())
   })
 })

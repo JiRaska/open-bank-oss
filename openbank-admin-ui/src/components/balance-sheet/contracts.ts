@@ -94,6 +94,97 @@ export const backfillExecutionSchema = z.object({
   }),
 })
 
+// IRRBB (risk-engine GET /snapshots/{id}/irrbb, ADR-0313 phase 1).
+export const SCENARIOS = ['parallel-up', 'parallel-down', 'steepener', 'flattener', 'short-up', 'short-down'] as const
+const nullableMoney = money.nullable()
+export const gapBucketSchema = z.object({ bucket: z.string(), assets: money, liabilities: money, gap: money, cumulativeGap: money })
+export const currencyGapSchema = z.object({
+  currency: z.string(), buckets: z.array(gapBucketSchema), totalAssets: money, totalLiabilities: money, totalGap: money,
+})
+export const currencyScenarioSchema = z.object({
+  currency: z.string(), basePv: money, shockedPv: money, deltaEve: money, eveLoss: money, deltaNii: nullableMoney.optional(),
+})
+export const scenarioSchema = z.object({
+  scenario: z.enum(SCENARIOS), currencies: z.array(currencyScenarioSchema), aggregateLoss: nullableMoney.optional(),
+})
+export const irrbbSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, curveSetId: z.string(), curveSetProvenance: provenance, curveSetSource: z.string(),
+  gaps: z.array(currencyGapSchema),
+  scenarios: z.array(scenarioSchema),
+  worstCase: z.object({
+    scenario: z.enum(SCENARIOS).nullable().optional(), loss: nullableMoney.optional(), currency: z.string().nullable().optional(),
+    byCurrency: z.record(z.string(), z.enum(SCENARIOS)),
+  }),
+  outlierTest: z.object({
+    tier1Supplied: z.boolean(), tier1Capital: nullableMoney.optional(), currency: z.string().nullable().optional(),
+    threshold: money, ratio: nullableMoney.optional(), breached: z.boolean().nullable().optional(), note: z.string(),
+  }),
+  shockNotConfigured: z.array(z.string()),
+  unpriced: z.array(z.string()),
+  assumptions: z.object({
+    model: z.object({ id: z.string(), version: z.string() }).passthrough(),
+    shockSizes: z.array(z.object({ currency: z.string(), parallelBp: money, shortBp: money, longBp: money })),
+    shockSource: z.string(), shortDecayYears: money,
+    postShockFloor: z.object({ atZeroBp: money, slopeBpPerYear: money }).nullable().optional(),
+    postShockFloorSource: z.string(), nmdRepricing: z.string(), floatingRepricing: z.string(),
+    eveBasis: z.string(), niiBasis: z.string(), niiHorizonMonths: z.number().int(), currencyAggregation: z.string(),
+  }),
+})
+
+export type Irrbb = z.infer<typeof irrbbSchema>
+
+// LCR / NSFR (risk-engine GET /snapshots/{id}/liquidity, ADR-0313 phase 1).
+export const liquidityLineSchema = z.object({
+  label: z.string(), glAccountCode: z.string().nullable().optional(), amount: money,
+  factor: money.nullable().optional(), factorKey: z.string().nullable().optional(), weighted: money, citation: z.string(),
+})
+export const hqlaSchema = z.object({
+  lines: z.array(z.object({
+    level: z.enum(['L1', 'L2A', 'L2B']), glClass: z.string(), glAccountCode: z.string(),
+    marketValue: money, haircut: money, afterHaircut: money,
+  })),
+  level1: money, level2a: money, level2b: money, adjustmentFor15Cap: money, adjustmentFor40Cap: money,
+  level2bCapBinding: z.boolean(), level2CapBinding: z.boolean(), stock: money,
+})
+export const currencyLiquiditySchema = z.object({
+  currency: z.string(),
+  lcr: z.object({
+    hqla: hqlaSchema, outflows: z.array(liquidityLineSchema), inflows: z.array(liquidityLineSchema),
+    totalOutflows: money, totalInflows: money, inflowCap: money, cappedInflows: money, inflowCapBinding: z.boolean(),
+    netOutflows: money, ratio: money.nullable().optional(),
+  }),
+  nsfr: z.object({
+    asf: z.array(liquidityLineSchema), rsf: z.array(liquidityLineSchema), totalAsf: money, totalRsf: money,
+    ratio: money.nullable().optional(),
+  }),
+})
+const glMappingSchema = z.object({ key: z.string(), glClass: z.string(), description: z.string() })
+export const liquiditySchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, parameterSetId: z.string(), parameterSetVersion: z.string(),
+  currencies: z.array(currencyLiquiditySchema),
+  total: currencyLiquiditySchema.nullable().optional(),
+  unclassified: z.array(z.object({
+    glAccountCode: z.string().nullable().optional(), glAccountType: z.string().nullable().optional(),
+    currency: z.string(), amount: money, reason: z.string(),
+  })),
+  notes: z.array(z.string()),
+  assumptions: z.object({
+    parameterSetId: z.string(), parameterSetVersion: z.string(), source: z.string(), scope: z.string(),
+    factors: z.array(z.object({ key: z.string(), value: money, citation: z.string() })),
+    classification: z.object({
+      retailStableShare: money, operationalDepositShare: money, tier2OverOneYearShare: money,
+      loansQualifyForLowRiskWeight: z.boolean(), glAccounts: z.array(glMappingSchema), glAccountTypes: z.array(glMappingSchema),
+      choices: z.array(z.string()),
+    }),
+    hqlaCapMethod: z.string(), loanInflows: z.string(), loanRsf: z.string(), notInData: z.string(), currencyAggregation: z.string(),
+  }),
+})
+
+export type Liquidity = z.infer<typeof liquiditySchema>
+export type CurrencyLiquidity = z.infer<typeof currencyLiquiditySchema>
+export type LiquidityLine = z.infer<typeof liquidityLineSchema>
+export type CurrencyGap = z.infer<typeof currencyGapSchema>
+export type ScenarioName = typeof SCENARIOS[number]
 export type SnapshotSummary = z.infer<typeof snapshotSummarySchema>
 export type SnapshotRun = z.infer<typeof snapshotRunSchema>
 export type Instrument = z.infer<typeof instrumentSchema>
