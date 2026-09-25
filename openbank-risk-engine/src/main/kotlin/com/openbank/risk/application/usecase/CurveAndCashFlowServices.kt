@@ -12,6 +12,7 @@ import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetNotFoundException
 import com.openbank.risk.application.port.out.CurveSetRepository
+import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.cashflow.SnapshotCashFlowProjection
 import com.openbank.risk.domain.curve.CurveBootstrap
@@ -44,6 +45,8 @@ class CurveSetService(private val repository: CurveSetRepository, private val cl
         repository.save(set, command.quotes)
         return set
     }
+
+    override suspend fun list(limit: Int): List<CurveSetSummary> = repository.listRecent(limit)
 
     override suspend fun get(id: UUID): CurveSet = repository.findById(id) ?: throw CurveSetNotFoundException(id)
 }
