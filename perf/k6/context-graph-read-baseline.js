@@ -69,8 +69,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network, kyb or fraud-network");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network", "lending-guarantees"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network, kyb, fraud-network or lending-guarantees");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -92,6 +92,13 @@ export function setup() {
       fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
     }
   }
+  if (lens === "lending-guarantees" &&
+      (!UUID.test(__ENV.CONTEXT_PERF_REFERENCE) ||
+       __ENV.CONTEXT_PERF_CASE_ID.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+       __ENV.CONTEXT_PERF_PURPOSE !== "LENDING_EXPOSURE_REVIEW" ||
+       !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID || ""))) {
+    fail("Lending baseline requires an assigned loan and one synthetic approved guarantee fixture");
+  }
   if (lens === "complaint" && __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID &&
       !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID)) {
     fail("Complaint reversal fixture requires a synthetic reversal booking UUID");
@@ -109,6 +116,7 @@ export default function () {
     "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
     kyb: `/api/v1/context/kyb-cases/${reference}/ownership-observations`,
     "fraud-network": `/api/v1/context/fraud-cases/${reference}/network`,
+    "lending-guarantees": `/api/v1/context/lending-loans/${reference}/approved-guarantees`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -170,10 +178,24 @@ export default function () {
             item.revision < body.observations[index - 1].revision);
       }
       if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
+      if (lens === "lending-guarantees") return hasLendingGuaranteeEvidence(body);
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
+}
+
+function hasLendingGuaranteeEvidence(body) {
+  const expected = __ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID.toLowerCase();
+  return body && typeof body.loanId === "string" &&
+    body.loanId.toLowerCase() === __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() &&
+    typeof body.effectiveAt === "string" && typeof body.knownAt === "string" &&
+    typeof body.truncated === "boolean" &&
+    Array.isArray(body.guarantees) && body.guarantees.length > 0 && body.guarantees.length <= 100 &&
+    body.guarantees.some((fact) => fact.guaranteeId?.toLowerCase() === expected &&
+      UUID.test(fact.contractId) && UUID.test(fact.guarantorPartyId) &&
+      UUID.test(fact.sourceDocumentId) && /^[0-9a-f]{64}$/i.test(fact.sourceSha256) &&
+      Number.isInteger(fact.revision) && fact.revision > 0);
 }
 
 function hasFraudNetworkEvidence(body) {
