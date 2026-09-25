@@ -41,8 +41,10 @@ The test prints `SEPA_OBSERVATION_BENCH` lines to its JUnit XML `system-out`.
 | A2: disabled | 50/s | 500 | 0 | 651 ms | 1,557 ms | 1,950 ms |
 
 The disabled control varied by more than 20× at the 10× offered rate. These numbers cannot
-isolate the extra insert's latency. The benchmark also does not record actual completion rate,
-client queueing, resource utilization or an incident-read workload. Next: run repeated randomized
+isolate the extra insert's latency. This first run predates the probe's achieved-throughput,
+client-queue and scheduled-to-completion measurements; those values cannot be reconstructed from
+the table. The updated probe prints them alongside service latency in future runs. It still does
+not record resource utilization or an incident-read workload. Next: run repeated randomized
 on/off pairs on a stable, dedicated host; capture achieved throughput, CPU, DB waits and pool
 pressure; include real OIDC/OPA and authenticated incident-read traffic. Keep the flag off until
 the 1×/10× payment-control comparison is stable and reviewed.

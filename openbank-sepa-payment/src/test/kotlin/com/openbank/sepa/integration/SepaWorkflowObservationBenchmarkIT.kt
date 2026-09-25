@@ -11,6 +11,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -21,6 +22,14 @@ import java.util.concurrent.TimeUnit
 @QuarkusTestResource(SepaWorkflowObservationBenchmarkIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(com.openbank.sepa.it.PostgresRedisTestResource::class)
 class SepaWorkflowObservationBenchmarkIT {
+    private data class WriteResult(
+        val serviceMs: Long,
+        val queueMs: Long,
+        val endToEndMs: Long,
+        val completedAt: Long,
+        val status: Int,
+    )
+
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("events-out")
 
@@ -39,25 +48,34 @@ class SepaWorkflowObservationBenchmarkIT {
         val executor = Executors.newFixedThreadPool(32)
         try {
             // Warm the same authenticated route before either measurement window.
-            repeat(10) { assertThat(createPayment().second).isEqualTo(201) }
+            repeat(10) { assertThat(createPayment().status).isEqualTo(201) }
             for (rate in listOf(baselineRate, baselineRate * 10)) {
-                val tasks = ArrayList<java.util.concurrent.Future<Pair<Long, Int>>>(rate * durationSeconds)
+                val tasks = ArrayList<java.util.concurrent.Future<WriteResult>>(rate * durationSeconds)
                 val start = System.nanoTime()
                 repeat(rate * durationSeconds) { index ->
                     val due = start + index * 1_000_000_000L / rate
                     val remaining = due - System.nanoTime()
                     if (remaining > 0) TimeUnit.NANOSECONDS.sleep(remaining)
-                    tasks += executor.submit(Callable { createPayment() })
+                    tasks += executor.submit(Callable { createPayment(due) })
                 }
                 val results = tasks.map { it.get(30, TimeUnit.SECONDS) }
-                val latencies = results.map { it.first }.sorted()
-                val failures = results.count { it.second != 201 }
+                val latencies = results.map { it.serviceMs }.sorted()
+                val queueTimes = results.map { it.queueMs }.sorted()
+                val endToEndTimes = results.map { it.endToEndMs }.sorted()
+                val failures = results.count { it.status != 201 }
                 val p50 = latencies[(latencies.size * 0.50).toInt()]
                 val p95 = latencies[(latencies.size * 0.95).toInt()]
                 val p99 = latencies[(latencies.size * 0.99).toInt()]
+                val queueP95 = queueTimes[(queueTimes.size * 0.95).toInt()]
+                val endToEndP95 = endToEndTimes[(endToEndTimes.size * 0.95).toInt()]
+                val elapsed = results.maxOf { it.completedAt } - start
+                val achievedRps = results.size * 1_000_000_000.0 / elapsed
                 println(
                     "SEPA_OBSERVATION_BENCH enabled=$enabled targetRps=$rate durationSeconds=$durationSeconds " +
-                        "requests=${results.size} failures=$failures p50Ms=$p50 p95Ms=$p95 p99Ms=$p99",
+                        "requests=${results.size} failures=$failures " +
+                        "achievedRps=${String.format(Locale.ROOT, "%.1f", achievedRps)} " +
+                        "serviceP50Ms=$p50 serviceP95Ms=$p95 serviceP99Ms=$p99 " +
+                        "queueP95Ms=$queueP95 endToEndP95Ms=$endToEndP95",
                 )
                 assertThat(failures).isZero()
             }
@@ -66,7 +84,7 @@ class SepaWorkflowObservationBenchmarkIT {
         }
     }
 
-    private fun createPayment(): Pair<Long, Int> {
+    private fun createPayment(scheduledAt: Long = System.nanoTime()): WriteResult {
         val started = System.nanoTime()
         val response = RestAssured.given()
             .contentType("application/json")
@@ -87,6 +105,13 @@ class SepaWorkflowObservationBenchmarkIT {
                 """.trimIndent(),
             )
             .post("/api/v1/sepa-payments")
-        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) to response.statusCode
+        val completed = System.nanoTime()
+        return WriteResult(
+            serviceMs = TimeUnit.NANOSECONDS.toMillis(completed - started),
+            queueMs = TimeUnit.NANOSECONDS.toMillis((started - scheduledAt).coerceAtLeast(0)),
+            endToEndMs = TimeUnit.NANOSECONDS.toMillis((completed - scheduledAt).coerceAtLeast(0)),
+            completedAt = completed,
+            status = response.statusCode,
+        )
     }
 }
