@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: loyalty-service-internal-tls
+  namespace: loyalty
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: loyalty-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - loyalty-service.loyalty.svc
+    - loyalty-service.loyalty.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

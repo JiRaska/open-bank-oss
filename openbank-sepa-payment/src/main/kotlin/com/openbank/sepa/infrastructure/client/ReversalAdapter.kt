@@ -7,6 +7,7 @@ package com.openbank.sepa.infrastructure.client
 import com.openbank.sepa.application.port.out.ReversalOutcome
 import com.openbank.sepa.application.port.out.ReversalPort
 import com.openbank.sepa.application.port.out.ReversalUnavailableException
+import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -22,7 +23,9 @@ import java.util.UUID
 @ApplicationScoped
 class ReversalAdapter(
     @RestClient private val client: TransactionServiceClient,
-    private val oidcClient: Instance<OidcClient>,
+    // #10486: sepa-payment's OWN Keycloak client `openbank-sepa-payment` (ROLE_API only), never the
+    // shared default client. transaction-service's OPA grants it transaction.create/.reverse only.
+    @NamedOidcClient("m2m") private val oidcClient: Instance<OidcClient>,
 ) : ReversalPort {
 
     @Inject

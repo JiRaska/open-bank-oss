@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "8d553342c28e9cb0"
+    openbank.tech/policy-checksum: "30a140c89fec90d2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -669,6 +669,34 @@ data:
     prohibited if {
         input.action == "party.guaranteeIdentity.verify"
         not "ROLE_LENDING_GRAPH_PROOF" in input.principal.roles
+    }
+
+    # party.create (POST /api/v1/parties) by a KYC analyst, #10486 batch 3. The endpoint has always
+    # admitted ROLE_KYC; operator-party-write above covers OPERATOR/ADMIN but not this persona, so
+    # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
+    allowed_reasons contains "kyc-party-create" if {
+        input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
+        "ROLE_KYC" in input.principal.roles
+        input.action == "party.create"
+    }
+
+    # kyb-service's OWN machine principal (client `openbank-kyb`, ROLE_API only), #10486 batch 3:
+    #   party.create        — the entity (legal-person) party for a business onboarding case
+    #                         (PartyServiceGateway.createEntityParty -> POST /api/v1/parties).
+    #   party.mandate.grant — binds each verified representative to that entity
+    #                         (PartyServiceGateway.grantMandate -> POST /api/v1/parties/{id}/mandates).
+    # Identity-gated, never a role: ROLE_API is held by every service account. The shared
+    # `service-account-openbank-services` is deliberately absent. While AUTHZ_ENFORCE=false the
+    # enforcing half for party.create is requireNamedPartyCreateCaller in PartyCreateCallerGuard.kt
+    # (PartyCreateCallerGuardTest pins that the two agree).
+    allowed_reasons contains "service-kyb-party-m2m" if {
+        input.principal.type == "HUMAN"
+        input.principal.id == "service-account-openbank-kyb"
+        input.action in {
+            "party.create",
+            "party.mandate.grant",
+        }
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

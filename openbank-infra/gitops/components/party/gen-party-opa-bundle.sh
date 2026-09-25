@@ -9,6 +9,8 @@ RULES_YAML=$REPO/openbank-libs/governance/rules-opa-data.yaml
 MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # Party REST extension — party-domain allow reasons (ADR-0034 Phase 5; ADR-0179 merge).
+# Extracted from an inline heredoc into its own file (#10486 batch 3) so a
+# party_rest_ext_test.rego beside it runs in CI's per-service rest_ext suite.
 PARTY_REST_EXT=$(cat "$REPO/openbank-infra/gitops/components/party/party_rest_ext.rego")
 
 CHECKSUM=$(printf '%s\n' \

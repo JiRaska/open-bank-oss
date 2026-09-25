@@ -12,7 +12,7 @@ import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -91,7 +91,10 @@ data class MandateBody(
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 3: this client's bearer for the entity-party create and mandate grant (party.create,
+// party.mandate.grant) is minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-kyb`
+// (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "party-service")
 // Below @RegisterRestClient deliberately: the taint gate reads the window between that annotation
 // and the interface, and an internal edge must PROPAGATE the synthetic marker rather than declare

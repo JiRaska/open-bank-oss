@@ -5,13 +5,9 @@
 package com.openbank.aml.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.aml.application.onboarding.OnboardingScreening
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
-import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
-import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
-import com.openbank.aml.domain.model.AmlCaseStatus
-import com.openbank.aml.domain.model.AmlRiskLevel
-import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -60,6 +56,9 @@ class PartyEventConsumer(
 ) {
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
+    /** Shared with the onboarding screening reconciler: one definition of an onboarding case. */
+    private val onboardingScreening = OnboardingScreening(amlUseCase, autoClear)
+
     @Incoming("party-events-in")
     suspend fun consume(payload: String) {
         val node = try {
@@ -89,33 +88,10 @@ class PartyEventConsumer(
             return
         }
         EventRetry.withRetry(log, "PARTY_CREATED AML screening", partyId) {
-            val case = amlUseCase.createCase(
-                CreateAmlCaseCommand(
-                    idempotencyKey = "$partyId:CUSTOMER_ONBOARDING",
-                    partyId = partyId,
-                    accountId = null,
-                    transactionId = null,
-                    customerReference = "onboarding-$partyId",
-                    screeningType = ScreeningType.CUSTOMER_ONBOARDING,
-                    riskLevel = AmlRiskLevel.LOW,
-                    alertCode = "ONBOARDING_SCREENING",
-                    alertDetail = null,
-                    matchedEntity = null,
-                ),
-            )
-            log.infof("[party-events-in] Opened onboarding AML case %s for party %s", case.id, partyId)
-
-            if (autoClear && case.status != AmlCaseStatus.CLEARED && case.status != AmlCaseStatus.BLOCKED) {
-                amlUseCase.updateDecision(
-                    UpdateAmlDecisionCommand(
-                        caseId = case.id,
-                        targetStatus = AmlCaseStatus.CLEARED,
-                        decisionReason = "Sandbox auto-clear (no adverse match)",
-                        assignedAnalyst = "SANDBOX_BOT",
-                        decidedBy = "SANDBOX_SYSTEM",
-                    ),
-                )
-                log.infof("[party-events-in] Auto-cleared AML case %s for party %s", case.id, partyId)
+            val outcome = onboardingScreening.open(partyId)
+            log.infof("[party-events-in] Opened onboarding AML case %s for party %s", outcome.case.id, partyId)
+            if (outcome.autoCleared) {
+                log.infof("[party-events-in] Auto-cleared AML case %s for party %s", outcome.case.id, partyId)
             }
         }
     }
@@ -139,6 +115,6 @@ class PartyEventConsumer(
 
     companion object {
         /** party-service `PartyType` values that get an onboarding AML case. */
-        val SCREENED_PARTY_TYPES = setOf("INDIVIDUAL", "SOLE_TRADER", "COMPANY")
+        val SCREENED_PARTY_TYPES = OnboardingScreening.SCREENED_PARTY_TYPES
     }
 }

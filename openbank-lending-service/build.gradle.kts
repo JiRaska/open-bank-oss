@@ -55,6 +55,8 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // Consumer-driven contract test against ledger-service postJournal (ADR-0063 P2 Batch B).
     testImplementation(libs.pact.consumer)
+    // Provider replay of risk-engine's loan-book pact (ADR-0314 D4) from the git-pact folder.
+    testImplementation(libs.pact.provider)
 }
 
 kover {

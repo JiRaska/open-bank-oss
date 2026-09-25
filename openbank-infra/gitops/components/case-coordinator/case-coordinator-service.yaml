@@ -38,7 +38,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match case-coordinator-opa-bundle's openbank.tech/policy-checksum (CI verifies).
-        openbank.tech/policy-checksum: "e7477333d70228ee"
+        openbank.tech/policy-checksum: "b088e22701be573d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: case-coordinator-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-89a08a7a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-fa23c346
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -74,6 +74,12 @@ spec:
               value: jdbc:postgresql://case-coordinator-db-rw.platform.svc:5432/openbank_casecoordinator
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: postgresql://case-coordinator-db-rw.platform.svc:5432/openbank_casecoordinator
+            # Authoritative messaging override mounted at /etc/quarkus-override. Required for
+            # dotted SmallRye keys (group.id, auto.offset.reset, dead-letter-queue.topic) on
+            # hyphenated channels — YAML flattening silently drops them; see transaction-service
+            # override pattern (#2945) and AGENTS.md Kafka dotted-key bullet.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /etc/quarkus-override
             - name: QUARKUS_DATASOURCE_USERNAME
               valueFrom: { secretKeyRef: { name: case-coordinator-db-app, key: username } }
             - name: QUARKUS_DATASOURCE_PASSWORD
@@ -95,6 +101,10 @@ spec:
               value: "openbank-cluster-kafka-bootstrap.messaging.svc:9093"
             - name: KAFKA_SECURITY_PROTOCOL
               value: SSL
+            # ADR-0244 D7: topic for agent-service kill-switch events. Must match the ACL in
+            # kafka-case-coordinator-mtls.yaml; the repo default is the legacy audit-events topic.
+            - name: AGENT_KILL_SWITCH_TOPIC
+              value: agent-kill-switch-events-in
             - name: KAFKA_SSL_KEYSTORE_LOCATION
               value: /mnt/kafka-keystore/user.p12
             - name: KAFKA_SSL_KEYSTORE_TYPE
@@ -127,6 +137,13 @@ spec:
             # Rotate this ID for each distinct shadow rollout; startup then rechecks legacy runs.
             - name: CASE_COORDINATOR_CASE_SHADOW_ROLLOUT_ID
               value: incident-triage-shadow-2026-08-20
+            # ADR-0271 pilot: local fail-safe gate mirrors the charter grant. OPA remains the
+            # independent authority and additionally restricts class, SHADOW mode, rollout and
+            # the eight-signal quota. The operator bearer may assert only these two agent ids.
+            - name: CASE_COORDINATOR_CASE_SWARM_AGENTS
+              value: rca-investigator
+            - name: CASE_COORDINATOR_CASE_IDENTITY_BINDINGS
+              value: ROLE_ADMIN=case-coordinator,rca-investigator;ROLE_OPERATOR=case-coordinator,rca-investigator
             # LiteLLM virtual key (ESO case-coordinator-litellm; reuses KEY_AGENT_SERVICE
             # until a per-service virtual key is provisioned in Vault — a Vault admin action).
             - name: CASE_COORDINATOR_MODEL_API_KEY
@@ -141,9 +158,8 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # Policy decision point: the OPA sidecar in this pod (localhost:8181). The
-            # in-process CaseCapabilityGate is the enforcement layer today; the adapter
-            # querying this PDP is the tracked follow-up (issue #4187 scope note).
+            # Policy decision point: the collaboration PEP queries this OPA sidecar, then applies
+            # CaseCapabilityGate as an additional fail-safe local charter check (ADR-0271).
             - name: QUARKUS_REST_CLIENT_OPA_URL
               value: http://localhost:8181
           startupProbe:
@@ -172,6 +188,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: case-coordinator-msg-override
+              mountPath: /etc/quarkus-override
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -259,6 +278,9 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: case-coordinator-msg-override
+          configMap:
+            name: case-coordinator-msg-override
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle

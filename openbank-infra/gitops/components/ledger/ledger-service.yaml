@@ -38,7 +38,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "260e59d339834f99"
+        openbank.tech/policy-checksum: "c7a7521d3604a844"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,14 +49,37 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ledger-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-1f8b96c7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-161bed0b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8101
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: clearing-service's
+            # net-settlement journal posting and interest-service's capitalization leg). HTTP/8101
+            # stays for existing callers (transaction, lending, settlement, balance, billing, finrep)
+            # until their own reviewed migrations; same shape as account-service's 8443 listener.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time value baked into this service's application.yaml
+            # (quarkus.http.ssl.client-auth). That property is BUILD TIME fixed, so this env can
+            # never set it — Quarkus ignores a differing runtime value and warns. It is kept, in
+            # the same spelling, so the manifest states the listener's posture and cannot silently
+            # disagree with the image.
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             # Default datasource exposes BOTH a JDBC leg (Flyway, blocking) and a
             # reactive leg onto the same CNPG primary; username is the `openbank`
             # owner (from application.yaml), password from the CNPG app secret.
@@ -172,6 +195,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -263,6 +289,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: ledger-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -318,6 +348,9 @@ spec:
     - name: http
       port: 8101
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # Canary service — Rollouts controller updates selector to canary replica set.
 # Internal callers that need to target canary pods directly use this Service.
@@ -335,3 +368,6 @@ spec:
     - name: http
       port: 8101
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

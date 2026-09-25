@@ -714,6 +714,22 @@ gates:
   # against the DDL. Deriving "does this column exist" needs real DDL parsing — partitioned tables,
   # custom enum types, ALTER/RENAME chains — and two attempts at it produced 12 and then ~40 false
   # findings against correct code. A gate that cries wolf gets ignored. ENFORCED.
+  - id: otel-exporter-endpoint
+    name: "Quarkus Deployments with quarkus-opentelemetry set the OTLP endpoint (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Without QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT a pod exports spans to the localhost:4317 default,
+      logs Connection refused on every batch and ships no traces, while staying Ready; 21
+      Deployments were in that state on 2026-09-24.
+    review_after: 2027-03-24
+    budget_seconds: 15   # 4.3 s measured locally 2026-09-24
+    min_subjects: 30   # 39 containers today (2026-09-24)
+    selftest_inputs: [".github/scripts/check-otel-exporter-endpoint.py"]
+    selftest: |
+      python3 .github/scripts/check-otel-exporter-endpoint.py --self-test
+    run: |
+      python3 .github/scripts/check-otel-exporter-endpoint.py
   - id: entity-column-names
     name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
     group: gitops
@@ -2512,6 +2528,45 @@ gates:
       python3 .github/scripts/check-configproperty-supplied.py --self-test
     run: |
       python3 .github/scripts/check-configproperty-supplied.py --enforce
+
+  # Negative control: delete `insecure-requests: enabled` from ledger-service's %prod block
+  # and it exits 1 naming the file and profile; restore it and it exits 0 (66 subjects).
+  - id: mtls-keeps-http-port
+    name: "client-auth required keeps the plain-HTTP port (insecure-requests: enabled, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      With quarkus.http.ssl.client-auth=required Quarkus defaults insecure-requests to disabled
+      and removes the HTTP listener. #10441 baked client-auth into seven services' %prod profile;
+      the first image built from it listened on 8443 only, its tcp-socket :http readiness probe
+      got connection refused and the rollout stalled. No unit test or @QuarkusTest sees %prod.
+    review_after: '2027-03-21'
+    min_subjects: 40
+    budget_seconds: 15
+    selftest_inputs: [".github/scripts/check-mtls-keeps-http-port.py"]
+    selftest: |
+      python3 .github/scripts/check-mtls-keeps-http-port.py --self-test
+    run: |
+      python3 .github/scripts/check-mtls-keeps-http-port.py --enforce
+
+  - id: restclient-url-supplied
+    name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      application.yaml's `${X_URL:http://localhost:N}` is right on a laptop and wrong in a pod: when
+      the service's gitops manifest never sets X_URL the deployed client dials its own pod and gets
+      connection refused. aml-service's #3413 party-resolution sweep ran that way — every lookup
+      failed, the pod stayed Ready, and no test reads gitops. First run found 18 such URLs fleet-wide;
+      17 are baselined untriaged, the aml one is fixed in the same change.
+    review_after: '2027-03-19'
+    budget_seconds: 30
+    min_subjects: 80
+    selftest_inputs: [".github/scripts/check-restclient-url-supplied.py"]
+    selftest: |
+      python3 .github/scripts/check-restclient-url-supplied.py --self-test
+    run: |
+      python3 .github/scripts/check-restclient-url-supplied.py
 
   # webpack rejects a non-route value export from an App Router route handler with
   # `"X" is not a valid Route export field`. This has broken the admin-ui build twice —
@@ -4496,6 +4551,27 @@ gates:
     selftest_inputs: [".github/scripts/check-roles-allowed-realm.py"]
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # rego principal.id ⇒ the client issues `profile` (#10486). A rule keyed on
+  # `service-account-<client>` matches preferred_username, which a client_credentials token only
+  # carries via the `profile` default scope. openbank-edge lacked it in realm-template.json: the
+  # running realm happened to have it, so nothing failed, but a cold-started realm would have
+  # minted nameless edge tokens and ~90 identity-gated rules would never match. Falsified: red on
+  # origin/main at introduction (the edge gap), green after the template fix, and red again with
+  # `profile` removed from openbank-services. The LIVE realm is held to the same rule by the
+  # keycloak-realm-drift CronJob (--live-client-scopes). ENFORCED.
+  - id: rego-service-account-profile-scope
+    name: "rego service-account principal ⇒ client issues profile scope (#10486, enforced)"
+    group: security
+    mode: enforced
+    min_subjects: 2
+    budget_seconds: 30
+    rationale: "A rego rule keyed on a service-account principal name only matches if that client's tokens carry preferred_username, which Keycloak adds only via the profile default scope; a template without it cold-starts into policies that silently never match."
+    review_after: "2027-09-21"
+    selftest: python3 .github/scripts/check-rego-service-account-profile-scope.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-rego-service-account-profile-scope.py"]
+    run: |
+      python3 .github/scripts/check-rego-service-account-profile-scope.py
   # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
   # NEEDS can exist, this one whether the caller can present a token at all. An outbound client
   # annotated @RegisterProvider(OidcClientRequest*Filter) mints from `quarkus.oidc-client`, a

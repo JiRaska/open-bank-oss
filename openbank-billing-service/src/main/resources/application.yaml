@@ -65,6 +65,17 @@ quarkus:
       type: client
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
+    # #10486 batch 5: the account reads (account.list for the fee run, account.read per account) no
+    # longer ride the shared openbank-services principal. AccountRestClient selects this NAMED client
+    # (@OidcClientFilter("m2m")), so its principal is service-account-openbank-billing (ROLE_API only),
+    # granted by identity in account_rest_ext.rego. Every other rest-client stays on the default client.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-billing
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   rest-client:
     product-catalog:

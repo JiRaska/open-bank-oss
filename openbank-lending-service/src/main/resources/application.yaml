@@ -54,6 +54,18 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486: the borrower credit/debit (transaction.create) and the loan journals (ledger.create) no longer rides the shared openbank-services principal. The
+    # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
+    # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-lending
+    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
+    # stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-lending
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
     tls:
       verification: none
     lending-graph:
@@ -285,6 +297,53 @@ lending:
 # separate block precisely so the offline story (dev, test, `./gradlew quarkusDev`) is unchanged:
 # only the shipped artifact posts to the real ledger and pays real borrowers.
 "%prod":
+  quarkus:
+    http:
+      # East-west mTLS listener (8443, #10618): the listener must VALIDATE the caller's
+      # certificate, not merely offer TLS. `quarkus.http.ssl.client-auth` is a BUILD-TIME
+      # property, so the container env QUARKUS_HTTP_SSL_CLIENT_AUTH could never set it — it has
+      # to live in the file the image is built from (#10441).
+      #
+      # Under `%prod` specifically, and NOT at the top level: `quarkus.http.ssl.*` makes Quarkus
+      # treat TLS as intended, and with no certificate configured it then refuses to start —
+      # which is every dev run and every @QuarkusTest. `prod` is the active profile during
+      # quarkusBuild, so the value is still baked into the image.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port. With client-auth REQUIRED, Quarkus defaults
+      # `insecure-requests` to `disabled` and drops the HTTP listener entirely, so the
+      # readiness probe and every in-cluster plaintext caller get `connection refused`.
+      # mTLS applies to the 8443 listener only. Runtime property; see #10505.
+      insecure-requests: enabled
+    # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
+    # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
+    # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+      consent-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority
+      consent-service:
+        tls-configuration-name: consent-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}

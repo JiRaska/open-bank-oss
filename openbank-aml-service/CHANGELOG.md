@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.12.1...aml-service-v0.12.2) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.12.0...aml-service-v0.12.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **aml:** point the party-resolution sweep at account-service, not localhost ([#10380](https://github.com/JiRaska/open-bank-oss/issues/10380)) ([e08acd9](https://github.com/JiRaska/open-bank-oss/commit/e08acd912e070fb09f50ed9d8c9f567272af3464))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.11.0...aml-service-v0.12.0) (2026-09-19)
+
+
+### Features
+
+* **aml:** reconcile parties KYC-approved but never AML-screened ([#10373](https://github.com/JiRaska/open-bank-oss/issues/10373)) ([dca8cea](https://github.com/JiRaska/open-bank-oss/commit/dca8ceae6edc631950a264d5a35421e90dff7ba7))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.3...aml-service-v0.11.0) (2026-09-17)
 
 

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Optional
 
 /** The router is where the demo switch lives, so the router is where "off means the real register" is proven. */
 class RegistryRouterDemoTest {
@@ -47,7 +48,7 @@ class RegistryRouterDemoTest {
         return RegistryRouter().also {
             it.adapters = instance
             it.metrics = mockk<KybMetricsPort>(relaxed = true)
-            it.demo = DemoEntity(demoOn, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", clock)
+            it.demo = DemoEntity(demoOn, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", Optional.empty(), clock)
         }
     }
 

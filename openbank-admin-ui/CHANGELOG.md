@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.251.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.0...admin-ui-v0.251.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** retain Test Intelligence runtime evidence ([a53e86b](https://github.com/JiRaska/open-bank-oss/commit/a53e86baa8c4496508e97994af6dcbe791c159ab)), closes [#6613](https://github.com/JiRaska/open-bank-oss/issues/6613)
+
+## [0.251.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.250.0...admin-ui-v0.251.0) (2026-09-23)
+
+
+### Features
+
+* **case-coordinator:** P3 swarm guardrails ([#10662](https://github.com/JiRaska/open-bank-oss/issues/10662)) ([a386d82](https://github.com/JiRaska/open-bank-oss/commit/a386d82a79abadce9fa7ffd8a73b1d95fd5fc8e7))
+
+## [0.250.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.249.0...admin-ui-v0.250.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** cancel cases on kill-switch halt ([#10572](https://github.com/JiRaska/open-bank-oss/issues/10572)) ([f8bff32](https://github.com/JiRaska/open-bank-oss/commit/f8bff32da82390aca2ac6605286fa1deaf1188f4))
+
+## [0.249.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.2...admin-ui-v0.249.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** start the governed RCA shadow pilot ([#10570](https://github.com/JiRaska/open-bank-oss/issues/10570)) ([e673381](https://github.com/JiRaska/open-bank-oss/commit/e673381d76b64d6968d0973046f45edc9671b96e))
+
+## [0.248.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.1...admin-ui-v0.248.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** count only on-book loans as active and label originated principal honestly ([#10562](https://github.com/JiRaska/open-bank-oss/issues/10562)) ([cbababa](https://github.com/JiRaska/open-bank-oss/commit/cbababa897c5754bd3c170250c5b0ba42570e69f)), closes [#10561](https://github.com/JiRaska/open-bank-oss/issues/10561)
+* **admin-ui:** render lending currency codes and sum the whole-book principal ([#10559](https://github.com/JiRaska/open-bank-oss/issues/10559)) ([2a54e83](https://github.com/JiRaska/open-bank-oss/commit/2a54e83cb26c7c805a9dfa0f35abf398461b4c84)), closes [#10558](https://github.com/JiRaska/open-bank-oss/issues/10558)
+
 ## [0.248.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.0...admin-ui-v0.248.1) (2026-09-17)
 
 

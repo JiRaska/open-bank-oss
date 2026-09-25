@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.2...sepa-instant-v0.10.3) (2026-09-23)
+
+
+### Security
+
+* **agent:** own M2M identities for the AI-agent reads and the statement search ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 7) ([#10551](https://github.com/JiRaska/open-bank-oss/issues/10551)) ([5a25631](https://github.com/JiRaska/open-bank-oss/commit/5a25631fffd69f9f5ea653d36b5b5718bb35e951))
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.1...sepa-instant-v0.10.2) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.0...sepa-instant-v0.10.1) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.9.0...sepa-instant-v0.10.0) (2026-08-24)
 
 

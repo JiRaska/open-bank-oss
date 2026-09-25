@@ -58,6 +58,18 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486: the settlement booking (transaction.create) no longer rides the shared openbank-services principal. The
+    # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
+    # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-domestic-payment
+    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
+    # stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-domestic-payment
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
@@ -264,3 +276,23 @@ authz:
   # deliberate follow-up flip, not bundled with this PR.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
+    # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
+    # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this
+    # stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      document-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/document-tls/tls.crt
+              key: /mnt/document-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/document-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      document-service:
+        tls-configuration-name: document-authority

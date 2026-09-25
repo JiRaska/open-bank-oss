@@ -96,14 +96,22 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
 
     @GET
     @Path("/rates")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    // #10486 batch 4: ROLE_API admits the machine callers of the published rate (ledger,
+    // transaction and agent-service, today on the shared openbank-services client). OPA stays
+    // identity-gated (`service-fx-shared-client-m2m`, `service-fx-edge-m2m`; fx enforces), so this
+    // only stops the RBAC outer gate depending on the shared client's ROLE_OPERATOR.
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "fx.list", resource = "")
     @Operation(summary = "Get all current FX rates")
     suspend fun getRates(): Response = Response.ok(fxUseCase.getAllRates()).build()
 
     @GET
     @Path("/rates/{base}/{quote}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    // #10486 batch 4: ROLE_API admits the machine callers of the published rate (ledger,
+    // transaction and agent-service, today on the shared openbank-services client). OPA stays
+    // identity-gated (`service-fx-shared-client-m2m`, `service-fx-edge-m2m`; fx enforces), so this
+    // only stops the RBAC outer gate depending on the shared client's ROLE_OPERATOR.
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "fx.read", resource = "")
     @Operation(summary = "Get specific FX rate; ?source=CNB returns the central-bank fixing, ?asOf pins its day")
     suspend fun getRate(
