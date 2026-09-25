@@ -11,6 +11,7 @@ import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.port.out.SnapshotRunSummary
 import com.openbank.risk.application.port.out.UntiedSnapshotException
 import com.openbank.risk.domain.model.InputHash
 import com.openbank.risk.domain.model.Instrument
@@ -65,6 +66,8 @@ class SnapshotService(
         val stored = repository.saveIfAbsent(candidate, positions, instruments.orEmpty())
         return SnapshotOutcome(stored, replayed = stored.id != candidate.id)
     }
+
+    override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = repository.listRecent(limit)
 
     override suspend fun getRun(id: UUID): SnapshotRun = repository.findById(id) ?: throw SnapshotNotFoundException(id)
 

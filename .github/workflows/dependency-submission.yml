@@ -215,7 +215,9 @@ jobs:
       # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
       # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
       - name: Resolve fleet dependency graph
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon
+        # The complete fleet reached the daemon's 6 GiB heap with the default worker count.
+        # Limit concurrent task models without omitting any runtime or test classpath.
+        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon --max-workers=2
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died

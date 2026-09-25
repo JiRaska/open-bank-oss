@@ -7,6 +7,7 @@ package com.openbank.risk.application
 import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.port.out.SnapshotRunSummary
 import com.openbank.risk.application.port.out.UntiedSnapshotException
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.Fixtures
@@ -60,6 +61,18 @@ class SnapshotServiceTest {
         override suspend fun findPositions(runId: UUID) = positions[runId].orEmpty()
 
         override suspend fun findInstruments(runId: UUID) = instruments[runId].orEmpty()
+
+        override suspend fun listRecent(limit: Int) = runs.sortedByDescending { it.recordedAt }.take(limit).map {
+            SnapshotRunSummary(
+                it.id,
+                it.asOf,
+                it.recordedAt,
+                it.provenance.wire,
+                it.status.name,
+                it.positionCount,
+                it.mismatches.size,
+            )
+        }
     }
 
     private val clock = Clock.fixed(Instant.parse("2026-10-01T06:00:00Z"), ZoneOffset.UTC)
