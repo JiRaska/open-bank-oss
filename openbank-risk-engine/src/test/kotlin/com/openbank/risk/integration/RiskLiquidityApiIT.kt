@@ -75,7 +75,7 @@ class RiskLiquidityApiIT {
         val body = liquidity(snapshot("2026-09-30", "TIED_OUT"))
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d238-d295")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")
