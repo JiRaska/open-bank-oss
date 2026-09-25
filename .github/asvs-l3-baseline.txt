@@ -238,6 +238,9 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 # new edge, the same one three other callers already have.
 V9.1 openbank-infra/gitops/components/analytics/ci-gate-runs-schema-apply-job.yaml:56: plaintext http:// env value http://clickhouse.analytics.svc:8123
 V9.1 openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml:82: plaintext http:// env value http://clickhouse.analytics.svc:8123
+# cloud-finops-collector (ADR-0316) -> ClickHouse: the same no-TLS-listener edge as the two lines above
+# and admin-ui's own BFF (same namespace, same Secret). Not a new edge class.
+V9.1 openbank-infra/gitops/components/admin-ui/cloud-finops-collector.yaml:104: plaintext http:// env value http://clickhouse.analytics.svc:8123
 # analytics-sink -> Apicurio schema registry (issue #1916). Same declared debt as every other
 # in-cluster edge here: the Service exposes exactly one port, named `http`, on 8080
 # (gitops/components/apicurio/registry.yaml) — there is no TLS listener to point at, so https
