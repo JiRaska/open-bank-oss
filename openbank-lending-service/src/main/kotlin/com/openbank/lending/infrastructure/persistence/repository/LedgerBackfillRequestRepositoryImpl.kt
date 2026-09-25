@@ -30,8 +30,9 @@ class LedgerBackfillRequestRepositoryImpl :
     override fun findById(id: UUID): Uni<LedgerBackfillRequestEntity?> = find("id", id).firstResult()
 
     @WithSession
-    override fun listRecent(limit: Int): Uni<List<LedgerBackfillRequestEntity>> =
-        find("order by proposedAt desc, id").page(0, limit).list()
+    override fun listRecent(limit: Int): Uni<List<LedgerBackfillRequestEntity>> = find(
+        "order by proposedAt desc, id",
+    ).page<LedgerBackfillRequestEntity>(0, limit).list<LedgerBackfillRequestEntity>()
 
     @WithSession
     override fun findProposedByHash(planHash: String): Uni<LedgerBackfillRequestEntity?> =
