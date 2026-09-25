@@ -69,7 +69,7 @@ Zkontroluj logy `InterestAccrualScheduler` ("interest accrual pass: N installmen
 Zkontroluj logy `ProvisioningCycleScheduler` ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Interval je `LENDING_PROVISIONING_EVERY` (výchozí ~720h/30d, delayed 60s). Nula zaúčtovaných zápisů při nenulovém počtu zpracovaných úvěrů je **očekávané a správné**, pokud se stage/ECL žádného úvěru od minulého období nezměnilo — než usoudíš na chybu, zkontroluj řádky v `loan_provisioning` pro dané období. Průchod je idempotentní podle `(loan_id, period)`; zmeškané okno se samo zhojí dalším tikem, ale kniha větší než `LENDING_PROVISIONING_BATCH_SIZE` je za jeden tik pokryta jen částečně (zatím bez kurzoru pro pokračování — sledováno v threat modelu).
 
 ### Doúčtování do hlavní knihy (jednorázové, #10746)
-Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6057). ROLE_FINANCE nebo ROLE_ADMIN (pouze lidé), dvě různé osoby (#10618).
+Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6057). ROLE_FINANCE nebo ROLE_ADMIN (pouze lidé), dvě různé osoby (#10618). Celý postup lze provést v administraci: Rozvaha a riziko → Doúčtování úvěrů.
 1. **Zkouška nanečisto** (nic nezapisuje): `GET /api/v1/lending/ledger-backfill/plan?cutoverDate=<dnes>&disbursedBefore=<datum>`. Ověřte `executable=true`, `plan.tieOut[*].ties=true` a `glTotals`.
 2. **Návrh** (maker): `POST /api/v1/lending/ledger-backfill/requests`.
 3. **Schválení** (checker, jiný uživatel financí nebo admin): `POST /requests/{id}/decide`. Vlastní schválení vrací 422.

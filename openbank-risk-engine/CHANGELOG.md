@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.6.0...risk-engine-v0.7.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.5.0...risk-engine-v0.6.0) (2026-09-25)
 
 

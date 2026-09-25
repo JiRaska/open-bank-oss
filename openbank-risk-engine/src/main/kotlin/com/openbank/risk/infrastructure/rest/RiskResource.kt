@@ -64,6 +64,13 @@ class RiskResource {
         return Response.status(status).entity(outcome.run.toResponse()).build()
     }
 
+    /** Bounded list for the console (#10618); the mismatches themselves are on the run manifest. */
+    @GET
+    @Operation(summary = "The most recently recorded snapshot runs, newest first (limit 1..100, default 25)")
+    @Authorize(action = "risk.snapshot.read", resource = "")
+    suspend fun list(@QueryParam("limit") limit: Int?): Response =
+        Response.ok(SnapshotRunListResponse(snapshots.listRuns(boundedLimit(limit)).map { it.toDto() })).build()
+
     @GET
     @Path("/{id}")
     @Operation(summary = "Run manifest, including every tie-out mismatch")

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.36.0...lending-service-v0.37.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
 ## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.2...lending-service-v0.36.0) (2026-09-25)
 
 

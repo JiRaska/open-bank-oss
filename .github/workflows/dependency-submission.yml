@@ -112,8 +112,10 @@ jobs:
       # then — no graph file to submit, but the job still exits without visibly failing that
       # step (issue #909's residual-alert investigation traced back here). security.yml's
       # CodeQL java-kotlin leg resolves the same whole-fleet graph on the same ubuntu-latest
-      # runner at -Xmx6g without OOMing — match that proven headroom here.
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+      # runner at -Xmx6g without OOMing. This job now resolves every configuration across
+      # the fleet; at 6g it OOMed while 7664 MiB of runner memory remained available.
+      # Give the single resolution daemon 10g, leaving measured system headroom.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx10g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
     steps:
@@ -210,12 +212,13 @@ jobs:
           # `detachedConfiguration11` would silently stop matching.
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
-      # assemble resolves runtimeClasspath (what actually ships); testClasses additionally
-      # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
-      # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
-      # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
+      # The setup-gradle plugin's resolveAllDependencies task resolves every project's
+      # resolvable configuration, including runtime and test classpaths, without compiling
+      # the fleet. Building assemble + testClasses exhausted the runner's 6 GiB daemon heap
+      # even with two workers, before the snapshot could be submitted. Keep the extractor's
+      # detached/buildscript configuration filter above; it applies to this task too.
       - name: Resolve fleet dependency graph
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon
+        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew --no-configure-on-demand :ForceDependencyResolutionPlugin_resolveAllDependencies --no-daemon --max-workers=2
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
@@ -226,7 +229,7 @@ jobs:
   # read that graph, and a stale graph makes the gate green without checking anything.
   #
   # The heap is a RATCHET with nothing measuring it: 4g was fine until the fleet grew
-  # past it, and 6g will go the same way. This job cannot prevent that — it makes the
+  # past it, and 10g will go the same way. This job cannot prevent that — it makes the
   # next occurrence arrive as an addressed issue instead of three quiet days.
   #
   # Not gated on `schedule` (unlike fleet-attestation's equivalent): the OOM ran red on
@@ -282,9 +285,9 @@ jobs:
           **Check the heap first.** The 2026-07-14..07-17 outage was \`Java heap space\` in
           \`Resolve fleet dependency graph\`: \`-Xmx4g\` stopped fitting as the fleet grew, every
           run died for three days, and nobody noticed because a red push-triggered workflow on
-          main is addressed to nobody. It is now \`-Xmx6g\`; that is a ratchet, not a fix. If the
-          log says \`Java heap space\`, raise \`GRADLE_OPTS\` in this workflow and match the
-          headroom \`security.yml\`'s CodeQL java-kotlin leg already proves on the same runner.
+          main is addressed to nobody. It is now \`-Xmx10g\`; that is a ratchet, not a fix. If the
+          log says \`Java heap space\`, inspect the recorded system-memory floor before changing
+          the limit; when the runner is short of RAM, reduce concurrent work instead.
 
           Note \`dependency-graph-continue-on-failure: true\` (setup-gradle's default): graph
           submission is NOT gated on the resolve succeeding, so a partial graph may have been
