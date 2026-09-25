@@ -892,6 +892,97 @@ capabilities:
     expect(report.totals).toMatchObject({ componentsWithExecutionEvidence: 1, missingEvidence: 0 })
   })
 
+  it('projects only named simulation scenario JUnit results to their covered services', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-scenarios-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const mapped = [
+      ['com.openbank.simulation.DstSimulationTest', 4, ['openbank-ledger-service', 'openbank-transaction-service']],
+      ['com.openbank.simulation.scenario.SepaSettlementScenarioTest', 4, ['openbank-sepa-payment', 'openbank-settlement-service']],
+      ['com.openbank.simulation.scenario.FeeBillingScenarioTest', 6, ['openbank-billing-service']],
+      ['com.openbank.simulation.scenario.InterestAccrualScenarioTest', 4, ['openbank-interest-service']],
+      ['com.openbank.simulation.scenario.StatementCloseScenarioTest', 3, ['openbank-statement-service']],
+    ] as const
+    for (const [, , services] of mapped) for (const service of services) {
+      write(repo, `${service}/version.txt`, '1.0.0\n')
+    }
+    write(repo, 'openbank-uncovered-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-lending-service/version.txt', '1.0.0\n')
+    const run = { id: '36088992291', attempt: 1, commit: 'ce63eac12345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/36088992291', observedAt: '2026-09-25T10:00:00Z' }
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1, run, component: 'openbank-simulation',
+      suites: [{ kind: 'simulation', state: 'passed', discovered: 58, executed: 58, passed: 58, failed: 0, skipped: 0, errors: 0, durationMs: 1000 }],
+      testCases: mapped.flatMap(([classname, count]) => Array.from({ length: count }, (_, index) => ({
+        kind: 'simulation', classname, name: `case ${index}`, state: 'passed',
+      }))),
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    for (const [classname, count] of mapped) {
+      const cases = Array.from({ length: count }, (_, index) => `<testcase classname="${classname}" name="case ${index}" time="0.1"/>`).join('')
+      write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`,
+        `<testsuite name="${classname}" tests="${count}" failures="0" errors="0" skipped="0">${cases}</testsuite>`)
+    }
+    write(repo, 'openbank-simulation/build/test-results/test/TEST-com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest.xml',
+      '<testsuite name="com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest"><testcase classname="com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest" name="shared IFRS9 math"/></testsuite>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const byComponent = new Map(report.components.map(component => [component.component, component]))
+    expect(byComponent.get('openbank-simulation')?.evidence[0].counts?.passed).toBe(58)
+    for (const [classname, count, services] of mapped) for (const service of services) {
+      expect(byComponent.get(service)?.evidence).toEqual([expect.objectContaining({
+        kind: 'simulation', state: 'passed', source: `JUnit:test/TEST-${classname}.xml`,
+        counts: expect.objectContaining({ discovered: count, passed: count }),
+        detail: expect.stringContaining(classname),
+        run: expect.objectContaining({ id: run.id, commit: run.commit, url: run.url }),
+      })])
+    }
+    expect(byComponent.get('openbank-uncovered-service')?.evidence).toEqual([])
+    expect(byComponent.get('openbank-lending-service')?.evidence).toEqual([])
+    expect(report.requiredControls.every(control => control.kind !== 'simulation')).toBe(true)
+  })
+
+  it('requires matching run-envelope cases and keeps failure and skip counts local to the scenario', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-unverified-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-billing-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-interest-service/version.txt', '1.0.0\n')
+    const classname = 'com.openbank.simulation.scenario.FeeBillingScenarioTest'
+    const xml = `<testsuite name="${classname}" tests="3" failures="1" skipped="1"><testcase classname="${classname}" name="passes"/><testcase classname="${classname}" name="fails"><failure/></testcase><testcase classname="${classname}" name="skips"><skipped/></testcase></testsuite>`
+    write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`, xml)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    let report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(component => component.component === 'openbank-billing-service')?.evidence).toEqual([])
+    const run = { id: '42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42', observedAt: '2026-09-25T10:00:00Z' }
+    const envelope = {
+      schemaVersion: 1, component: 'openbank-simulation', run,
+      suites: [{ kind: 'simulation', state: 'failed', discovered: 3, executed: 2, passed: 1, failed: 1, skipped: 1, errors: 0, durationMs: 100 }],
+      testCases: [
+        { kind: 'simulation', classname, name: 'passes', state: 'passed' },
+        { kind: 'simulation', classname, name: 'fails', state: 'failed' },
+        { kind: 'simulation', classname, name: 'other name', state: 'skipped' },
+      ],
+    }
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify(envelope))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(component => component.component === 'openbank-billing-service')?.evidence).toEqual([])
+
+    envelope.testCases[2].name = 'skips'
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify(envelope))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(component => component.component === 'openbank-billing-service')?.evidence).toEqual([
+      expect.objectContaining({ kind: 'simulation', state: 'failed', run: expect.objectContaining({ id: '42' }),
+        counts: { discovered: 3, executed: 2, passed: 1, failed: 1, skipped: 1, errors: 0 } }),
+    ])
+    expect(report.components.find(component => component.component === 'openbank-interest-service')?.evidence).toEqual([])
+  })
+
   it('keeps verdicts but omits outbound provenance from an untrusted run host', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-untrusted-run-'))
     dirs.push(repo)

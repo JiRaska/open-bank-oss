@@ -240,6 +240,79 @@ async function junitEvidence(component) {
   }))
 }
 
+// A simulation suite is evidence for a service only when that suite actually ran.
+// Keep the mapping at JUnit-class granularity: the harness-wide 58-test total belongs
+// to openbank-simulation, while these rows describe specific domain paths.
+const simulationScenarios = [
+  { classname: 'com.openbank.simulation.DstSimulationTest', components: ['openbank-ledger-service', 'openbank-transaction-service'], scope: 'Seeded payment, ledger and saga domain sweep (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.SepaSettlementScenarioTest', components: ['openbank-sepa-payment', 'openbank-settlement-service'], scope: 'SEPA payment and settlement domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.FeeBillingScenarioTest', components: ['openbank-billing-service'], scope: 'Billing fee domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.InterestAccrualScenarioTest', components: ['openbank-interest-service'], scope: 'Interest accrual domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.StatementCloseScenarioTest', components: ['openbank-statement-service'], scope: 'Statement close domain scenario (pure JVM)' },
+]
+
+async function simulationScenarioEvidence() {
+  const component = 'openbank-simulation'
+  const root = path.join(repo, component, 'build', 'test-results', 'test')
+  const envelope = readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json'))
+  const projected = new Map()
+  // CI stages both documents from one immutable service artifact. Reconcile the
+  // XML cases with its run envelope too, so a lone or mismatched local XML cannot
+  // acquire the run's verdict and provenance.
+  if (envelope?.schemaVersion !== 1 || envelope.component !== component
+      || !Array.isArray(envelope.testCases)
+      || !Array.isArray(envelope.suites)
+      || !envelope.suites.some(suite => suite.kind === 'simulation')) return projected
+  const run = safeRun(envelope.run, `${component}:scenarios`)
+  if (!run) return projected
+  for (const scenario of simulationScenarios) {
+    const filename = `TEST-${scenario.classname}.xml`
+    const file = path.join(root, filename)
+    if (!exists(file)) continue
+    let parsed
+    try {
+      parsed = await parseStringPromise(fs.readFileSync(file, 'utf8'), { explicitArray: true })
+    } catch {
+      warnings.push(`unparsable JUnit report skipped: ${path.relative(repo, file)}`)
+      continue
+    }
+    const suite = parsed?.testsuite
+    if (suite?.$?.name !== scenario.classname || !Array.isArray(suite.testcase) || !suite.testcase.length
+        || suite.testcase.some(item => item.$?.classname !== scenario.classname)) continue
+    const cases = suite.testcase
+    const identity = item => {
+      const name = item.$?.name ?? 'unknown'
+      const definition = name.replace(/\s*(?:\[[^\]]*]|\([^)]*\))\s*$/, '').trim() || name
+      return `${definition}\0${item.skipped !== undefined ? 'skipped' : item.failure !== undefined || item.error !== undefined ? 'failed' : 'passed'}`
+    }
+    const expected = envelope.testCases.filter(item => item.kind === 'simulation' && item.classname === scenario.classname)
+    const expectedIdentities = expected.map(item => `${item.name}\0${item.state}`).sort()
+    const actualIdentities = cases.map(identity).sort()
+    if (expectedIdentities.length !== actualIdentities.length
+        || expectedIdentities.some((value, index) => value !== actualIdentities[index])) continue
+    const skipped = cases.filter(item => item.skipped !== undefined).length
+    const failures = cases.filter(item => item.failure !== undefined).length
+    const errors = cases.filter(item => item.error !== undefined).length
+    const at = envelope.run.observedAt
+    const counts = {
+      discovered: cases.length, executed: cases.length - skipped,
+      passed: cases.length - skipped - failures - errors,
+      failed: failures + errors, skipped, errors,
+    }
+    const evidence = {
+      kind: 'simulation', state: stateFrom(counts.failed, counts.executed, at), observedAt: at,
+      source: `JUnit:test/${filename}`, environment: 'ci',
+      durationMs: Math.round(cases.reduce((sum, item) => sum + Number(item.$?.time ?? 0), 0) * 1000),
+      counts, detail: `${scenario.scope}; ${scenario.classname}`,
+      run,
+    }
+    for (const service of scenario.components) {
+      projected.set(service, [...(projected.get(service) ?? []), evidence])
+    }
+  }
+  return projected
+}
+
 function runEnvelope(component) {
   const file = path.join(repo, component, 'build', 'test-intelligence', 'run.json')
   const run = readJson(file)
@@ -1039,6 +1112,7 @@ async function main() {
     .filter(component => !names.includes(component) && !tooling.includes(component))
     .sort()
   const moneyPath = moneyPathComponents()
+  const simulationByService = await simulationScenarioEvidence()
   const currentEnvelopes = [...names, ...tooling]
     .map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json')))
     .filter(Boolean)
@@ -1046,7 +1120,7 @@ async function main() {
     const envelope = runEnvelope(component)
     return {
       component, released: true, moneyPath: moneyPath.has(component),
-      evidence: envelope?.evidence ?? await junitEvidence(component),
+      evidence: [...(envelope?.evidence ?? await junitEvidence(component)), ...(simulationByService.get(component) ?? [])],
       coverage: envelope?.coverage ?? coverage(component),
       testInfrastructure: envelope?.testInfrastructure ?? { declared: [], observed: [] },
     }
