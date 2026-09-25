@@ -1,0 +1,37 @@
+.shell{max-width:1200px;margin:0 auto;padding:40px 28px 80px;color:var(--text-primary)}
+.back{display:inline-block;margin-bottom:34px;color:var(--accent);font-size:13px;text-decoration:none}
+.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--accent);font-weight:750;font-size:11px;margin-bottom:10px}
+.shell h1{font-size:clamp(30px,4vw,46px);letter-spacing:-.035em;margin:0 0 12px}
+.intro{color:var(--text-secondary);max-width:760px;line-height:1.65;margin:0 0 28px}
+.scope{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:18px 22px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font-size:13px}
+.scope code{overflow-wrap:anywhere;color:var(--text-primary)}
+.scopeBadge{margin-left:auto;border:1px solid var(--accent);border-radius:999px;padding:5px 10px;color:var(--accent);font-size:11px;font-weight:700}
+.meta{display:flex;flex-wrap:wrap;gap:24px;padding:20px 0;color:var(--text-secondary);font-size:12px}
+.meta strong{display:block;color:var(--text-primary);font-size:14px;margin-top:5px}
+.notice,.error,.warning{padding:18px 20px;border-radius:14px;margin:24px 0;line-height:1.5}
+.notice{background:var(--surface);border:1px solid var(--border)}
+.error{background:color-mix(in srgb,#d34b4b 9%,var(--surface));border:1px solid #d34b4b}
+.warning{background:color-mix(in srgb,#c99428 12%,var(--surface));border:1px solid #c99428}
+.graph{border:1px solid var(--border);border-radius:20px;background:radial-gradient(circle at 50% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 55%),var(--surface);padding:36px 22px;overflow-x:auto}
+.loanNode,.guaranteeNode,.children>span{display:flex;flex-direction:column;gap:7px;padding:14px 18px;border-radius:13px;background:var(--surface-2);border:1px solid var(--border);min-width:180px}
+.loanNode{width:max-content;margin:0 auto;border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 12%,transparent)}
+.graph small{font-size:10px;letter-spacing:.09em;font-weight:800;color:var(--text-tertiary)}
+.graph strong{font-size:14px;color:var(--text-primary)}
+.branches{display:flex;gap:16px;align-items:stretch;min-width:max-content;justify-content:center;margin-top:36px}
+.branch{font:inherit;color:inherit;text-align:left;border:0;background:transparent;padding:0;display:flex;flex-direction:column;gap:14px;cursor:pointer;position:relative}
+.branch:focus-visible{outline:3px solid var(--accent);outline-offset:5px;border-radius:14px}
+.branch .line{height:22px;width:1px;background:var(--accent);position:absolute;top:-28px;left:50%}
+.guaranteeNode{border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
+.active .guaranteeNode{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 35%,transparent)}
+.guaranteeNode em{font-size:12px;font-style:normal;color:var(--accent);font-weight:700}
+.children{display:flex;gap:8px}
+.children>span{min-width:0;flex:1;border-style:dashed}
+.children strong{font-size:12px}
+.detail{margin-top:26px;padding:26px;border:1px solid var(--border);border-radius:18px;background:var(--surface)}
+.detail h2{font-size:18px;margin:0 0 18px}
+.detail dl{display:grid;grid-template-columns:minmax(130px,210px) minmax(0,1fr);gap:11px 20px;margin:0;font-size:13px}
+.detail dt{color:var(--text-tertiary)}
+.detail dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.hash{font-size:11px}
+.caveat{color:var(--text-secondary);font-size:12px;line-height:1.6;margin-top:22px}
+@media(max-width:700px){.shell{padding:24px 16px 50px}.detail dl{grid-template-columns:1fr;gap:5px}.detail dd{margin-bottom:9px}.scopeBadge{margin-left:0}}

@@ -174,6 +174,16 @@ no graph edge or read endpoint is created from this feed. Current source proof,
 exact loan assignment, purpose, policy and read audit remain prerequisites for
 any later Lending graph disclosure.
 
+The optional single-loan guarantee view reads evidence from Lending only after
+Context verifies the human investigator's exact loan assignment, purpose and
+policy. It forwards that investigator's bearer token, requests at most 100 facts,
+validates the returned loan ID and evidence references, limits concurrent source
+calls, records disclosure references, and returns `no-store`. Shared guarantors
+do not authorize a read of another loan. Source outages and invalid responses
+fail closed. The view remains disabled by default; activation requires a declared
+Context-to-Lending network edge and a trusted source connection. The Kafka
+pointer is never presented as a verified guarantee relationship.
+
 ## Invariants
 
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.

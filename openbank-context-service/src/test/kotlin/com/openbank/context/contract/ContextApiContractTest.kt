@@ -10,9 +10,22 @@ class ContextApiContractTest {
     @Test
     fun `Lending access contract returns only a case scoped decision`() {
         val operation = contract.substringAfter("/api/v1/context/lending-loans/{loanId}/access:")
-            .substringBefore("/api/v1/context/fraud-cases/{caseId}/network:")
+            .substringBefore("/api/v1/context/lending-loans/{loanId}/approved-guarantees:")
         assertThat(operation).contains("verifyAssignedLendingLoanAccess", "'204'", "'403'", "'503'")
         assertThat(operation).doesNotContain("'200'", "guarantorPartyId", "capAmount", "sourceDocumentId")
+    }
+
+    @Test
+    fun `Lending source evidence contract is bounded to one loan`() {
+        val operation = contract.substringAfter("/api/v1/context/lending-loans/{loanId}/approved-guarantees:")
+            .substringBefore("/api/v1/context/fraud-cases/{caseId}/network:")
+        assertThat(operation).contains(
+            "getAssignedLendingApprovedGuarantees",
+            "LendingGuaranteeHistory",
+            "'403'",
+            "'503'",
+        )
+        assertThat(contract).contains("maxItems: 100", "sourceDocumentId", "sourceSha256")
     }
 
     @Test

@@ -25,6 +25,31 @@ paths:
         '400': { description: Case or purpose mismatch }
         '403': { description: Role, assignment or policy denied }
         '503': { description: Authorization unavailable }
+  /api/v1/context/lending-loans/{loanId}/approved-guarantees:
+    get:
+      operationId: getAssignedLendingApprovedGuarantees
+      summary: Read approved guarantee evidence for one assigned loan
+      description: >-
+        Disabled by default. Requires the human investigator's exact loan case ID,
+        LENDING_EXPOSURE_REVIEW purpose, current root assignment and policy allow.
+        Reads bounded source evidence directly from Lending; shared parties confer no access
+        to another loan. The response is uncached and may be truncated.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most 100 approved guarantee facts for this loan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LendingGuaranteeHistory' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, assignment, policy or source denied }
+        '503': { description: Feature disabled, authorization or source unavailable }
   /api/v1/context/fraud-cases/{caseId}/network:
     get:
       operationId: getAssignedFraudCaseNetwork
@@ -318,6 +343,36 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    LendingGuaranteeHistory:
+      type: object
+      required: [loanId, effectiveAt, knownAt, guarantees, truncated]
+      properties:
+        loanId: { type: string, format: uuid }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        guarantees:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/LendingGuaranteeEvidence' }
+    LendingGuaranteeEvidence:
+      type: object
+      required: [guaranteeId, contractId, revision, guarantorPartyId, capAmount, currency, coverageFraction, seniority, validFrom, sourceDocumentId, sourceSha256, decidedAt]
+      properties:
+        guaranteeId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        supersedesGuaranteeId: { type: [string, "null"], format: uuid }
+        guarantorPartyId: { type: string, format: uuid }
+        capAmount: { type: number }
+        currency: { type: string }
+        coverageFraction: { type: number }
+        seniority: { type: integer }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: [string, "null"], format: date-time }
+        sourceDocumentId: { type: string, format: uuid }
+        sourceSha256: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        decidedAt: { type: string, format: date-time }
     FraudAssignedCandidates:
       type: object
       required: [ids, truncated]

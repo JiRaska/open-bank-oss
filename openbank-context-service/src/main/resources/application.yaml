@@ -37,6 +37,10 @@ quarkus:
       url: ${FRAUD_CASE_SOURCE_URL:http://localhost:8133}
       connect-timeout: 250
       read-timeout: 4500
+    lending-service:
+      url: ${LENDING_GRAPH_SOURCE_URL:http://localhost:8126}
+      connect-timeout: 250
+      read-timeout: 4500
   smallrye-openapi:
     store-schema-directory: target/openapi
   management:
