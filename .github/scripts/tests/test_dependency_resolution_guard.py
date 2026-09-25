@@ -6,9 +6,59 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[3]
 GUARD = ROOT / '.github/scripts/dependency-resolution-strict.init.gradle'
+
+
+class BuildscriptFreeMarkerTests(unittest.TestCase):
+    def run_case(self, version, resolver=False):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory)
+            (fixture / 'settings.gradle').write_text("rootProject.name = 'buildscript-floor-test'\n")
+            build = (
+                "buildscript { repositories { maven { url = uri('repo') } }; "
+                f"dependencies {{ classpath 'org.freemarker:freemarker:{version}' }} }}\n"
+            )
+            if resolver:
+                build += "tasks.register('ForceDependencyResolutionPlugin_resolveProjectDependencies')\n"
+            (fixture / 'build.gradle').write_text(build)
+            artifact = fixture / 'repo/org/freemarker/freemarker' / version
+            artifact.mkdir(parents=True)
+            (artifact / f'freemarker-{version}.pom').write_text(
+                '<project><modelVersion>4.0.0</modelVersion><groupId>org.freemarker</groupId>'
+                f'<artifactId>freemarker</artifactId><version>{version}</version></project>'
+            )
+            with ZipFile(artifact / f'freemarker-{version}.jar', 'w') as jar:
+                jar.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+            task = ('ForceDependencyResolutionPlugin_resolveProjectDependencies'
+                    if resolver else 'VerifyBuildscriptFreeMarker')
+            return subprocess.run(
+                [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
+                 '--offline', task, *(['--dry-run'] if resolver else [])],
+                capture_output=True, text=True, timeout=120, check=False,
+            )
+
+    def test_vulnerable_plugin_classpath_fails(self):
+        result = self.run_case('2.3.32')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Vulnerable buildscript FreeMarker: 2.3.32', result.stdout + result.stderr)
+
+    def test_last_vulnerable_version_fails(self):
+        result = self.run_case('2.3.34')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Vulnerable buildscript FreeMarker: 2.3.34', result.stdout + result.stderr)
+
+    def test_patched_plugin_classpath_passes(self):
+        result = self.run_case('2.3.35')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dependency_resolver_runs_the_buildscript_check_first(self):
+        result = self.run_case('2.3.35', resolver=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertLess(result.stdout.index(':VerifyBuildscriptFreeMarker SKIPPED'),
+                        result.stdout.index(':ForceDependencyResolutionPlugin_resolveProjectDependencies SKIPPED'))
 
 
 # Needs the graph plugin setup-gradle injects; dependency-submission.yml runs it and fails

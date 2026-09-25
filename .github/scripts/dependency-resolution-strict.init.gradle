@@ -3,9 +3,36 @@
 import groovy.json.JsonOutput
 import org.gradle.api.artifacts.result.UnresolvedDependencyResult
 
+// Buildscript/plugin dependencies are intentionally excluded from the submitted
+// application graph. Check the critical Kover transitive here instead, on the
+// classpath that actually loads in every service build (GHSA-27j2-h3m2-8237).
+def verifyBuildscriptFreeMarker = { project ->
+    project.buildscript.configurations.getByName('classpath').incoming.resolutionResult.allComponents.each { component ->
+        def module = component.moduleVersion
+        if (module?.group != 'org.freemarker' || module?.name != 'freemarker') {
+            return
+        }
+        def match = module.version =~ /^(\d+)\.(\d+)\.(\d+)$/
+        if (!match.matches()) {
+            throw new GradleException("Cannot verify buildscript FreeMarker version: ${module.version}")
+        }
+        def numbers = (1..3).collect { match[0][it] as int }
+        if (numbers[0] < 2 || (numbers[0] == 2 && (numbers[1] < 3 ||
+                (numbers[1] == 3 && numbers[2] < 35)))) {
+            throw new GradleException("Vulnerable buildscript FreeMarker: ${module.version}; require 2.3.35 or newer")
+        }
+    }
+}
+
 gradle.beforeProject { project ->
+    // This task also makes the exact production check runnable against a local
+    // Maven fixture without setup-gradle's dependency-graph plugin.
+    project.tasks.register('VerifyBuildscriptFreeMarker') {
+        doLast { verifyBuildscriptFreeMarker(project) }
+    }
     project.tasks.configureEach { task ->
         if (task.name == 'ForceDependencyResolutionPlugin_resolveProjectDependencies') {
+            task.dependsOn('VerifyBuildscriptFreeMarker')
             task.doLast {
                 def excluded = java.util.regex.Pattern.compile(System.getenv('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') ?: '')
                 def configurations = project.configurations.findAll {
