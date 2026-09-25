@@ -35,7 +35,10 @@ import java.util.UUID
 @Path("/api/v1/risk/curve-sets")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+// #10618: the risk and finance departments read every endpoint here; only ROLE_RISK (never FINANCE)
+// joins the write below. Literal names, like lending's ROLE_CREDIT_RISK: adding them to libs Roles.kt
+// would rebuild the whole fleet for two constants.
+@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, "ROLE_RISK", "ROLE_FINANCE")
 class CurveSetResource {
 
     @Inject
@@ -44,6 +47,7 @@ class CurveSetResource {
     @POST
     @Operation(summary = "Upload money-market quotes per index; they are bootstrapped into zero curves and stored")
     @Authorize(action = "risk.curve-set.create")
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, "ROLE_RISK")
     suspend fun create(request: CreateCurveSetRequest?): Response {
         val body = requireNotNull(request) { "request body is required" }
         val command = CreateCurveSetCommand(

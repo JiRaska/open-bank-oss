@@ -10,7 +10,9 @@ info:
   # one and nothing in a merge can tell them apart.
   # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
-  version: 1.26.0
+  # 1.26.0 -> 1.26.1: description-only — the ledger-backfill operations now name their roles
+  # (ROLE_FINANCE or ROLE_ADMIN, humans only, #10618). No schema or path change.
+  version: 1.26.1
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -1021,6 +1023,7 @@ paths:
       tags: [Lending]
       operationId: planLedgerBackfill
       summary: "Dry-run of the one-off ledger backfill (#10746): exact journal set, GL totals, tie-out. Writes nothing."
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       parameters:
         - name: cutoverDate
           in: query
@@ -1047,6 +1050,7 @@ paths:
       tags: [Lending]
       operationId: proposeLedgerBackfill
       summary: Propose a ledger backfill (maker); the approval binds to the plan hash
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       requestBody:
         required: true
         content:
@@ -1072,6 +1076,7 @@ paths:
       tags: [Lending]
       operationId: decideLedgerBackfill
       summary: Approve or reject a ledger backfill request (checker, must differ from the maker)
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       parameters:
         - name: id
           in: path
@@ -1106,6 +1111,7 @@ paths:
       tags: [Lending]
       operationId: executeLedgerBackfill
       summary: Execute an APPROVED ledger backfill; without execute=true only returns the plan
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
       parameters:
         - name: id
           in: path
