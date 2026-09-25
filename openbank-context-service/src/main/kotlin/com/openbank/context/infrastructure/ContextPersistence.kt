@@ -397,14 +397,12 @@ class ContextGraphRepository(
         asOf: Instant,
         limit: Int,
     ): List<ContextEdgeEntity> = sessions.boundedGraphRead(queryTimeoutMs) { session ->
-        session.createQuery(
-            "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                "namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and " +
-                "(validTo is null or validTo > :asOf) order by recordedAt desc",
+        session.createNativeQuery(
+            ROOT_EDGES_SQL,
             ContextEdgeEntity::class.java,
         ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
             .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
-            .setParameter("root", root).setMaxResults(limit).resultList
+            .setParameter("root", root).setParameter("limit", limit).resultList
     }.awaitSuspending()
 
     private suspend fun findComplaintPaymentEvidenceEdges(
@@ -508,6 +506,23 @@ class ContextGraphRepository(
     }.awaitSuspending()
 
     private companion object {
+        // Keep each direction index-ordered and bounded before merging. The previous OR predicate
+        // scanned and sorted every edge of a high-degree root before applying the result limit.
+        val ROOT_EDGES_SQL = """
+            SELECT * FROM (
+                (SELECT e.* FROM context_edges e
+                 WHERE e.bank_scope = :bankScope AND e.projection_generation = :generation
+                   AND e.namespace = :namespace AND e.from_key = :root
+                   AND e.valid_from <= :asOf AND (e.valid_to IS NULL OR e.valid_to > :asOf)
+                 ORDER BY e.recorded_at DESC, e.edge_id LIMIT :limit)
+                UNION ALL
+                (SELECT e.* FROM context_edges e
+                 WHERE e.bank_scope = :bankScope AND e.projection_generation = :generation
+                   AND e.namespace = :namespace AND e.to_key = :root AND e.from_key <> :root
+                   AND e.valid_from <= :asOf AND (e.valid_to IS NULL OR e.valid_to > :asOf)
+                 ORDER BY e.recorded_at DESC, e.edge_id LIMIT :limit)
+            ) candidates ORDER BY recorded_at DESC, edge_id LIMIT :limit
+        """.trimIndent()
         const val MAX_GRAPH_NODES = 100
         const val MAX_GRAPH_EDGES = 200
         const val CONCERNS_TRANSACTION = "CONCERNS_TRANSACTION"
