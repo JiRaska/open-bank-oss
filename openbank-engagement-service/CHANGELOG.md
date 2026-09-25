@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.1...engagement-service-v0.14.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **engagement:** suppress campaign banners for fraud holds ([#10793](https://github.com/JiRaska/open-bank-oss/issues/10793)) ([d38ac04](https://github.com/JiRaska/open-bank-oss/commit/d38ac0453b3f2132bcb3029443b90326efe3410c))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.0...engagement-service-v0.14.1) (2026-09-13)
 
 

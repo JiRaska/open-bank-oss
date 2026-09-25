@@ -24,20 +24,20 @@ import org.junit.jupiter.api.extension.ExtendWith
 
 /**
  * The broker half of lending's provider pair (ADR-0314 D4): the same replay as
- * [LendingLoanBookPactProviderTest], sourced from the Pact Broker and gated on `pactbroker.url`,
+ * [LendingLoanBookPactProviderVerificationTest], sourced from the Pact Broker and gated on `pactbroker.url`,
  * so it runs on main-push only and PUBLISHES the verification result `can-i-deploy` reads — which
  * the folder class structurally cannot. It is the only permitted second
  * `@Provider("openbank-lending-service")` class; both use [LoanBookPactState].
  */
 @QuarkusTest
-@QuarkusTestResource(LendingLoanBookPactProviderTest.InMemoryKafkaResource::class)
+@QuarkusTestResource(LendingLoanBookPactProviderVerificationTest.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
 @Provider("openbank-lending-service")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
-class LendingLoanBookPactBrokerProviderTest {
+class LendingLoanBookPactBrokerProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
