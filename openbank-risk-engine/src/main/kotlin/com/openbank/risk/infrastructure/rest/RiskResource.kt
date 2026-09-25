@@ -36,7 +36,10 @@ import java.util.UUID
 @Path("/api/v1/risk/snapshots")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+// #10618: the risk and finance departments read every endpoint here; only ROLE_RISK (never FINANCE)
+// joins the write below. Literal names, like lending's ROLE_CREDIT_RISK: adding them to libs Roles.kt
+// would rebuild the whole fleet for two constants.
+@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, "ROLE_RISK", "ROLE_FINANCE")
 class RiskResource {
 
     @Inject
@@ -48,6 +51,7 @@ class RiskResource {
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
     @Authorize(action = "risk.snapshot.create")
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, "ROLE_RISK")
     suspend fun create(request: CreateSnapshotRequest?): Response {
         val raw = requireNotNull(request?.asOf) { "field 'asOf' is required" }
         val asOf = try {

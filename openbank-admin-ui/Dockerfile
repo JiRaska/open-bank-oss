@@ -231,6 +231,7 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
+COPY .github/gates/gates.yaml /.github/gates/gates.yaml
 # The origination Kotlin, at the repo-relative path the generator expects (#3283). It resolves
 # against --repo, which defaults to the parent of the admin-ui directory — here, /.
 COPY --from=origination-collector /origination-src/openbank-libs-domain /openbank-libs-domain
@@ -288,6 +289,7 @@ RUN addgroup -S openbank && adduser -S openbank -G openbank
 COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/gate-catalog.json ./gate-catalog.json
 # OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
 # bundle because Next.js only emits application code there; a --require preload is invisible to
 # its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from

@@ -322,7 +322,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         continue-on-error: true
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: ${{ inputs.service }}/build/reports/kover/report.xml
           flags: ${{ inputs.service }}
@@ -550,7 +550,7 @@ jobs:
       - name: Authenticate to ECR via OIDC
         id: ecr_auth
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1

@@ -35,18 +35,18 @@ import java.sql.DriverManager
  * Authentication: the endpoint admits ROLE_API (the risk engine's M2M token), so Pact replays as
  * that role; OPA is not enforced in tests, the rego rule is held by `lending_rest_ext_test.rego`.
  *
- * This is the git-pact half of the sanctioned pair; [LendingLoanBookPactBrokerProviderTest] is the
+ * This is the git-pact half of the sanctioned pair; [LendingLoanBookPactBrokerProviderVerificationTest] is the
  * broker half (main-push only), which publishes the verification `can-i-deploy` reads. Both use
  * [LoanBookPactState], so an added `@State` cannot land in one and not the other.
  */
 @QuarkusTest
-@QuarkusTestResource(LendingLoanBookPactProviderTest.InMemoryKafkaResource::class)
+@QuarkusTestResource(LendingLoanBookPactProviderVerificationTest.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
 @Provider("openbank-lending-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-class LendingLoanBookPactProviderTest {
+class LendingLoanBookPactProviderVerificationTest {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
@@ -96,8 +96,8 @@ class LendingLoanBookPactProviderTest {
 }
 
 /**
- * The provider state both loan-book verification classes share ([LendingLoanBookPactProviderTest]
- * and [LendingLoanBookPactBrokerProviderTest]) — one seed, so the broker replay cannot drift from
+ * The provider state both loan-book verification classes share ([LendingLoanBookPactProviderVerificationTest]
+ * and [LendingLoanBookPactBrokerProviderVerificationTest]) — one seed, so the broker replay cannot drift from
  * the folder replay.
  *
  * Plain JDBC: the reactive repositories cannot be driven from a JUnit callback without a Vert.x

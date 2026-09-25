@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "665d5f2c13e541f6"
+    openbank.tech/policy-checksum: "2fb347d57a7cd34e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -590,7 +590,9 @@ data:
     #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
     #   risk.snapshot.create  — POST /snapshots
     #   risk.curve-set.read   — GET  /curve-sets/{id}, and cash flows ride on risk.snapshot.read
-    #                           (both granted by base rest.rego `operator-read-any`)
+    #                           (both granted by base rest.rego `operator-read-any`, and to
+    #                           ROLE_RISK / ROLE_FINANCE through rules.yaml role_action_matrix —
+    #                           reads only, #10618)
     #   risk.curve-set.create — POST /curve-sets: the market data every PV and projection is computed
     #                           from. Same rule as a snapshot: real staff only, never the shared
     #                           service-account, because a curve set is an INPUT to risk figures and
@@ -602,6 +604,10 @@ data:
     # yet a run is the evidence behind a risk figure, so who triggered it matters. Real staff only
     # until the ADR-0314 D8 workflow lands, which runs in-process and needs no REST grant.
     #
+    # ROLE_RISK (#10618) joins both write rules above: the risk department owns the inputs to its own
+    # figures. ROLE_FINANCE deliberately does NOT — finance reads snapshots, it does not produce them.
+    # The reason names keep their `operator-` prefix so decision logs stay comparable across the change.
+    #
     # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it
     # (rules.yaml: authz_policy, issue #266).
 
@@ -612,7 +618,7 @@ data:
     allowed_reasons contains "operator-risk-snapshot-create" if {
     	input.principal.type == "HUMAN"
     	not startswith(input.principal.id, "service-account-")
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
     	role in input.principal.roles
     	input.action == "risk.snapshot.create"
     }
@@ -620,7 +626,7 @@ data:
     allowed_reasons contains "operator-risk-curve-set-create" if {
     	input.principal.type == "HUMAN"
     	not startswith(input.principal.id, "service-account-")
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
     	role in input.principal.roles
     	input.action == "risk.curve-set.create"
     }
@@ -1744,6 +1750,21 @@ data:
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
+        # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+        # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+        # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER are realm
+        # roles with NO entry here: no treasury service exists yet, so they grant nothing.
+        ROLE_RISK:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
+        ROLE_FINANCE:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

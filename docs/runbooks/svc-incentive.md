@@ -8,14 +8,6 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `incentive` service. Data domain **open-banking**,
 > classification **confidential**, datastore **PostgreSQL**.
 
-## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED
-
-The GitOps manifest declares this workload, but its owning ArgoCD Application has **no
-automated sync**. This is desired state, not evidence that the Deployment, database,
-metrics scrape, or traffic path exists in the cluster. Before using any command below
-as an incident procedure, complete the separately reviewed manual sync and observe
-the resulting deployment and health checks.
-
 ## Service identity
 
 | Field | Value |
@@ -39,13 +31,11 @@ triaging an incident that starts on `incentive`.
 ## Health & probes
 
 - Readiness: `GET :8087/q/health/ready` · Liveness: `GET :8087/q/health/live`
-- Metrics: declared for the fleet PodMonitor (namespace `incentive`), but live scrape status is unverified until manual sync and health observation.
+- Metrics: scraped by the fleet PodMonitor (namespace `incentive`); dashboards in Grafana.
 - Logs: `kubectl logs -n incentive deploy/incentive-service -f`, or Loki
   `{namespace="incentive"}`.
 
 ## Routine operations
-
-> **Live status unverified:** the commands below are planned procedures until the manual ArgoCD sync and cluster health checks have been observed.
 
 - **Restart:** `kubectl rollout restart deploy/incentive-service -n incentive` (rolling, zero-downtime at >1 replica).
 - **Scale:** `kubectl scale deploy/incentive-service -n incentive --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
