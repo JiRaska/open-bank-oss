@@ -176,6 +176,16 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-21** — Two releasable approval kinds, `STANDING_ORDER` and `SDD_MANDATE` (#10281,
+  ADR-0312 addendum, migration V26). Same boundary and caller as `PAYMENT` (customer-edge's service
+  account); the guards are unchanged code paths — distinct signer and initiator-not-cosigner in
+  `ApprovalRequest.sign`, live mandate at sign and release, the single-use CAS in `claimRelease`
+  (now `kind in` the releasable set). New: `SigningPolicyEvaluator.evaluateRecurring` never applies
+  the trusted-payee shortcut and falls back to the strictest rule when an SDD mandate has no
+  maximum. Sabotage: letting a standing order take the payment evaluation, or evaluating an
+  amount-less mandate against the first band, each turns a named `BusinessSigningApiIT` test red.
+  Rollback: V26 only widens two CHECK constraints; revert after no row of the new kinds exists.
+
 - **2026-09-07** — Role-preset creation is now replay-safe (#8351, ADR-0292). A retried
   `POST /api/v1/delegation-role-presets` stacked a duplicate catalog row; `create` now checks the
   admin-supplied natural key (name, resourceType) first and replays the original, with

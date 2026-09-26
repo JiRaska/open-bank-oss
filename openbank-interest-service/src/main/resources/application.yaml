@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound service-to-service token (#999): the transaction-service and ledger-service
   # rest-clients mint an openbank-services M2M token via this oidc-client. Disabled under %test
   # (units call the consumer directly; the boot IT never books a remittance payment).
@@ -149,6 +147,8 @@ authz:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:
