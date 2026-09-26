@@ -44,6 +44,7 @@ class CommittedResponseLossProxy:
 
     def __init__(self, upstream_port: int, drop_count: int, resource: str = "journal"):
         assert resource in {"journal", "hold"}
+        self.on_drop = None
         self.resource = resource
         self.drop_count = drop_count
         self.lock = threading.Lock()
@@ -81,6 +82,8 @@ class CommittedResponseLossProxy:
                                 proxy.dropped_responses += 1
                                 drop = True
                     if drop:
+                        if proxy.on_drop is not None:
+                            proxy.on_drop()
                         # Only lose a successful response from the real upstream.
                         self.close_connection = True
                         self.connection.shutdown(socket.SHUT_RDWR)
@@ -396,7 +399,12 @@ def main() -> None:
     parser.add_argument("--with-audit", action="store_true", help="Prove real settlement outbox ingestion and audit chain integrity")
     parser.add_argument("--reject-cover", action="store_true", help="Verify insufficient cover never reaches ledger booking")
     parser.add_argument("--drop-cover-responses", action="store_true", help="Lose all five committed cover replies and verify safe uncertainty")
+    parser.add_argument("--crash-worker-after-ledger-commit", action="store_true", help="Kill and restart the settlement JVM after confirmed journal commit")
     args = parser.parse_args()
+    if args.crash_worker_after_ledger_commit:
+        if args.drop_ledger_response or args.drop_cover_responses or args.recover_after_loss:
+            parser.error("worker crash cannot be combined with another fault mode")
+        args.drop_ledger_response = 1
     if args.drop_cover_responses and (args.drop_ledger_response or args.reject_cover or args.with_audit):
         parser.error("--drop-cover-responses is a standalone three-service proof")
     if args.recover_after_loss and args.drop_ledger_response != 5:
@@ -534,6 +542,9 @@ def main() -> None:
         for name, component in ([("ledger", "ledger"), ("balance", "balances"), ("settlement", "payments")]
                                 + ([("audit", "audit")] if args.with_audit else []))
     }
+    service_processes = {}
+    service_commands = {}
+    service_environments = {}
     for name in service_names:
         env = child_environment()
         env.update(
@@ -565,11 +576,10 @@ def main() -> None:
         properties = ["-Dmp.messaging.incoming.ledger-events-in.auto.offset.reset=earliest"] if name == "balance" else []
         if name == "audit":
             properties.append("-Dmp.messaging.incoming.audit-events-in.auto.offset.reset=earliest")
-        start_process(
-            [java, "-Xmx384m", *properties, "-jar", str(service_jars[name])],
-            name,
-            env,
-        )
+        command = [java, "-Xmx384m", *properties, "-jar", str(service_jars[name])]
+        service_commands[name] = command
+        service_environments[name] = env
+        service_processes[name] = start_process(command, name, env)
         management_port = env["QUARKUS_MANAGEMENT_PORT"]
         until(
             lambda management_port=management_port: request(
@@ -666,9 +676,36 @@ def main() -> None:
         "currency": "CZK",
     }
     settlement_endpoint = f"http://127.0.0.1:{service_ports['settlement']}/api/v1/settlements"
+    crash_evidence = None
+    worker_killed = threading.Event()
+    if args.crash_worker_after_ledger_commit:
+        assert response_loss_proxy is not None
+        original_worker = service_processes["settlement"]
+
+        def kill_worker() -> None:
+            assert original_worker.poll() is None, "Worker exited before fault injection"
+            original_worker.kill()
+            assert original_worker.wait(timeout=10) == -9, "Expected SIGKILL"
+            worker_killed.set()
+
+        response_loss_proxy.on_drop = kill_worker
     created = request(settlement_endpoint, settlement_body, token)
     settlement_id = created["id"]
     print(f"Originated settlement {settlement_id}", flush=True)
+    if args.crash_worker_after_ledger_commit:
+        assert worker_killed.wait(timeout=60), "No committed journal reached the crash hook"
+        processes.remove(original_worker)  # Already reaped and verified as the intentional SIGKILL.
+        restarted = start_process(service_commands["settlement"], "settlement-restarted", service_environments["settlement"])
+        management = service_environments["settlement"]["QUARKUS_MANAGEMENT_PORT"]
+        until(lambda: request(f"http://127.0.0.1:{management}/q/health/ready").get("status") == "UP", "restarted worker readiness")
+        crash_evidence = {"signal": "SIGKILL", "oldExitCode": original_worker.returncode, "restarted": restarted.poll() is None}
+        # Retain real server timing even when the baseline cannot recover within the proof deadline.
+        history = json.loads(run("docker", "exec", temporal, "temporal", "workflow", "show",
+            "--workflow-id", f"settlement-{settlement_id}", "--namespace", "openbank-settlement",
+            "--address", "127.0.0.1:7233", "--output", "json", "--command-timeout", "10s"))
+        crash_evidence["originalRunId"] = history["events"][0]["workflowExecutionStartedEventAttributes"]["originalExecutionRunId"]
+        (OUT / "workflow-after-worker-crash.json").write_text(json.dumps(history, indent=2))
+        print("Settlement worker killed after commit and restarted", flush=True)
     if args.drop_cover_responses:
         until(
             lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{settlement_id}'") == "BALANCE_STATE_UNKNOWN",
@@ -766,6 +803,23 @@ def main() -> None:
         assert expected in service_log, f"Missing authorization evidence for {service}: {expected}"
     assert balances_correct(), "Duplicate request changed balances"
 
+    if args.crash_worker_after_ledger_commit:
+        def recovered_crash_history() -> dict[str, Any] | None:
+            history = json.loads(run("docker", "exec", temporal, "temporal", "workflow", "show",
+                "--workflow-id", f"settlement-{settlement_id}", "--namespace", "openbank-settlement",
+                "--address", "127.0.0.1:7233", "--output", "json", "--command-timeout", "10s"))
+            return history if history["events"][-1]["eventType"] == "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED" else None
+
+        history = until(recovered_crash_history, "same-run recovery after process crash", 30)
+        assert history["events"][0]["workflowExecutionStartedEventAttributes"]["originalExecutionRunId"] == crash_evidence["originalRunId"]
+        bookings = [e for e in history["events"] if e.get("activityTaskScheduledEventAttributes", {}).get("activityType", {}).get("name") == "BookToLedger"]
+        assert len(bookings) == 1
+        assert bookings[0]["activityTaskScheduledEventAttributes"]["startToCloseTimeout"] == "60s"
+        attempts = [e["activityTaskStartedEventAttributes"]["attempt"] for e in history["events"]
+                    if e.get("activityTaskStartedEventAttributes", {}).get("scheduledEventId") == bookings[0]["eventId"]]
+        assert attempts == [2], attempts
+        crash_evidence["completedAttempt"] = 2
+        (OUT / "workflow-recovered-after-crash.json").write_text(json.dumps(history, indent=2))
     fault_evidence = response_loss_proxy.evidence(journals[0]["id"]) if response_loss_proxy else None
     recovery_evidence = None
     if args.recover_after_loss:
@@ -909,6 +963,7 @@ def main() -> None:
                 "source": source_metadata,
                 "responseLoss": fault_evidence,
                 "rejectedCover": rejected_cover_evidence,
+                "workerCrash": crash_evidence,
                 "settlementStatus": "BOOKED" if recovery_evidence else expected_status,
                 "recovery": recovery_evidence,
                 "audit": audit_evidence,

@@ -14,6 +14,8 @@ import java.util.UUID
 /** Ledger owns booked money. Balance projection consumes cover as that movement commits. */
 class LedgerSettlementWorkflowImpl : LedgerSettlementWorkflow {
     private val options = ActivityOptions.newBuilder()
+        // Bound a lost worker attempt separately so the remaining retry budget can recover it.
+        .setStartToCloseTimeout(Duration.ofMinutes(ATTEMPT_MINUTES))
         .setScheduleToCloseTimeout(Duration.ofHours(ACTIVITY_HOURS))
         .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(MAX_ATTEMPTS).build())
         .build()
@@ -37,6 +39,7 @@ class LedgerSettlementWorkflowImpl : LedgerSettlementWorkflow {
 
     private companion object {
         const val MAX_ATTEMPTS = 5
+        const val ATTEMPT_MINUTES = 1L
         const val ACTIVITY_HOURS = 2L
     }
 }

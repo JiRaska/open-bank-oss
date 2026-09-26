@@ -98,3 +98,18 @@ new transfers, legacy saga recovery, or reset of an in-flight execution.
 The harness option `--drop-ledger-response 5 --recover-after-loss` exercises the same history-based
 reset with isolated infrastructure. The runtime has no automatic reset loop. Access control for the
 operator interface and approval evidence must be verified separately in the deployment environment.
+
+## Worker process loss
+
+New ledger-projection activity schedules use a one-minute Start-To-Close timeout within the
+existing two-hour Schedule-To-Close budget and five-attempt limit. This permits retry when a
+worker dies without reporting completion; the total deadline alone previously gave an individual
+attempt the full two hours, leaving no budget for recovery after it timed out. Retry retains the
+same settlement identity and relies on the original hold/journal idempotency keys. A timeout
+never establishes whether a remote write committed.
+
+`--crash-worker-after-ledger-commit` verifies same-run recovery after killing the local worker
+once the ledger confirms POSTED but before its reply reaches settlement. This exercises the
+new workflow only. Already scheduled activities retain the timeouts in their Temporal history;
+upgrading a worker does not shorten those timers or repair a legacy saga. Inspect the recorded
+activity deadlines and preserve the existing reconciliation procedure for those histories.

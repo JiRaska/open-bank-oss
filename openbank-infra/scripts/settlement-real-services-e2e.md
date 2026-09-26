@@ -132,3 +132,17 @@ uncertainty outbox fact and the completed workflow history are retained.
 This is the counterpart to insufficient cover: both can leave a failed activity, but here
 money really is reserved. It proves safe retention, not completed reconciliation or cancellation.
 Do not turn an exhausted reservation request into a blind release or terminal rejection.
+
+## Crash the settlement worker after journal commit
+
+```sh
+python3 openbank-infra/scripts/settlement-real-services-e2e.py --crash-worker-after-ledger-commit
+```
+
+The loopback proxy waits for a real POSTED ledger response, then sends SIGKILL only to the
+settlement JVM owned by this run, before forwarding that response. The fixture reaps that
+process, verifies exit code -9, and starts the same runtime with the same local configuration.
+All other process and container health checks remain active. Recovery must finish the same
+Temporal run without reset, with journal activity attempt 2 and a recorded 60-second
+Start-To-Close timeout. The normal one-journal, two-leg, 60/40 balances and released-cover
+assertions still apply. Original and recovered histories are retained separately.

@@ -460,3 +460,14 @@ Policy tests assert reservation admission, deny other balance actions and unrela
 and reject the wrong principal type. They do not prove token issuance or the full distributed
 workflow. Roll back this grant only after disabling new ledger-projection originations and
 draining their workflows; otherwise the cover step will be denied again.
+
+## Ledger-projection worker loss and retry timing
+
+Each newly scheduled ledger-projection activity has a one-minute attempt deadline within the
+existing two-hour total deadline and five-attempt cap. A crashed worker no longer consumes the
+entire total budget before Temporal can retry. This changes liveness, not authorization or the
+meaning of a successful posting. A timeout may overlap a slow original request, so retries must
+retain the same settlement, hold reference and journal idempotency key. Never compensate or
+release cover based only on timeout. Already scheduled activities keep their recorded deadlines;
+legacy saga timing is unchanged. The local crash proof kills only its owned worker after a real
+POSTED reply and requires one journal and same-run completion after restart.
