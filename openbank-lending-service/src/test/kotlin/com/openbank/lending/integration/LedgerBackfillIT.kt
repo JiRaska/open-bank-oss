@@ -371,11 +371,129 @@ class LedgerBackfillIT {
         }
     }
 
+    // #10969: void the synthetic loans the backfill above posted. Cancelled, not paid out.
+    private lateinit var voidId: String
+    private var mirroredRefs: Set<String> = emptySet()
+
+    @Test
+    @Order(11)
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
+    fun `11 - maker plans and proposes a void of the executed backfill, and cannot approve it`() {
+        val plan = Given { queryParam("sourceRequestId", requestId) } When {
+            get("/api/v1/lending/ledger-backfill/voids/plan")
+        } Then { statusCode(200) } Extract { jsonPath() }
+        assertThat(plan.getBoolean("executable")).isTrue()
+        val planned = plan.getList<Map<String, Any>>("plan.loans").map { it["loanId"] }
+        assertThat(planned).contains(czkLoan.toString(), eurLoan.toString())
+
+        // #8351: a money-path command without Idempotency-Key is a 400, not a 500 and not a write.
+        Given {
+            contentType("application/json")
+            body("""{"sourceRequestId":"$requestId"}""")
+        } When { post("/api/v1/lending/ledger-backfill/voids") } Then { statusCode(400) }
+
+        voidId = Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            contentType("application/json")
+            body("""{"sourceRequestId":"$requestId"}""")
+        } When { post("/api/v1/lending/ledger-backfill/voids") } Then { statusCode(201) } Extract {
+            jsonPath().getString("id")
+        }
+        Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            contentType("application/json")
+            body("""{"approve":true}""")
+        } When { post("/api/v1/lending/ledger-backfill/voids/$voidId/decide") } Then { statusCode(422) }
+        Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            queryParam("execute", true)
+        } When {
+            post("/api/v1/lending/ledger-backfill/voids/$voidId/execute")
+        } Then { statusCode(422) }
+        assertThat(
+            mine().keys.filter {
+                it.startsWith("void:")
+            },
+        ).describedAs("nothing offset before approval").isEmpty()
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "backfill-checker", roles = ["ROLE_ADMIN"])
+    fun `12 - a different admin approves the void`() {
+        Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            contentType("application/json")
+            body("""{"approve":true,"reason":"IT: synthetic, never paid out"}""")
+        } When { post("/api/v1/lending/ledger-backfill/voids/$voidId/decide") } Then { statusCode(200) }
+    }
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
+    fun `13 - the void offsets every leg to zero and takes the loans off the book`() {
+        val originals = mine().filterKeys { !it.startsWith("void:") }
+        val body = Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            queryParam("execute", true)
+        } When {
+            post("/api/v1/lending/ledger-backfill/voids/$voidId/execute")
+        } Then { statusCode(200) } Extract { jsonPath() }
+        assertThat(body.getBoolean("execution.complete")).isTrue()
+        val loans = body.getList<Map<String, Any>>("execution.loans").associateBy { it["loanId"] }
+        assertThat(loans.getValue(czkLoan.toString())["status"]).isEqualTo("VOIDED")
+        assertThat(loans.getValue(eurLoan.toString())["status"]).isEqualTo("VOIDED")
+
+        // Every original leg has a mirror of exactly the opposite amount, so each loan nets to zero.
+        originals.forEach { (ref, original) ->
+            val mirror = ledger.journals["void:$ref"]
+            assertThat(mirror).describedAs("mirror of $ref").isNotNull
+            assertThat(mirror!!.kind).isEqualTo(original.kind)
+            assertThat(mirror.amount.amount).isEqualByComparingTo(original.amount.amount.negate())
+            assertThat(mirror.amount.currency).isEqualTo(original.amount.currency)
+        }
+        mirroredRefs = originals.keys
+        assertThat(count("SELECT count(*) FROM loan WHERE id IN ('$czkLoan', '$eurLoan') AND status = 'UNWOUND'"))
+            .isEqualTo(2)
+        assertThat(
+            count(
+                "SELECT count(*) FROM lending_outbox WHERE event_type = 'credit.loan.transition' " +
+                    "AND payload LIKE '%\"toState\":\"UNWOUND\"%' AND aggregate_id IN ('$czkLoan', '$eurLoan')",
+            ),
+        ).describedAs("one evidence event per voided loan").isEqualTo(2)
+        // GL only: the borrower-credit port was never asked to move money for these loans.
+        assertThat(borrower.calls.filter { it.contains(czkLoan.toString()) || it.contains(eurLoan.toString()) })
+            .isEmpty()
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
+    fun `14 - an executed void cannot run again and a voided loan is out of every later plan`() {
+        val journalsBefore = mine().size
+        Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            queryParam("execute", true)
+        } When {
+            post("/api/v1/lending/ledger-backfill/voids/$voidId/execute")
+        } Then { statusCode(422) }
+        assertThat(mine()).hasSize(journalsBefore)
+        val plan = Given { queryParam("sourceRequestId", requestId) } When {
+            get("/api/v1/lending/ledger-backfill/voids/plan")
+        } Then { statusCode(200) } Extract { jsonPath() }
+        assertThat(plan.getList<Map<String, Any>>("plan.loans").map { it["loanId"] })
+            .doesNotContain(czkLoan.toString(), eurLoan.toString())
+        assertThat(mirroredRefs).isNotEmpty
+    }
+
     /** The IT database is shared by every @QuarkusTest: leave nothing behind for book-wide counts (LendingSummaryIT). */
     @AfterAll
     fun cleanup() {
         val loans = "'$czkLoan', '$eurLoan'"
         sql("DELETE FROM lending_outbox WHERE aggregate_id IN (SELECT id FROM ledger_backfill_request)")
+        sql("DELETE FROM lending_outbox WHERE aggregate_id IN (SELECT id FROM ledger_backfill_void_request)")
+        sql("DELETE FROM lending_outbox WHERE aggregate_id IN ($loans)")
+        sql("DELETE FROM ledger_backfill_void_request")
         sql("DELETE FROM ledger_backfill_request")
         sql("DELETE FROM installment WHERE loan_id IN ($loans)")
         sql("DELETE FROM loan_provisioning WHERE loan_id IN ($loans)")
