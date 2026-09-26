@@ -10,6 +10,7 @@ import com.openbank.delegation.application.usecase.DelegationPortfolioService
 import com.openbank.delegation.domain.model.DelegationPortfolio
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -69,28 +70,17 @@ class DelegationPortfolioResource(
         val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) { "Idempotency-Key header is required" }
         val ownerPartyId = requireNotNull(request.ownerPartyId) { "ownerPartyId is required" }
         if (customerPartyId != ownerPartyId) throw DelegationPortfolioAccessDenied()
-        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/delegation-portfolios", request)
-        idempotencyStore.lookup(createKey(ownerPartyId, key), hash)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/delegation-portfolios", request)
+        return idempotencyStore.withReservation(createKey(ownerPartyId, key), hash) {
+            val created = service.create(
+                customerPartyId,
+                ownerPartyId,
+                requireNotNull(request.name) { "name is required" },
+                requireNotNull(request.accountIds) { "accountIds is required" },
+            )
+            val response = DelegationPortfolioResponse.from(created)
+            Triple(Response.Status.CREATED.statusCode, objectMapper.writeValueAsString(response), null)
         }
-        val created = service.create(
-            customerPartyId,
-            ownerPartyId,
-            requireNotNull(request.name) { "name is required" },
-            requireNotNull(request.accountIds) { "accountIds is required" },
-        )
-        val response = DelegationPortfolioResponse.from(created)
-        idempotencyStore.save(
-            createKey(ownerPartyId, key),
-            hash,
-            Response.Status.CREATED.statusCode,
-            objectMapper.writeValueAsString(response),
-        )
-        return Response.status(Response.Status.CREATED).entity(response).build()
     }
 
     @GET

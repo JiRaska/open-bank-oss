@@ -24,9 +24,13 @@ import java.util.UUID
 /**
  * PR #10922 binds an `Idempotency-Key`/`X-Request-ID` to a SHA-256 fingerprint of (method,
  * concrete path, canonicalised body): `DelegationResource.confirmRecertification` and
- * `DelegationPortfolioResource.create` now use `IdempotencyStore.lookup(key, hash)` instead of
- * plain `get(key)`, so a stored record whose fingerprint disagrees with the CURRENT request is
- * refused (422 IDEMPOTENCY_KEY_REUSED) instead of replayed.
+ * `DelegationPortfolioResource.create` now atomically `reserve(key, hash)` instead of a plain
+ * `get(key)`, so a stored record whose fingerprint disagrees with the CURRENT request is refused
+ * (409 IDEMPOTENCY_KEY_REUSED) instead of replayed. For `confirmRecertification` specifically,
+ * the fingerprint has no request body (method + path + the ids already in the cache key), so a
+ * mismatch can only arise from a stale/legacy record — this test simulates exactly that by
+ * pre-seeding one with the wrong hash directly, rather than through two live requests with
+ * different bodies (there is no body to vary).
  *
  * Both endpoints call out to a downstream port (`DelegationRecertificationUseCase`,
  * `ResourceOwnershipClient`) on a genuine cache MISS, which this suite does not stub — so both
@@ -64,7 +68,7 @@ class DelegationIdempotencyFingerprintIT {
             .queryParam("grantorPartyId", grantor.toString())
             .post("/api/v1/delegations/recertifications/${cycle.id}/confirm")
             .then()
-            .statusCode(422)
+            .statusCode(409)
             .body("code", org.hamcrest.Matchers.equalTo("IDEMPOTENCY_KEY_REUSED"))
 
         // The confirm use case must never have been reached: cycle stays PENDING.
@@ -90,7 +94,7 @@ class DelegationIdempotencyFingerprintIT {
             )
             .post("/api/v1/delegation-portfolios")
             .then()
-            .statusCode(422)
+            .statusCode(409)
             .body("code", org.hamcrest.Matchers.equalTo("IDEMPOTENCY_KEY_REUSED"))
 
         // The create use case (and its downstream account-ownership call) must never have been

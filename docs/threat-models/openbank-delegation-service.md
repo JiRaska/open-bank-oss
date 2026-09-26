@@ -246,15 +246,36 @@ cannot become authorization. The response contains only `valid: true`: returning
 attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-directory oracle.
 - **2026-09-21** — **Party-eligibility and card-ownership reads move to the service's own machine identity (#10486 batch 6).** `PidServiceRestClient` (`GET /api/v1/parties/{id}`) and `CardIssuanceRestClient` (`GET /api/v1/cards/{id}`) now mint their bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only). pid-service grants it `party.read` by identity; that endpoint gained `@Authorize` in the same change and pid enforces OPA. card-issuance grants `card.read` by identity, plus a Kotlin named-caller check while it runs OPA advisory. **STRIDE-S:** a new credential at Vault KV `keycloak/delegation-service`, projected by `delegation-service-m2m-oidc`, env ref `optional: false`; compromise reaches those two reads only. The account-ownership client stays on the shared client, where its `account.read` is already identity-granted. Rollback: revert the commit.
 
-- **2026-09-26** — **Idempotency-Key bound to a request fingerprint (#10959).**
-  `DelegationPortfolioResource.kt` and `DelegationResource.kt` (inbound REST surface) now bind each
-  `Idempotency-Key` to a SHA-256 fingerprint (`METHOD\npath\ncanonicalBody`) of the request it was
-  first used with (`RequestFingerprint`, `openbank-libs-domain`), via the shared
-  `RedisIdempotencyStore`. Reusing the same key with a DIFFERENT delegation request now answers
-  **422 IDEMPOTENCY_KEY_REUSED** instead of silently replaying the first response — closing a path
-  where a caller (or a naive retry with a mutated body) could get a stale response for a mutated
-  create/modify of a delegated payment portfolio. Covered by
-  `DelegationIdempotencyFingerprintIT`. **Risk class:** integrity of delegated-portfolio
-  create/modify — strictly tightens the existing idempotency contract, no new principal or data path.
-  The fingerprint stores only a hash, not the request body, so no new PII exposure. Rollback: revert
-  to key-only idempotency lookup (accepts key reuse across different payloads again).
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint, reworked onto the final
+  atomic reserve/save/release API (#10959, v2).** `DelegationPortfolioResource.kt` and
+  `DelegationResource.kt` (`offer`, `confirmRecertification`, portfolio `create`) now call
+  `IdempotencyStore.reserve(key, hash)` BEFORE running the use case, closing the lookup-then-save
+  race a plain `lookup`+`save` pair left open (two concurrent first requests could both miss and
+  both execute); on a use-case failure the reservation is `release`d so a retry with the same body
+  can still succeed. The fingerprint is `RequestFingerprints.of(objectMapper, method, path, dto)`
+  (`openbank-libs-runtime`, the ONE canonicaliser — this service's own `canonicalFingerprint`
+  helper is removed). Reusing the same key with a DIFFERENT request now answers **409**
+  IDEMPOTENCY_KEY_REUSED (not 422 as an earlier revision of this entry stated), and a request still
+  in flight under the same key answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+  `confirmRecertification`'s fingerprint covers only the ids already present in its cache key
+  (task id + grantorPartyId) — there is no request body — so a mismatch can only arise from a
+  stale/legacy stored record, never from two live requests with different bodies; `openapi.yaml`
+  therefore documents only IDEMPOTENCY_REQUEST_IN_PROGRESS for that operation, not
+  IDEMPOTENCY_KEY_REUSED, and `DelegationIdempotencyFingerprintIT` simulates the stale-record case
+  directly rather than through two differing live requests. **Body-shape note:** these three
+  endpoints answer with the fleet-wide libs `ApiError` envelope (`traceId/status/code/message`),
+  which is a DIFFERENT JSON shape from the pre-existing, unrelated
+  `SpendReservationIdempotencyConflictExceptionMapper` (`type/title/status/detail/code/error`,
+  `application/problem+json`) that spend-reservation endpoints already used for the same 409
+  IDEMPOTENCY_KEY_REUSED code — both are 409, but a client cannot rely on one body shape across
+  every idempotent endpoint on this service; reconciling the two shapes is out of scope here.
+  Covered by `DelegationIdempotencyFingerprintIT` and the plain-unit `WithReservationTest`.
+  **DB-level dedupe (migration brief step 5) does not apply**: the only
+  `findByIdempotencyKey`-style lookup in this service is `SpendReservationRepositoryImpl`'s
+  pre-existing, independent dedupe for spend reservations, which already compares the full
+  reservation tuple (`sameSpend`) rather than trusting key presence alone — it does not ignore the
+  fingerprint and is unrelated to this Redis-based rework. **Risk class:** integrity of
+  delegation-offer, recertification-confirmation and delegated-portfolio create — strictly tightens
+  the existing idempotency contract (closes a race the previous revision left open), no new
+  principal or data path. Rollback: revert to the non-atomic `lookup`+`save` pair (reopens the
+  lookup-then-save race, does not remove any control).
