@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.4.0
+  version: 1.5.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -249,7 +249,7 @@ components:
         occurredAt: { type: string, format: date-time }
         sourceService: { type: string, const: delegation-service }
         entityPartyId: { type: string, format: uuid, description: The company whose payment or policy this is }
-        kind: { type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE] }
+        kind: { type: string, enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE, STANDING_ORDER, SDD_MANDATE] }
         status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED] }
         # AWAITING_INITIATOR never appears on the wire: nothing is published before the initiator signs.
         requiredSignatures: { type: integer, minimum: 1 }
@@ -274,6 +274,8 @@ components:
           additionalProperties: true
           description: >-
             PAYMENT — amount (decimal string), currency, creditorIban, creditorName, rail.
+            STANDING_ORDER (#10281) — as PAYMENT with the per-execution amount, plus frequency.
+            SDD_MANDATE (#10281) — creditorName, creditorIdentifier, mandateReference, rail; no amount.
             PAYEE_ADD/PAYEE_REMOVE — iban, name. POLICY_CHANGE — the proposed change.
         reason: { type: string, nullable: true, description: Rejection reason, SUPERSEDED, or the rail error }
         releaseRef: { type: string, nullable: true, description: The rail's reference, on PAYMENT_RELEASED }
