@@ -4,7 +4,9 @@
 
 package com.openbank.aml.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
 import com.openbank.aml.domain.model.AmlCaseStatus
@@ -14,6 +16,7 @@ import com.openbank.aml.infrastructure.rest.dto.UpdateAmlDecisionRequest
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -70,7 +73,8 @@ class AmlCaseResource(
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
 
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
+        val requestHash = fingerprint("POST", CASES_PATH, request)
+        idempotencyStore.lookup(idempotencyKey, requestHash)?.let { cached ->
             return Response.status(cached.statusCode)
                 .entity(cached.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -80,7 +84,12 @@ class AmlCaseResource(
 
         val amlCase = amlCaseUseCase.createCase(request.toCommand(idempotencyKey))
         val responseBody = amlCase.toResponse()
-        idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
+        idempotencyStore.save(
+            idempotencyKey,
+            requestHash = requestHash,
+            statusCode = 201,
+            responseBody = objectMapper.writeValueAsString(responseBody),
+        )
 
         return Response.created(URI.create("/api/v1/aml/cases/${amlCase.id}"))
             .entity(responseBody)
@@ -125,6 +134,24 @@ class AmlCaseResource(
     @Operation(summary = "Update AML case decision")
     suspend fun updateDecision(@PathParam("caseId") caseId: UUID, request: UpdateAmlDecisionRequest): Response =
         Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
+
+    /**
+     * Binds an Idempotency-Key to the request it was first used for (#10916): the deserialised
+     * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
+     * while any field value does.
+     */
+    private fun fingerprint(method: String, path: String, body: Any): String =
+        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
+
+    private val canonicalMapper: ObjectMapper by lazy {
+        objectMapper.copy()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+    }
+
+    private companion object {
+        const val CASES_PATH = "/api/v1/aml/cases"
+    }
 }
 
 /** Staff roles `createCase` admitted before #10486; a caller holding one needs no identity check. */

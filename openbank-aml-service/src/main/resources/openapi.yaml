@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -23,6 +23,10 @@ paths:
     post:
       tags: [AML Cases]
       summary: Submit an AML screening case
+      description: >-
+        Idempotent on the Idempotency-Key header. The key is bound to a fingerprint of the request
+        (method, path, canonical body): a retry with the same body replays the stored 201, reusing
+        the key with a different body is refused with 422 IDEMPOTENCY_KEY_REUSED.
       operationId: createAmlCase
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
@@ -55,6 +59,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          description: >-
+            IDEMPOTENCY_KEY_REUSED — the Idempotency-Key was already used for a different request
+            body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     get:
       tags: [AML Cases]
       summary: List AML screening cases
