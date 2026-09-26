@@ -25,8 +25,18 @@ object RequestFingerprint {
 
 /**
  * The same `Idempotency-Key` was reused for a different request. libs-runtime maps it to
- * **422 IDEMPOTENCY_KEY_REUSED**. Deliberately not an [IllegalStateException] so no generic
- * mapper can claim it with a different code.
+ * **409 IDEMPOTENCY_KEY_REUSED** (the fleet convention). Deliberately not an
+ * [IllegalStateException] so no generic mapper can claim it with a different code.
+ *
+ * The message never carries the key: stores often key on a composite internal namespace
+ * (e.g. `party:operation:key`), and echoing client input into logs invites log injection.
  */
-class IdempotencyKeyReusedException(val key: String) :
-    RuntimeException("Idempotency-Key '$key' was already used for a different request")
+class IdempotencyKeyReusedException : RuntimeException("Idempotency-Key was already used for a different request")
+
+/**
+ * The same request is still being processed under this `Idempotency-Key` (an in-flight marker
+ * from [IdempotencyStore.reserve]). libs-runtime maps it to **409 IDEMPOTENCY_REQUEST_IN_PROGRESS**
+ * — a distinct code from reuse, because here the client should simply retry later.
+ */
+class IdempotencyRequestInProgressException :
+    RuntimeException("A request with this Idempotency-Key is still being processed")
