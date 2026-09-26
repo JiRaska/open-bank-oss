@@ -77,15 +77,13 @@ class LedgerBackfillVoidResource(private val voids: LedgerBackfillVoidService, p
     @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "lending.ledgerBackfill.propose", resource = "")
     @Operation(summary = "Propose voiding an EXECUTED backfill's synthetic loans (maker)")
-    fun propose(
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-        request: ProposeVoidRequest?,
-    ): Uni<Response> = guarded {
-        val key = requireKey(idempotencyKey)
-        requireNotNull(request) { "request body is required" }
-        val source = requireNotNull(request.sourceRequestId) { "sourceRequestId is required" }
-        voids.propose(source, actor(), key).map { Response.status(HTTP_CREATED).entity(it).build() }
-    }
+    fun propose(@HeaderParam("Idempotency-Key") idempotencyKey: String?, request: ProposeVoidRequest?): Uni<Response> =
+        guarded {
+            val key = requireKey(idempotencyKey)
+            requireNotNull(request) { "request body is required" }
+            val source = requireNotNull(request.sourceRequestId) { "sourceRequestId is required" }
+            voids.propose(source, actor(), key).map { Response.status(HTTP_CREATED).entity(it).build() }
+        }
 
     @POST
     @Path("/{id}/decide")

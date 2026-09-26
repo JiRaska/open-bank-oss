@@ -142,7 +142,9 @@ class LedgerBackfillVoidService(
                 voids.findProposedByHash(plan.planHash)
             }.flatMap { twin ->
                 twin?.let { Uni.createFrom().item(it.toView()) }
-                    ?: voids.save(entity).call { saved -> audit(saved, "PROPOSED", maker, idempotencyKey) }.map { it.toView() }
+                    ?: voids.save(entity).call { saved ->
+                        audit(saved, "PROPOSED", maker, idempotencyKey)
+                    }.map { it.toView() }
             }
         }
     }
@@ -153,50 +155,45 @@ class LedgerBackfillVoidService(
         checker: String,
         reason: String?,
         idempotencyKey: String? = null,
-    ): Uni<VoidRequestView> =
-        voids.findById(id).flatMap { entity ->
-            requireNotNull(entity) { "Void request not found: $id" }
-            require(entity.state == ProposalState.PROPOSED) { "Void request $id is ${entity.state}, not decidable" }
-            val proposal =
-                Proposal(entity.id.toString(), entity.planHash, entity.proposedBy, entity.proposedAt.toInstant())
-            val at = clock.instant()
-            // Proposal.approve/reject throw MakerCheckerViolation when checker == maker — four-eyes in code.
-            val decided = if (approve) proposal.approve(checker, at, reason) else proposal.reject(checker, at, reason)
-            entity.state = decided.state
-            entity.decidedBy = checker
-            entity.decidedAt = OffsetDateTime.ofInstant(at, clock.zone)
-            entity.decisionReason = reason
-            entity.updatedAt = OffsetDateTime.now(clock)
-            voids.compareAndSetDecision(entity).flatMap { claimed ->
-                require(claimed == 1) { "Void request $id was decided concurrently and is no longer decidable" }
-                audit(entity, decided.state.name, checker, idempotencyKey).map { entity.toView() }
-            }
+    ): Uni<VoidRequestView> = voids.findById(id).flatMap { entity ->
+        requireNotNull(entity) { "Void request not found: $id" }
+        require(entity.state == ProposalState.PROPOSED) { "Void request $id is ${entity.state}, not decidable" }
+        val proposal =
+            Proposal(entity.id.toString(), entity.planHash, entity.proposedBy, entity.proposedAt.toInstant())
+        val at = clock.instant()
+        // Proposal.approve/reject throw MakerCheckerViolation when checker == maker — four-eyes in code.
+        val decided = if (approve) proposal.approve(checker, at, reason) else proposal.reject(checker, at, reason)
+        entity.state = decided.state
+        entity.decidedBy = checker
+        entity.decidedAt = OffsetDateTime.ofInstant(at, clock.zone)
+        entity.decisionReason = reason
+        entity.updatedAt = OffsetDateTime.now(clock)
+        voids.compareAndSetDecision(entity).flatMap { claimed ->
+            require(claimed == 1) { "Void request $id was decided concurrently and is no longer decidable" }
+            audit(entity, decided.state.name, checker, idempotencyKey).map { entity.toView() }
         }
+    }
 
     /**
      * Rebuild the plan for void [id]; with [execute] false return it, with [execute] true post it.
      * Posting requires an APPROVED void whose plan hash still matches (nothing moved since approval)
      * and a void date that has not passed.
      */
-    fun execute(
-        id: UUID,
-        execute: Boolean,
-        executor: String,
-        idempotencyKey: String? = null,
-    ): Uni<VoidExecution> = voids.findById(id).flatMap { v ->
-        requireNotNull(v) { "Void request not found: $id" }
-        backfills.findById(v.sourceRequestId).flatMap { source ->
-            checkNotNull(source) { "source backfill request ${v.sourceRequestId} is gone" }
-            plan(source, v.voidDate).flatMap { plan ->
-                if (!execute) {
-                    Uni.createFrom().item(VoidExecution(id, false, false, plan, emptyList()))
-                } else {
-                    guardExecution(v, plan, executor)
-                    runClaimed(v, source, plan, executor, idempotencyKey)
+    fun execute(id: UUID, execute: Boolean, executor: String, idempotencyKey: String? = null): Uni<VoidExecution> =
+        voids.findById(id).flatMap { v ->
+            requireNotNull(v) { "Void request not found: $id" }
+            backfills.findById(v.sourceRequestId).flatMap { source ->
+                checkNotNull(source) { "source backfill request ${v.sourceRequestId} is gone" }
+                plan(source, v.voidDate).flatMap { plan ->
+                    if (!execute) {
+                        Uni.createFrom().item(VoidExecution(id, false, false, plan, emptyList()))
+                    } else {
+                        guardExecution(v, plan, executor)
+                        runClaimed(v, source, plan, executor, idempotencyKey)
+                    }
                 }
             }
         }
-    }
 
     /** The source's own scope, restricted to loans still ACTIVE: a voided loan is UNWOUND and drops out. */
     private fun plan(source: LedgerBackfillRequestEntity, voidDate: LocalDate): Uni<BackfillPlan> {
@@ -360,29 +357,28 @@ class LedgerBackfillVoidService(
         transition: String,
         actor: String,
         idempotencyKey: String? = null,
-    ): Uni<Unit> =
-        events.emit(
-            LendingOutboxMessage(
-                aggregateId = entity.id,
-                eventType = "lending.ledger_backfill_void.transition",
-                payload = json.writeValueAsString(
-                    linkedMapOf(
-                        "aggregateType" to "LEDGER_BACKFILL_VOID",
-                        "aggregateId" to entity.id.toString(),
-                        "sourceRequestId" to entity.sourceRequestId.toString(),
-                        "transition" to transition,
-                        "actor" to actor,
-                        "planHash" to entity.planHash,
-                        "voidDate" to entity.voidDate.toString(),
-                        "loanCount" to entity.loanCount,
-                        "legCount" to entity.legCount,
-                        "idempotencyKey" to idempotencyKey,
-                        "occurredAt" to clock.instant().toString(),
-                        "sourceService" to "lending",
-                    ),
+    ): Uni<Unit> = events.emit(
+        LendingOutboxMessage(
+            aggregateId = entity.id,
+            eventType = "lending.ledger_backfill_void.transition",
+            payload = json.writeValueAsString(
+                linkedMapOf(
+                    "aggregateType" to "LEDGER_BACKFILL_VOID",
+                    "aggregateId" to entity.id.toString(),
+                    "sourceRequestId" to entity.sourceRequestId.toString(),
+                    "transition" to transition,
+                    "actor" to actor,
+                    "planHash" to entity.planHash,
+                    "voidDate" to entity.voidDate.toString(),
+                    "loanCount" to entity.loanCount,
+                    "legCount" to entity.legCount,
+                    "idempotencyKey" to idempotencyKey,
+                    "occurredAt" to clock.instant().toString(),
+                    "sourceService" to "lending",
                 ),
             ),
-        )
+        ),
+    )
 
     companion object {
         const val VOIDED = "VOIDED"
