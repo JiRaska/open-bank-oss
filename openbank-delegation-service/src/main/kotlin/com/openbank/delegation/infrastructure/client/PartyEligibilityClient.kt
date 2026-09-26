@@ -7,6 +7,8 @@ package com.openbank.delegation.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
+import com.openbank.libs.resilience.ResilienceProfile
+import com.openbank.libs.resilience.ResilienceProfiles
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -68,9 +70,27 @@ interface PidServiceRestClient {
 class ResilientPartyEligibilityClient @Inject constructor(@RestClient private val client: PidServiceRestClient) :
     PartyEligibilityClient {
 
-    @Timeout(2000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
+    // successThreshold is left as the literal `2` on purpose: ResilienceProfiles.Read.CB_SUCCESS_THRESHOLD
+    // is 1 (MicroProfile FT's own default, per its KDoc — the ADR-0321 table leaves this field blank for
+    // `read`), but every fleet site shaped like this one (Timeout(2000) + Retry(2,200,100) +
+    // CircuitBreaker(10, 0.5, 5000)) — this one, ResourceOwnershipClient, ScaChallengeClient x2,
+    // TppRegistryClient, NotificationDispatchGuard — sets it to 2, so 1 would be a silent behaviour
+    // change dressed up as a mechanical literal-to-constant swap. Filed as a follow-up on the
+    // constant itself (see PR description); adopting the other four values here is unaffected by it.
+    @ResilienceProfile(ResilienceProfiles.READ)
+    @Timeout(ResilienceProfiles.Read.TIMEOUT_MS)
+    @Retry(
+        maxRetries = ResilienceProfiles.Read.MAX_RETRIES,
+        delay = ResilienceProfiles.Read.DELAY_MS,
+        jitter = ResilienceProfiles.Read.JITTER_MS,
+        retryOn = [Exception::class],
+    )
+    @CircuitBreaker(
+        requestVolumeThreshold = ResilienceProfiles.Read.CB_REQUEST_VOLUME_THRESHOLD,
+        failureRatio = ResilienceProfiles.Read.CB_FAILURE_RATIO,
+        delay = ResilienceProfiles.Read.CB_DELAY_MS,
+        successThreshold = 2,
+    )
     override suspend fun eligibilityOf(partyId: UUID): PartyEligibility {
         val party = client.getParty(partyId)
         return PartyEligibility(

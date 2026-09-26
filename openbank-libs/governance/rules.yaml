@@ -209,6 +209,16 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  resilience_profile_declaration:
+    detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
+    require:
+      - "the declaration also carries @ResilienceProfile(...) (com.openbank.libs.resilience, ADR-0321 D2) naming one of ResilienceProfiles.ALL"
+      - "ResilienceProfiles.CUSTOM carries a non-blank reason beside the call"
+      - "no new undeclared site; the per-file baseline only shrinks"
+    gate: resilience-profile
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0321: advisory until the fleet sweep
+    ci_producer: ".github/scripts/check-resilience-profile.py"
   openapi_request_schema_conformance:
     detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
     require:
