@@ -16,7 +16,6 @@ import com.openbank.party.application.usecase.PartyNotFoundException
 import com.openbank.party.domain.model.AmlProfileNotApplicableException
 import io.quarkus.security.AuthenticationFailedException
 import io.quarkus.security.ForbiddenException
-import io.quarkus.security.UnauthorizedException
 import io.vertx.pgclient.PgException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -164,20 +163,9 @@ class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> 
 // @Provider naming an `io.quarkus.security` type would be loaded by ArC in every consumer,
 // including services without quarkus-security on the classpath — the #6240 boot-failure
 // class, enforced by the provider-type-classpath gate.
-@Provider
-class QuarkusUnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
-    override fun toResponse(exception: UnauthorizedException): Response = Response.status(Response.Status.UNAUTHORIZED)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                Response.Status.UNAUTHORIZED.statusCode,
-                "UNAUTHORIZED",
-                "Unauthorized",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
-
+// UnauthorizedException -> 401 is libs-runtime's UnauthorizedExceptionMapper (#8993); a local
+// copy for the same type is the #526 non-deterministic collision; removed here to close #10911. The two
+// below have no libs-runtime equivalent yet.
 @Provider
 class QuarkusAuthenticationFailedExceptionMapper : ExceptionMapper<AuthenticationFailedException> {
     override fun toResponse(exception: AuthenticationFailedException): Response =

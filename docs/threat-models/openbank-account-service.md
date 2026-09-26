@@ -785,3 +785,24 @@ decision use first; the additive projection table may remain until its consumer 
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+
+- **2026-09-26** — **Exception-mapper collision removal (#10923 / #10911), 401 message text
+  changes.** Only the local QuarkusUnauthorizedExceptionMapper mapper for `UnauthorizedException`
+  (deleted by this PR — no longer present in tracked source) is removed here; it duplicated
+  libs-runtime's own
+  `UnauthorizedExceptionMapper` (#8993), which is the #526 non-deterministic-dispatch collision
+  this closes. The `AuthenticationFailedException`
+  (401) and `ForbiddenException` (403) mappers stay service-local — libs-runtime has no mapper for
+  those two types, so removing them would fall back to Quarkus's plain-text body (#8803/#8875);
+  they are unchanged by this PR. New 404/409 base classes
+  (`com.openbank.libs.domain.error.ResourceExceptions`,
+  `com.openbank.libs.api.error.CommonExceptionMappers`) are added to `openbank-libs` in this PR but
+  no service, including this one, has migrated to them yet — `ExceptionMappers.kt` here still
+  declares all of its own 404/409 mappers. **Wire contract: status code, `code` and envelope shape
+  are unchanged on every path; the fixed `message` string for the `UnauthorizedException` case
+  changes from `"Unauthorized"` to libs-runtime's `"Authentication required"`** — verified by
+  `SecurityAbortExceptionMapperTest` and the shared-library `ResourceExceptionMappersTest`. No
+  openapi/pact impact: the message is not part of any schema or pact matcher. **Risk class:**
+  none — response-plumbing de-duplication only; `AuthorizeInterceptor`, OPA policy evaluation and
+  the Keycloak token validation path are untouched. Rollback: restore the deleted
+  QuarkusUnauthorizedExceptionMapper class; no data or config migration involved.
