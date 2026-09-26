@@ -1062,6 +1062,25 @@
       "secret": "__TREASURY_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-finrep",
+      "name": "OpenBank FINREP/COREP Service",
+      "description": "Per-service M2M client for COREP C 02.00: reads the risk engine's snapshot list and Pillar 1 capital (risk.snapshot.read only, ADR-0313 D6). Holds ROLE_API only; its read is granted by identity in risk_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__FINREP_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-clearing",
       "name": "OpenBank Clearing Service",
       "description": "Per-service M2M client for clearing's net-settlement journal (ledger.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1721,6 +1740,14 @@
       "username": "service-account-openbank-treasury",
       "enabled": true,
       "serviceAccountClientId": "openbank-treasury",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-finrep",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-finrep",
       "realmRoles": [
         "ROLE_API"
       ]

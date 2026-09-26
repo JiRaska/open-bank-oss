@@ -9,7 +9,7 @@ import com.openbank.finrep.application.port.out.RiskCapitalPort
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -28,12 +28,14 @@ import java.time.LocalDate
 
 /**
  * Outbound, read-only client for openbank-risk-engine's snapshot list and Pillar 1 capital result
- * (ADR-0313 D6). The paths are the risk engine's `RiskResource` (`/api/v1/risk/snapshots`,
- * `/{id}/capital`).
+ * (ADR-0313 D6), as finrep's own identity (named oidc-client `m2m`, Keycloak client
+ * `openbank-finrep`), which the risk engine grants risk.snapshot.read by identity. The paths are the
+ * risk engine's `RiskResource`; `RiskEngineCapitalPactConsumerTest` pins them and the risk engine's
+ * provider replay of the committed pact fails if they move (#2269).
  */
 @RegisterRestClient(configKey = "risk-engine")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@OidcClientFilter("m2m")
 @Path("/api/v1/risk/snapshots")
 @Produces(MediaType.APPLICATION_JSON)
 interface RiskEngineRestClient {

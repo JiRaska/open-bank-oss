@@ -68,12 +68,21 @@ spec:
               value: "false"
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
-            # ADR-0313 D6: COREP C 02.00 reads the risk engine's Pillar 1 result. Declared here so the
-            # NetworkPolicy generator admits finrep -> risk-engine:8159; the read itself stays OFF
-            # (OPENBANK_FINREP_RISK_ENGINE_ENABLED unset = false) until finrep's own identity and its
-            # risk-engine read grant are deployed.
+            # ADR-0313 D6: COREP C 02.00 reads the risk engine's Pillar 1 result, as finrep's own
+            # identity (openbank-finrep, granted risk.snapshot.read by identity in risk_rest_ext.rego).
             - name: RISK_ENGINE_URL
               value: http://risk-engine.risk.svc:8159
+            - name: OPENBANK_FINREP_RISK_ENGINE_ENABLED
+              value: "true"
+            # NOT optional: a missing keycloak/finrep entry is a loud CreateContainerConfigError,
+            # never a silently empty credential. Provision the client and keycloak/finrep BEFORE
+            # this syncs (runbook 0009).
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: finrep-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # NOT optional (#2929). LedgerClient carries OidcClientRequestReactiveFilter, so
             # without this value the oidc-client never initializes and the ledger call goes out
             # with no Authorization header. The ref was absent entirely until now.

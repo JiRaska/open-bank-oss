@@ -154,3 +154,25 @@ test_treasury_roles_grant_nothing_in_risk if {
 			with data.rules as dept_rules
 	}
 }
+
+finrep_m2m := {"type": "HUMAN", "id": "service-account-openbank-finrep", "roles": ["ROLE_API"]}
+
+test_finrep_m2m_may_read_a_snapshot if {
+	rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.read"}
+}
+
+test_finrep_m2m_is_denied_create if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.create"}
+}
+
+test_finrep_m2m_is_denied_curve_set_create if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.curve-set.create"}
+}
+
+# Same ROLE_API, different machine: the grant is by identity, not by role.
+test_other_api_service_account_is_denied_read if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]},
+		"action": "risk.snapshot.read",
+	}
+}
