@@ -16,6 +16,7 @@ import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.junit.jupiter.api.Test
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * The observable distributed shape of opening a currency pocket (money path, ADR-0024).
@@ -53,6 +54,9 @@ class BalanceTraceContractIT {
             statusCode(201)
         }
 
+        // The client can receive 201 before the server's final span-end callback runs.
+        // Wait for that span, without relaxing the trace/attribute assertions below.
+        awaitServerSpan()
         exporter.contract()
             .requiresSpan("POST /api/v1/balances/{accountId}/initialize")
             .requiresAttribute("POST /api/v1/balances/{accountId}/initialize", "http.response.status_code")
@@ -60,5 +64,18 @@ class BalanceTraceContractIT {
             .requiresSameTrace("POST /api/v1/balances/{accountId}/initialize", "INSERT balances")
             .hasNoErrorSpan()
             .verifiedAs("balance-pocket-initialize")
+    }
+
+    private fun awaitServerSpan() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (true) {
+            try {
+                exporter.contract().requiresSpan("POST /api/v1/balances/{accountId}/initialize")
+                return
+            } catch (failure: AssertionError) {
+                if (System.nanoTime() >= deadline) throw failure
+            }
+            Thread.sleep(25)
+        }
     }
 }

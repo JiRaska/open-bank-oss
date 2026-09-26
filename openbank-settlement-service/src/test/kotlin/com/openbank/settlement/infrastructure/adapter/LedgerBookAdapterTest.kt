@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.infrastructure.adapter
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
@@ -43,6 +44,38 @@ class LedgerBookAdapterTest {
         createdAt = Instant.now(),
         updatedAt = Instant.now(),
     )
+
+    @Test
+    fun `journal factory removes only insignificant database scale`() {
+        fun build(amount: String) = SettlementJournalFactory.build(
+            posting = SettlementJournalFactory.Posting(
+                settlementId = settlement.id,
+                amount = BigDecimal(amount),
+                currency = "CZK",
+                payerAccountId = settlement.payerAccountId,
+                payeeAccountId = settlement.payeeAccountId,
+            ),
+            glDebitAccountId = glDebitAccountId,
+            glCreditAccountId = glCreditAccountId,
+            date = "2026-01-15",
+            createdBy = LedgerBookAdapter.SYSTEM_USER,
+        )
+
+        val exact = build("125.5000")
+        assertThat(exact.lines).hasSize(2).allSatisfy { line ->
+            assertThat(line.amount).isEqualByComparingTo("125.5")
+            assertThat(line.baseAmount).isEqualByComparingTo("125.5")
+            assertThat(Money.of(line.amount, "CZK").amount).isEqualByComparingTo("125.5")
+        }
+
+        val excessPrecision = build("125.5001")
+        assertThat(excessPrecision.lines).hasSize(2).allSatisfy { line ->
+            assertThat(line.amount).isEqualByComparingTo("125.5001")
+            assertThat(line.baseAmount).isEqualByComparingTo("125.5001")
+            assertThatThrownBy { Money.of(line.amount, "CZK") }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
 
     @Test
     fun `book posts a balanced debit-credit journal dated from the injected clock`(): Unit = runBlocking {
@@ -108,5 +141,22 @@ class LedgerBookAdapterTest {
                 ).book(settlement.id)
             }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger-service down")
+    }
+
+    @Test
+    fun `unposted or unrelated journal response cannot complete settlement`() {
+        val ledgerClient = mockk<LedgerRestClient>()
+        val repo = mockk<SettlementRepository>()
+        coEvery { repo.findById(settlement.id) } returns settlement
+        val adapter = LedgerBookAdapter(ledgerClient, repo, glDebitAccountId, glCreditAccountId, fixedClock)
+        listOf(
+            JournalResponse(UUID.randomUUID(), settlement.id, "PENDING"),
+            JournalResponse(UUID.randomUUID(), settlement.id, "REJECTED"),
+            JournalResponse(UUID.randomUUID(), UUID.randomUUID(), "POSTED"),
+        ).forEach { response ->
+            every { ledgerClient.postJournal(any()) } returns Uni.createFrom().item(response)
+            assertThatThrownBy { runBlocking { adapter.book(settlement.id) } }
+                .isInstanceOf(IllegalStateException::class.java)
+        }
     }
 }

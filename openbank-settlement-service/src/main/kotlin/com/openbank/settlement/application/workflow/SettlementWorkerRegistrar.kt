@@ -18,6 +18,7 @@ class SettlementWorkerRegistrar(
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
     private val activities: SettlementActivitiesImpl,
+    private val projectionActivities: LedgerSettlementActivitiesImpl,
     @ConfigProperty(name = "openbank.settlement.worker.enabled", defaultValue = "true")
     private val workerEnabled: Boolean,
 ) {
@@ -38,8 +39,11 @@ class SettlementWorkerRegistrar(
         log.infof("Registering Temporal settlement worker on task queue '%s'", temporalConfig.taskQueue())
         val factory = WorkerFactory.newInstance(workflowClient)
         val worker = factory.newWorker(temporalConfig.taskQueue())
-        worker.registerWorkflowImplementationTypes(SettlementWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(activities)
+        worker.registerWorkflowImplementationTypes(
+            SettlementWorkflowImpl::class.java,
+            LedgerSettlementWorkflowImpl::class.java,
+        )
+        worker.registerActivitiesImplementations(activities, projectionActivities)
         factory.start()
         log.infof("Temporal settlement worker started on task queue '%s'", temporalConfig.taskQueue())
     }

@@ -6,13 +6,15 @@ package com.openbank.settlement.application.port.`in`
 
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.domain.model.validateSettlementAmount
 import java.math.BigDecimal
 import java.util.UUID
 
 /**
  * Request to originate a new settlement between two customer accounts. [idempotencyKey] is a
- * caller-supplied dedup token: re-submitting the same key is a no-op that returns the original
- * settlement (no second debit/credit), so a client retry can never double-settle.
+ * caller-supplied dedup token: re-submitting the same key with the same instruction returns the
+ * original settlement (no second debit/credit). A changed payer, payee, amount or currency is
+ * rejected before workflow dispatch, including when a concurrent insert wins the key.
  */
 data class OriginateSettlementCommand(
     val idempotencyKey: String,
@@ -20,9 +22,25 @@ data class OriginateSettlementCommand(
     val payeeAccountId: UUID,
     val amount: BigDecimal,
     val currency: String,
-)
+) {
+    init {
+        validateSettlementAmount(amount)
+    }
+
+    /** Stable identity shared by origination and historical approval correlation. */
+    val settlementId: UUID
+        get() = UUID.nameUUIDFromBytes("settlement:$idempotencyKey".toByteArray(Charsets.UTF_8))
+
+    fun matches(settlement: Settlement): Boolean = settlement.payerAccountId == payerAccountId &&
+        settlement.payeeAccountId == payeeAccountId &&
+        settlement.amount.compareTo(amount) == 0 &&
+        settlement.currency == currency
+}
 
 interface SettlementUseCase {
+    /** Read persisted financial state without starting or retrying a workflow. */
+    suspend fun findById(settlementId: UUID): Settlement?
+
     /**
      * Persist a new PENDING settlement and kick off its settlement (Temporal durable workflow
      * when enabled, else the legacy in-process saga). Returns the persisted settlement; the final

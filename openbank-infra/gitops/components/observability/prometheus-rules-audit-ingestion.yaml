@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-audit-ingestion-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.audit.ingestion
+      interval: 1m
+      rules:
+        - alert: AuditIngestionFailed
+          # The second branch catches a first failure before the first scrape. An increase-only
+          # rule cannot see a counter whose first observed value is already positive.
+          expr: |
+            sum by (namespace, pod) (
+              (increase(openbank_audit_ingest_failures_total[15m]) > 0)
+              or
+              (openbank_audit_ingest_failures_total > 0
+                unless openbank_audit_ingest_failures_total offset 15m)
+            ) > 0
+          labels:
+            severity: critical
+            service: audit-service
+          annotations:
+            subject_period: continuous
+            summary: Audit ingestion failed
+            description: >-
+              Audit ingestion failed within the observation window. Inspect the consumer failure
+              and its configured dead-letter handling; reconcile and replay the original event
+              before its retention expires. A healthy hash chain does not prove complete ingestion.
+            runbook_url: docs/runbooks/audit-ingestion-recovery.md

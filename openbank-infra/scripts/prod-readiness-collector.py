@@ -300,7 +300,8 @@ def score_c3_api(short: str, att, today) -> tuple[int, str]:
 
 def score_c4_data(short: str, att, today) -> tuple[int, str]:
     d = svc_dir(short)
-    migs = list((d).rglob("db/migration/V*.sql"))
+    # Score source migrations only; Gradle copies must not change readiness evidence.
+    migs = list((d / "src" / "main" / "resources" / "db" / "migration").glob("V*.sql"))
     datastore = declared_datastore(short, REPO)
     stateless = is_stateless(datastore)
     if stateless and not migs:

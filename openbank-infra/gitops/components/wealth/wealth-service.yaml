@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-wealth-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e62cc1d36a785caa"
+        openbank.tech/policy-checksum: "2b42b87830a4fdf5"
       labels:
         app.kubernetes.io/name: wealth-service
         app.kubernetes.io/part-of: wealth

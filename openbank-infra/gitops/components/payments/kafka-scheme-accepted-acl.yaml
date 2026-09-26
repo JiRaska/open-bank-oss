@@ -470,6 +470,7 @@ rules:
       - balance-service
       - account-service
       - clearing-service
+      - settlement-service
       # Tier 2a (#2665): sca-service
       - sca-service
       - fx-service
@@ -590,3 +591,23 @@ subjects:
   - kind: ServiceAccount
     name: external-secrets
     namespace: external-secrets
+---
+# Settlement may publish its own state facts, never another producer's events.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: settlement-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: openbank.settlement.events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"

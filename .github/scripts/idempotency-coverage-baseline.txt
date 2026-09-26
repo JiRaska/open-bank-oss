@@ -90,6 +90,7 @@ openbank-sanctions-service POST /api/v1/sanctions/lists/refresh-all  # creation 
 openbank-sanctions-service POST /api/v1/sanctions/lists/{listType}/refresh  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/review  # creation POST with no idempotency key today — burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges  # Idempotency-Key/X-Request-ID replay via store — ADR-0296, burn-down #8351
+openbank-sca-service POST /api/v1/sca/challenges/{id}/consume  # pre-existing route newly inventoried; one-use UUID-addressed DB CAS, concurrent 1x200 + 7x409 proven by ScaLifecycleSafetyIT — ADR-0296 inventory correction
 openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/parties/{partyId}/devices  # credentialId natural key (uq V4) — ADR-0296, burn-down #8351

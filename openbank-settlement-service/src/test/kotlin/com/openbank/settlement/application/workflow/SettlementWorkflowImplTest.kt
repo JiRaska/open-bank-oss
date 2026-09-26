@@ -104,37 +104,39 @@ class SettlementWorkflowImplTest {
     }
 
     @Test
-    fun `creditPayee failure reverses only the debit then rejects`() {
+    fun `a failed credit requires reconciliation before refunding the payer`() {
         val calls = RecordingActivities(failCreditPayee = true)
         worker.registerActivitiesImplementations(calls)
         env.start()
 
         val result = newWorkflow().settle(UUID.randomUUID())
 
-        assertThat(result).isEqualTo(SettlementStatus.REJECTED)
+        assertThat(result).isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
         assertThat(calls.debitPayer.get()).isEqualTo(1)
         assertThat(calls.creditPayee.get()).isEqualTo(1)
-        assertThat(calls.reverseDebit.get()).isEqualTo(1)
+        assertThat(calls.reverseDebit.get()).isZero()
         assertThat(calls.reverseCredit.get()).isZero()
         assertThat(calls.bookToLedger.get()).isZero()
-        assertThat(calls.rejectSettlement.get()).isEqualTo(1)
+        assertThat(calls.rejectSettlement.get()).isZero()
+        assertThat(calls.recordBalanceStateUnknown.get()).isEqualTo(1)
     }
 
     @Test
-    fun `debitPayer failure compensates nothing and rejects directly`() {
+    fun `a failed debit requires reconciliation before rejection`() {
         val calls = RecordingActivities(failDebitPayer = true)
         worker.registerActivitiesImplementations(calls)
         env.start()
 
         val result = newWorkflow().settle(UUID.randomUUID())
 
-        assertThat(result).isEqualTo(SettlementStatus.REJECTED)
+        assertThat(result).isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
         assertThat(calls.debitPayer.get()).isEqualTo(1)
         assertThat(calls.creditPayee.get()).isZero()
         assertThat(calls.reverseDebit.get()).isZero()
         assertThat(calls.reverseCredit.get()).isZero()
         assertThat(calls.reverseBookToLedger.get()).isZero()
-        assertThat(calls.rejectSettlement.get()).isEqualTo(1)
+        assertThat(calls.rejectSettlement.get()).isZero()
+        assertThat(calls.recordBalanceStateUnknown.get()).isEqualTo(1)
     }
 
     @Test
@@ -291,9 +293,44 @@ class SettlementWorkflowImplTest {
         assertThat(calls.rejectSettlement.get()).isEqualTo(1)
     }
 
+    @Test
+    fun `a debit applied before all responses fail is never reported as rejected`() {
+        val calls = RecordingActivities(failAfterDebit = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(calls.debitPayer.get()).isEqualTo(5)
+        assertThat(calls.payerBalance.get()).isEqualTo(900)
+        assertThat(result).isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
+        assertThat(calls.recordBalanceStateUnknown.get()).isEqualTo(1)
+        assertThat(calls.rejectSettlement.get()).isZero()
+        assertThat(calls.creditPayee.get()).isZero()
+    }
+
+    @Test
+    fun `an unacknowledged payee credit never refunds the payer while keeping the payee credit`() {
+        val calls = RecordingActivities(failAfterCredit = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(calls.creditPayee.get()).isEqualTo(5)
+        assertThat(calls.payerBalance.get() + calls.payeeBalance.get()).isEqualTo(2000)
+        assertThat(result).isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
+        assertThat(calls.recordBalanceStateUnknown.get()).isEqualTo(1)
+        assertThat(calls.reverseDebit.get()).isZero()
+        assertThat(calls.rejectSettlement.get()).isZero()
+        assertThat(calls.bookToLedger.get()).isZero()
+    }
+
     /** In-process activities stub that records call order/counts and can fail selected steps. */
     private class RecordingActivities(
         private val failDebitPayer: Boolean = false,
+        private val failAfterDebit: Boolean = false,
+        private val failAfterCredit: Boolean = false,
         private val failCreditPayee: Boolean = false,
         private val failBookToLedger: Boolean = false,
         private val failReverseCredit: Boolean = false,
@@ -307,18 +344,33 @@ class SettlementWorkflowImplTest {
         val reverseCredit = AtomicInteger(0)
         val reverseBookToLedger = AtomicInteger(0)
         val rejectSettlement = AtomicInteger(0)
+        val recordBalanceStateUnknown = AtomicInteger(0)
         val order = mutableListOf<String>()
+        val payerBalance = AtomicInteger(1000)
+        val payeeBalance = AtomicInteger(1000)
+        private var debitApplied = false
+        private var creditApplied = false
 
         override fun debitPayer(settlementId: UUID) {
             order += "debitPayer"
             debitPayer.incrementAndGet()
             if (failDebitPayer) throw ApplicationFailure.newNonRetryableFailure("balance down", "BalanceError")
+            if (!debitApplied) {
+                payerBalance.addAndGet(-100)
+                debitApplied = true
+            }
+            if (failAfterDebit) throw ApplicationFailure.newFailure("response lost after debit", "ResponseLost")
         }
 
         override fun creditPayee(settlementId: UUID) {
             order += "creditPayee"
             creditPayee.incrementAndGet()
             if (failCreditPayee) throw ApplicationFailure.newNonRetryableFailure("balance down", "BalanceError")
+            if (!creditApplied) {
+                payeeBalance.addAndGet(100)
+                creditApplied = true
+            }
+            if (failAfterCredit) throw ApplicationFailure.newFailure("response lost after credit", "ResponseLost")
         }
 
         override fun bookToLedger(settlementId: UUID) {
@@ -330,6 +382,7 @@ class SettlementWorkflowImplTest {
         override fun reverseDebit(settlementId: UUID) {
             order += "reverseDebit"
             reverseDebit.incrementAndGet()
+            payerBalance.addAndGet(100)
         }
 
         override fun reverseCredit(settlementId: UUID) {
@@ -349,6 +402,11 @@ class SettlementWorkflowImplTest {
                     reverseBookToLedgerFailureType,
                 )
             }
+        }
+
+        override fun recordBalanceStateUnknown(settlementId: UUID) {
+            order += "recordBalanceStateUnknown"
+            recordBalanceStateUnknown.incrementAndGet()
         }
 
         override fun rejectSettlement(settlementId: UUID) {

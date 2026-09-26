@@ -20,7 +20,7 @@
     "pretest:coverage": "npm run pretest",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "pretest:e2e": "node scripts/generate-gate-catalog.mjs",
+    "pretest:e2e": "npm run pretest",
     "test:e2e": "playwright test"
   },
   "dependencies": {

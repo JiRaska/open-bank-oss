@@ -6,9 +6,12 @@ package com.openbank.settlement.application.usecase
 
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.application.workflow.LedgerSettlementActivities
+import com.openbank.settlement.application.workflow.LedgerSettlementWorkflowImpl
 import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
 import io.mockk.coEvery
 import io.mockk.every
@@ -48,8 +51,14 @@ class SettlementServiceTemporalSettleTest {
     fun setUp() {
         env = TestWorkflowEnvironment.newInstance()
         worker = env.newWorker(TASK_QUEUE)
-        worker.registerWorkflowImplementationTypes(SettlementWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(RelaxedActivities())
+        worker.registerWorkflowImplementationTypes(
+            SettlementWorkflowImpl::class.java,
+            LedgerSettlementWorkflowImpl::class.java,
+        )
+        worker.registerActivitiesImplementations(
+            RelaxedActivities(),
+            mockk<LedgerSettlementActivities>(relaxed = true),
+        )
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
         service = SettlementService(repo, temporalConfig, env.workflowClient, mockk(relaxed = true))
@@ -97,6 +106,25 @@ class SettlementServiceTemporalSettleTest {
         assertThat(second).isEqualTo(SettlementStatus.PENDING)
     }
 
+    @Test
+    fun `persisted protocol selects workflow even after rollout flag changes`() {
+        for (protocol in SettlementProtocol.entries) {
+            val settlement = pendingSettlement().copy(protocol = protocol)
+            coEvery { repo.findById(settlement.id) } returns settlement
+            val changedFlag = protocol == SettlementProtocol.LEGACY
+            val dispatcher =
+                SettlementService(repo, temporalConfig, env.workflowClient, mockk(relaxed = true), changedFlag)
+            runBlocking { dispatcher.settle(settlement.id) }
+            val stub = env.workflowClient.newUntypedWorkflowStub("settlement-${settlement.id}")
+            assertThat(stub.getResult(SettlementStatus::class.java)).isEqualTo(SettlementStatus.BOOKED)
+            val history = env.getWorkflowExecutionHistory(stub.execution)
+            val start = history.events.first().workflowExecutionStartedEventAttributes
+            assertThat(start.workflowType.name).isEqualTo(
+                if (protocol == SettlementProtocol.LEGACY) "SettlementWorkflow" else "LedgerSettlementWorkflow",
+            )
+        }
+    }
+
     /** Activities stub that never throws — this test suite only exercises SettlementService dispatch. */
     private class RelaxedActivities : SettlementActivities {
         override fun debitPayer(settlementId: UUID) = Unit
@@ -105,6 +133,7 @@ class SettlementServiceTemporalSettleTest {
         override fun reverseDebit(settlementId: UUID) = Unit
         override fun reverseCredit(settlementId: UUID) = Unit
         override fun reverseBookToLedger(settlementId: UUID) = Unit
+        override fun recordBalanceStateUnknown(settlementId: UUID) = Unit
         override fun rejectSettlement(settlementId: UUID) = Unit
     }
 }

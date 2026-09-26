@@ -11,6 +11,7 @@ vi.mock('@/auth', () => ({
 }))
 
 import { auth } from '@/auth'
+import { parseApprovalInbox } from '@/lib/approvals/evidence'
 
 const SESSION = { user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } }
 
@@ -125,7 +126,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       // catch-all below and doubles up P-1 under a different domain label — exactly the
       // "unread source is indistinguishable from an empty one" trap this file's other tests
       // are named for, just self-inflicted by an unguarded fallback instead of a missing fetch.
-      if (url.includes('communications/approvals') || url.includes('communication-service')) {
+      if (url.includes('communications/approvals') || url.includes('communication-service') || url.includes('/sca/approvals')) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       }
       if (url.includes('delegations/approvals') || url.includes('delegation-service')) {
@@ -141,6 +142,8 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
+    // Exercise the UI's real consumer against the route's output, not an independent fixture.
+    expect(parseApprovalInbox(body)).toEqual(body)
     // D-1, C-1, J-1, W-1 and SP-1 all sit at 11:00 (domestic-payment, clearing, ledger, swift,
     // sepaPayment); F-1 and I-1 both sit at 11:30 (fx before sepa-instant) — both ties resolved
     // by the stable-sort's concat order in route.ts. N-1 sits at 10:30, between L-1 and the
@@ -525,4 +528,24 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.party).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })
+  it('includes SCA approvals with the authenticated operator and a bounded queue', async () => {
+    const mock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      if (url.includes('/api/v1/sca/approvals')) {
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer operator-token')
+        expect(new URL(url).searchParams.get('limit')).toBe('50')
+        return Promise.resolve(Response.json([
+          { id: 'sca-1', action: 'device.revoke', resourceId: 'party@device', makerId: 'maker', createdAt: '2026-09-13T10:00:00Z' },
+        ]))
+      }
+      return Promise.resolve(Response.json([]))
+    })
+    vi.stubGlobal('fetch', mock)
+    const body = await (await (await route()).GET()).json()
+    expect(body.sources.sca).toBe('ok')
+    expect(body.items).toContainEqual({
+      id: 'sca-1', domain: 'sca', action: 'device.revoke', resourceId: 'party@device',
+      maker: 'maker', proposedAt: '2026-09-13T10:00:00Z',
+    })
+  })
+
 })

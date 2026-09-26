@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "234d43fb41536d13" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "3d7981b78ba02569" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -437,7 +437,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a1b42d00a71a6882"
+        openbank.tech/policy-checksum: "b7b0c0c0037f503a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -829,7 +829,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "7287db4dc7d5dbc9" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "adede563cbb1f9f6" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1189,7 +1189,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "34621250e6744dd3"
+        openbank.tech/policy-checksum: "4df71389ac2ad280"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1520,7 +1520,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "15ab32b13ba847d1" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "6de7f120155f8669" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1844,7 +1844,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "012b5070801edba0" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "aa5e3a6378919e5c" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2133,7 +2133,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "7cf052c73c372ae9"
+        openbank.tech/policy-checksum: "bec58a3c99af9fd9"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2419,7 +2419,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "195a94c6b341943b" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "107a826113593b2b" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2462,13 +2462,29 @@ spec:
             # enough; safe to leave briefly, repair is a no-op once checksums already match).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            # `KAFKA_BOOTSTRAP_SERVERS: …:9092` stood here and was dead (issue #3393):
-            # openbank-settlement-service has no `mp.messaging` config and no Kafka client
-            # anywhere under src/main, so it opened no connection and the value was never read.
-            # It mattered only because it made settlement-service read as a plaintext-listener
-            # client in every audit of who is still on :9092 — including
-            # `gen-network-policies.py`, which derives the broker allow-list from exactly this
-            # kind of env URL and so admitted `payments` on 9092 partly on its account.
+            # Durable settlement audit producer, using the shared mTLS pattern.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -2551,6 +2567,12 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           resources:
@@ -2635,6 +2657,12 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: kafka-keystore
+          secret:
+            secretName: settlement-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -2855,7 +2883,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "15009242c18f42c6"
+        openbank.tech/policy-checksum: "f0f8adac3471ee44"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3179,7 +3207,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4d409aa5d415ea32"
+        openbank.tech/policy-checksum: "0c537116f405de43"
     spec:
       securityContext:
         runAsNonRoot: true

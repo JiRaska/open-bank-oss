@@ -286,8 +286,16 @@ def _job_context_names(job_id: str, job: dict) -> set[str]:
     literal = str(job.get("name", job_id))
     strategy = job.get("strategy")
     combos = _matrix_combos(strategy.get("matrix")) if isinstance(strategy, dict) else None
-    if not combos:
+    if combos is None:
+        # A runtime matrix cannot prove any concrete matrix-derived context. Keeping the
+        # expression would let a ruleset require the template text even though GitHub never
+        # emits that check name.
+        if _MATRIX_REF.search(literal):
+            return set()
         return {literal}
+    if not combos:
+        # An empty matrix creates no job instances and therefore no check-run context.
+        return set()
     names: set[str] = set()
     for combo in combos:
         if "name" in job:
@@ -295,9 +303,12 @@ def _job_context_names(job_id: str, job: dict) -> set[str]:
                 lambda m, c=combo: _matrix_value(c[m.group(1)]) if m.group(1) in c else m.group(0),
                 literal,
             )
-            names.add(rendered)
+            if "${{" not in rendered:
+                names.add(rendered)
         else:
-            names.add(f"{job_id} ({', '.join(_matrix_value(v) for v in combo.values())})")
+            rendered = f"{job_id} ({', '.join(_matrix_value(v) for v in combo.values())})"
+            if "${{" not in rendered:
+                names.add(rendered)
     return names
 
 
@@ -388,6 +399,30 @@ def self_test() -> int:
         if got != want:
             fails.append(f"pr_triggered_job_names: want {want}, got {got}")
 
+    # Static include-only matrices emit concrete names, never the expression template.
+    matrix_cases = [
+        ("include names", {"include": [{"slug": "one"}, {"slug": "two"}]},
+         {"gates (one)", "gates (two)"}),
+        ("renamed slug", {"include": [{"slug": "renamed"}]}, {"gates (renamed)"}),
+        ("empty include", {"include": []}, set()),
+        ("missing value", {"include": [{"other": "one"}]}, set()),
+        ("dynamic matrix", "${{ fromJSON(needs.detect.outputs.matrix) }}", set()),
+        ("unresolved value", {"include": [{"slug": "${{ inputs.slug }}"}]}, set()),
+        ("axes expand with additive include", {"slug": ["one"], "include": [{"slug": "two"}]},
+         {"gates (one)", "gates (two)"}),
+    ]
+    for label, matrix, expected in matrix_cases:
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            doc = {"on": ["pull_request"], "jobs": {"gates": {
+                "name": "gates (${{ matrix.slug }})", "strategy": {"matrix": matrix},
+            }}}
+            write_workflow(root, "matrix.yml", yaml.safe_dump(doc))
+            ran.append("matrix: " + label)
+            got = pr_triggered_job_names(root)
+            if got != expected:
+                fails.append(f"matrix {label}: want {expected}, got {got}")
+
     # --- merge_group_gaps (ADR-0272) ---------------------------------------------------
     # Both directions. A readiness check that only ever sees the not-ready case cannot tell a
     # workflow that gained merge_group from one that did not, which is the whole question it
@@ -435,7 +470,6 @@ def self_test() -> int:
             ("matrix: second include instance", "gates (lint-sec)"),
             ("matrix: axes without name use GitHub's default", "build (linux, 21)"),
             ("matrix: include-only without name", "flags (true)"),
-            ("matrix: unexpandable matrix keeps the literal", "dyn (${{ matrix.x }})"),
         ]:
             ran.append(label)
             if want_in not in got:
@@ -443,6 +477,7 @@ def self_test() -> int:
         for label, want_out in [
             ("matrix: template itself is not a context", "gates (${{ matrix.slug }})"),
             ("matrix: exclude removes an instance", "build (mac, 21)"),
+            ("matrix: runtime matrix proves no concrete context", "dyn (${{ matrix.x }})"),
         ]:
             ran.append(label)
             if want_out in got:

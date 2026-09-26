@@ -159,10 +159,11 @@ class BalancePactFolderProviderVerificationTest {
      * verification pass needs.
      */
     private suspend fun seedBalance(balance: Balance) {
-        if (balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency) == null) {
+        val current = balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency)
+        if (current == null) {
             balanceRepo.save(balance)
         } else {
-            balanceRepo.update(balance)
+            balanceRepo.update(balance.copy(version = current.version + 1))
         }
     }
 
@@ -176,6 +177,16 @@ class BalancePactFolderProviderVerificationTest {
         } else {
             holdRepo.update(hold)
         }
+    }
+
+    @State("no balance exists for the settlement cover account")
+    fun stateSettlementCoverAccountMissing() = runOnVertxContext {
+        check(
+            balanceRepo.findByAccountIdAndCurrency(
+                UUID.fromString("88888888-8888-4888-8888-888888888820"),
+                "CZK",
+            ) == null,
+        ) { "Missing-account contract fixture must not have a balance" }
     }
 
     @State("a CZK balance exists for the holds account with sufficient funds")

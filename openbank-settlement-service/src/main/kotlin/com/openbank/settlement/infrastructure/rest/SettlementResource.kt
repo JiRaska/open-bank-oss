@@ -4,24 +4,34 @@
 
 package com.openbank.settlement.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonFormat
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.domain.model.validateSettlementAmount
+import com.openbank.settlement.infrastructure.approval.SettlementProposalStore
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
-import jakarta.ws.rs.BadRequestException
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.net.URI
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 /**
@@ -36,43 +46,36 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Settlements", description = "Interbank settlement origination")
-class SettlementResource(private val settlementUseCase: SettlementUseCase) {
+class SettlementResource(
+    private val execution: SettlementApprovedExecution,
+    private val proposals: SettlementProposalStore,
+    private val identity: SecurityIdentity,
+    @param:ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false") private val fourEyes: Boolean,
+) {
 
     @POST
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "settlement.create", resource = "")
+    @Authorize(action = "settlement.proposal.create", resource = "#request.approvalFingerprint")
     @Operation(summary = "Originate a settlement and start its workflow")
+    suspend fun originate(request: CreateSettlementRequest?): Response {
+        requireNotNull(request) { "a request body is required" }
+        if (fourEyes) proposals.capture(request, identity.principal.name)
+        return execution.originate(request)
+    }
+}
+
+/** The injected CDI boundary retains the original gate immediately before the financial write. */
+@ApplicationScoped
+class SettlementApprovedExecution(private val settlementUseCase: SettlementUseCase) {
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "settlement.create", resource = "#request.approvalFingerprint")
     suspend fun originate(request: CreateSettlementRequest): Response {
-        validate(request)
         val settlement = settlementUseCase.originate(
-            OriginateSettlementCommand(
-                idempotencyKey = request.idempotencyKey,
-                payerAccountId = request.payerAccountId,
-                payeeAccountId = request.payeeAccountId,
-                amount = request.amount,
-                currency = request.currency,
-            ),
+            request.toCommand(),
         )
         return Response.created(URI.create("/api/v1/settlements/${settlement.id}"))
             .entity(settlement.toResponse())
             .build()
-    }
-
-    /** Reject malformed money-path input with 400 before any settlement is created. */
-    private fun validate(request: CreateSettlementRequest) {
-        val errors = buildList {
-            if (request.idempotencyKey.isBlank()) add("idempotencyKey must not be blank")
-            if (request.amount <= BigDecimal.ZERO) add("amount must be positive")
-            if (!CURRENCY_CODE.matches(request.currency)) add("currency must be an uppercase 3-letter ISO-4217 code")
-            if (request.payerAccountId == request.payeeAccountId) add("payer and payee accounts must differ")
-        }
-        if (errors.isNotEmpty()) {
-            throw BadRequestException(errors.joinToString("; "))
-        }
-    }
-
-    private companion object {
-        val CURRENCY_CODE = Regex("[A-Z]{3}")
     }
 }
 
@@ -80,9 +83,46 @@ data class CreateSettlementRequest(
     val idempotencyKey: String,
     val payerAccountId: UUID,
     val payeeAccountId: UUID,
+    @get:JsonFormat(shape = JsonFormat.Shape.STRING)
     val amount: BigDecimal,
     val currency: String,
-)
+) {
+    // Jackson constructs this value before the authorization interceptor runs. An invalid
+    // instruction must neither create a pending approval nor consume an approved one.
+    init {
+        require(idempotencyKey.isNotBlank()) { "idempotencyKey must not be blank" }
+        validateSettlementAmount(amount)
+        require(CURRENCY_CODE.matches(currency)) { "currency must be an uppercase 3-letter ISO-4217 code" }
+        require(payerAccountId != payeeAccountId) { "payer and payee accounts must differ" }
+    }
+
+    fun toCommand() = OriginateSettlementCommand(idempotencyKey, payerAccountId, payeeAccountId, amount, currency)
+
+    /** Versioned binding to every submitted money instruction; never a caller-supplied digest. */
+    @get:JsonIgnore
+    val approvalFingerprint: String
+        get() {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val fields = listOf(
+                "settlement.create.v1",
+                idempotencyKey,
+                payerAccountId.toString(),
+                payeeAccountId.toString(),
+                amount.stripTrailingZeros().toString(),
+                currency,
+            )
+            for (value in fields) {
+                val bytes = value.toByteArray(Charsets.UTF_8)
+                digest.update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(bytes.size).array())
+                digest.update(bytes)
+            }
+            return HexFormat.of().formatHex(digest.digest())
+        }
+
+    private companion object {
+        val CURRENCY_CODE = Regex("[A-Z]{3}")
+    }
+}
 
 data class SettlementResponse(
     val id: UUID,
@@ -90,9 +130,11 @@ data class SettlementResponse(
     val payeeAccountId: UUID,
     val amount: BigDecimal,
     val currency: String,
-    val status: String,
+    val status: SettlementResponseStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val recoveryRequired: Boolean = false,
+    val recoveryReason: String? = null,
 )
 
 private fun Settlement.toResponse() = SettlementResponse(
@@ -101,7 +143,10 @@ private fun Settlement.toResponse() = SettlementResponse(
     payeeAccountId = payeeAccountId,
     amount = amount,
     currency = currency,
-    status = status.name,
+    // Preserve the v1 status vocabulary: an uncertain movement is still pending settlement.
+    status = SettlementResponseStatus.fromDomain(status),
     createdAt = createdAt,
     updatedAt = updatedAt,
+    recoveryRequired = status == SettlementStatus.BALANCE_STATE_UNKNOWN,
+    recoveryReason = status.takeIf { it == SettlementStatus.BALANCE_STATE_UNKNOWN }?.name,
 )

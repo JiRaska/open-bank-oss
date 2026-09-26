@@ -334,4 +334,61 @@ also be deleted (nothing else in balance-service depends on it).
   No new surface, role, or data flow — same endpoint, same authz, tighter input handling.
   Risk class = **availability/information disclosure** (500s on an operator control endpoint).
   Rollback: revert the guard; no stored data or schema changes.
+
+## Atomic ledger projection and reservation consumption
+
+**Threat:** a payee event could release the payer's hold before the payer debit was projected,
+or a committed projection could lose its subsequent hold release. Either breaks the spendable
+balance invariant. A hold or overdraft update prepared from an older balance could also overwrite
+a concurrent ledger movement despite Hibernate versioning, because the repository loaded a newer
+entity and copied old amounts onto it.
+
+**Controls:** lock the account/currency pocket, then commit the booked delta, projection marker,
+matching account/currency/transaction cover release and outbox records in one transaction. A
+redelivery skips the booked delta and can finish an older partial cover release. Snapshot-based
+hold and overdraft writes compare the expected domain version before copying amounts; Hibernate
+optimistic locking protects changes after that comparison. A conflict rolls the transaction back.
+Explicit hold release rechecks the active hold while holding the same pocket lock, and replays an
+already released hold without changing another reservation or emitting another release event.
+
+**Evidence:** `ProjectionCoverAtomicityIT` exercises payee-first delivery, failed release-outbox
+persistence and old partial-write redelivery against PostgreSQL. `HoldSnapshotConcurrencyIT`
+interleaves a ledger credit between a snapshot read and a hold/overdraft write.
+
+**Residual risk:** these controls do not reconcile historic balance drift or prove that every
+producer uses the ledger as its sole booked-money writer. Reservation consumption assumes the
+journal transaction reference identifies the covered movement. Authorization, DLQ replay and
+ledger reconciliation remain required operational controls.
+
 - **2026-09-21** — **Two per-service identities on the balance writes (#10486 batch 2).** `service-transaction-balance-hold` (`service-account-openbank-transaction`: `balance.hold` + `balance.holdRelease`) and `service-settlement-balance-move` (`service-account-openbank-settlement`: `balance.debit` + `balance.credit`), each gated on `input.principal.id`. No RBAC change: `BalanceResource` already admits `ROLE_API` on all four writes, which means OPA was — and is — the whole control for any ROLE_API caller; `balance_rest_ext_test.rego` now proves another ROLE_API service account is DENIED all four, each identity is denied every other balance action (incl. `initialize`, `overdraftLimit`, `reconciliation.run`, `approval.decide`), and neither rule admits the shared client. Removing either `principal.id` line turns 3 tests red. `AUTHZ_ENFORCE` is `"true"` for balance-service in gitops. Rollback: revert together with the callers.
+
+## Ledger-projection reservation identity
+
+The settlement named M2M client now additionally receives `balance.hold` through
+`service-settlement-balance-cover`. The grant requires the exact settlement service principal
+and the validated user/service-account principal type. This is necessary for payer-cover
+reservation before journal posting; the former debit/credit-only grant rejected that first step.
+Legacy debit/credit grants remain for existing workflow histories. No `balance.holdRelease`,
+initialization, overdraft, reconciliation or approval-decision permission is added. A compromised
+settlement credential can reserve funds as well as perform its existing legacy movements; it
+cannot directly release cover when a journal outcome is uncertain. Ledger projection remains
+the owner of reservation consumption.
+
+Policy tests assert reservation admission, deny other balance actions and unrelated principals,
+and reject the wrong principal type. They do not prove token issuance or the full distributed
+workflow. Roll back this grant only after disabling new ledger-projection originations and
+draining their workflows; otherwise the cover step will be denied again.
+
+## Failed projection records
+
+With projection enabled, malformed JSON and malformed booked-change events fail processing
+and are parked by the configured Kafka dead-letter handler instead of being acknowledged as
+successful. The DLQ explicitly serializes String values without JSON-string wrapping so the
+original payload remains available for diagnosis and controlled replay. Existing topic and
+write ACL declarations are retained. Operators must correct the cause before replay and retain
+the original journal/account/currency identity used for deduplication.
+
+`LedgerProjectionDlqIT` verifies two poison records reach the real broker's DLQ unchanged,
+then a valid event and its acknowledged redelivery apply one booked movement and consume
+matching cover. This does not prove upstream ledger delivery, OIDC enforcement or a full
+settlement workflow.

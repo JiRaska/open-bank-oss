@@ -13,12 +13,12 @@ import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.PartyMergeIndexRepository
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -47,6 +47,11 @@ class AuditConsumer {
 
     private val log = Logger.getLogger(AuditConsumer::class.java)
 
+    @PostConstruct
+    fun initializeIngestMetrics() {
+        meterRegistry.counter(INGEST_FAILURES)
+    }
+
     /**
      * Records one audit event.
      *
@@ -62,34 +67,28 @@ class AuditConsumer {
      * nothing. A producer that populates the field keeps its own value, so this can only turn a
      * sentinel into a value — it can never re-attribute a row that is already attributed.
      *
-     * **Nothing is rejected.** Every message that was stored before is still stored, with the same
-     * or better attribution; a message with no metadata and no body fields still lands on the
+     * Attribution remains permissive for JSON objects: an object with no metadata or body
+     * fields still lands on the
      * sentinels rather than being dropped. An audit path that drops events is worse than one that
      * under-attributes them, so the fallbacks stay and only become visible ([AttributionSource],
      * `openbank.audit.attribution.missing`) instead of silent.
      */
     @Incoming("audit-events-in")
+    @Suppress("TooGenericExceptionCaught") // Any parse/store failure must NACK at this transport boundary.
     suspend fun consume(message: Message<String>) {
-        val payload = message.payload
         try {
-            persist(payload, addressOf(message))
-        } catch (e: Exception) {
-            // best-effort: DELIBERATE, and #6209 is where it was decided — this legacy
-            // multi-producer channel keeps its historic availability behaviour rather than wedging
-            // ~20 producers on one store failure. Stated plainly because the marker suppresses the
-            // event-handler-swallow gate (#5698) and the cost is real: a store failure here loses
-            // an evidentiary row, and an acked message is indistinguishable from a stored one.
-            // The strict path is AgentAuditConsumer — it acknowledges only a successful durable
-            // write, so a D5 provenance store failure is retried by Kafka rather than lost. Any
-            // producer that cannot tolerate this trade belongs on that consumer, not this one.
-            log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
-        } finally {
-            // Switching the signature from `String` to `Message<String>` also switches SmallRye
-            // from auto-ack to MANUAL ack, so the ack must be explicit — and in a `finally`, or an
-            // un-storable message would stall the partition forever and the audit trail would stop
-            // dead. (`consume` already swallows its own exceptions, so this is belt-and-braces.)
-            Uni.createFrom().completionStage(message.ack()).awaitSuspending()
+            persist(message.payload, addressOf(message))
+        } catch (failure: Exception) {
+            // NACK preserves the failure for the connector's configured failure strategy.
+            // Do not log the event body: audit payloads may contain personal or financial data.
+            meterRegistry.counter(INGEST_FAILURES).increment()
+            log.error("Failed to persist audit entry", failure)
+            Uni.createFrom().completionStage(message.nack(failure)).awaitSuspending()
+            return
         }
+        // Keep ACK outside the persistence catch. A lost ACK must not turn a committed row into
+        // a poison-record decision; broker redelivery is deduplicated by the immutable entry ID.
+        Uni.createFrom().completionStage(message.ack()).awaitSuspending()
     }
 
     /** Lifts the broker metadata this consumer used to discard. Absent metadata is not an error. */
@@ -107,6 +106,8 @@ class AuditConsumer {
         return EventAddress(
             topic = record.topic?.takeIf { it.isNotBlank() },
             ceType = ceType,
+            partition = record.partition,
+            offset = record.offset,
         )
     }
 
@@ -116,32 +117,20 @@ class AuditConsumer {
      */
     suspend fun consume(payload: String): Unit = consume(payload, EventAddress.NONE)
 
-    suspend fun consume(payload: String, address: EventAddress) {
-        try {
-            persist(payload, address)
-        } catch (e: Exception) {
-            // best-effort: the same deliberate #6209 trade as the @Incoming overload above, and for
-            // the same channel — this is the no-broker-metadata entry point into it. See there for
-            // why, and for the strict alternative (AgentAuditConsumer).
-            log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
-        }
-    }
+    suspend fun consume(payload: String, address: EventAddress): Unit = persist(payload, address)
 
-    /**
-     * Writes an audit event and propagates a failure to the caller. The dedicated agent-provenance
-     * consumer uses this method before ACKing, while the legacy mixed stream keeps [consume]'s
-     * compatibility behaviour.
-     */
+    /** Writes an audit event; failure propagates so the caller cannot report a durable success. */
     suspend fun persist(payload: String, address: EventAddress = EventAddress.NONE) {
         val node: JsonNode = objectMapper.readTree(payload)
+        require(node.isObject) { "Audit event must be a JSON object" }
         val eventTime = eventTime(node)
         val resolvedSource = resolveSourceService(node, address)
         val actor = resolveActor(node)
         val resolvedAggregateId = resolveAggregateId(node)
         val entry = AuditEntry(
-            // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
-            // producers without one retain the previous random entry id behaviour.
-            id = node.textOrNull("eventId")?.let(UUID::fromString) ?: Ids.newId(),
+            // Producer identity wins. A broker record without one still has a stable address,
+            // so a lost acknowledgement cannot append the same delivery as a second audit fact.
+            id = address.entryId(node.textOrNull("eventId")),
             // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
             // not "eventType" — the only #996-consumed producer that does so.
             // `ce-type` is the outbox event type, and it is the LAST resort before the
@@ -336,6 +325,8 @@ class AuditConsumer {
     }
 
     private companion object {
+        const val INGEST_FAILURES = "openbank.audit.ingest.failures"
+
         /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }

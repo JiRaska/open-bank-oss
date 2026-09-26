@@ -175,6 +175,123 @@ is the **authentication assurance gate** for payments and consent — defeating 
   same authenticated `initiate` call, against a caller-supplied enum the service already validated.
   Rollback: revert the commit; TOTP goes back to silently minting a dead challenge.
 
+## Lifecycle concurrency hardening
+
+A completed challenge is still subject to expiry, including the exact deadline. The database
+compare-and-consume requires COMPLETED, an expiry strictly in the future and no consumption marker.
+It increments the same optimistic version carried from the original read through lifecycle writes;
+a stale verification cannot erase consumption or overwrite a newer attempt count. Concurrent-update
+conflicts fail closed through the shared 422 business-rule mapper.
+
+A device decision is claimed once with an atomic Redis SET NX EX GET. A losing claimant receives a
+conflict even if it passed the earlier existence check and has a valid signature. The first decision
+and its expiry remain authoritative. These controls are covered by ScaLifecycleSafetyIT with real
+PostgreSQL and Redis, plus service tests for the expiry boundary and the losing decision claim.
+
+Rollout requires all lifecycle writers to adopt optimistic versions. The additive version column
+supports deploying the schema first, but an old writer does not participate in the new guard: drain
+old instances before relying on it. Keeping the column during binary rollback is safe for the
+schema; restoring old writers is not safe for actionable challenges. Do not reset consumedAt or
+reissue a consumed challenge as a recovery shortcut.
+
+These tests use the local authorization test profile. They do not prove an enforced production OPA
+policy, device attestation, credential revocation, durable decision evidence or the delivery of an
+external notification. Those remain separate launch controls. See the consumption contract in
+`openbank-sca-service/src/main/resources/openapi.yaml`.
+
+- **2026-09-13 — Customer party identity enforcement.** Device enrollment, device
+  listing and pending challenge listing reject customer identities whose principal is
+  missing, malformed or different from the requested party. Previously an unparseable
+  principal bypassed the device ownership comparison. The local check now fails closed
+  before persistence or disclosure, including when ROLE_API accompanies ROLE_CUSTOMER.
+  Operator/admin roles retain their privileged path; service identities still require
+  the existing authorization policy. No new policy exemption is introduced. Real HTTP
+  tests cover rejection, zero enrollment/outbox writes and permitted owner/operator/service
+  paths. The tests exercise the local guard with advisory OPA and do not establish that
+  a production policy grants a service call. Credential revocation, recovery and
+  attestation validation are separate controls. Rollback reopens the ownership bypass.
+
+- **2026-09-13 — Durable signed decisions.** PostgreSQL is authoritative for device
+  decisions; an accepted first decision and its `SCA_DEVICE_DECIDED` outbox event commit
+  in one transaction. A challenge row lock, eligibility check and expected challenge
+  version prevent competing or stale acceptance. The retained record preserves the
+  signature and signed bytes; expiry closes authorization without erasing evidence or
+  reopening the first-decision slot. The audit identifies a credential, not a verified
+  human or hardware-attestation result. This adds signature evidence to the existing
+  audit topic, so its access and retention controls apply. The existing key records must
+  remain available for later verification. No automatic deletion is introduced.
+  Upgrade and rollback require quiescing initiation and draining active challenges;
+  mixed Redis/PostgreSQL writers are unsafe. Follow
+  [the migration and rollback runbook](../runbooks/sca-durable-decisions.md).
+  Real PostgreSQL/Redis HTTP tests prove persistence after cache removal, identical
+  decision/outbox transaction IDs, rollback on audit failure, signature fidelity and
+  expiry retention. Concurrent store claims preserve one winner. These tests do not
+  establish live Kafka receipt, device attestation or credential revocation.
+
+
+## Credential revocation and outstanding approvals
+
+### Operator approval binding
+
+The service wires the shared atomic approval store and exposes a checker queue and decision
+endpoint. The per-id read endpoint has the same operator/admin and OPA checks as the pending
+queue; it exposes only the authorization record and stops resolving it after expiry.
+With four-eyes enforcement enabled, revocation binds both party and device id; enrollment
+binds the party and a SHA-256 fingerprint covering every credential field.
+This prevents a maker replacing the target or public key after another operator approved it.
+OPA's customer grant parses the composite target and checks the party component. The checker
+uses the same principal name as the maker path; self-approval remains forbidden.
+
+`ScaFourEyesFlowIT` exercises the generated deployment OPA policy with real HTTP, Redis and
+PostgreSQL, including substitution, replay and existing M2M exemptions. This proves the local
+flow only. Four-eyes remains a separate deployment opt-in; the admin flow and real identity
+provider must be verified before activation. PostgreSQL retains checker audit evidence with
+transactional outbox records; an authorization claim is not a business commit. See
+[the rollout procedure](../runbooks/sca-operator-approvals.md).
+
+`DELETE /api/v1/sca/parties/{partyId}/devices/{deviceId}` checks customer ownership before
+accessing the credential and authorizes `device.revoke`. OPA permits a customer's request
+only for their own party; the money-path four-eyes obligation remains in force.
+`ScaDeviceRevocationIT` covers own/foreign and unresolved identities; the REST policy
+suite checks the owner grant and the unchanged approval requirement.
+
+Revocation locks the credential before updating its unconsumed pending/completed
+challenges. Decision persistence takes the same locks in the same order and rechecks the
+credential. Bulk cancellation increments challenge versions, preventing stale verification
+from restoring approval (`ScaLifecycleSafetyIT`). Consumed operations are not reversed.
+The credential marker, cancellations and `DEVICE_REVOKED` event share one transaction;
+a deliberate outbox failure verifies rollback. Retained keys and signatures remain evidence.
+
+All writers must support the marker before revocation traffic begins. A rollback to a
+binary ignoring revocation is unsafe after the first revocation. See
+[the rollout and rollback procedure](../runbooks/sca-device-revocation.md).
+This change does not establish hardware attestation, identity recovery, customer-edge
+passkey revocation or a live end-to-end four-eyes approval proof.
+
+### Durable operator authorization evidence
+
+SCA operator approvals and each accepted maker/checker transition are stored with their audit
+outbox record in the same PostgreSQL transaction. A row lock serializes decision and claim;
+self-approval, repeat transitions and expired authorization are refused. Expiry does not delete
+evidence or renew authorization. The record and event bind the exact original action, target,
+maker and checker. `EXECUTED` establishes only an authorization claim, not a committed business
+operation. Database/outbox availability is required before acknowledging a transition.
+
+Mixed Redis/PostgreSQL approval writers and restored Redis snapshots are unsafe: cutover and
+rollback require paused mutations and a verified drain of every live approval. Evidence tables
+remain intact on rollback. Production four-eyes activation still requires a reviewed rollout
+and real identity-provider validation; this storage change does not enable it.
+
+### Real-token integration coverage
+
+`ScaOidcApprovalIT` obtains tokens from an isolated upstream Keycloak realm and drives the
+actual OIDC authentication, generated OPA policy and PostgreSQL approval store. It verifies
+missing/tampered token rejection, customer denial, maker/checker identity agreement, one-use
+request binding and the two explicit service-account ceremony exemptions. The audit event's
+actor is checked against the authenticated principal. The fixture has only synthetic users
+and generates its credentials at startup. This is local integration coverage, not an
+attestation of the target deployment's identity-provider configuration or admin login flow.
+
 - **2026-09-20** — **New inbound edge: a parallel private-CA mTLS listener (8443, client auth
   REQUIRED, TLSv1.3; server cert `sca-service-internal-tls`), the same shape as account-service's and
   document-service's.** HTTP/8110 stays for existing callers (document-service, consent-service).

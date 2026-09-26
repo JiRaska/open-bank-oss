@@ -22,8 +22,7 @@ import javax.sql.DataSource
 
 /**
  * #8679: `ScaService.enroll` must commit the enrolled device and its `DEVICE_ENROLLED` outbox row
- * in ONE transaction. This is sca's only outbox write, so the whole of the service's event
- * production rides on it.
+ * in ONE transaction. Device decision acceptance has a separate atomic outbox test.
  *
  * The oracle (#8496) is Postgres's own `xmin` — the id of the transaction that wrote each row
  * version — so "the same transaction wrote both" is read from the database, never inferred from

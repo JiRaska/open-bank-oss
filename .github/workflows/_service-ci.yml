@@ -286,17 +286,16 @@ jobs:
       # untrusted PR-code execution job.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
       #
-      # No -D pact flags to mirror here (unlike the pre-split single job's #1009 workaround):
-      # `test` above never touched pactbroker.* either, so this is a plain up-to-date/cached
-      # second invocation of the same, single-shaped `test` task.
+      # Consume the enforcing build's coverage, never produce a second test run here.
+      # Different invocation properties can invalidate `test` and overwrite the verified
+      # test.ic before this advisory report, even when both Gradle invocations succeed.
       - name: Generate Kover XML report
         continue-on-error: true
         # This is advisory evidence, never a second mandatory build. Keep it daemonless
         # and bounded so a Gradle/Kover process cannot retain the raw coverage file or
         # hold a fleet runner after the enforcing build has already completed (#6734).
-        # Account's real Testcontainers suite needs more than the old three-minute limit:
-        # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+        # Test execution belongs to the enforcing build above; this step only renders it.
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{ inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only

@@ -43,11 +43,12 @@ data class EnrolledDevice(
     val publicKeySpkiB64: String,
     val algorithm: SignatureAlgorithm,
     val createdAt: OffsetDateTime,
+    val revokedAt: OffsetDateTime? = null,
 )
 
 /**
- * A signature-verified decision recorded against a challenge. Persisted transiently
- * (mirrors the OTP store) — it only needs to outlive the challenge.
+ * A signature-verified decision recorded against a challenge. The decision and its
+ * audit event are durable; expiry limits authorization, not evidence retention.
  */
 data class DeviceApprovalDecision(
     val challengeId: UUID,
@@ -56,6 +57,8 @@ data class DeviceApprovalDecision(
     /** Base64-encoded signature over [dynamicLinkingPayload]. Retained for audit. */
     val signatureB64: String,
     val decidedAt: OffsetDateTime,
+    val challengeVersion: Int = 0,
+
     /**
      * The party whose enrolled device signed this decision (#10281 item 3). Nullable only so a
      * decision written by the previous release (still in Redis for at most a challenge TTL)

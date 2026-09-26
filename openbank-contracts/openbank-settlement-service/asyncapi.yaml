@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+asyncapi: 3.0.0
+info:
+  title: OpenBank Settlement state events
+  version: 1.1.0
+  description: Durable state facts emitted from the settlement transactional outbox.
+channels:
+  settlementEvents:
+    address: openbank.settlement.events
+    messages:
+      operatorApprovalChanged:
+        $ref: '#/components/messages/OperatorApprovalChanged'
+      stateChanged:
+        $ref: '#/components/messages/SettlementStateChanged'
+operations:
+  publishStateChanged:
+    action: send
+    channel:
+      $ref: '#/channels/settlementEvents'
+components:
+  messages:
+    SettlementStateChanged:
+      name: SETTLEMENT_STATE_CHANGED
+      contentType: application/json
+      description: |
+        Written with the aggregate in one transaction, including origination (previousStatus null).
+        Suppressed or repeated same-state writes emit nothing. Delivery is at least once;
+        deduplicate by eventId. Different dispatchers may deliver transitions out of order.
+        status is the observed settlement state, not proof of customer receipt or finality.
+        actorType identifies a service-owned transition, not the initiating person.
+      payload:
+        type: object
+        required: [eventId, eventType, schemaVersion, aggregateType, aggregateId, sourceService,
+                   actorType, occurredAt, previousStatus, status, protocol, payerAccountId,
+                   payeeAccountId, amount, currency]
+        properties:
+          eventId: {type: string, format: uuid}
+          eventType: {type: string, const: SETTLEMENT_STATE_CHANGED}
+          schemaVersion: {type: integer, const: 1}
+          aggregateType: {type: string, const: SETTLEMENT}
+          aggregateId: {type: string, format: uuid}
+          sourceService: {type: string, const: settlement-service}
+          actorType: {type: string, const: SERVICE}
+          occurredAt: {type: string, format: date-time}
+          previousStatus: {type: [string, 'null']}
+          status: {type: string}
+          protocol: {type: string, enum: [LEGACY, LEDGER_PROJECTION]}
+          payerAccountId: {type: string, format: uuid}
+          payeeAccountId: {type: string, format: uuid}
+          amount: {type: string, pattern: '^[0-9]+(\.[0-9]+)?$'}
+          currency: {type: string, pattern: '^[A-Z]{3}$'}
+
+    OperatorApprovalChanged:
+      name: SETTLEMENT_OPERATOR_APPROVAL_CHANGED
+      contentType: application/json
+      description: |
+        Each maker/checker transition and this event commit together. Deduplicate by eventId.
+        EXECUTED means the maker claimed authorization once; it is not evidence that the
+        protected business operation committed. Authorization expires at expiresAt and cannot
+        be extended by deciding or claiming it. The database retains expired evidence.
+        Consumers must tolerate other event types on this shared topic.
+      payload:
+        type: object
+        required: [eventId, eventType, schemaVersion, sourceService, aggregateType, aggregateId,
+                   actorId, actorType, action, makerId, status, createdAt, expiresAt, occurredAt]
+        properties:
+          eventId: {type: string, format: uuid}
+          eventType: {type: string, const: SETTLEMENT_OPERATOR_APPROVAL_CHANGED}
+          schemaVersion: {type: integer, const: 1}
+          sourceService: {type: string, const: settlement-service}
+          aggregateType: {type: string, const: SETTLEMENT_OPERATOR_APPROVAL}
+          aggregateId: {type: string, format: uuid}
+          actorId: {type: string}
+          actorType: {type: string, const: AUTHENTICATED_PRINCIPAL}
+          action: {type: string}
+          resourceId: {type: [string, 'null']}
+          makerId: {type: string}
+          status: {type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED]}
+          createdAt: {type: string, format: date-time}
+          expiresAt: {type: string, format: date-time}
+          decidedBy: {type: [string, 'null']}
+          decidedAt: {type: [string, 'null'], format: date-time}
+          claimedAt: {type: [string, 'null'], format: date-time}
+          occurredAt: {type: string, format: date-time}

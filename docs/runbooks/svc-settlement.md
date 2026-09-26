@@ -23,7 +23,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 ## Dependencies
 
 - **Upstream (this service consumes):** _none declared_
-- **Downstream (depends on this service):** _none declared_
+- **Downstream (depends on this service):** `audit-service`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `settlement`.
@@ -68,3 +68,19 @@ triaging an incident that starts on `settlement`.
   `settlement.oncall` attestation — until that is live, escalate via the team channel).
 - Break-glass cluster access is audited; use it only for a declared incident and
   record the justification.
+
+## Submitting an operator proposal
+
+Use `POST /api/v1/settlements/approvals` with the complete `CreateSettlementRequest` to request a
+review without financial execution. A human operator or administrator receives 202, a pending
+approval `id`, the immutable `proposalId` and instruction, and a `Location` for subsequent detail
+reads. This guarantee holds with four-eyes enforcement either on or off. Supplying an approval
+header does not execute or consume that approval through this endpoint.
+
+Preserve the original idempotency key and instruction. If the response is lost, inspect pending
+approvals and their stored instructions before any deliberate resubmission: another POST can
+create another approval for the same proposal. Do not automatically retry a write or choose a new
+idempotency key. A pending or approved decision does not prove reservation, dispatch or booking.
+The origination endpoint `POST /api/v1/settlements` retains its existing execution semantics and
+must not back a proposal-only button. This API addition does not activate the deployed four-eyes
+gate or prove the complete operator UI and sandbox acceptance flow.

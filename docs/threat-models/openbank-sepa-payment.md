@@ -364,6 +364,18 @@ simply stops existing).
   failed" at the *data* level, and the case row itself carries no marker of which branch produced
   it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.
 
+- **2026-09-13** — **Settlement audit edge in the shared payments manifest.**
+  The settlement producer now publishes state events using its own Kafka identity and
+  topic ACL. The shared `payments-services.yaml` also holds this service's workload; a
+  parsed resource comparison confirms that only the settlement Rollout changes. This
+  service receives no new credential mount, Kafka grant, ingress or environment value.
+  The added event exposes settlement account identifiers and amounts to the audit
+  consumer, as assessed in [the settlement threat model](openbank-settlement-service.md).
+  A broker acknowledgement does not establish payment finality or audit persistence;
+  upstream payment status must continue to follow the existing settlement protocol.
+  Rollback removes the settlement relay configuration while retaining its pending outbox
+  rows for recovery; no payment-service schema rollback is required.
+
 - **2026-09-20** — **No boundary change for this service.** Recorded because
   `openbank-infra/gitops/components/payments/payments-services.yaml` is a shared multi-service
   manifest and the threat-model gate attributes a Deployment/Rollout hunk in it to every money-path

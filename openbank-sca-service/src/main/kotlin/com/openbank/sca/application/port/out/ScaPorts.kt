@@ -22,9 +22,9 @@ interface ScaChallengeRepository {
     suspend fun findPendingByParty(partyId: UUID): List<ScaChallenge>
 
     /**
-     * Atomically mark the challenge consumed (single-use gate). Returns true when THIS call
-     * spent it; false when it was already consumed — the `consumed_at IS NULL` guard in the
-     * UPDATE makes concurrent double-spends impossible at the database level.
+     * Atomically spend a completed, unexpired, unconsumed challenge. Returns true only for
+     * the caller that spent it. The update increments the snapshot version, so an earlier
+     * lifecycle read cannot subsequently erase this consumption marker.
      */
     suspend fun markConsumed(id: UUID): Boolean
 }
@@ -71,18 +71,22 @@ interface EnrolledDeviceRepository {
      */
     suspend fun saveWithOutbox(device: EnrolledDevice, outboxMessage: OutboxMessage): EnrolledDevice
 
+    /** Revoke, cancel unconsumed approvals and append audit atomically; false means no owned device exists. */
+    suspend fun revokeWithAudit(partyId: UUID, deviceId: UUID, actorId: String): Boolean
+
     suspend fun findByCredentialId(credentialId: String): EnrolledDevice?
 
     suspend fun findByPartyId(partyId: UUID): List<EnrolledDevice>
 }
 
 /**
- * Transient store of signature-verified device decisions, keyed by challenge id.
- * Mirrors [OtpStore]: a decision only needs to outlive its challenge.
+ * Durable store of signature-verified decisions, keyed by challenge id. Authorization
+ * expiry does not delete evidence. Acceptance and its audit event must commit together.
  */
 interface ScaDecisionStore {
 
-    suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long)
+    /** Atomically retain the first eligible decision and its audit event; false means it cannot be accepted. */
+    suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean
 
     suspend fun find(challengeId: UUID): DeviceApprovalDecision?
 }
@@ -101,6 +105,8 @@ interface DeviceAssertionVerifier {
         signatureB64: String,
     ): Boolean
 }
+
+class ScaConcurrentUpdateException(id: UUID) : IllegalStateException("SCA challenge $id was concurrently modified")
 
 /**
  * The register's answer to "is this party a natural person?" (#10281 item 1). A device key is a

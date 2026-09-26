@@ -50,7 +50,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6246ea5d604b1435"
+        openbank.tech/policy-checksum: "6d191b2b9a3a5dc3"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.

@@ -27,12 +27,31 @@ spec:
   # than run initdb. Credentials via EKS Pod Identity on this namespace's CNPG
   # ServiceAccount, granted read-only against the ledger-db backup prefix — the
   # restore must not be able to write back to the source bucket path it reads from.
+  managed:
+    roles:
+      - name: ledger_dr_check
+        ensure: present
+        login: true
+        inherit: true
+        superuser: false
+        createdb: false
+        createrole: false
+        replication: false
+        bypassrls: false
+        inRoles:
+          - pg_read_all_data
+        passwordSecret:
+          name: ledger-dr-check-db
   bootstrap:
     recovery:
       source: ledger-db-source
+      database: openbank_ledger
+      owner: openbank
   externalClusters:
     - name: ledger-db-source
       barmanObjectStore:
+        # Select the original archive, not the external-cluster alias.
+        serverName: ledger-db
         destinationPath: s3://openbank-sandbox-db-backups/ledger-db
         s3Credentials:
           inheritFromIAMRole: true

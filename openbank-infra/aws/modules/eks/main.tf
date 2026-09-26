@@ -163,6 +163,9 @@ resource "aws_iam_role_policy_attachment" "node" {
 }
 
 resource "aws_eks_node_group" "bootstrap" {
+  # An omitted version remains at the existing node version after a control-plane upgrade.
+  # Keep the managed workers on the reviewed cluster version; max_unavailable bounds the roll.
+  version         = aws_eks_cluster.this.version
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "${var.name}-bootstrap"
   node_role_arn   = aws_iam_role.node.arn
@@ -197,6 +200,7 @@ resource "aws_eks_node_group" "bootstrap" {
   depends_on = [
     aws_iam_role_policy_attachment.node,
     aws_eks_addon.vpc_cni,
+    aws_eks_addon.kube_proxy,
   ]
 
   lifecycle {
@@ -218,9 +222,11 @@ resource "aws_eks_node_group" "bootstrap" {
 # node group.
 # ---------------------------------------------------------------------------
 data "aws_eks_addon_version" "this" {
-  for_each           = toset(["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"])
-  addon_name         = each.value
-  kubernetes_version = aws_eks_cluster.this.version
+  for_each   = toset(["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"])
+  addon_name = each.value
+  # Resolve exact add-on versions during plan; the target is already a reviewed input.
+  # Add-on resources still depend on the cluster, so updates follow the control-plane upgrade.
+  kubernetes_version = var.kubernetes_version
 }
 
 resource "aws_eks_addon" "vpc_cni" {

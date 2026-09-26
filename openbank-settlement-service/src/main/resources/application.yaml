@@ -72,6 +72,8 @@ quarkus:
       scope: jakarta.inject.Singleton
 
 openbank:
+  outbox:
+    dispatch-enabled: true
   temporal:
     # ADR-0209 D1 (#2572): server-url and namespace were previously carried as this service's own
     # @WithDefault values in a per-service TemporalConfig copy. The shared contract in
@@ -85,6 +87,8 @@ openbank:
   build:
     time: "${BUILD_TIME:unknown}"
   settlement:
+    # Upgrade every originator/worker and verify balance projection before new originations opt in.
+    ledger-projection-enabled: "${SETTLEMENT_LEDGER_PROJECTION_ENABLED:false}"
     gl:
       debit-account-id: "${SETTLEMENT_GL_DEBIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
       credit-account-id: "${SETTLEMENT_GL_CREDIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
@@ -95,6 +99,8 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 "%test":
   quarkus:
@@ -108,6 +114,8 @@ authz:
       ledger-api:
         url: http://localhost:${quarkus.http.port}
   openbank:
+    outbox:
+      dispatch-enabled: false
     settlement:
       # No real Temporal frontend in @QuarkusTest: don't register the worker (it would fail boot on
       # UNAVAILABLE). Tests that need the workflow drive their own in-process TestWorkflowEnvironment.
@@ -116,3 +124,28 @@ authz:
       gl:
         debit-account-id: "a0000000-0000-0000-0000-000000000002"
         credit-account-id: "a0000000-0000-0000-0000-000000000002"
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security:
+          protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl:
+          keystore:
+            location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+            type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+          truststore:
+            location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+            type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      settlement-events-out:
+        connector: smallrye-kafka
+        topic: openbank.settlement.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        acks: all

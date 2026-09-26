@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "6300d162fd520b81"
+    openbank.tech/policy-checksum: "c8e5ab4c2096ad1e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -759,7 +759,8 @@ data:
     #   transaction-service (BalanceCoverRestClient, named oidc-client `m2m`): the cover hold and its
     #     release -> balance.hold + balance.holdRelease. Never a booked debit/credit.
     #   settlement-service  (BalanceRestClient, named oidc-client `m2m`): the settlement workflow's
-    #     balance legs -> balance.debit + balance.credit. Never a hold.
+    #     legacy balance legs -> balance.debit + balance.credit; ledger-projection origination
+    #     reserves cover -> balance.hold. Never directly release a hold on an unknown journal outcome.
     allowed_reasons contains "service-transaction-balance-hold" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-transaction"
@@ -770,6 +771,14 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-settlement"
     	input.action in {"balance.debit", "balance.credit"}
+    }
+
+    # Preserve legacy grants while the new protocol originates a payer reservation. Only ledger
+    # projection consumes that reservation; settlement cannot directly release it after a timeout.
+    allowed_reasons contains "service-settlement-balance-cover" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-settlement"
+    	input.action == "balance.hold"
     }
 
     prohibited if {
@@ -1556,6 +1565,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller.
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1971,7 +1981,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only instruction-bound origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"

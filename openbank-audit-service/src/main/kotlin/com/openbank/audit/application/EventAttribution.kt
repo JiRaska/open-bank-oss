@@ -5,6 +5,8 @@
 package com.openbank.audit.application
 
 import com.openbank.libs.analytics.TopicProducers
+import com.openbank.libs.domain.identifiers.Ids
+import java.util.UUID
 
 /**
  * Broker-side addressing for one consumed audit record (#3994).
@@ -27,7 +29,19 @@ data class EventAddress(
     val topic: String? = null,
     /** `ce-type` header — the outbox event type (`OutboxKafkaHeaders.HEADER_EVENT_TYPE`). */
     val ceType: String? = null,
+    val partition: Int? = null,
+    val offset: Long? = null,
 ) {
+    fun entryId(producerId: String?): UUID = producerId?.let(UUID::fromString) ?: recordId() ?: Ids.newId()
+
+    /** Stable within the original Kafka address; body-only replays need a producer event ID. */
+    fun recordId(): UUID? {
+        if (topic.isNullOrBlank()) return null
+        if (partition == null || partition < 0) return null
+        if (offset == null || offset < 0) return null
+        return UUID.nameUUIDFromBytes("openbank.audit.kafka:$topic:$partition:$offset".toByteArray(Charsets.UTF_8))
+    }
+
     companion object {
         /** No broker metadata available — a hand-constructed or replayed record. */
         val NONE = EventAddress()

@@ -18,6 +18,8 @@ import com.openbank.sca.application.port.`in`.ListDevicesQuery
 import com.openbank.sca.application.port.`in`.ListDevicesUseCase
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionCommand
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionUseCase
+import com.openbank.sca.application.port.`in`.RevokeDeviceCommand
+import com.openbank.sca.application.port.`in`.RevokeDeviceUseCase
 import com.openbank.sca.application.port.`in`.VerifyScaCommand
 import com.openbank.sca.application.port.`in`.VerifyScaUseCase
 import com.openbank.sca.application.port.out.DeviceAssertionVerifier
@@ -85,10 +87,11 @@ class ScaDynamicLinkingMismatchException(id: UUID) :
     RuntimeException("Operation does not match what the device signed for challenge: $id")
 class DeviceNotEnrolledException(credentialId: String) :
     RuntimeException("Device credential not enrolled: $credentialId")
+class DeviceRevokedException(credentialId: String) : RuntimeException("Device credential is revoked: $credentialId")
 class DeviceOwnershipMismatchException(credentialId: String) :
     RuntimeException("Device credential does not belong to the challenge party: $credentialId")
 class CredentialAlreadyEnrolledException(credentialId: String) :
-    RuntimeException("Credential '$credentialId' is already enrolled by another party")
+    RuntimeException("Credential '$credentialId' is already enrolled and cannot be replaced")
 class InvalidDeviceAssertionException(id: UUID) : RuntimeException("Invalid device assertion for challenge: $id")
 
 /**
@@ -132,7 +135,8 @@ class ScaService(
     EnrollDeviceUseCase,
     RecordDeviceDecisionUseCase,
     ListDevicesUseCase,
-    ConsumeScaUseCase {
+    ConsumeScaUseCase,
+    RevokeDeviceUseCase {
 
     @Inject
     constructor(
@@ -306,7 +310,7 @@ class ScaService(
         }
         if (partyType !in NATURAL_PERSON_TYPES) throw NonNaturalPersonEnrolmentException(command.partyId, partyType)
         enrolledDeviceRepository.findByCredentialId(command.credentialId)?.let { existing ->
-            if (existing.partyId == command.partyId) return existing
+            if (existing.partyId == command.partyId && existing.revokedAt == null) return existing
             throw CredentialAlreadyEnrolledException(command.credentialId)
         }
         val now = OffsetDateTime.now(clock)
@@ -321,7 +325,7 @@ class ScaService(
         // used to be two — `enrolledDeviceRepository.save(...)` followed by
         // `outboxRepository.save(...)`, each opening its own `Panache.withTransaction`, measured
         // as xmin 751 vs 752 — so a crash in between enrolled the device and lost the event with
-        // nothing to retry it. This is sca's only outbox write.
+        // nothing to retry it. Decision acceptance has its own atomic outbox write.
         return try {
             enrolledDeviceRepository.saveWithOutbox(
                 device,
@@ -358,6 +362,12 @@ class ScaService(
         }
     }
 
+    override suspend fun revoke(command: RevokeDeviceCommand) {
+        if (!enrolledDeviceRepository.revokeWithAudit(command.partyId, command.deviceId, command.actorId)) {
+            throw DeviceNotEnrolledException(command.deviceId.toString())
+        }
+    }
+
     override suspend fun listDevices(query: ListDevicesQuery): List<EnrolledDevice> =
         enrolledDeviceRepository.findByPartyId(query.partyId)
 
@@ -368,13 +378,13 @@ class ScaService(
         if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         if (challenge.status != ScaStatus.PENDING) throw ScaChallengeNotAwaitingException(command.challengeId)
 
-        // P2 idempotency: a decision is write-once. Reject any second call so a DENIED cannot
-        // be overwritten with APPROVED by re-sending a valid signature (even though that would
-        // require a valid signed assertion, it is a better design principle to be immutable).
+        // Fast rejection of an existing decision. The atomic store claim below also handles
+        // two valid decisions racing after both callers observe this key as absent.
         if (decisionStore.find(command.challengeId) != null) throw ScaChallengeNotAwaitingException(command.challengeId)
 
         val device = enrolledDeviceRepository.findByCredentialId(command.credentialId)
             ?: throw DeviceNotEnrolledException(command.credentialId)
+        if (device.revokedAt != null) throw DeviceRevokedException(command.credentialId)
         if (device.partyId != challenge.partyId) throw DeviceOwnershipMismatchException(command.credentialId)
 
         // Dynamic linking (RTS Art. 5): the device must have signed THIS challenge's amount+payee.
@@ -388,17 +398,20 @@ class ScaService(
         if (!signatureValid) throw InvalidDeviceAssertionException(command.challengeId)
 
         val ttl = maxOf(1L, java.time.Duration.between(now, challenge.expiresAt).seconds)
-        decisionStore.record(
+        val recorded = decisionStore.record(
             DeviceApprovalDecision(
                 challengeId = command.challengeId,
                 credentialId = command.credentialId,
                 decision = command.decision,
                 signatureB64 = command.signatureB64,
                 decidedAt = now,
+                challengeVersion = challenge.version,
+
                 decidingPartyId = device.partyId,
             ),
             ttlSeconds = ttl,
         )
+        if (!recorded) throw ScaChallengeNotAwaitingException(command.challengeId)
         return challenge
     }
 
@@ -421,12 +434,12 @@ class ScaService(
             throw ScaChallengePartyMismatchException(command.challengeId)
         }
         if (challenge.consumedAt != null) throw ScaChallengeAlreadyConsumedException(command.challengeId)
+        if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         // A decoupled challenge may hold a signature-verified device decision that nobody has
         // promoted yet (verify() is a separate call) — resolve it now rather than refusing.
         if (challenge.status == ScaStatus.PENDING &&
             (challenge.method == ScaMethod.PUSH_NOTIFICATION || challenge.method == ScaMethod.BIOMETRIC)
         ) {
-            if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
             challenge = verifyDecoupled(challenge, now)
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)

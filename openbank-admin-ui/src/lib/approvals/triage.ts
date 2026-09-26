@@ -20,6 +20,7 @@ export type ApprovalDomain =
   | 'billing'
   | 'delegation'
   | 'communication'
+  | 'sca'
 
 export type DomainApprovalItem = {
   id: string
@@ -67,6 +68,9 @@ export function approvalWorkbenchHref(item: DomainApprovalItem): string | null {
   }
   if (item.domain === 'delegation') {
     return `/approvals/delegation/${encodeURIComponent(item.id)}`
+  }
+  if (item.domain === 'sca') {
+    return `/approvals/sca/${encodeURIComponent(item.id)}`
   }
   if (item.domain === 'communication') {
     return '/approvals/communication'

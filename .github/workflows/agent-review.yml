@@ -218,7 +218,7 @@ jobs:
           fi
           # CLI budget is an estimate, not a provider billing or subscription hard cap.
           touch /tmp/review.started
-          claude -p "$(cat /tmp/prompt.txt)" --model sonnet --max-turns 2 --max-budget-usd 0.50 \
+          claude -p < /tmp/prompt.txt --model sonnet --max-turns 2 --max-budget-usd 0.50 \
             --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
             --setting-sources "" --no-session-persistence \
             --output-format stream-json --verbose > /tmp/review.raw 2>&1 || { echo "::error::review invocation failed; no retry"; exit 1; }

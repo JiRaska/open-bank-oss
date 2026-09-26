@@ -5,6 +5,7 @@
 package com.openbank.sca.infrastructure.persistence.repository
 
 import com.openbank.sca.application.port.out.ScaChallengeRepository
+import com.openbank.sca.application.port.out.ScaConcurrentUpdateException
 import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaStatus
 import com.openbank.sca.infrastructure.persistence.entity.ScaChallengeEntity
@@ -13,6 +14,7 @@ import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.OptimisticLockException
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -29,7 +31,8 @@ class ScaChallengeRepositoryImpl :
         val entity = ScaChallengeEntity.fromDomain(challenge)
         val merged = Panache.withTransaction {
             getSession().flatMap { s -> s.merge(entity) }
-        }.awaitSuspending()
+        }.onFailure(OptimisticLockException::class.java).transform { ScaConcurrentUpdateException(challenge.id) }
+            .awaitSuspending()
         return merged.toDomain()
     }
 
@@ -46,6 +49,12 @@ class ScaChallengeRepositoryImpl :
     }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun markConsumed(id: UUID): Boolean = Panache.withTransaction {
-        update("consumedAt = ?1 where id = ?2 and consumedAt is null", OffsetDateTime.now(clock), id)
+        update(
+            "consumedAt = ?1, version = version + 1 where id = ?2 and consumedAt is null " +
+                "and status = ?3 and expiresAt > ?1",
+            OffsetDateTime.now(clock),
+            id,
+            ScaStatus.COMPLETED,
+        )
     }.awaitSuspending() == 1
 }

@@ -1,12 +1,13 @@
-openapi: "3.0.3"
+openapi: 3.0.3
 info:
   title: OpenBank Settlement Service
-  version: "1.6.0"
-  description: "Settlement orchestration service (ADR-0101 P3)"
+  version: 1.12.0
+  description: Settlement orchestration service (ADR-0101 P3)
 paths:
   /api/v1/settlements:
     post:
-      tags: [Settlements]
+      tags:
+      - Settlements
       summary: Originate a settlement and start its workflow
       operationId: originateSettlement
       requestBody:
@@ -14,76 +15,417 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateSettlementRequest"
+              $ref: '#/components/schemas/CreateSettlementRequest'
       responses:
-        "201":
+        '201':
           description: Settlement created (PENDING); the workflow settles it asynchronously.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SettlementResponse"
-        "401":
+                $ref: '#/components/schemas/SettlementResponse'
+        '401':
           description: Unauthenticated.
-        "403":
-          description: >-
-            Not authorized. Requires SERVICE/OPERATOR/ADMIN (RBAC) and an allow decision
-            from the fine-grained `settlement.create` OPA policy, enforced as of
-            ADR-0034 Phase 5 (issue #266).
+        '403':
+          description: 'Not authorized. Requires SERVICE/OPERATOR/ADMIN (RBAC) and
+            an allow decision from the fine-grained `settlement.create` OPA policy,
+            enforced as of ADR-0034 Phase 5 (issue #266).'
+        '400':
+          description: Invalid instruction, or the idempotency key belongs to a different
+            payer, payee, amount or currency.
+        '202':
+          description: Four-eyes approval is required; no settlement or workflow has
+            been created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                - approvalId
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - PENDING_APPROVAL
+                  approvalId:
+                    type: string
+      parameters:
+      - in: header
+        name: X-Approval-Id
+        required: false
+        schema:
+          type: string
+        description: Single-use maker/checker approval bound to the complete settlement
+          instruction.
+  /api/v1/settlements/{id}:
+    get:
+      tags:
+      - Settlements
+      operationId: getSettlement
+      summary: Read persisted settlement state without executing a transfer
+      description: Approval EXECUTED is only an authorization claim. This endpoint returns
+        the stored financial state, including uncertainty and compensation failures.
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Persisted financial state. Responses are not cacheable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementDetails'
+        '400':
+          description: Malformed settlement UUID.
+        '401':
+          description: Unauthenticated.
+        '403':
+          description: Not an authorized human operator or administrator.
+        '404':
+          description: No persisted settlement with this UUID.
+  /api/v1/settlements/approvals:
+    post:
+      tags:
+      - Settlements
+      operationId: proposeSettlement
+      summary: Submit a settlement instruction for approval without financial execution
+      description: |
+        Always creates a pending approval, including when four-eyes enforcement is disabled.
+        Does not create a settlement or consume an existing approval. Repeated submissions
+        may create separate approvals for the same immutable proposal; do not automatically
+        retry after an ambiguous response. Preserve the original instruction and reconcile
+        pending approvals before submitting again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSettlementRequest'
+      responses:
+        '202':
+          description: Pending approval and immutable instruction recorded with audit evidence.
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Approval detail URL.
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementApproval'
+        '400':
+          description: Missing or invalid settlement instruction.
+        '401':
+          description: Unauthenticated.
+        '403':
+          description: Not an authorized human operator or administrator.
+    get:
+      tags:
+      - Settlements
+      operationId: listSettlementApprovals
+      summary: List pending settlement approvals
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SettlementApproval'
+        '401': &id001
+          description: Unauthenticated.
+        '403': &id002
+          description: Not authorized.
+  /api/v1/settlements/approvals/{id}:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Settlements
+      operationId: getSettlementApproval
+      responses:
+        '200': &id003
+          description: Approval metadata. EXECUTED means authorization claimed, not
+            financial completion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementApproval'
+        '404':
+          description: No retained approval record was found.
+        '401': *id001
+        '403': *id002
+    patch:
+      tags:
+      - Settlements
+      operationId: decideSettlementApproval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideSettlementApproval'
+      responses:
+        '200': *id003
+        '400':
+          description: Missing body, missing reviewed instruction or instruction mismatch.
+        '404':
+          description: Not found or expired.
+        '409':
+          description: Approval already decided or consumed.
+        '401': *id001
+        '403': *id002
 components:
   schemas:
+    SettlementDetails:
+      type: object
+      required: [id, payerAccountId, payeeAccountId, amount, currency, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        payerAccountId:
+          type: string
+          format: uuid
+        payeeAccountId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          description: Exact persisted decimal amount; preserve as text in clients.
+        currency:
+          type: string
+        status:
+          type: string
+          description: Actual stored state. Only BOOKED confirms settlement completion;
+            uncertainty and compensation states must not be treated as success.
+          enum:
+          - PENDING
+          - DEBITED
+          - CREDITED
+          - BOOKED
+          - REJECTED
+          - REVERSED
+          - CREDITED_REVERSED
+          - REVERSAL_FAILED
+          - BALANCE_STATE_UNKNOWN
+          - LEDGER_REVERSAL_UNSUPPORTED
+          - LEDGER_NOT_POSTED
+          - LEDGER_STATE_UNKNOWN
+          - LEDGER_REVERSED
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     CreateSettlementRequest:
       type: object
-      required: [idempotencyKey, payerAccountId, payeeAccountId, amount, currency]
+      required:
+      - idempotencyKey
+      - payerAccountId
+      - payeeAccountId
+      - amount
+      - currency
       properties:
         idempotencyKey:
           type: string
           minLength: 1
-          description: "Caller-supplied dedup token; re-submitting the same key returns the original settlement."
-        payerAccountId: { type: string, format: uuid }
-        payeeAccountId: { type: string, format: uuid }
-        amount: { type: string, description: "Positive decimal amount, e.g. 250.00" }
-        currency: { type: string, minLength: 3, maxLength: 3, example: CZK }
+          description: Caller-supplied dedup token; re-submitting the same key returns
+            the original settlement.
+        payerAccountId:
+          type: string
+          format: uuid
+        payeeAccountId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          description: Positive decimal amount with at most 15 integer and 4 fractional
+            digits, e.g. 250.00. Excess trailing zeroes are accepted; rounding is never applied.
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CZK
     SettlementResponse:
       type: object
       properties:
-        id: { type: string, format: uuid }
-        payerAccountId: { type: string, format: uuid }
-        payeeAccountId: { type: string, format: uuid }
-        amount: { type: string }
-        currency: { type: string }
+        id:
+          type: string
+          format: uuid
+        payerAccountId:
+          type: string
+          format: uuid
+        payeeAccountId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          description: Persisted decimal amount, using the database precision of four
+            fractional digits.
+        currency:
+          type: string
         status:
           type: string
-          description: >
-            Settlement saga state. The compensation outcomes are distinct values on purpose
-            (issue #6037): REVERSED and CREDITED_REVERSED mean balance-service accepted the
-            counter-movement and the money is back; REVERSAL_FAILED means a reversal was attempted
-            and refused (typically the payee has spent the funds) and the money is still moved;
-            LEDGER_REVERSAL_UNSUPPORTED means a journal for this settlement was confirmed to
-            exist in the general ledger and was not reversed, so the GL needs a manual correcting
-            entry; LEDGER_NOT_POSTED means the ledger was asked and holds no journal for the
-            settlement, so nothing was owed and nothing was done; LEDGER_STATE_UNKNOWN means the
-            lookup itself failed and neither of those two could be established (issue #6410).
-            Those three are separate values rather than one because they call for different
-            actions, and reporting the wrong one either summons an accountant to correct an entry
-            that does not exist or asserts a clean ledger nobody checked.
-            LEDGER_REVERSED is deprecated and is no longer produced —
-            the code path that wrote it updated this column without reversing anything.
-            REJECTED means the saga unwound COMPLETELY: it is written only when every compensation
-            succeeded (issue #6286). A settlement whose compensation was refused stays in
-            REVERSAL_FAILED and is never rejected, so REJECTED never has to be read as "possibly
-            still owed".
+          description: 'Settlement saga state. The compensation outcomes are distinct
+            values on purpose (issue #6037): REVERSED and CREDITED_REVERSED mean balance-service
+            accepted the counter-movement and the money is back; REVERSAL_FAILED means
+            a reversal was attempted and refused (typically the payee has spent the
+            funds) and the money is still moved; LEDGER_REVERSAL_UNSUPPORTED means
+            a journal for this settlement was confirmed to exist in the general ledger
+            and was not reversed, so the GL needs a manual correcting entry; LEDGER_NOT_POSTED
+            means the ledger was asked and holds no journal for the settlement, so
+            nothing was owed and nothing was done; LEDGER_STATE_UNKNOWN means the
+            lookup itself failed and neither of those two could be established (issue
+            #6410). Those three are separate values rather than one because they call
+            for different actions, and reporting the wrong one either summons an accountant
+            to correct an entry that does not exist or asserts a clean ledger nobody
+            checked. An uncertain forward balance movement is exposed as PENDING with
+            recoveryRequired=true and recoveryReason=BALANCE_STATE_UNKNOWN. PENDING
+            does not prove no money has moved. LEDGER_REVERSED is deprecated and is
+            no longer produced — the code path that wrote it updated this column without
+            reversing anything. REJECTED means the saga unwound COMPLETELY: it is
+            written only when every compensation succeeded (issue #6286). A settlement
+            whose compensation was refused stays in REVERSAL_FAILED and is never rejected,
+            so REJECTED never has to be read as "possibly still owed".
+
+            '
           enum:
-            - PENDING
-            - DEBITED
-            - CREDITED
-            - BOOKED
-            - REJECTED
-            - REVERSED
-            - CREDITED_REVERSED
-            - REVERSAL_FAILED
-            - LEDGER_REVERSAL_UNSUPPORTED
-            - LEDGER_NOT_POSTED
-            - LEDGER_STATE_UNKNOWN
-            - LEDGER_REVERSED
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+          - PENDING
+          - DEBITED
+          - CREDITED
+          - BOOKED
+          - REJECTED
+          - REVERSED
+          - CREDITED_REVERSED
+          - REVERSAL_FAILED
+          - LEDGER_REVERSAL_UNSUPPORTED
+          - LEDGER_NOT_POSTED
+          - LEDGER_STATE_UNKNOWN
+          - LEDGER_REVERSED
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        recoveryRequired:
+          type: boolean
+          description: An uncertain forward balance movement requires reconciliation
+            before settlement can finish.
+        recoveryReason:
+          type: string
+          nullable: true
+          description: Reason for required reconciliation, or null. BALANCE_STATE_UNKNOWN
+            means a forward debit or credit may have committed without a reliable
+            completion result. Clients must tolerate additional reasons. No automatic
+            counter-movement or rejection is attempted.
+    SettlementApproval:
+      type: object
+      required:
+      - id
+      - action
+      - status
+      - makerId
+      - createdAt
+      properties:
+        proposalId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Immutable proposal identity returned on detail reads; absent for legacy approvals.
+        instruction:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/CreateSettlementRequest'
+          description: Complete server-stored instruction returned on authorized detail reads.
+        id:
+          type: string
+        action:
+          type: string
+        resourceId:
+          type: string
+          nullable: true
+          description: Server-computed SHA-256 binding of the proposed instruction;
+            not the instruction itself.
+        status:
+          type: string
+          enum:
+          - PENDING
+          - APPROVED
+          - REJECTED
+          - EXECUTED
+        makerId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        decidedBy:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Authorization expiry returned on detail reads; retained evidence remains readable.
+        expired:
+          type: boolean
+          nullable: true
+          description: Server-observed authorization expiry. Does not change the recorded approval status.
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        claimedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Authorization consumption time, not financial completion time.
+        settlementId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Existing settlement whose complete instruction matches the stored proposal. Read its financial status separately.
+        settlementCorrelation:
+          type: string
+          nullable: true
+          enum: [NOT_OBSERVED, MATCHED, CONFLICT]
+          description: Detail-read correlation, absent for legacy approvals without a proposal. NOT_OBSERVED is not proof of non-execution; CONFLICT means the key resolves to a different instruction. MATCHED does not mean BOOKED.
+    DecideSettlementApproval:
+      type: object
+      required:
+      - approve
+      properties:
+        approve:
+          type: boolean
+        instruction:
+          $ref: '#/components/schemas/CreateSettlementRequest'
+      description: Approval requires the complete instruction independently reviewed
+        by the checker and matching the pending binding. Rejection may omit it.

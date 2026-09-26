@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.10.0
+  version: 1.12.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -18,6 +18,90 @@ tags:
   - name: SCA
 
 paths:
+  /api/v1/sca/approvals:
+    get:
+      tags: [SCA]
+      summary: List pending operator approvals, oldest first
+      operationId: listScaApprovals
+      parameters:
+        - name: limit
+          in: query
+          description: Clamped to 1 through 200.
+          schema: {type: integer, default: 50}
+      responses:
+        '200':
+          description: Pending approvals accessible to operators and administrators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/sca/approvals/{id}:
+    get:
+      tags: [SCA]
+      summary: Read an SCA authorization approval by id
+      operationId: getScaApproval
+      description: >-
+        Includes decided and consumed approvals until their TTL expires. EXECUTED records
+        an authorization claim, not business completion. Access is operator or administrator only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Authorization approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Approval is missing or expired
+    patch:
+      tags: [SCA]
+      summary: Approve or reject a pending SCA operator action
+      operationId: decideScaApproval
+      description: >-
+        The checker must differ from the maker. An approval can be decided once.
+        The maker then retries the identical operation with X-Approval-Id.
+        This authorization record is TTL-bounded and does not assert business completion.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: {type: boolean}
+      responses:
+        '200':
+          description: Checker decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '400':
+          description: Request body is required and must contain a decision
+        '403':
+          description: Self-approval or unauthorized checker
+        '404':
+          description: Approval is missing or expired
+        '409':
+          description: Approval has already been decided or consumed
+
   /api/v1/sca/challenges:
     post:
       tags: [SCA]
@@ -99,13 +183,119 @@ paths:
           description: Invalid or expired code
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Challenge expired or concurrently modified
         '429':
           description: Max attempts exceeded
+
+  /api/v1/sca/challenges/{id}/consume:
+    post:
+      tags: [SCA]
+      summary: Consume an approved challenge once for its bound operation
+      operationId: consumeScaChallenge
+      description: >-
+        Requires the expected party and matching dynamic-linking fields. The challenge must
+        be completed, unexpired and unconsumed at the database update. A concurrent lifecycle
+        update is rejected; the caller must re-read the challenge before retrying.
+        An APPROVAL challenge also binds approvalRequestId and payloadSha256; a mismatched
+        operation returns 409 without consuming the challenge.
+      parameters:
+        - $ref: '#/components/parameters/approvalId'
+        - $ref: '#/components/parameters/challengeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeScaRequest'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingApproval'
+        '503':
+          description: Authorization service or required approval infrastructure unavailable
+        '200':
+          description: Challenge consumed; consumedAt is populated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaChallengeResponse'
+        '400':
+          description: Invalid request or challenge not approved
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Challenge already consumed, no longer eligible, or dynamic linking does not match
+        '422':
+          description: Challenge expired or concurrently modified
+
+  /api/v1/sca/parties/{partyId}/challenges/pending:
+    get:
+      tags: [SCA]
+      summary: List a party's pending unexpired approvals
+      description: Customer callers must have a UUID party identity matching partyId.
+      operationId: listPendingScaChallenges
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Pending challenges with the operation to display before signing
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingScaResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/sca/parties/{partyId}/devices/{deviceId}:
+    delete:
+      tags: [SCA]
+      summary: Revoke an enrolled device credential
+      description: |
+        Revokes the owned credential and cancels its pending or completed, unconsumed
+        approvals in the same transaction as the audit event. Repeated revocation is a
+        successful no-op. Public keys and prior signatures remain as evidence. Customers
+        must own the party; the money-path four-eyes policy also applies in enforced mode.
+      operationId: revokeScaDevice
+      parameters:
+        - $ref: '#/components/parameters/approvalId'
+        - name: partyId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: deviceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingApproval'
+        '503':
+          description: Authorization service or required approval infrastructure unavailable
+        '204':
+          description: Credential revoked or already revoked
+        '401':
+          description: Authentication required
+        '403':
+          description: Ownership or authorization policy rejected the request
+        '404':
+          description: No such device belongs to the party
+        '409':
+          description: Revocation transaction conflicted; reconcile before retrying
 
   /api/v1/sca/parties/{partyId}/devices:
     get:
       tags: [SCA]
       summary: List device credentials enrolled to a party
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listScaDevices
       parameters:
         - name: partyId
@@ -129,12 +319,14 @@ paths:
       tags: [SCA]
       summary: Enrol a device credential for decoupled approval (ADR-0021)
       description: >-
+        Customer callers must have a UUID party identity matching partyId.
         Idempotent on the credentialId natural key (ADR-0296): re-enrolling the same credential
         for the same party replays the original enrollment (201, no duplicate row;
         `credential_id UNIQUE`, V4, is the race backstop). The same credentialId presented for a
         DIFFERENT party is refused (409) — a credential belongs to exactly one party.
       operationId: enrollScaDevice
       parameters:
+        - $ref: '#/components/parameters/approvalId'
         - name: partyId
           in: path
           required: true
@@ -148,6 +340,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EnrollDeviceRequest'
       responses:
+        '202':
+          $ref: '#/components/responses/PendingApproval'
         '201':
           description: Device enrolled
           content:
@@ -166,71 +360,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: The party register could not be asked; enrolment fails closed.
+          description: Party register, authorization service or required approval infrastructure unavailable; enrolment fails closed.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-
-  /api/v1/sca/parties/{partyId}/challenges/pending:
-    get:
-      tags: [SCA]
-      summary: Live challenges awaiting a decision for a party
-      operationId: listPendingScaChallenges
-      parameters:
-        - name: partyId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: Pending challenges, newest first, with what is being approved.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PendingScaResponse'
-
-  /api/v1/sca/challenges/{id}/consume:
-    post:
-      tags: [SCA]
-      summary: Spend an approved challenge on exactly the operation it authorised (single use)
-      description: >-
-        Every dynamic-linking field is compared: amount/currency/creditor (payment),
-        documentSha256/ceremonyId (document), cardId/cardAction (card) and, for an APPROVAL
-        challenge, approvalRequestId/payloadSha256. A challenge raised for one shape can never
-        be spent on another; a mismatch answers 409 and does not burn the challenge.
-      operationId: consumeScaChallenge
-      parameters:
-        - $ref: '#/components/parameters/challengeId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ConsumeScaRequest'
-      responses:
-        '200':
-          description: Consumed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScaChallengeResponse'
-        '403':
-          description: The challenge belongs to another party
-        '404':
-          description: Challenge not found
-        '409':
-          description: Already consumed, or the operation does not match what the device signed
 
   /api/v1/sca/challenges/{id}/decision:
     post:
       tags: [SCA]
       summary: Record an out-of-band device approval/denial (ADR-0021)
       description: >-
+        A successful response acknowledges a durable first decision and its atomic audit event.
+        Expiry limits authorization; it does not delete signature evidence.
         Authenticated as the enrolled device/party (a different principal from the verify caller).
         The signed assertion is verified against the challenge's dynamic-linking data (amount, payee)
         before it is recorded. No valid decision leaves the challenge PENDING — push/biometric is
@@ -254,14 +396,26 @@ paths:
         '401':
           description: Invalid device assertion
         '403':
-          description: Device does not belong to the challenge party
+          description: Device is revoked or does not belong to the challenge party
         '404':
           description: Challenge or device not found
         '409':
-          description: Challenge is not awaiting a decision
+          description: Challenge is not awaiting a decision or another signed decision won the atomic claim
+        '422':
+          description: Challenge expired
 
 components:
   parameters:
+    approvalId:
+      name: X-Approval-Id
+      in: header
+      required: false
+      description: >-
+        One-use approval for this action, maker and exact resource. Device revocation binds
+        party and device id; enrollment binds party and a SHA-256 fingerprint of credentialId,
+        publicKey and algorithm. Missing or mismatched approval returns 202 when required by policy
+        and four-eyes enforcement is enabled. Existing service-account exemptions remain applicable.
+      schema: {type: string}
     challengeId:
       name: id
       in: path
@@ -271,6 +425,16 @@ components:
         format: uuid
 
   responses:
+    PendingApproval:
+      description: Operation parked until a distinct checker approves it; no business write occurred
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status, approvalId]
+            properties:
+              status: {type: string, enum: [PENDING_APPROVAL]}
+              approvalId: {type: string}
     Forbidden:
       description: Authenticated but denied by the OPA authorization policy (ADR-0034)
       content:
@@ -285,6 +449,17 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      required: [id, action, status, makerId, createdAt]
+      properties:
+        id: {type: string}
+        action: {type: string}
+        resourceId: {type: [string, 'null']}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED]}
+        makerId: {type: string}
+        createdAt: {type: string, format: date-time}
+        decidedBy: {type: [string, 'null']}
     InitiateScaRequest:
       type: object
       required: [partyId, purpose]
@@ -391,11 +566,32 @@ components:
           format: uuid
         challengeType:
           type: string
+          deprecated: true
+          description: Legacy documentation field; the current response uses purpose and method.
+        purpose:
+          type: string
+        method:
+          type: string
+          enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC]
         status:
           type: string
           enum: [PENDING, COMPLETED, FAILED, EXPIRED, CANCELLED]
         attemptsRemaining:
           type: integer
+          deprecated: true
+          description: Legacy documentation field; the current response uses attemptCount and maxAttempts.
+        attemptCount:
+          type: integer
+        maxAttempts:
+          type: integer
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
         expiresAt:
           type: string
           format: date-time
@@ -441,6 +637,10 @@ components:
           type: string
           format: date-time
           description: When the device credential was enrolled.
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Revocation time; a revoked credential cannot be reactivated by enrollment.
 
     RecordDecisionRequest:
       type: object

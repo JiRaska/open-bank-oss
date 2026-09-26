@@ -188,12 +188,22 @@ test_settlement_may_debit_and_credit_via_its_identity_rule if {
 	}
 }
 
+# The ledger-projection workflow reserves cover through the same named m2m client.
+# Only journal projection may consume it; no direct release grant accompanies this hold.
+test_settlement_may_reserve_projection_cover if {
+	decision := rest.allow with input as {"principal": settlement_m2m, "action": "balance.hold"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-settlement-balance-cover" in rest.allowed_reasons with input as {"principal": settlement_m2m, "action": "balance.hold"}
+		with data.rules as rules_mock
+}
+
 test_batch2_identities_denied_every_other_balance_action if {
 	every action in balance_actions - {"balance.hold", "balance.holdRelease"} {
 		rest.allow == false with input as {"principal": transaction_m2m, "action": action}
 			with data.rules as rules_mock
 	}
-	every action in balance_actions - {"balance.debit", "balance.credit"} {
+	every action in balance_actions - {"balance.debit", "balance.credit", "balance.hold"} {
 		rest.allow == false with input as {"principal": settlement_m2m, "action": action}
 			with data.rules as rules_mock
 	}
@@ -212,5 +222,13 @@ test_batch2_balance_rules_do_not_admit_the_shared_client if {
 	not "service-transaction-balance-hold" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "balance.hold"}
 		with data.rules as rules_mock
 	not "service-settlement-balance-move" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "balance.debit"}
+		with data.rules as rules_mock
+}
+
+test_settlement_cover_rejects_wrong_principal_type if {
+	rest.allow == false with input as {
+		"principal": {"type": "AGENT", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]},
+		"action": "balance.hold",
+	}
 		with data.rules as rules_mock
 }
