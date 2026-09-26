@@ -38,12 +38,24 @@ class ApprovalEndpointSupport(private val approvalStore: ApprovalStore) {
     }
 
     /**
-     * Records [checkerId]'s decision. A null body (JSON `null`) is a 400 via libs-runtime's
-     * `IllegalArgumentException` mapping, not a 500; an unknown or already-decided id is a 404.
+     * Records the decision made by [identity]. A null body (JSON `null`) is a 400 via
+     * libs-runtime's `IllegalArgumentException` mapping, not a 500; an unknown or already-decided
+     * id is a 404.
+     *
+     * Takes [SecurityIdentity] rather than a pre-resolved checker id string so [checkerId] is
+     * resolved AFTER the null-body check, never before it. A caller passing
+     * `checkerId(identity)` as the argument would have Kotlin evaluate that expression before
+     * this function's body runs at all — touching [identity] even for a request this function was
+     * always going to reject as malformed. `ApprovalNullBodyTest` (originally #3029) pins the
+     * intended order: "a null body is rejected before any identity is resolved," so a request
+     * this malformed never reaches authorization-adjacent code. Found the hard way (#11033): the
+     * pilot migration (#10917) passed the pre-resolved string and broke exactly this ordering,
+     * surfacing as `UninitializedPropertyAccessException` instead of the expected 400 whenever a
+     * test (or, in principle, any caller) exercised `decide` without a live `SecurityIdentity`.
      */
-    suspend fun decide(id: String, request: DecideApprovalRequest?, checkerId: String): Response {
+    suspend fun decide(id: String, request: DecideApprovalRequest?, identity: SecurityIdentity): Response {
         requireNotNull(request) { "request body is required" }
-        val decided = approvalStore.decide(id, checkerId, request.approve)
+        val decided = approvalStore.decide(id, checkerId(identity), request.approve)
             ?: throw NotFoundException("no pending approval with id=$id")
         return Response.ok(decided.toApprovalResponse()).build()
     }
