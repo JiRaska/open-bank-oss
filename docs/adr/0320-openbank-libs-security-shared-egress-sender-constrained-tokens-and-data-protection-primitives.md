@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [security, libs, authn, privacy-gdpr]
-summary: "Four shared primitives land in com.openbank.libs.security inside libs-runtime/domain (no new module): egress allowlist client, DPoP/mTLS-bound token check, field-protection port over OpenBao Transit, per-client Valkey rate limit."
+summary: "Four shared primitives in com.openbank.libs.security, no new module: egress allowlist, DPoP/mTLS token check, Transit field protection, Valkey rate limit; optional JOSE/Redis types load only via opt-in service subclasses (#6240)."
 ---
 
 # ADR-0320 — openbank-libs-security: shared egress, sender-constrained tokens and data-protection primitives
@@ -58,16 +58,48 @@ We will add four primitives to the existing `com.openbank.libs.security` package
 `openbank-libs-domain`, implementations in `openbank-libs-runtime`. **No new Gradle module**:
 ADR-0279's split trigger is a dependency no service-wide module may carry, and none of the four
 needs one — card-issuance's Transit client is plain `java.net.http`, Valkey is already
-`compileOnly("io.quarkus:quarkus-redis-client")` in libs-runtime, and JOSE verification uses the
-SmallRye JWT already on every service's classpath. "openbank-libs-security" in the title names
+`compileOnly("io.quarkus:quarkus-redis-client")` in libs-runtime, and JOSE verification uses
+jose4j, which `quarkus-oidc` brings transitively. "openbank-libs-security" in the title names
 this package, not a module.
+
+**Classpath measurement (origin/main, 2026-09-26).** Neither JOSE nor Valkey is on *every*
+consumer's classpath, and libs-runtime does not carry either at runtime:
+- `quarkus-oidc` (and with it SmallRye JWT / jose4j): declared by **67 of 68** non-libs service
+  modules (`implementation(libs.quarkus.oidc)`); `openbank-simulation` has none.
+- `quarkus-redis-client`: declared by **33** service modules; the other ~35 have no Valkey client.
+
+**Classpath-guard design — the #6240 hazard.** `CommonExceptionMappers.kt` records what happens
+when libs-runtime auto-registers a `@Provider` whose signature names a type absent from a
+consumer's runtime classpath: agent-service, analytics-sink and ap2-service failed at ArC init
+with `ClassNotFoundException`. P2 (JOSE types) and P4 (Redis client types) would reproduce it on
+the modules measured above. Decision, instead of a new module:
+1. **No `@Provider`, `@ServerRequestFilter`, `@Interceptor` or CDI bean annotation in
+   libs-runtime on any class whose signature, fields or supertypes name a JOSE or Redis type.**
+   libs-runtime ships the logic as a plain `abstract class` (`DpopProofVerifier`,
+   `ValkeyClientRateLimiter`) that Jandex never registers.
+2. **Activation is an explicit opt-in in the consuming service:** a thin `@Provider` /
+   `@Interceptor` subclass in that service's own `src/main`, exactly the #6240 remedy already used
+   for the Hibernate mappers. A service that does not opt in never loads the class, so a missing
+   optional dependency cannot break it.
+3. **The one annotation libs-runtime does export, `@SenderConstrained` (#10928), is a pure
+   `@InterceptorBinding`** that names no optional type; binding it without the opt-in subclass is
+   inert, which `check-sender-constrained-endpoints.py` catches by requiring the subclass wherever
+   the annotation is used.
+4. **Guard test.** A libs-runtime test boots a Quarkus app with neither `quarkus-oidc` nor
+   `quarkus-redis-client` on the test classpath and asserts it starts — the negative case for
+   #6240, which today has no test.
+
+This is the reason ADR-0279's split trigger is judged *not* met: the trigger is a dependency no
+service-wide module may carry, and the opt-in-subclass pattern means libs-runtime carries neither
+dependency at runtime. If the guard test ever cannot be made green without adding one of them as
+a runtime dependency of libs-runtime, the trigger *is* met and P2/P4 move to a separate module.
 
 | # | Primitive | Shape | Phase | Enforcing gate |
 |---|---|---|---|---|
 | P1 | **Egress client** | `SafeHttpClient` wrapping `java.net.http.HttpClient`: per-service host allowlist from config (`openbank.egress.allowed-hosts`), deny RFC 1918 / link-local / loopback / metadata addresses after DNS resolution, no cross-host redirects, bounded timeouts | 1 | new `check-raw-http-client.py`: new `HttpClient.newBuilder()`/`newHttpClient()` in `src/main` outside libs fails; today's sites baselined (ratchet) |
-| P2 | **Sender-constrained token check** | `@SenderConstrained` interceptor (planned, not yet built — #10928): validates a DPoP proof (RFC 9449: `htm`, `htu`, `iat`, `jti` replay cache, `ath`) against the token's `cnf.jkt`, or an mTLS `cnf.x5t#S256` against the client certificate (RFC 8705) | 2 (psd2-service first, the FAPI 2.0 surface) | new `check-sender-constrained-endpoints.py`: every XS2A resource in `openbank-psd2-service` carries the annotation; extends to TPP-facing services by list in `rules.yaml` |
-| P3 | **Field-protection port** | `FieldProtector` (encrypt/decrypt with AAD, deterministic `tokenize` via keyed HMAC for lookup) with an OpenBao Transit envelope adapter lifted from card-issuance and a local AES-GCM adapter for tests | 2 (card-issuance migrates first) | new `check-field-crypto-in-libs.py`: `javax.crypto.Cipher` or a Transit `encrypt/`/`decrypt/` path in a service's `src/main` fails outside the baseline |
-| P4 | **Per-client rate limit** | `ClientRateLimitFilter`: fixed-window counter in Valkey keyed on `azp`/`party_id`/client-cert thumbprint, fail-open with a metric when Valkey is down; the per-pod semaphore stays as a last-resort bulkhead | 3 | none new: opt-in per service by config; the existing k6 abuse lane (ADR-0279 WS1) is the observable. Declared `n-a` for a gate because the per-service need is a product choice, not a defect class |
+| P2 | **Sender-constrained token check** | `@SenderConstrained` binding + opt-in interceptor subclass (planned, not yet built — #10928), reusing the key-binding verification already in pid-service's `EudiPresentationVerifierImpl` (KB-JWT against `cnf.jwk`, jose4j) rather than a second JOSE path: validates a DPoP proof (RFC 9449: `htm`, `htu`, `iat`, `jti` replay cache, `ath`) against the token's `cnf.jkt`, or an mTLS `cnf.x5t#S256` against the client certificate (RFC 8705) | 2 (psd2-service first, the FAPI 2.0 surface) | new `check-sender-constrained-endpoints.py`: every XS2A resource in `openbank-psd2-service` carries the annotation; extends to TPP-facing services by list in `rules.yaml` |
+| P3 | **Field-protection port** | `FieldProtector` (encrypt/decrypt with AAD; deterministic `tokenize` **delegates to the existing ADR-0189 keyed blind index**, `openbank-libs-domain/.../identity/BlindIndex.kt` — no second HMAC scheme) with an OpenBao Transit envelope adapter lifted from card-issuance and a local AES-GCM adapter for tests | 2 (card-issuance migrates first) | new `check-field-crypto-in-libs.py`: `javax.crypto.Cipher` or a Transit `encrypt/`/`decrypt/` path in a service's `src/main` fails outside the baseline |
+| P4 | **Per-client rate limit** | `ClientRateLimitFilter`: fixed-window counter in Valkey keyed on `azp`/`party_id`/client-cert thumbprint, fail-open when Valkey is down, counted on `openbank_rate_limit_backend_unavailable_total` and alerted by `ClientRateLimitFailOpen` (counter increasing for 5 m — the limit is silently off while it fires); the per-pod semaphore stays as a last-resort bulkhead | 3 | none new: opt-in per service by config; the existing k6 abuse lane (ADR-0279 WS1) is the observable. Declared `n-a` for a gate because the per-service need is a product choice, not a defect class |
 
 Service-to-service **mTLS** as network transport is *not* decided here: it belongs to ADR-0177's
 north star (SPIFFE/mesh) and issue #1914. P2's mTLS branch only validates a certificate-bound
@@ -133,6 +165,9 @@ Mapping is to the obligations these primitives support, not a claim of complianc
 ## References
 
 - ADR-0279, ADR-0177, ADR-0172, ADR-0189, ADR-0262, ADR-0132, ADR-0059, ADR-0113
+- Issue #6240 (optional-type `@Provider` crashed consumers) and `openbank-libs-runtime/.../api/error/CommonExceptionMappers.kt`
+- `openbank-pid-service/.../infrastructure/crypto/EudiPresentationVerifierImpl.kt` (prior art for P2)
+- `openbank-libs-domain/.../identity/BlindIndex.kt` (reused by P3)
 - `docs/compliance/fapi2-self-assessment.md`
 - `openbank-libs-runtime/src/main/kotlin/com/openbank/libs/web/RateLimitFilter.kt`
 - Issue #1914 (Istio STRICT mTLS not deployed)
