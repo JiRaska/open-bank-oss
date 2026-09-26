@@ -25,7 +25,6 @@ import jakarta.persistence.Table
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.io.Serializable
-import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -314,11 +313,10 @@ internal fun <T> Mutiny.SessionFactory.boundedContextTransaction(
     session.withTransaction {
         session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
             .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
-            .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
     }.onTermination().call { session.close() }
 }
 
-/** SQL and work are bounded; pool acquisition and transaction cleanup are outside this timer. */
+/** PostgreSQL bounds each statement; server timeout reaches cleanup without cancelling SQL observation. */
 internal fun <T> Mutiny.SessionFactory.boundedGraphRead(timeoutMs: Int, block: (Mutiny.Session) -> Uni<T>): Uni<T> =
     boundedContextTransaction(timeoutMs, block)
 

@@ -83,6 +83,33 @@ class ContextGraphQueryTimeoutIT {
     }
 
     @Test
+    fun `database timeout finishes SQL before transaction cleanup and pool recovery`() {
+        assertThatThrownBy {
+            VertxContextSupport.subscribeAndAwait<Int> {
+                sessions.boundedContextTransaction(100) { session ->
+                    // Separate server completion from an earlier client cancellation deadline.
+                    session.createNativeQuery(
+                        "select set_config('statement_timeout', '1000ms', true)",
+                        String::class.java,
+                    ).singleResult.flatMap {
+                        session.createNativeQuery("select 1 from pg_sleep(2)", Int::class.javaObjectType)
+                            .singleResult
+                    }
+                }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+            }
+        }.satisfies(
+            java.util.function.Consumer<Throwable> { failure ->
+                val causes = generateSequence(failure) { it.cause }.toList()
+                assertThat(causes.any { it is io.smallrye.mutiny.TimeoutException }).isFalse()
+                assertThat(causes.any { it.message?.contains("statement timeout") == true }).isTrue()
+            },
+        )
+        repeat(6) {
+            assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        }
+    }
+
+    @Test
     fun `overlapping Context transactions in one Vertx context own separate sessions`() {
         val entered = CompletableFuture<Mutiny.Session>()
         val release = CompletableFuture<Int>()
