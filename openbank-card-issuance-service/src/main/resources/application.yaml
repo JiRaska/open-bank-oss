@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # M2M client for the outbound product-catalog lookup — product-catalog authenticates its
   # readers (#743), so an unauthenticated call would 401 and silently degrade every card
   # entitlement rule to the permissive fallback.
@@ -57,8 +55,6 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
-    tls:
-      verification: none
   rest-client:
     # Short timeouts on purpose: product-catalog is KEDA scale-to-zero, and this lookup is
     # fail-open (see CardProductCatalogPort) — waiting on a cold start would delay every issue
@@ -184,11 +180,16 @@ mp:
       # per boot; export OPENBANK_CARD_PAN_ENCRYPTION_KEY to pin a stable key locally.
       allow-ephemeral-pan-key: true
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   openbank:

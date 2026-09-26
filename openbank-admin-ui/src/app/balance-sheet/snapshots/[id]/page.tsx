@@ -143,6 +143,11 @@ function SnapshotDetail({ id }: { id: string }) {
             {t('Likvidita (LCR/NSFR)', 'Liquidity (LCR/NSFR)')}
           </Link>
         )}
+        {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/capital`} className="btn btn-secondary btn-sm">
+            {t('Kapitál: úvěrové riziko (SA)', 'Capital: credit risk (SA)')}
+          </Link>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>

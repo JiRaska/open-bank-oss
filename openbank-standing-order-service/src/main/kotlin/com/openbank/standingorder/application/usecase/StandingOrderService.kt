@@ -42,7 +42,13 @@ class StandingOrderService(
             lastExecutionDate = null, executionCount = 0, failureCount = 0,
             status = StandingOrderStatus.ACTIVE, createdAt = now, updatedAt = now,
         )
-        return repo.save(order)
+        val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
+        // An edit: create the replacement and cancel the original atomically, so a customer is
+        // never debited by both (#10281). A replay of the same idempotency key returned above.
+        check(repo.replace(order, replaced, now)) {
+            "Standing order $replaced is not an ACTIVE or PAUSED order of this party; nothing was changed"
+        }
+        return order
     }
 
     override suspend fun pause(id: UUID, operatorId: String) =
