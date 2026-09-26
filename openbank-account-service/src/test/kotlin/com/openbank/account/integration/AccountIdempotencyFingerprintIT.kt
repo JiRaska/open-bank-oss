@@ -6,6 +6,9 @@ package com.openbank.account.integration
 
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.usecase.AccountService
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
+import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.arc.ClientProxy
@@ -129,6 +132,32 @@ class AccountIdempotencyFingerprintIT {
         assertThat(retry.statusCode).isEqualTo(201)
         assertThat(retry.header("X-Idempotency-Replayed")).isNull()
         assertThat(accountsOf(partyId)).hasSize(1)
+    }
+
+    @Test
+    @TestSecurity(user = OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a release failure does not mask the original open failure`() {
+        // Without withContext(NonCancellable) { runCatching { ... } } around the release call, an
+        // exception thrown by release() would propagate from the `finally` block and REPLACE the
+        // original open failure the caller actually needs to see.
+        val key = UUID.randomUUID().toString()
+        val partyId = UUID.randomUUID()
+        val real = ClientProxy.unwrap(useCase) as AccountService
+        val failingUseCase = mockk<AccountService>()
+        coEvery { failingUseCase.openAccount(any()) } coAnswers { error("transient failure on open") }
+        // The GET used by accountsOf() goes through the same (now mocked) bean.
+        coEvery { failingUseCase.listAccounts(any()) } coAnswers { real.listAccounts(firstArg()) }
+        QuarkusMock.installMockForType(failingUseCase, AccountUseCase::class.java)
+
+        val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
+        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
+
+        // The open failure (422, from the use case's IllegalStateException) must surface — not the
+        // IllegalStateException thrown by release().
+        assertThat(open(key, body(partyId, "Test Customer")).statusCode).isEqualTo(422)
+        assertThat(accountsOf(partyId)).isEmpty()
     }
 
     @Test
