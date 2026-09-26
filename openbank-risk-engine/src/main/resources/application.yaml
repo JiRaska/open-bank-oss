@@ -345,6 +345,48 @@ openbank:
             EQUITY: not-an-exposure
             INCOME: not-an-exposure
             EXPENSE: not-an-exposure
+    # ČNB minimum reserve requirement (povinné minimální rezervy, PMR) — ADR-0313 treasury gap,
+    # ADR-0315. Source: Opatření ČNB o povinných minimálních rezervách (Provision of the ČNB on
+    # minimum reserves). Every key is required (MinReservesConfig is a mapping; the domain rejects
+    # a rate outside [0, 1] and an unknown class), so nothing here has a code default. Change a
+    # value -> bump parameter-set-version; every /min-reserves result names id and version.
+    # UNVERIFIED (not checked against the provision's current wording, so no article numbers are
+    # cited): the exact list of base items and exclusions, the maintenance-period calendar, the
+    # rounding of the requirement, and whether foreign-currency liabilities enter the base.
+    min-reserves:
+      parameter-set-id: cnb-pmr
+      parameter-set-version: "1"
+      source: "Opatření ČNB o povinných minimálních rezervách: 2 % of liabilities up to 2 years excl. banks subject to PMR and the ČNB; unremunerated since 2023-10-05"
+      rate: 0.02                     # the PMR ratio, 2 % of the reserve base
+      remuneration-rate: 0           # ČNB has not remunerated minimum reserves since 2023-10-05
+      holding-currency: CZK          # held on the bank's current account at the ČNB
+      classification:
+        # GL code -> class. Customer deposits need no entry: they are sub-ledger positions on
+        # deposit control 2100-2103 and always join the base (liabilities to non-bank clients).
+        #
+        # HOLDINGS: the ledger chart (ledger-service db/migration V1..V29) has NO current account at
+        # the ČNB, so no account is mapped reserve-holding and holdings read 0 until one exists.
+        # 1510 "Deposit Facility at CNB" (V29) is the ČNB overnight DEPOSIT FACILITY, a separate
+        # instrument from the current account on which reserves are held: never a reserve holding.
+        # 1000 / 1001 / 1002 are cash and nostro balances at commercial banks: not the ČNB account.
+        gl-accounts:
+          "1510": not-a-holding
+          # MM borrowings from banks (V29) and their accrued interest: liabilities to banks. Mapped
+          # as EXCLUDED on the assumption that the counterparty is a bank itself subject to PMR —
+          # UNVERIFIED: the ledger does not record the counterparty; a bank NOT subject to ČNB PMR
+          # (e.g. a foreign bank) would put the liability back into the base.
+          "2300": excluded-bank-or-cnb
+          "2301": excluded-bank-or-cnb
+          "2310": excluded-bank-or-cnb
+          "2311": excluded-bank-or-cnb
+        # Any LIABILITY not named above (e.g. 2200 Withholding Tax Payable) is deliberately NOT
+        # mapped by type: whether it is in the base is a reading of the provision, so it is listed
+        # as unclassified instead of guessed.
+        gl-account-types:
+          ASSET: not-a-holding
+          EQUITY: not-a-liability
+          INCOME: not-a-liability
+          EXPENSE: not-a-liability
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
