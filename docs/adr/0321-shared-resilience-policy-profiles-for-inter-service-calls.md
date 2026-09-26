@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [resilience, libs, testing, compliance]
-summary: "Inter-service calls pick one of four named resilience profiles (money-sync, read, external-scheme, batch) from openbank-libs instead of per-site literals; every profile emits ResilientCallMetrics and honours a synthetic-only fault hook gated by the ADR-0252 trusted-principals taint (empty by default); money-sync retries only idempotency-keyed calls via a keyed-only retryOn exception type."
+summary: "Inter-service calls use one of four named resilience profiles from openbank-libs; money-sync retries only keyed calls (keyed-only retryOn exception); fault hook needs ADR-0252 trusted-principal taint (empty by default)."
 followup: "none — decision-only until the profile catalogue and the resilience-profile gate land; delivery tracked by the linked issue"
 ---
 

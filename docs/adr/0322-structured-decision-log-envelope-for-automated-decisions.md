@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [audit, ai-agents, authz, compliance]
-summary: "Authz, fraud, credit and AI-agent decisions emit one DecisionRecord envelope (core package com.openbank.libs.audit.decision); state-changing ALLOWs commit via the outbox with the business tx (ADR-0323 transport), AUTHZ denies go a non-transactional, rate-bounded, aggregated path."
+summary: "Automated decisions emit one core DecisionRecord (libs.audit.decision); state-changing ALLOWs go via the ADR-0323 outbox with the business tx, AUTHZ denies via a non-transactional rate-bounded aggregated path."
 followup: "none — decision-only until DecisionRecord lands in the libs platform core and the first producers adopt it; delivery tracked by the linked issue"
 ---
 
