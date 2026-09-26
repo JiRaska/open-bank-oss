@@ -235,3 +235,16 @@ consumes SCA, writes a grant or publishes an event. `offer` repeats every check 
 cannot become authorization. The response contains only `valid: true`: returning counterparty
 attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-directory oracle.
 - **2026-09-21** — **Party-eligibility and card-ownership reads move to the service's own machine identity (#10486 batch 6).** `PidServiceRestClient` (`GET /api/v1/parties/{id}`) and `CardIssuanceRestClient` (`GET /api/v1/cards/{id}`) now mint their bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only). pid-service grants it `party.read` by identity; that endpoint gained `@Authorize` in the same change and pid enforces OPA. card-issuance grants `card.read` by identity, plus a Kotlin named-caller check while it runs OPA advisory. **STRIDE-S:** a new credential at Vault KV `keycloak/delegation-service`, projected by `delegation-service-m2m-oidc`, env ref `optional: false`; compromise reaches those two reads only. The account-ownership client stays on the shared client, where its `account.read` is already identity-granted. Rollback: revert the commit.
+
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint (#10959).**
+  `DelegationPortfolioResource.kt` and `DelegationResource.kt` (inbound REST surface) now bind each
+  `Idempotency-Key` to a SHA-256 fingerprint (`METHOD\npath\ncanonicalBody`) of the request it was
+  first used with (`RequestFingerprint`, `openbank-libs-domain`), via the shared
+  `RedisIdempotencyStore`. Reusing the same key with a DIFFERENT delegation request now answers
+  **422 IDEMPOTENCY_KEY_REUSED** instead of silently replaying the first response — closing a path
+  where a caller (or a naive retry with a mutated body) could get a stale response for a mutated
+  create/modify of a delegated payment portfolio. Covered by
+  `DelegationIdempotencyFingerprintIT`. **Risk class:** integrity of delegated-portfolio
+  create/modify — strictly tightens the existing idempotency contract, no new principal or data path.
+  The fingerprint stores only a hash, not the request body, so no new PII exposure. Rollback: revert
+  to key-only idempotency lookup (accepts key reuse across different payloads again).
