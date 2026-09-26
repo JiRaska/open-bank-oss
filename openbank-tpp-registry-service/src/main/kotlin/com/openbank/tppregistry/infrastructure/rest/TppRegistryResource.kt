@@ -4,9 +4,12 @@
 
 package com.openbank.tppregistry.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.tppregistry.application.port.`in`.BlacklistTppCommand
 import com.openbank.tppregistry.application.port.`in`.CheckTppAuthorizationQuery
 import com.openbank.tppregistry.application.port.`in`.GetTppQuery
@@ -26,6 +29,17 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+
+// Canonicalises a request body so whitespace / key order in the raw JSON never changes the
+// fingerprint: sorted object keys + sorted map entries, derived from the service's own
+// ObjectMapper so custom (de)serializers still apply. Kept top-level (not a class member) so it
+// does not count against TppRegistryResource's detekt TooManyFunctions threshold.
+private fun ObjectMapper.canonicalFingerprint(method: String, path: String, body: Any?): String {
+    val canonical = copy()
+        .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+        .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+    return RequestFingerprint.of(method, path, body?.let { canonical.writeValueAsString(it) })
+}
 
 @Path("/api/v1/tpp-registry")
 @Produces(MediaType.APPLICATION_JSON)
@@ -65,8 +79,9 @@ class TppRegistryResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { registerKey(cmd.tppId, it) }
+        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/tpp-registry", cmd)
         cacheKey?.let { key ->
-            idempotencyStore.get(key)?.let { cached ->
+            idempotencyStore.lookup(key, hash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -76,7 +91,7 @@ class TppRegistryResource(
         }
 
         val entry = svc.registerTpp(cmd)
-        cacheKey?.let { key -> idempotencyStore.save(key, 201, objectMapper.writeValueAsString(entry)) }
+        cacheKey?.let { key -> idempotencyStore.save(key, hash, 201, objectMapper.writeValueAsString(entry)) }
         return Response.status(201).entity(entry).build()
     }
 
@@ -118,8 +133,9 @@ class TppRegistryResource(
     ): Response {
         val reason = body["reason"] ?: "No reason provided"
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { blacklistKey(tppId, it) }
+        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/tpp-registry/$tppId/blacklist", body)
         cacheKey?.let { key ->
-            idempotencyStore.get(key)?.let { cached ->
+            idempotencyStore.lookup(key, hash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -129,7 +145,7 @@ class TppRegistryResource(
         }
 
         val result = svc.blacklistTpp(BlacklistTppCommand(tppId, reason))
-        cacheKey?.let { key -> idempotencyStore.save(key, 200, objectMapper.writeValueAsString(result)) }
+        cacheKey?.let { key -> idempotencyStore.save(key, hash, 200, objectMapper.writeValueAsString(result)) }
         return Response.ok(result).build()
     }
 
@@ -138,8 +154,9 @@ class TppRegistryResource(
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun triggerEbaSync(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let(::syncKey)
+        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/tpp-registry/sync/eba", null)
         cacheKey?.let { key ->
-            idempotencyStore.get(key)?.let { cached ->
+            idempotencyStore.lookup(key, hash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -149,7 +166,7 @@ class TppRegistryResource(
         }
 
         val result = svc.triggerEbaSync()
-        cacheKey?.let { key -> idempotencyStore.save(key, 200, objectMapper.writeValueAsString(result), 300) }
+        cacheKey?.let { key -> idempotencyStore.save(key, hash, 200, objectMapper.writeValueAsString(result), 300) }
         return Response.ok(result).build()
     }
 

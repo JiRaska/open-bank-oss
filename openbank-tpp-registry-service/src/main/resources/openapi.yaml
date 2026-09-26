@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: TPP Registry Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Third Party Provider registry — registration, authorization checks, EBA sync, blacklisting.
   license:
     name: Apache-2.0
@@ -55,6 +55,8 @@ paths:
       responses:
         '201':
           description: TPP registered
+        '422':
+          $ref: '#/components/responses/IdempotencyKeyReused'
     get:
       tags: [TPP Registry]
       summary: List registered TPPs
@@ -104,6 +106,8 @@ paths:
       responses:
         '200':
           description: TPP blacklisted
+        '422':
+          $ref: '#/components/responses/IdempotencyKeyReused'
 
   /api/v1/tpp-registry/sync/eba:
     post:
@@ -118,6 +122,8 @@ paths:
       responses:
         '202':
           description: Sync triggered
+        '422':
+          $ref: '#/components/responses/IdempotencyKeyReused'
 
   /api/v1/tpp-registry/sync/state:
     get:
@@ -140,6 +146,12 @@ components:
   responses:
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    IdempotencyKeyReused:
+      description: Idempotency-Key was already used for a different request
       content:
         application/json:
           schema:
