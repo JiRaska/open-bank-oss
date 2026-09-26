@@ -126,8 +126,13 @@ kover {
                 // construction, and TemporalClientProducerLazinessTest asserts exactly that.
                 // Ratchet-only still applies from here: raise this if the module grows testable
                 // logic, never lower it.
+                // Measured 2026-09-26 over two independent koverXmlReport runs (both 35.00% LINE,
+                // 7/20 covered, no variance observed): floor = floor(min(run1, run2)) - 2, per the
+                // fleet's flaky-koverVerify ratchet convention. With only 20 measurable lines each
+                // line is 5 points of the percentage, so this floor has very little slack — a
+                // single line toggling coverage could trip it even without a real regression.
                 bound {
-                    minValue = 20
+                    minValue = 33
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
