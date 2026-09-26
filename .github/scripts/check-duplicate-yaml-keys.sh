@@ -119,6 +119,16 @@ YML
 # Exclude build outputs and isolated git worktrees (.claude/worktrees) so we only
 # gate the committed source tree. (find|xargs, not mapfile — the macOS pool member
 # ships bash 3.2; service paths contain no spaces.)
+# ...and .github/gates/*.yaml, the gate estate's own manifest, added 2026-09-05 after a
+# duplicated `budget_seconds` in five gates turned main red for the whole queue. Two PRs added
+# the same key to the same blocks within an hour of each other and neither noticed, because the
+# duplicate is INVISIBLE FROM THE READING SIDE: every gate script parses this file with
+# `yaml.safe_load`, which keeps the LAST of a repeated key without a word, so
+# `gate-observability-declarations` saw a budget, called it declared and passed. Only yamllint
+# could see it, and its finding arrived buried among that gate's warnings AFTER the merge. The
+# lesson generalises past this file: a guard that READS a YAML document cannot be the thing that
+# notices the document is malformed.
+#
 # ...and openbank-libs/governance/*.yaml, which has the same failure with a wider blast
 # radius. `rules.yaml` is what CI enforces, and nothing lints it: yamllint's own gate covers
 # `openbank-infra .github` only, so a key added above an existing one is dropped by SnakeYAML
@@ -129,7 +139,8 @@ files="$(
   find "$ROOT" \
     \( -type d \( -name build -o -name node_modules -o -name .git -o -name .claude \) -prune \) -o \
     \( -path '*/src/main/resources/application.yaml' -print \) -o \
-    \( -path '*/openbank-libs/governance/*.yaml' -print \)
+    \( -path '*/openbank-libs/governance/*.yaml' -print \) -o \
+    \( -path '*/.github/gates/*.yaml' -print \)
 )"
 
 if [ -z "$files" ]; then
@@ -148,13 +159,13 @@ echo "SUBJECTS=$count_files"
 violations="$(printf '%s\n' "$files" | xargs yamllint -f parsable -c "$CFG" || true)"
 
 if [ -z "$violations" ]; then
-  echo "check-duplicate-yaml-keys: $count_files file(s) checked (service application.yaml + openbank-libs/governance), no duplicate keys."
+  echo "check-duplicate-yaml-keys: $count_files file(s) checked (service application.yaml + openbank-libs/governance + .github/gates), no duplicate keys."
   exit 0
 fi
 
 count="$(printf '%s\n' "$violations" | grep -c . || true)"
 level="warning"; [ "$ENFORCE" -eq 1 ] && level="error"
-echo "::${level}::Found $count duplicate YAML key(s) in service application.yaml files."
+echo "::${level}::Found $count duplicate YAML key(s) in the scanned YAML (service application.yaml, openbank-libs/governance, .github/gates)."
 echo "Duplicate mapping keys are SILENTLY DISCARDED by SmallRye Config / SnakeYAML"
 echo "(last occurrence wins) — the dropped config falls back to defaults and a boot"
 echo "smoke-test will NOT catch it. See #1170 (quarkus.http) and #1193 (openbank)."

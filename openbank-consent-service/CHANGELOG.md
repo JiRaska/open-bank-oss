@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.3...consent-service-v0.24.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.2...consent-service-v0.24.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.1...consent-service-v0.24.2) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.0...consent-service-v0.24.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **consent:** guard consent_outbox created_at plausibility at INSERT ([#9304](https://github.com/JiRaska/open-bank-oss/issues/9304)) ([e33b426](https://github.com/JiRaska/open-bank-oss/commit/e33b426aad46f0f86cbd15362a1cabb3b55a0bea))
+* **consent:** replay-safe suppression creation + ADR-0288 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9011](https://github.com/JiRaska/open-bank-oss/issues/9011)) ([3ad41c6](https://github.com/JiRaska/open-bank-oss/commit/3ad41c643d14f8760ffd2eabe7f93a8d2ece8469))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.23.0...consent-service-v0.24.0) (2026-09-08)
 
 

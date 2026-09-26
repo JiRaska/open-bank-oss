@@ -45,6 +45,13 @@ data class RegistryDescriptor(
     val free: Boolean,
     val listsRepresentatives: Boolean,
     val listsRepresentationRule: Boolean,
+    /**
+     * The register can be searched by company name (issue #9707). Declared per jurisdiction, and
+     * false by default, because the UI must only offer a search box where one exists — a box that
+     * always finds nothing reads as "the bank does not know my company". CZ (ARES) has it; other
+     * packs stay false until their adapter implements [RegistryAdapter.search].
+     */
+    val supportsNameSearch: Boolean = false,
 )
 
 /** How ultimate beneficial owners are established in this jurisdiction. */

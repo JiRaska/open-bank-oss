@@ -278,8 +278,8 @@ const REPORTS = [
 ]
 
 const DATA_SOURCE_CONFIG = {
-  implemented: { label: 'Implementovaný náhled', color: '#2563eb', icon: <FileText size={13} /> },
-  catalog: { label: 'Katalog — bez zdroje', color: '#6b7280', icon: <AlertTriangle size={13} /> },
+  implemented: { label: 'Implementovaný náhled', text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)', icon: <FileText size={13} /> },
+  catalog: { label: 'Katalog — bez zdroje', text: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)', icon: <AlertTriangle size={13} /> },
 }
 
 function dataSourceOf(report: Report): keyof typeof DATA_SOURCE_CONFIG {
@@ -441,9 +441,9 @@ export default function RegulatoryPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         {[
           { label: t('Katalog výkazů', 'Report catalogue'), value: REPORTS.length, color: 'var(--accent)' },
-          { label: t('Implementovaný náhled', 'Implemented preview'), value: implementedPreviewCount, color: '#2563eb' },
-          { label: t('Bez datového zdroje', 'No data source'), value: catalogueOnlyCount, color: '#6b7280' },
-          { label: t('Napojené odesílání', 'Connected submission'), value: 0, color: '#d97706' },
+          { label: t('Implementovaný náhled', 'Implemented preview'), value: implementedPreviewCount, color: 'var(--info-text)' },
+          { label: t('Bez datového zdroje', 'No data source'), value: catalogueOnlyCount, color: 'var(--text-tertiary)' },
+          { label: t('Napojené odesílání', 'Connected submission'), value: 0, color: 'var(--warning-text)' },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: '14px 16px' }}>
             <div style={{ fontSize: '22px', fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -460,7 +460,7 @@ export default function RegulatoryPage() {
               const count = REPORTS.filter(r => dataSourceOf(r) === st).length
               if (count === 0) return null;
               const percent = (count / REPORTS.length) * 100;
-              const color = DATA_SOURCE_CONFIG[st].color;
+              const color = DATA_SOURCE_CONFIG[st].text;
               return <div key={st} style={{ width: `${percent}%`, background: color }} title={`${DATA_SOURCE_CONFIG[st].label}: ${count}`} />
             })}
           </div>
@@ -470,7 +470,7 @@ export default function RegulatoryPage() {
               const cfg = DATA_SOURCE_CONFIG[st];
               return (
                 <div key={st} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: cfg.color }} />
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: cfg.text }} />
                   <span style={{ color: 'var(--text-secondary)' }}>{cfg.label}</span>
                   <span style={{ fontWeight: 600 }}>{count}</span>
                 </div>
@@ -524,20 +524,20 @@ export default function RegulatoryPage() {
           const cfg = DATA_SOURCE_CONFIG[source]
           const isSelected = selected === report.id
           return (
-            <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.color}` }}>
-              <div role="button" tabIndex={0} aria-expanded={isSelected}
-                aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
-                style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
-                onClick={() => setSelected(s => s === report.id ? null : report.id)}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === report.id ? null : report.id) } }}>
+            <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
+                <button type="button" aria-expanded={isSelected} aria-controls={`regulatory-report-${report.id}`}
+                  aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
+                  style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flex: '1 1 520px', minWidth: 0, flexWrap: 'wrap', border: 0, background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left' }}
+                  onClick={() => setSelected(s => s === report.id ? null : report.id)}>
                 {/* Status */}
-                <span style={{ color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
+                <span style={{ color: cfg.text, flexShrink: 0 }}>{cfg.icon}</span>
 
                 {/* Name + authority */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700 }}>{report.name}</span>
-                    <span style={{ fontSize: '10px', padding: '2px 6px', background: `${cfg.color}15`, color: cfg.color, borderRadius: '4px', border: `1px solid ${cfg.color}30`, fontWeight: 600 }}>
+                    <span style={{ fontSize: '10px', padding: '2px 6px', background: cfg.bg, color: cfg.text, borderRadius: '4px', border: `1px solid ${cfg.border}`, fontWeight: 600 }}>
                       {cfg.label}
                     </span>
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace' }}>{report.sdatCode}</span>
@@ -554,12 +554,14 @@ export default function RegulatoryPage() {
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                </button>
+
+                {/* Actions remain a sibling of the disclosure button, never a nested interactive control. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, padding: '10px 16px 10px 0' }}>
                   {source === 'implemented' ? (
-                    <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
+                    <button type="button" className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
                       onClick={(e) => openPreview(report.id, e)}>
-                      {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
+                      {downloadMessage === report.id ? <><Check size={11} style={{ color: 'var(--success-text)' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
                     </button>
                   ) : (
                     <span role="status" style={{ fontSize: '11px', padding: '5px 10px', color: 'var(--text-tertiary)' }}>
@@ -571,7 +573,7 @@ export default function RegulatoryPage() {
 
               {/* Detail */}
               {isSelected && (
-                <div style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                <div id={`regulatory-report-${report.id}`} style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '12px' }}>
                     <div>
                       <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{t('Popis', 'Description')}</div>
@@ -593,7 +595,7 @@ export default function RegulatoryPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {report.fields.map((f, i) => (
                           <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <CheckCircle2 size={11} style={{ color: '#16a34a', flexShrink: 0 }} />
+                            <CheckCircle2 size={11} style={{ color: 'var(--success-text)', flexShrink: 0 }} />
                             {f}
                           </div>
                         ))}
@@ -602,9 +604,9 @@ export default function RegulatoryPage() {
                   </div>
 
                   {/* Reporting transport is deliberately not represented as implemented. */}
-                  <div style={{ padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', color: '#1e40af' }}>
+                  <div style={{ padding: '10px 12px', background: 'var(--info-bg)', border: '1px solid var(--info-border)', borderRadius: '6px', fontSize: '12px', color: 'var(--info-text)' }}>
                     <strong>{t('Stav odeslání:', 'Submission status:')}</strong> {t('Přenos k regulátorovi zatím není v Admin UI ani v backendu napojen. Kód výkazu je jen katalogová informace, ne důkaz podání.', 'Regulator transmission is not connected in the Admin UI or backend yet. The report code is catalogue metadata, not proof of submission.')}
-                    {' '}{t('Kód výkazu:', 'Report code:')} <code style={{ fontFamily: 'JetBrains Mono, monospace', background: '#dbeafe', padding: '1px 4px', borderRadius: '3px' }}>{report.sdatCode}</code>.
+                    {' '}{t('Kód výkazu:', 'Report code:')} <code style={{ fontFamily: 'JetBrains Mono, monospace', background: 'var(--surface-3)', padding: '1px 4px', borderRadius: '3px' }}>{report.sdatCode}</code>.
                   </div>
                 </div>
               )}
@@ -675,7 +677,7 @@ export default function RegulatoryPage() {
             )}
 
             {IS_TEST_ENVIRONMENT && (
-              <div role="status" data-testid="test-data-watermark" style={{ padding: '10px 20px', color: '#991b1b', background: '#fef2f2', borderBottom: '1px solid #fecaca', fontSize: '12px', fontWeight: 700 }}>
+              <div role="status" data-testid="test-data-watermark" style={{ padding: '10px 20px', color: 'var(--danger-text)', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger-border)', fontSize: '12px', fontWeight: 700 }}>
                 {DEPLOYMENT_ENVIRONMENT.toUpperCase()} / {t('TESTOVACÍ DATA — náhled ani stažený soubor nesmí být odeslán regulátorovi.', 'TEST DATA — neither this preview nor a downloaded file may be submitted to a regulator.')}
               </div>
             )}
@@ -687,7 +689,7 @@ export default function RegulatoryPage() {
               ) : (
                 <>
                 {previewData.status === 'ready' && previewData.evidence === 'LIVE_PREVIEW' && (
-                  <div role="status" style={{ padding: '12px 20px', color: '#92400e', background: '#fffbeb', borderBottom: '1px solid #fde68a', fontSize: '12px' }}>
+                  <div role="status" style={{ padding: '12px 20px', color: 'var(--warning-text)', background: 'var(--warning-bg)', borderBottom: '1px solid var(--warning-border)', fontSize: '12px' }}>
                     <strong>{t('Pracovní náhled skutečných hodnot', 'Working preview of actual values')}</strong>
                     {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
                   </div>
@@ -703,7 +705,7 @@ export default function RegulatoryPage() {
                     {buildExportRows(preview, previewData).map((row, i) => (
                       <tr key={i}>
                         <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{row.field}</td>
-                        <td style={{ fontSize: '12px', color: row.value.includes('DATOVÁ MEZERA') ? '#b45309' : 'var(--text-primary)', fontFamily: row.value === '—' ? 'inherit' : 'JetBrains Mono, monospace' }}>{row.value}</td>
+                        <td style={{ fontSize: '12px', color: row.value.includes('DATOVÁ MEZERA') ? 'var(--warning-text)' : 'var(--text-primary)', fontFamily: row.value === '—' ? 'inherit' : 'JetBrains Mono, monospace' }}>{row.value}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -720,7 +722,7 @@ export default function RegulatoryPage() {
                 style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}
               >
                 {exportReadiness.ok ? (
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--success)' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--success-text)' }}>
                     <CheckCircle2 size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
                     <strong>{t('Připraveno pro interní export', 'Ready for internal export')}</strong>
                   </div>
@@ -730,7 +732,7 @@ export default function RegulatoryPage() {
                     <div
                       data-testid="export-blocked"
                       data-block-reason={exportReadiness.reason}
-                      style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--danger)' }}
+                      style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--danger-text)' }}
                     >
                       <Ban size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
                       <span>

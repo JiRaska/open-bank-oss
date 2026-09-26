@@ -43,3 +43,10 @@ spec:
           name: openbank.delegation.spend-reservation-state
           patternType: literal
         operations: [Write, Describe]
+      # ADR-0312 business-signing lifecycle → notification-service (approval push + inbox) and
+      # the audit trail. The KafkaTopic is declared with its consumer (#10313).
+      - resource:
+          type: topic
+          name: openbank.delegation.approval-events
+          patternType: literal
+        operations: [Write, Describe]

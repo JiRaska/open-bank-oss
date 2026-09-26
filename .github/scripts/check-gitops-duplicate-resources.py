@@ -32,6 +32,19 @@ Two rules, both within a single file:
      `OPENBANK_NAMESPACES` is the live instance; the rule is general because the
      next such list will not be called that.
 
+  3. No (kind, name, namespace) declared by two different directories under
+     `gitops/components/`. Rules 1 and 2 are deliberately one file at a time —
+     across files a redefinition is usually an overlay, and legitimate. Under
+     `components/` it is not: one directory is one ArgoCD Application, so two
+     directories claiming one resource put it in two desired states. ArgoCD
+     tracks it for whichever got there first and answers SharedResourceWarning
+     on the other, which then reports OutOfSync forever. That was live for
+     `ExternalSecret platform/kafka-cluster-ca-truststore`, declared identically
+     by `agent` (#696) and `case-coordinator` (#4236): case-coordinator had been
+     permanently OutOfSync, so its drift signal said nothing about drift. The
+     copies were identical, which is the quiet half — nothing is wrong until the
+     day they differ, and then the sync order decides which one the cluster gets.
+
 Usage:
     check-gitops-duplicate-resources.py             # warn
     check-gitops-duplicate-resources.py --enforce   # fail
@@ -120,6 +133,61 @@ def check_file(path: pathlib.Path) -> list[str]:
     return problems
 
 
+
+COMPONENTS_ROOT = "openbank-infra/gitops/components"
+
+
+def _component_identities(components_root: pathlib.Path) -> dict:
+    """Map (kind, name, namespace) -> set of component directory names that declare it."""
+    owners: dict = collections.defaultdict(set)
+    if not components_root.is_dir():
+        return owners
+    for component in sorted(p for p in components_root.iterdir() if p.is_dir()):
+        for path in sorted(component.rglob("*.yaml")):
+            try:
+                docs = gatelib.load_yaml_all(path)
+            except yaml.YAMLError:
+                continue  # rule 1 reports an unparseable file; do not report it twice
+            for doc in docs:
+                if not isinstance(doc, dict):
+                    continue
+                meta = doc.get("metadata") or {}
+                if not isinstance(meta, dict):
+                    continue
+                kind, name = doc.get("kind"), meta.get("name")
+                if not kind or not name:
+                    continue
+                owners[(kind, name, meta.get("namespace"))].add(component.name)
+    return owners
+
+
+def check_components(components_root: pathlib.Path) -> list[str]:
+    """One resource, one owning component — see rule 3 in the module docstring."""
+    problems: list[str] = []
+    for identity, components in sorted(_component_identities(components_root).items()):
+        if len(components) < 2:
+            continue
+        kind, name, ns = identity
+        where = f" in namespace {ns}" if ns else " (cluster-scoped)"
+        listed = ", ".join(sorted(components))
+        problems.append(
+            f"{components_root}: {kind}/{name}{where} is declared by {len(components)} "
+            f"components ({listed}). Each is its own ArgoCD Application, so the resource "
+            f"is in two desired states: ArgoCD tracks it for one and reports "
+            f"SharedResourceWarning + a permanent OutOfSync on the other. Declare it in "
+            f"one component; the others consume it by name."
+        )
+    return problems
+
+
+SELF_TEST_SHARED_RESOURCE = """\
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: probe-truststore
+  namespace: probe-ns
+"""
+
 SELF_TEST_DUPLICATE_DOC = """\
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -175,11 +243,56 @@ spec:
 """
 
 
+SELF_TEST_COMPONENT_TREES = {
+    # Two components declaring one resource into one namespace: the live shape of
+    # ExternalSecret platform/kafka-cluster-ca-truststore before #9799.
+    "shared across components": (
+        {
+            "alpha/secret.yaml": SELF_TEST_SHARED_RESOURCE,
+            "beta/secret.yaml": SELF_TEST_SHARED_RESOURCE,
+        },
+        True,
+    ),
+    # One component declaring it once: the shape this gate must leave alone.
+    "single owner": ({"alpha/secret.yaml": SELF_TEST_SHARED_RESOURCE}, False),
+    # Same kind and name, different namespace, different components: legitimate —
+    # every service declares its own `ExternalSecret/oidc` in its own namespace.
+    "same name, different namespaces": (
+        {
+            "alpha/secret.yaml": SELF_TEST_SHARED_RESOURCE,
+            "beta/secret.yaml": SELF_TEST_SHARED_RESOURCE.replace(
+                "namespace: probe-ns", "namespace: other-ns"
+            ),
+        },
+        False,
+    ),
+}
+
+
+def _self_test_components() -> int:
+    failures = 0
+    for label, (tree, must_flag) in SELF_TEST_COMPONENT_TREES.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for rel, content in tree.items():
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+            flagged = bool(check_components(root))
+            ok = flagged == must_flag
+            print(f"  [{'ok' if ok else 'FAIL'}] cross-component {label}: "
+                  f"flagged={flagged}, expected={must_flag}")
+            if not ok:
+                failures += 1
+    return failures
+
+
 def self_test() -> int:
     """Each case is one the check MUST get right, including the ones it must NOT flag.
 
-    The clean case matters as much as the dirty ones: the same (kind, name) in two
-    DIFFERENT namespaces is normal, and so is a non-repeating list.
+    The clean cases matter as much as the dirty ones: the same (kind, name) in two
+    DIFFERENT namespaces is normal, so is a non-repeating list, and so is a resource
+    declared exactly once by one component.
     """
     cases = [
         ("duplicate document", SELF_TEST_DUPLICATE_DOC, True),
@@ -196,6 +309,7 @@ def self_test() -> int:
             print(f"  [{'ok' if ok else 'FAIL'}] {label}: flagged={flagged}, expected={must_flag}")
             if not ok:
                 failures += 1
+    failures += _self_test_components()
     if failures:
         print(f"\nself-test: {failures} case(s) wrong — the check does not measure what it claims.")
         return 1
@@ -219,10 +333,15 @@ def main() -> int:
             checked += 1
             problems.extend(check_file(path))
 
+    problems.extend(check_components(pathlib.Path(COMPONENTS_ROOT)))
+
     gatelib.subjects(checked, "gitops manifests")
 
     if not problems:
-        print(f"check-gitops-duplicate-resources: OK — {checked} manifests, no duplicate resource or list entry")
+        print(
+            f"check-gitops-duplicate-resources: OK — {checked} manifests, no duplicate resource "
+            f"or list entry, and no resource declared by two components"
+        )
         return 0
 
     level = "error" if args.enforce else "warning"

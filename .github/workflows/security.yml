@@ -163,9 +163,10 @@ jobs:
     # CodeQL uploads results to GitHub code scanning, which on a PRIVATE repo is a
     # paid GHAS add-on (not bundled with Free/Pro) — the init step errors with
     # "Code scanning is not enabled for this repository". So this job auto-skips
-    # while the repo is private and activates the moment it goes public (free GHAS),
-    # mirroring the dependency-review job in ci.yml. Until then Trivy fs + Dependabot
-    # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
+    # while the repo is private and activates the moment it goes public (free GHAS).
+    # Dependency review has its own workflow and submitted Gradle graph; while CodeQL
+    # is unavailable, Trivy fs + Dependabot cover the remaining detection layer.
+    # (Aside: the CodeQL CLI also does not
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
     # Skip on gitops/docs-only PRs (run_codeql=false) — CodeQL isn't a required check
     # there, and the java-kotlin autobuild is the ~14 min tax that strands deploy PRs.
@@ -193,7 +194,7 @@ jobs:
         include: ${{ fromJSON(needs.detect-deps.outputs.codeql_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
@@ -217,7 +218,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -270,7 +271,7 @@ jobs:
             echo "compile tasks executed: $executed"
           fi
 
-      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -397,14 +398,20 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+        # The scan above is the blocking decision (`--exit-code 1`). SARIF upload is
+        # reporting only: GitHub's installation API rate limit can reject it after a
+        # clean scan, and must not turn that clean security decision into a false red.
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+        # Keep reporting availability independent from the blocking IaC scan above.
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -457,7 +464,7 @@ jobs:
     if: needs.detect-deps.outputs.run_sbom == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "25"

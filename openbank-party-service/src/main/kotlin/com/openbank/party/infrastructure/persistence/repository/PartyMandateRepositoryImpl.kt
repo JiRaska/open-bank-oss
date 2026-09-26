@@ -77,6 +77,7 @@ class PartyMandateRepositoryImpl(
         agentPartyId = m.agentPartyId
         role = m.role.name
         authority = m.authority.name
+        requiredSignatures = m.requiredSignatures
         source = m.source.name
         status = m.status.name
         evidenceRef = m.evidenceRef
@@ -93,6 +94,7 @@ class PartyMandateRepositoryImpl(
         agentPartyId = agentPartyId,
         role = MandateRole.valueOf(role),
         authority = MandateAuthority.valueOf(authority),
+        requiredSignatures = requiredSignatures,
         source = MandateSource.valueOf(source),
         status = MandateStatus.valueOf(status),
         evidenceRef = evidenceRef,

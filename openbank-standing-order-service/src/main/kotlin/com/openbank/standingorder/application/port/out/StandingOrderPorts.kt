@@ -18,6 +18,13 @@ interface StandingOrderRepository {
 
     suspend fun findByIdempotencyKey(key: String): StandingOrder?
 
+    /**
+     * Insert [replacement] and cancel [replacedId] in ONE transaction. The cancel is a conditional
+     * update (same party, ACTIVE or PAUSED); when it matches no row nothing is written and false
+     * is returned.
+     */
+    suspend fun replace(replacement: StandingOrder, replacedId: UUID, now: java.time.Instant): Boolean
+
     suspend fun listAllOrders(): List<StandingOrder>
 
     suspend fun findByPartyId(partyId: UUID): List<StandingOrder>

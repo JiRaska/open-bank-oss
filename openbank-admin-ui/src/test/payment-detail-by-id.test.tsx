@@ -6,9 +6,9 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PaymentDetailPage from '@/app/payments/[id]/page'
 
-const PAYMENT_ID = 'payment/id 42'
-const BY_ID_URL = '/api/svc/sepa-payment/api/v1/sepa-payments/payment%2Fid%2042'
-const DOMESTIC_BY_ID_URL = '/api/svc/domestic-payment/api/v1/domestic-payments/payment%2Fid%2042'
+const PAYMENT_ID = '123e4567-e89b-42d3-a456-426614174000'
+const BY_ID_URL = `/api/svc/sepa-payment/api/v1/sepa-payments/${PAYMENT_ID}`
+const DOMESTIC_BY_ID_URL = `/api/svc/domestic-payment/api/v1/domestic-payments/${PAYMENT_ID}`
 let paymentId = PAYMENT_ID
 let paymentType = 'SEPA'
 
@@ -23,6 +23,26 @@ vi.mock('@/lib/i18n/LanguageContext', () => ({
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+const sepaPayment = (overrides: Record<string, unknown> = {}) => ({
+  id: PAYMENT_ID,
+  status: 'COMPLETED',
+  amount: 125,
+  currency: 'EUR',
+  createdAt: '2026-09-09T12:00:00Z',
+  creditorName: 'By-ID creditor',
+  ...overrides,
+})
+
+const domesticPayment = (overrides: Record<string, unknown> = {}) => ({
+  id: PAYMENT_ID,
+  status: 'SETTLED',
+  amount: '99.50',
+  currency: 'CZK',
+  createdAt: '2026-09-09T12:00:00Z',
+  creditorName: 'Domestic creditor',
+  ...overrides,
+})
 
 beforeEach(() => {
   paymentId = PAYMENT_ID
@@ -41,13 +61,7 @@ describe('payment detail by-id loading', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === BY_ID_URL) {
-        return json({
-          id: PAYMENT_ID,
-          status: 'COMPLETED',
-          amount: 125,
-          currency: 'EUR',
-          creditorName: 'By-ID creditor',
-        })
+        return json(sepaPayment())
       }
       if (url === '/api/sepa-payments') throw new Error('collection URL must not be used')
       throw new Error(`unexpected request: ${url}`)
@@ -65,10 +79,7 @@ describe('payment detail by-id loading', () => {
     window.sessionStorage.setItem(`ob:row:payments:${PAYMENT_ID}`, JSON.stringify({
       id: PAYMENT_ID,
       type: 'SEPA',
-      status: 'RECEIVED',
-      amount: 99,
-      currency: 'EUR',
-      creditorName: 'Saved preview creditor',
+      ...sepaPayment({ status: 'RECEIVED', amount: 99, creditorName: 'Saved preview creditor' }),
     }))
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe(BY_ID_URL)
@@ -82,27 +93,26 @@ describe('payment detail by-id loading', () => {
     expect(screen.getByText(/may be stale/i)).toBeInTheDocument()
   })
 
-  it('keeps re-authentication guidance visible when an expired session leaves only a saved preview', async () => {
+  it('clears a saved preview when the session expires', async () => {
     window.sessionStorage.setItem(`ob:row:payments:${PAYMENT_ID}`, JSON.stringify({
       id: PAYMENT_ID,
       type: 'SEPA',
-      status: 'RECEIVED',
-      creditorName: 'Preview requiring sign-in',
+      ...sepaPayment({ status: 'RECEIVED', creditorName: 'Preview requiring sign-in' }),
     }))
     vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'unauthorized' }, 401)))
 
     await act(async () => { render(<PaymentDetailPage />) })
 
-    expect(await screen.findByText('Preview requiring sign-in')).toBeInTheDocument()
-    expect(await screen.findByText('Session expired — showing saved preview')).toBeInTheDocument()
-    expect(screen.getByText(/may be stale\. Sign in again/i)).toBeInTheDocument()
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Preview requiring sign-in')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show raw payment payload' })).not.toBeInTheDocument()
   })
 
   it('keeps domestic rail selection on the domestic by-id service and path', async () => {
     paymentType = 'DOMESTIC'
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe(DOMESTIC_BY_ID_URL)
-      return json({ id: PAYMENT_ID, status: 'SETTLED', creditorName: 'Domestic creditor' })
+      return json(domesticPayment())
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -110,6 +120,37 @@ describe('payment detail by-id loading', () => {
 
     expect(await screen.findByText('Domestic creditor')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a verified same-route preview when live evidence is malformed', async () => {
+    window.sessionStorage.setItem(`ob:row:payments:${PAYMENT_ID}`, JSON.stringify(sepaPayment({
+      creditorName: 'Verified saved creditor',
+    })))
+    vi.stubGlobal('fetch', vi.fn(async () => json(sepaPayment({
+      id: '223e4567-e89b-42d3-a456-426614174000',
+      creditorName: 'Mismatched live creditor',
+    }))))
+
+    await act(async () => { render(<PaymentDetailPage />) })
+
+    expect(await screen.findByText('Verified saved creditor')).toBeInTheDocument()
+    expect(await screen.findByText('Live payment unavailable — showing saved preview')).toBeInTheDocument()
+    expect(screen.queryByText('Mismatched live creditor')).not.toBeInTheDocument()
+  })
+
+  it('discloses only accepted payment fields in the raw payload', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(sepaPayment({
+      creditorName: 'Disclosure creditor',
+      secretInternalNote: 'must not be exposed',
+    }))))
+
+    await act(async () => { render(<PaymentDetailPage />) })
+    await screen.findByText('Disclosure creditor')
+    await act(async () => { screen.getByRole('button', { name: 'Show raw payment payload' }).click() })
+
+    expect(screen.getByRole('region', { name: 'Raw payment payload' })).toHaveTextContent('Disclosure creditor')
+    expect(screen.getByRole('region', { name: 'Raw payment payload' })).not.toHaveTextContent('secretInternalNote')
+    expect(screen.getByRole('region', { name: 'Raw payment payload' })).not.toHaveTextContent('must not be exposed')
   })
 
   it('ignores a superseded rail response that resolves after the current request', async () => {
@@ -134,13 +175,13 @@ describe('payment detail by-id loading', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
     await act(async () => {
-      resolveDomestic?.(json({ id: PAYMENT_ID, status: 'SETTLED', creditorName: 'Current domestic payment' }))
+      resolveDomestic?.(json(domesticPayment({ creditorName: 'Current domestic payment' })))
       await domesticResponse
     })
     expect(await screen.findByText('Current domestic payment')).toBeInTheDocument()
 
     await act(async () => {
-      resolveSepa?.(json({ id: PAYMENT_ID, status: 'COMPLETED', creditorName: 'Superseded SEPA payment' }))
+      resolveSepa?.(json(sepaPayment({ creditorName: 'Superseded SEPA payment' })))
       await sepaResponse
     })
     expect(screen.queryByText('Superseded SEPA payment')).not.toBeInTheDocument()
@@ -148,11 +189,11 @@ describe('payment detail by-id loading', () => {
   })
 
   it('never carries the previous payment or a mismatched stash across a failed route change', async () => {
-    const nextId = 'domestic/id 77'
-    const nextUrl = '/api/svc/domestic-payment/api/v1/domestic-payments/domestic%2Fid%2077'
+    const nextId = '223e4567-e89b-42d3-a456-426614174000'
+    const nextUrl = `/api/svc/domestic-payment/api/v1/domestic-payments/${nextId}`
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === BY_ID_URL) return json({ id: PAYMENT_ID, status: 'COMPLETED', creditorName: 'Previous SEPA payment' })
+      if (url === BY_ID_URL) return json(sepaPayment({ creditorName: 'Previous SEPA payment' }))
       if (url === nextUrl) return json({ error: 'scaled_to_zero' }, 503)
       throw new Error(`unexpected request: ${url}`)
     })

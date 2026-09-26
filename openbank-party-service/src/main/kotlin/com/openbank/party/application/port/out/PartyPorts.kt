@@ -4,7 +4,9 @@
 
 package com.openbank.party.application.port.out
 
+import com.openbank.party.domain.model.AmlDerivedFacts
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyAmlProfile
 import com.openbank.party.domain.model.PartyChangeMateriality
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
@@ -14,6 +16,12 @@ import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.Payee
 import java.time.Instant
 import java.util.UUID
+
+/** What a [PartyRepository.modify] change writes: the new state and the event announcing it. */
+data class PartyWrite(val party: Party, val event: PartyEvent)
+
+/** Outcome of [PartyRepository.modify]: the locked state the change saw, and what was written. */
+data class PartyModification(val before: Party, val after: Party)
 
 /** Outbound persistence port for the party aggregate. */
 interface PartyRepository {
@@ -40,10 +48,22 @@ interface PartyRepository {
     /** Toggle pay-to-phone findability. Returns false when no such party exists. */
     suspend fun updateDiscoverable(partyId: UUID, discoverable: Boolean, at: Instant): Boolean
 
-    suspend fun update(party: Party): Party
-
-    /** Transactional-outbox counterpart of [update] — see [save] with a [PartyEvent]. */
-    suspend fun update(party: Party, event: PartyEvent): Party
+    /**
+     * Atomic read-modify-write of one party: loads the row under a row lock
+     * (`SELECT … FOR UPDATE`), hands the CURRENT state to [change], writes the returned party and
+     * its event to `party_outbox` — all in ONE transaction. Returns null when no such party exists.
+     *
+     * This is the only way to change a party's full state. The previous `update(party, event)`
+     * took a [Party] the caller had read in an EARLIER, separate session and wrote every column
+     * back, so two concurrent writers (the KYC and AML consumers run on independent channels)
+     * each overwrote the other's field: a party with KYC APPROVED and AML CLEARED was left at
+     * PENDING_KYC with one of the two outcomes silently lost. Under the lock the second writer
+     * blocks until the first commits and then derives its change from the committed row.
+     *
+     * [change] runs inside the transaction: it must be pure (no I/O). Throwing from it rolls the
+     * transaction back and propagates — use that to re-check a precondition on the locked row.
+     */
+    suspend fun modify(id: UUID, change: (Party) -> PartyWrite): PartyModification?
 
     suspend fun listAll(page: Int, size: Int): List<Party>
 
@@ -220,4 +240,18 @@ interface PartyMandateRepository {
     suspend fun findByAgent(agentPartyId: UUID): List<PartyMandate>
 
     suspend fun findActive(principalPartyId: UUID, agentPartyId: UUID, role: String): PartyMandate?
+}
+
+/** Outbound persistence port for the versioned personal AML profile (V25). */
+interface PartyAmlProfileRepository {
+    suspend fun findCurrent(partyId: UUID): PartyAmlProfile?
+
+    /** Every version, oldest first — the audit history of what was declared. */
+    suspend fun findHistory(partyId: UUID): List<PartyAmlProfile>
+
+    /**
+     * In ONE transaction: demote the current row, insert [profile] as the new current version,
+     * write the derived facts onto the `parties` row, and append [event] to `party_outbox`.
+     */
+    suspend fun saveNewVersion(profile: PartyAmlProfile, facts: AmlDerivedFacts, event: PartyEvent): PartyAmlProfile
 }

@@ -30,7 +30,7 @@ triaging an incident that starts on `onboarding`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8130` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `onboarding`); dashboards in Grafana.
 - Logs: `kubectl logs -n onboarding -l app.kubernetes.io/name=onboarding-service -f`, or Loki
   `{namespace="onboarding"}`.

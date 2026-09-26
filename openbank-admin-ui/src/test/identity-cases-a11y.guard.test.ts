@@ -7,9 +7,15 @@ const read = () => fs.readFileSync(path.join(process.cwd(), 'src/app/identity-ca
 describe('identity cases four-eyes accessibility', () => {
   it('keeps decision and refresh controls explicit and stateful', () => {
     const source = read()
+    expect(source).toContain("import * as Dialog from '@radix-ui/react-dialog'")
+    expect(source).toContain('<Dialog.Content')
+    expect(source).toContain('<Dialog.Title')
+    expect(source).toContain('<Dialog.Description')
     expect(source).toContain('role="alertdialog"')
     expect(source).toContain('aria-busy={busy}')
-    expect(source).toContain('trapDialogFocus(event, dialogRef.current)')
+    expect(source).toContain('onEscapeKeyDown={event =>')
+    expect(source).toContain('onPointerDownOutside={event =>')
+    expect(source).toContain('onCloseAutoFocus={event => event.preventDefault()}')
     expect(source).toContain('if (succeeded) setDecisionIntent(null)')
     expect(source).toContain('type="button"')
     expect(source).toContain('aria-busy={loading}')

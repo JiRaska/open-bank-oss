@@ -3,13 +3,40 @@
 // pending (query-error / no-provider-main-version / pending-verification), distinct from a
 // real 'passed' or 'failed' verdict — never flattened to one unexplained "unavailable", and
 // never leaking the broker response body or credentials into the classification text.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { enrichWithVerification, fetchPairVerification } from '../../scripts/collect-quality-report.mjs'
+import { collectMutations, enrichWithVerification, fetchPairVerification } from '../../scripts/collect-quality-report.mjs'
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-afterEach(() => vi.unstubAllGlobals())
+const dirs: string[] = []
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+describe('collect-quality-report mutation scoring', () => {
+  it('counts timed-out mutants as detected using PIT integer rounding', async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'quality-report-mutation-'))
+    dirs.push(repo)
+    const reportDir = path.join(repo, 'openbank-ledger-service', 'build', 'reports', 'pitest')
+    mkdirSync(reportDir, { recursive: true })
+    writeFileSync(path.join(reportDir, 'mutations.xml'), `<mutations>
+      <mutation status="KILLED"/><mutation status="KILLED"/>
+      <mutation status="KILLED"/><mutation status="KILLED"/>
+      <mutation status="TIMED_OUT"/>
+      <mutation status="SURVIVED"/><mutation status="SURVIVED"/><mutation status="SURVIVED"/>
+    </mutations>`)
+
+    await expect(collectMutations(['openbank-ledger-service'], repo)).resolves.toEqual([
+      expect.objectContaining({ totalMutants: 8, killed: 4, timedOut: 1, survived: 3, score: 63 }),
+    ])
+  })
+})
 
 describe('collect-quality-report contract classification (#7544)', () => {
   it('classifies a broker query error (e.g. HTTP 400) as query-error, without echoing the body', async () => {
@@ -17,6 +44,19 @@ describe('collect-quality-report contract classification (#7544)', () => {
     const v = await fetchPairVerification('http://broker.example', null, 'openbank-admin-ui', 'sha-consumer', 'openbank-case-coordinator-agent')
     expect(v).toMatchObject({ status: 'pending', reasonCode: 'query-error', detail: expect.stringMatching(/HTTP 400/) })
     expect(v.detail).not.toMatch(/do-not-leak/)
+  })
+
+  it('classifies a matrix 400 caused by an unpublished provider as no-provider-main-version', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/matrix')) return jsonResponse(400, { error: 'Pacticipant not found' })
+      if (url.includes('/branches/main/latest-version')) return jsonResponse(404, { error: 'not found' })
+      throw new Error(`unexpected url ${url}`)
+    }))
+    const v = await fetchPairVerification('http://broker.example', null, 'openbank-admin-ui', 'sha-consumer', 'openbank-context-service')
+    expect(v).toMatchObject({
+      status: 'pending', reasonCode: 'no-provider-main-version',
+      detail: expect.stringMatching(/no published main-branch version/),
+    })
   })
 
   it('classifies an empty matrix with no published provider main version as no-provider-main-version', async () => {
@@ -43,6 +83,50 @@ describe('collect-quality-report contract classification (#7544)', () => {
       status: 'pending', reasonCode: 'pending-verification',
       detail: expect.stringMatching(/no verification result/),
     })
+  })
+
+  it('uses a newer main consumer version only when its published pact matches the committed pact', async () => {
+    const committedPact = {
+      consumer: { name: 'openbank-alpha-service' }, provider: { name: 'openbank-real-provider' },
+      interactions: [{ description: 'reads an account' }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/matrix')) {
+        const version = new URL(url).searchParams.get('q[][version]')
+        return jsonResponse(200, { matrix: version === 'new-main'
+          ? [{ providerVersion: { number: 'provider-main' }, verificationResult: { success: true, verifiedAt: '2026-09-17T00:00:00Z' } }]
+          : [] })
+      }
+      if (url.includes('/openbank-alpha-service/branches/main/latest-version')) return jsonResponse(200, { number: 'new-main' })
+      if (url.includes('/pacts/provider/')) return jsonResponse(200, { ...committedPact, _links: { self: { href: 'broker-link' } } })
+      throw new Error(`unexpected url ${url}`)
+    }))
+
+    const v = await fetchPairVerification(
+      'http://broker.example', null, 'openbank-alpha-service', 'old-file-commit', 'openbank-real-provider', committedPact,
+    )
+    expect(v).toEqual({
+      status: 'passed', verifiedAt: '2026-09-17T00:00:00Z', providerVersion: 'provider-main', consumerVersion: 'new-main',
+    })
+  })
+
+  it('does not borrow a newer verdict when the published pact differs from the committed file', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      if (url.includes('/matrix')) return jsonResponse(200, { matrix: [] })
+      if (url.includes('/openbank-alpha-service/branches/main/latest-version')) return jsonResponse(200, { number: 'new-main' })
+      if (url.includes('/pacts/provider/')) return jsonResponse(200, { interactions: [{ description: 'different operation' }] })
+      if (url.includes('/openbank-real-provider/branches/main/latest-version')) return jsonResponse(200, { number: 'provider-main' })
+      throw new Error(`unexpected url ${url}`)
+    }))
+
+    const v = await fetchPairVerification(
+      'http://broker.example', null, 'openbank-alpha-service', 'old-file-commit', 'openbank-real-provider',
+      { interactions: [{ description: 'reads an account' }] },
+    )
+    expect(v).toMatchObject({ status: 'pending', reasonCode: 'pending-verification' })
+    expect(calls.filter(url => url.includes('/matrix'))).toHaveLength(1)
   })
 
   it('resolves a real passed/failed verdict with no reasonCode — a broker query error cannot override an authoritative result', async () => {

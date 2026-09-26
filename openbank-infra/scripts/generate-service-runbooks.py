@@ -24,7 +24,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tempfile
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gitops_facts  # noqa: E402  (path must be set before the import)
@@ -141,19 +145,82 @@ def management_port(short: str) -> str:
     return "8085"
 
 
+@lru_cache(maxsize=None)
+def probe_containers(gitops: Path) -> dict[str, list[dict]]:
+    """Index declared workload containers once per generator invocation."""
+    result: dict[str, list[dict]] = {}
+    for path in sorted(gitops.rglob("*.yaml")):
+        text = read(path)
+        if "openbank-" not in text or not any(kind in text for kind in ("Deployment", "Rollout")):
+            continue
+        for doc in yaml.load_all(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+            if not isinstance(doc, dict) or doc.get("kind") not in {"Deployment", "Rollout"}:
+                continue
+            containers = doc.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+            result.setdefault(doc.get("metadata", {}).get("name", ""), []).extend(containers)
+    return result
+
+
+def declared_probes(short: str, gitops: Path = GITOPS) -> tuple[str, str]:
+    """Read probes from the module's container, never from a sidecar or a framework default."""
+    module_images = {f"openbank-{short}", f"openbank-{short}-service"}
+    matches: set[tuple[str, str]] = set()
+    index = probe_containers(gitops)
+    for name in gitops_facts.module_names(short):
+        for container in index.get(name, []):
+            image = container.get("image", "").rsplit("/", 1)[-1].split("@", 1)[0].split(":", 1)[0]
+            if image in module_images:
+                matches.add(tuple(describe_probe(container, kind) for kind in ("readinessProbe", "livenessProbe")))
+    if len(matches) == 1:
+        return next(iter(matches))
+    explanation = "not declared in a matching workload" if not matches else "multiple workload declarations; inspect GitOps"
+    return explanation, explanation
+
+
+def describe_probe(container: dict, kind: str) -> str:
+    probe = container.get(kind) or {}
+    for protocol, field in (("GET", "httpGet"), ("TCP", "tcpSocket"), ("gRPC", "grpc")):
+        if field not in probe:
+            continue
+        settings = probe[field]
+        port = settings.get("port", "?")
+        if isinstance(port, str):
+            declared = [p.get("containerPort") for p in container.get("ports", []) if p.get("name") == port]
+            port = declared[0] if len(declared) == 1 else f"{port} (unresolved named port)"
+        if field == "httpGet":
+            scheme = "HTTPS " if settings.get("scheme", "HTTP") == "HTTPS" else ""
+            return f"`{scheme}GET :{port}{settings.get('path', '/')}`"
+        return f"`{protocol} :{port}`"
+    if "exec" in probe:
+        return "exec probe; inspect the container's command in the GitOps manifest"
+    return "not declared"
+
+
 def application_automated(short: str) -> bool | None:
     """Whether the Argo Application owning this component declares automated sync.
 
     A workload under a manual Application is desired state only: it is not evidence that Argo
     has ever created a pod. Resolve ownership from the source path rather than a display name.
+
+    Parsed with a real YAML load, not a line-oriented regex: `syncPolicy.automated` is valid
+    either as a block mapping (`automated:` alone on its line, nested keys indented below) or as
+    flow-style (`automated: { prune: true, selfHeal: true }`, all on one line) — both are the
+    same YAML value, `{prune: true, selfHeal: true}` vs `None`. A regex anchored on
+    `automated:\\s*$` only matches the block form, so a flow-style Application reads as
+    manual-sync when it is not: `context.yaml` declares `automated: { prune: true, selfHeal:
+    true }` and was rendered into its committed runbook as "WORKLOAD DESIRED — LIVE STATUS
+    UNVERIFIED / no automated sync" — the wrong operational instruction, for a service that IS
+    automated (found via `service-runbook-drift` self-test drift once `incentive.yaml` stopped
+    being a manual-sync example, #10783).
     """
     marker = f"path: openbank-infra/gitops/components/{short}"
     for app in sorted((GITOPS / "apps").glob("*.yaml")):
         text = read(app)
         if marker not in text:
             continue
-        sync_policy = re.search(r"^  syncPolicy:\s*$([\s\S]*?)(?=^\S|\Z)", text, re.M)
-        return bool(sync_policy and re.search(r"^\s+automated:\s*$", sync_policy.group(1), re.M))
+        doc = yaml.safe_load(text) or {}
+        sync_policy = ((doc.get("spec") or {}).get("syncPolicy") or {})
+        return "automated" in sync_policy and sync_policy["automated"] is not None
     return None
 
 
@@ -341,7 +408,7 @@ service facts. Real scaffolding — EXTEND with operational specifics; do not de
 Bank-grade ops (prod-readiness C9=3 / C6=3) still needs a real on-call rotation and an
 exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
-# Runbook — openbank-{short}-service
+# Runbook — {module}
 
 > Operational runbook for the `{short}` service. Data domain **{domain}**,
 > classification **{classification}**, datastore **{datastore}**.
@@ -413,7 +480,9 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     plugin-free restart is offered alongside the plugin form on purpose: a runbook that assumes a
     kubectl plugin on the reader's laptop fails in exactly the situation it exists for.
     """
-    svc = f"{short}-service"
+    # The workload's real name, not `<short>-service`: released modules without the suffix deploy
+    # under their bare name (customer-edge, admin-ui), so the suffix would address nothing (#6253).
+    svc = gitops_facts.workload_name(short, GITOPS) or f"{short}-service"
     if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
         return {
             "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
@@ -434,15 +503,15 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
 
 def runtime_sections(short: str, ns: str) -> str:
     """Render operational commands only for a workload that is intended to run."""
+    readiness, liveness = declared_probes(short)
     if zero_replica_workload(short):
         return (
             "## Runtime operations — DEFERRED\n"
             "\n"
             "Do not increase replicas, restart, or use log/metrics commands to activate this staged\n"
             "workload. The reviewed activation procedure must first establish the signed image,\n"
-            "GitOps sync, and actual cluster health. It will then use management health endpoints\n"
-            f"`GET :{management_port(short)}/q/health/ready` and\n"
-            f"`GET :{management_port(short)}/q/health/live`.\n"
+            "GitOps sync, and actual cluster health. The declared probes are:\n\n"
+            f"- Readiness: {readiness} · Liveness: {liveness}\n"
         )
     commands = ops_commands(short, ns)
     live_unverified = workload_live_unverified(short)
@@ -460,8 +529,7 @@ def runtime_sections(short: str, ns: str) -> str:
     return (
         "## Health & probes\n"
         "\n"
-        f"- Readiness: `GET :{management_port(short)}/q/health/ready` · Liveness: "
-        f"`GET :{management_port(short)}/q/health/live`\n"
+        f"- Readiness: {readiness} · Liveness: {liveness}\n"
         f"- Metrics: {metrics}\n"
         f"- Logs: {commands['logs_cmd']}, or Loki\n"
         f"  `{{namespace=\"{ns}\"}}`.\n"
@@ -556,6 +624,18 @@ def all_services() -> list[str]:
     for short in gitops_facts.money_path_services(REPO):
         if gitops_facts.module_dir(short, REPO).is_dir():
             out.add(short)
+    # Every RELEASED module that is actually DEPLOYED needs one too (#6253). The `-service` glob
+    # plus the money-path list left 14 out — customer-edge (durable passkey state in Redis),
+    # product-catalog, security-scanner, admin-ui and the control-plane agents — and
+    # `git diff --exit-code docs/runbooks/` could never report a runbook nobody generated.
+    # Released = has a version.txt (rules.yaml: released_unit_marker); deployed = a Deployment or
+    # Rollout in gitops whose own metadata.name is the module, so a merely-mentioned module or an
+    # undeployed one (no workload to operate) does not get a runbook of fictional commands.
+    for version_txt in REPO.glob("openbank-*/version.txt"):
+        short = version_txt.parent.name.removeprefix("openbank-")
+        short = short.removesuffix("-service")
+        if gitops_facts.workload_name(short, GITOPS) is not None:
+            out.add(short)
     return sorted(out)
 
 
@@ -578,13 +658,45 @@ def self_test() -> int:
     service with no backup.
     """
     fails: list[str] = []
+    cases = 0
 
     def says(text: str, *needles: str) -> bool:
         return all(n in text for n in needles)
 
     def case(label: str, ok: bool) -> None:
+        nonlocal cases
+        cases += 1
         if not ok:
             fails.append(label)
+
+    tcp = {"ports": [{"name": "http", "containerPort": 3000}],
+           "readinessProbe": {"tcpSocket": {"port": "http"}},
+           "livenessProbe": {"exec": {"command": ["/check-health"]}}}
+    case("TCP probe stays TCP and resolves the container's named port",
+         describe_probe(tcp, "readinessProbe") == "`TCP :3000`")
+    case("exec probe is not represented as an HTTP endpoint",
+         describe_probe(tcp, "livenessProbe").startswith("exec probe"))
+    case("an absent probe does not invent a framework endpoint",
+         describe_probe({}, "readinessProbe") == "not declared")
+    case("HTTP path and named management port come from the container",
+         describe_probe({"ports": [{"name": "management", "containerPort": 8087}],
+                         "readinessProbe": {"httpGet": {"port": "management", "path": "/ready"}}},
+                        "readinessProbe") == "`GET :8087/ready`")
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp)
+        container = {**tcp, "name": "app", "image": "registry.example/openbank-example:v1"}
+        sidecar = {"name": "sidecar", "image": "registry.example/opa:v1",
+                   "readinessProbe": {"httpGet": {"port": 8181, "path": "/health"}}}
+        doc = {"kind": "Deployment", "metadata": {"name": "example"},
+               "spec": {"template": {"spec": {"containers": [sidecar, container]}}}}
+        (fixture / "workload.yaml").write_text(yaml.safe_dump(doc).replace("kind: Deployment", 'kind: "Deployment"'))
+        case("matching workload selects the app container even when a sidecar is first",
+             declared_probes("example", fixture) == ("`TCP :3000`", describe_probe(tcp, "livenessProbe")))
+        case("an unrelated workload does not supply fallback probes",
+             declared_probes("unrelated", fixture) == ("not declared in a matching workload",) * 2)
+    admin = runtime_sections("admin-ui", "admin-ui")
+    case("the deployed admin-ui TCP probes never render Quarkus health URLs",
+         "TCP :3000" in admin and "/q/health" not in admin)
 
     # STATELESS: no datastore at all. Recovery is a redeploy, and the text must say so without
     # ever mentioning a backup.
@@ -647,17 +759,74 @@ def self_test() -> int:
              "kubectl scale" not in t)
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
+    # `application_automated()` itself, falsified against a SYNTHETIC fixture rather than a named
+    # real service: which service (if any) is manual-sync is a live rollout fact that drifts —
+    # `incentive` was this fixture until #10783 activated its automated sync, which silently
+    # untested this whole classifier until the fixture below was added (the self-test still
+    # "passed" while the classifier had a live regex bug: see `application_automated`'s
+    # docstring). A synthetic Application, both in flow style (`automated: {...}`, one line) and
+    # block style (`automated:` alone, nested keys below), can never go stale this way.
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture_gitops = Path(tmp)
+        (fixture_gitops / "apps").mkdir()
+        (fixture_gitops / "apps" / "flow-sync.yaml").write_text(
+            "apiVersion: argoproj.io/v1alpha1\n"
+            "kind: Application\n"
+            "metadata: {name: flow-sync, namespace: argocd}\n"
+            "spec:\n"
+            "  source: {path: openbank-infra/gitops/components/flow-sync-fixture}\n"
+            "  syncPolicy:\n"
+            "    automated: {prune: true, selfHeal: true}\n"
+        )
+        (fixture_gitops / "apps" / "block-sync.yaml").write_text(
+            "apiVersion: argoproj.io/v1alpha1\n"
+            "kind: Application\n"
+            "metadata: {name: block-sync, namespace: argocd}\n"
+            "spec:\n"
+            "  source: {path: openbank-infra/gitops/components/block-sync-fixture}\n"
+            "  syncPolicy:\n"
+            "    automated:\n"
+            "      prune: true\n"
+            "      selfHeal: true\n"
+        )
+        (fixture_gitops / "apps" / "manual-sync.yaml").write_text(
+            "apiVersion: argoproj.io/v1alpha1\n"
+            "kind: Application\n"
+            "metadata: {name: manual-sync, namespace: argocd}\n"
+            "spec:\n"
+            "  source: {path: openbank-infra/gitops/components/manual-sync-fixture}\n"
+            "  syncPolicy:\n"
+            "    syncOptions: [ServerSideApply=true]\n"
+        )
+        global GITOPS
+        real_gitops = GITOPS
+        GITOPS = fixture_gitops
+        try:
+            case("flow-style `automated: {...}` on one line is detected as automated",
+                 application_automated("flow-sync-fixture") is True)
+            case("block-style `automated:` with nested keys is detected as automated",
+                 application_automated("block-sync-fixture") is True)
+            case("an Application with no `automated` key at all is manual-sync",
+                 application_automated("manual-sync-fixture") is False)
+            case("a component path owned by no Application resolves to unknown, not manual",
+                 application_automated("no-such-fixture") is None)
+        finally:
+            GITOPS = real_gitops
+
     # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
-    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
-    # automated sync while this exact distinction is under rollout review.
-    if "incentive" in deployed:
-        incentive = render("incentive")
+    # that Argo has ever created a pod. Resolved dynamically (never a hardcoded service name) —
+    # which deployed service, if any, is manual-sync today is a live rollout fact, and hardcoding
+    # one is exactly what went stale when #10783 activated `incentive`'s automated sync.
+    manual_sync_deployed = [x for x in deployed if application_automated(x) is False]
+    if manual_sync_deployed:
+        target = manual_sync_deployed[0]
+        rendered = render(target)
         case("a manual-sync workload is explicitly live-unverified",
-             says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
+             says(rendered, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
         case("a manual-sync workload does not present declared metrics as a live scrape",
-             says(incentive, "live scrape status is unverified"))
-        case("a separate management listener is used for health commands",
-             "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
+             says(rendered, "live scrape status is unverified"))
+    # No `else` that passes: every deployed service being automated-sync is the expected steady
+    # state now, and the synthetic fixture above is what keeps the classifier itself falsifiable.
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)
@@ -697,13 +866,33 @@ def self_test() -> int:
     case("the assertion is read case- and whitespace-insensitively",
          owns_no_database({"ownsNoDatabase": " TRUE ", "primaryDatastore": "PostgreSQL"}) is True)
 
+    # ORPHANS (#6253): the drift gate cannot see a runbook the generator stops producing — the file
+    # stays on disk and diffs clean. Reverting the population widening proved it (gate green).
+    case("a committed runbook the population no longer generates is an orphan",
+         orphan_runbooks({"svc-ledger.md", "svc-customer-edge.md"}, {"ledger"}) == ["svc-customer-edge.md"])
+    case("a population that generates every committed runbook has no orphans",
+         orphan_runbooks({"svc-ledger.md", "svc-customer-edge.md"}, {"ledger", "customer-edge"}) == [])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: runbook deployment/DR classifier is falsifiable (20 cases)")
+    print(f"self-test ok: runbook deployment/DR classifier is falsifiable ({cases} cases)")
     return 0
+
+
+def orphan_runbooks(existing: set[str], population: set[str]) -> list[str]:
+    """`svc-*.md` filenames on disk that no module in the population generates.
+
+    The drift gate regenerates and diffs, so it sees a runbook whose CONTENT drifted and one that
+    is MISSING — but a file the generator simply stops writing stays on disk unchanged and diffs
+    clean. Measured (#6253): reverting the population widening dropped 14 modules from the
+    population and the gate still passed. An orphan is exactly that silent state.
+    """
+    wanted = {f"svc-{short}.md" for short in population}
+    return sorted(name for name in existing if name not in wanted)
+
 
 def main():
     if "--self-test" in sys.argv:
@@ -727,6 +916,19 @@ def main():
         out.write_text(render(short), encoding="utf-8")
         created += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
+    # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
+    if not args.services:
+        existing = {p.name for p in RUNBOOKS.glob("svc-*.md")}
+        orphans = orphan_runbooks(existing, set(targets))
+        for name in orphans:
+            print(
+                f"::error file=docs/runbooks/{name}::{name} is committed but no module in the "
+                f"generator's population produces it, so it can never be regenerated and will go "
+                f"stale unseen. Either the module left the population (restore it) or it is gone "
+                f"(delete the runbook)."
+            )
+        if orphans:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

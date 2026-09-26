@@ -54,6 +54,42 @@ def trusted_run_url(url: str, run_id: str) -> bool:
             and re.fullmatch(rf"/[^/]+/[^/]+/actions/runs/{re.escape(str(run_id))}", parsed.path) is not None)
 
 
+SHA_PATTERN = re.compile(r"[0-9a-f]{7,40}")
+
+
+def build_attestation_from(vitals: dict | None) -> dict | None:
+    """The rollout attestation the browser synthetic recorded, or None when none was requested.
+
+    Returned only when the run was ASKED to prove a specific build (`requestedSha` present). A run
+    with no requested SHA is ordinary CI/browser evidence and must not acquire an attestation it
+    never made. `matched` is derived here from the two SHAs, never trusted from the sidecar: the
+    script that wrote the sidecar is the thing being checked, and a boolean it asserts about
+    itself is not evidence (#7451).
+    """
+    raw = (vitals or {}).get("buildAttestation")
+    if not isinstance(raw, dict):
+        return None
+    requested = raw.get("requestedSha")
+    observed = raw.get("observedSha")
+    if not isinstance(requested, str) or not SHA_PATTERN.fullmatch(requested.lower()):
+        return None
+    requested = requested.lower()
+    observed = observed.lower() if isinstance(observed, str) and SHA_PATTERN.fullmatch(observed.lower()) else None
+    # A short requested SHA matches the full observed one it prefixes, never the other way round:
+    # the attestation endpoint is the authority on the full identity.
+    matched = observed is not None and observed.startswith(requested)
+    return {"requestedSha": requested, "observedSha": observed, "matched": matched}
+
+
+def valid_build_attestation(value) -> bool:
+    return (isinstance(value, dict) and set(value) == {"requestedSha", "observedSha", "matched"}
+            and isinstance(value["requestedSha"], str) and SHA_PATTERN.fullmatch(value["requestedSha"]) is not None
+            and (value["observedSha"] is None
+                 or (isinstance(value["observedSha"], str) and SHA_PATTERN.fullmatch(value["observedSha"]) is not None))
+            and isinstance(value["matched"], bool)
+            and value["matched"] == (value["observedSha"] is not None and value["observedSha"].startswith(value["requestedSha"])))
+
+
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
@@ -121,12 +157,14 @@ def validate_envelope(envelope: dict) -> None:
         if observed_at - run_observed_at > MAX_FUTURE_SKEW:
             raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
-        if set(item) - {"kind", "state", "source", "detail", "variant"} or not {"kind", "state", "source"}.issubset(item):
+        if set(item) - {"kind", "state", "source", "detail", "variant", "buildAttestation"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
         if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
             raise ValueError("specialized evidence values are invalid")
         if "variant" in item and (item["kind"] != "synthetic" or item["variant"] not in {"chromium", "firefox", "webkit"}):
             raise ValueError("synthetic evidence variant is invalid")
+        if "buildAttestation" in item and (item["kind"] != "synthetic" or not valid_build_attestation(item["buildAttestation"])):
+            raise ValueError("synthetic build attestation is invalid")
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
         retry_fields = {"retryFlaky", "failedAttemptCount", "failedAttemptDurationMs"}
@@ -200,9 +238,41 @@ def classify(name: str, classname: str, task: str, component: str, service: Path
     identity = f"{classname} {task}"
     if re.search(r"integration|inttest", identity, re.I) or re.search(r"IT(?:$|[.$\s])", identity):
         return "integration"
-    if re.search(r"pact|contract", identity, re.I):
+
+    # The TASK is the producer's own declaration of which lane ran; the CLASSNAME is a
+    # filename someone chose. When they disagree the task wins, because a Playwright spec
+    # named `*-contract.spec.ts` is still an end-to-end run of the real screen, and counting
+    # it as contract evidence moves it into a dimension whose controls it cannot satisfy.
+    # Measured on a real Admin UI report (#8263): 2 cases from campaign-visual-contract.spec.ts
+    # were reported as contract while their task said e2e.
+    if re.search(r"\be2e\b|playwright", task, re.I):
+        return "e2e"
+
+    # Two ways `pact` legitimately appears, and one way it does not.
+    #
+    #   (?<![A-Za-z])pact   a separated token: `ledger-pact`, `pacts/`, `.pact.json`
+    #   (?<=[a-z0-9])Pact   a CamelCase segment: `LedgerPactTest` — case-SENSITIVE, the
+    #                       capital is what marks the boundary Kotlin class names use
+    #
+    # Neither matches `compact`, which is the second defect here: the previous unbounded
+    # search classified `compact-filters-a11y.guard.test.ts` as CONTRACT because
+    # "com-PACT-filters" contains the substring (#8263).
+    #
+    # A plain `\bpact\b` is NOT enough and looks like it is — it rejects `compact` correctly
+    # and also rejects `LedgerPactTest`, since there is no word boundary inside CamelCase.
+    # That silently reclassifies every Kotlin pact suite in the fleet as `unit`, which is a
+    # worse defect than the one being fixed and passes any test written only from the issue's
+    # three examples.
+    if re.search(r"(?<![A-Za-z])pacts?(?![A-Za-z])", identity, re.I) \
+            or re.search(r"(?<=[a-z0-9])Pacts?(?![a-z])", identity) \
+            or re.search(r"\bcontract\b", identity, re.I):
         return "contract"
-    if re.search(r"e2e|playwright", identity, re.I):
+
+    # Only reachable when the task did not declare a lane — e.g. a Vitest run whose classname
+    # merely mentions Playwright. `\be2e\b` keeps that from promoting a unit test:
+    # `playwright-test-intelligence-evidence.guard.test.ts` is a Vitest guard ABOUT Playwright,
+    # not an end-to-end test, and it was being reported as e2e.
+    if re.search(r"\be2e\b", identity, re.I):
         return "e2e"
     if component == "openbank-simulation":
         return "simulation"
@@ -626,6 +696,11 @@ def trace_contract_evidence(service: Path) -> list[dict]:
     } for contract_id, row in sorted(results.items())]
 
 
+def pitest_mutation_score(detected: int, total: int) -> int | None:
+    """Return PIT's integer score: detected mutants, rounded half up."""
+    return (detected * 100 + total // 2) // total if total else None
+
+
 def specialized_evidence(
     performance_summary: str | None,
     mutation_report: str | None,
@@ -655,15 +730,15 @@ def specialized_evidence(
         if mutation_file.exists():
             root = ET.parse(mutation_file).getroot()
             mutations = root.findall(".//mutation")
-            killed = sum(1 for item in mutations if item.attrib.get("status") == "KILLED")
-            score = round(killed * 100 / len(mutations), 2) if mutations else None
+            detected = sum(1 for item in mutations if item.attrib.get("status") in {"KILLED", "TIMED_OUT"})
+            score = pitest_mutation_score(detected, len(mutations))
             state = "skipped" if not mutations else (
                 "failed" if mutation_threshold is not None and score is not None and score < mutation_threshold else "passed"
             )
             target = f", target {mutation_threshold:g}%" if mutation_threshold is not None else ""
             specialized.append({"kind": "mutation", "state": state,
                                 "source": str(mutation_file),
-                                "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%{target})"})
+                                "detail": f"{detected}/{len(mutations)} detected ({score if score is not None else 'n/a'}%{target})"})
         else:
             specialized.append({"kind": "mutation", "state": "not-run", "source": str(mutation_file), "detail": "mutation report absent"})
     if synthetic_summary:
@@ -707,9 +782,17 @@ def specialized_evidence(
         state = e2e["state"] if e2e and e2e["state"] == "failed" else "passed" if e2e and valid else "not-run"
         detail = (f"{e2e['executed']}/{e2e['discovered']} browser E2E checks; FCP {round(metrics['fcpMs'])}ms, CLS {metrics['cls']:.3f}"
                   if e2e and valid else "browser Web Vitals sample absent or unattributable" if e2e else "browser E2E JUnit report absent")
+        attestation = build_attestation_from(vitals)
+        if attestation and not attestation["matched"]:
+            # The run was asked to prove one build and saw another (or none). Whatever else passed,
+            # it did not validate the requested build, so it must never read as a pass for it.
+            state = "failed" if e2e else "not-run"
+            detail = (f"deployed build {attestation['observedSha'] or 'attestation unavailable'} "
+                      f"does not match requested {attestation['requestedSha']}")
         specialized.append({"kind": "synthetic", "state": state,
                             "source": f"journey:{synthetic_journey}", "detail": detail,
-                            **({"variant": variant} if variant else {})})
+                            **({"variant": variant} if variant else {}),
+                            **({"buildAttestation": attestation} if attestation else {})})
     return specialized
 
 
@@ -758,6 +841,14 @@ def main() -> None:
             performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":true}}}}')
             mutation = service / "mutations.xml"
             mutation.write_text('<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>')
+            rounded_mutation = service / "rounded-mutations.xml"
+            rounded_mutation.write_text(
+                "<mutations>"
+                + '<mutation status="KILLED"/>' * 4
+                + '<mutation status="TIMED_OUT"/>'
+                + '<mutation status="SURVIVED"/>' * 3
+                + "</mutations>"
+            )
             # Negative control for the report discovery itself: a vitest/Playwright
             # `<testsuites>` file is not named TEST-*.xml, and globbing that Gradle
             # convention reported an empty Admin UI envelope while its suites passed.
@@ -1036,6 +1127,11 @@ def main() -> None:
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
             assert "target 70%" in specialized[1]["detail"]
+            rounded = specialized_evidence(None, str(rounded_mutation), mutation_threshold=63)
+            assert rounded == [{
+                "kind": "mutation", "state": "passed", "source": str(rounded_mutation),
+                "detail": "5/8 detected (63%, target 63%)",
+            }]
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
@@ -1051,6 +1147,28 @@ def main() -> None:
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":0,"cls":0}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable", "variant": "chromium"}]
+            # #7451: a run asked to prove a build carries the attestation; a matching one stays a pass,
+            # a mismatching or unavailable one can never read as a pass for the requested build.
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"abc1234def5678"}}')
+            attested = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert attested[0]["state"] == "passed", attested
+            assert attested[0]["buildAttestation"] == {"requestedSha": "abc1234", "observedSha": "abc1234def5678", "matched": True}, attested
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"9999999aaaa"}}')
+            mismatch = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert mismatch[0]["state"] == "failed" and mismatch[0]["buildAttestation"]["matched"] is False, mismatch
+            assert "does not match requested abc1234" in mismatch[0]["detail"], mismatch
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":null}}')
+            unavailable = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert unavailable[0]["state"] == "failed" and unavailable[0]["buildAttestation"]["observedSha"] is None, unavailable
+            assert "attestation unavailable" in unavailable[0]["detail"], unavailable
+            # The sidecar's own claim of a match is ignored: `matched` is derived, never trusted.
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"9999999aaaa","matched":true}}')
+            forged = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert forged[0]["buildAttestation"]["matched"] is False and forged[0]["state"] == "failed", forged
+            # And the envelope validator refuses an attestation whose `matched` disagrees with its SHAs.
+            assert valid_build_attestation({"requestedSha": "abc1234", "observedSha": "abc1234def", "matched": True})
+            assert not valid_build_attestation({"requestedSha": "abc1234", "observedSha": "9999999", "matched": True})
+            assert not valid_build_attestation({"requestedSha": "abc1234", "observedSha": None, "matched": True, "extra": 1})
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
@@ -1161,6 +1279,32 @@ def main() -> None:
                 raise AssertionError("a runtime observation after its run was accepted")
             except ValueError:
                 pass
+        # Classification, in BOTH directions. The three must-move cases come from #8263; the
+        # must-stay ones exist because the obvious fix for them is wrong: a plain `\bpact\b`
+        # rejects `compact` correctly AND rejects `LedgerPactTest`, since CamelCase has no word
+        # boundary — silently reclassifying every Kotlin pact suite in the fleet as `unit`.
+        # That regression passes any test written only from the issue's examples, which is why
+        # the must-stay rows are here.
+        for classname, task, want in [
+            # must MOVE (the reported defects)
+            ("campaign-visual-contract.spec.ts", "e2e", "e2e"),
+            ("playwright-test-intelligence-evidence.guard.test.ts", "test", "unit"),
+            ("compact-filters-a11y.guard.test.ts", "test", "unit"),
+            # must STAY (the regressions a narrower fix would cause)
+            ("opsmessage-api.contract.test.ts", "test", "contract"),
+            ("com.openbank.ledger.LedgerPactTest", "test", "contract"),
+            ("SwiftPactFolderProviderVerificationTest", "test", "contract"),
+            ("ledger-pact.spec.ts", "test", "contract"),
+            ("LedgerOutboxProjectionIT", "integrationTest", "integration"),
+            ("com.openbank.party.PartyServiceTest", "test", "unit"),
+            ("compaction-policy.guard.test.ts", "test", "unit"),
+        ]:
+            got = classify("a case", classname, task, "openbank-admin-ui")
+            if got != want:
+                raise AssertionError(
+                    f"classify({classname!r}, task={task!r}) returned {got!r}, expected {want!r}"
+                )
+
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
         return
     if not args.service or not args.out:

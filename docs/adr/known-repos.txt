@@ -4,3 +4,4 @@
 # check-adr-registry.sh rejects any Delivery-Repos value not listed here — it
 # catches a typo'd repo name, not the target repo's actual state (out of scope).
 openbank-app
+open-bank-oss

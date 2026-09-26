@@ -128,7 +128,11 @@ export default function CommunicationPersonaPage() {
                     <td>{t('Byznys editor, čtyři oči', 'Business editor, four-eyes')}</td>
                     <td>
                       <span className="badge badge-neutral">{t('zatím nepublikováno', 'not published yet')}</span>
-                      <div style={muted}>{t('Dodá openbank-communication-service ve fázi 2.', 'Delivered by openbank-communication-service in phase 2.')}</div>
+                      <div style={muted}>
+                        <Link href={`/communication/edit/${encodeURIComponent(personaId)}`}>
+                          {t('Otevřít editor stylu →', 'Open style editor →')}
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                   <tr>

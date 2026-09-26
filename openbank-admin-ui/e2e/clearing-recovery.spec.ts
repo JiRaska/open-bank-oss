@@ -4,12 +4,19 @@ import { signInAsOperator } from './helpers/auth'
 const batch = {
   id: 'batch-2026-0042',
   batchReference: 'CLR-2026-0042',
-  paymentRail: 'SEPA',
-  status: 'PROCESSING',
+  rail: 'SEPA_SCT',
+  settlementType: 'NET',
+  status: 'IN_CLEARING',
   itemCount: 18,
-  totalAmount: 125000.50,
+  totalDebit: 125000.50,
+  totalCredit: 100000,
+  netPosition: -25000.50,
   currency: 'EUR',
+  cycleId: 'cycle-42',
+  settlementDate: '2026-08-31',
+  settledAt: null,
   createdAt: '2026-08-31T12:00:00Z',
+  updatedAt: '2026-08-31T12:05:00Z',
 }
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -38,15 +45,15 @@ test('keeps clearing and settlement evidence visible after a failed refresh', as
   await page.goto('/clearing')
 
   await expect(page.getByText('CLR-2026-0042')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('125,000.50', { exact: true })).toBeVisible()
-  await expect(page.getByText('PROCESSING', { exact: true })).toBeVisible()
+  await expect(page.getByRole('table').getByText(/EUR\s*125,000\.50/)).toBeVisible()
+  await expect(page.getByText('IN_CLEARING', { exact: true })).toBeVisible()
 
   unavailable = true
   await page.getByRole('button', { name: /Obnovit clearing dávky|Refresh clearing batches/ }).click()
 
   await expect(page.getByText(/Zobrazen je poslední úspěšný snapshot|Showing the last successful snapshot/)).toBeVisible({ timeout: 25_000 })
   await expect(page.getByText('CLR-2026-0042')).toBeVisible()
-  await expect(page.getByText('125,000.50', { exact: true })).toBeVisible()
-  await expect(page.getByText('PROCESSING', { exact: true })).toBeVisible()
+  await expect(page.getByRole('table').getByText(/EUR\s*125,000\.50/)).toBeVisible()
+  await expect(page.getByText('IN_CLEARING', { exact: true })).toBeVisible()
   await expect(page.getByText(/zatím žádné clearing dávky|no clearing batches yet/)).toHaveCount(0)
 })

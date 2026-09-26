@@ -1,0 +1,1 @@
+Mluv stručně.

@@ -57,6 +57,7 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'balance',            label: 'Balance',          group: 'core',         container: 'openbank-balance-service',        port: 8103 },
   { id: 'product-catalog',    label: 'Product Catalog',  group: 'core',         container: 'openbank-product-catalog',        port: 8104 },
   { id: 'pid',                label: 'PID',              group: 'identity',     container: 'openbank-pid-service',            port: 8105 },
+  { id: 'kyb',                label: 'KYB',              group: 'identity',     container: 'openbank-kyb-service',            port: 8157 },
   { id: 'consent',            label: 'Consent',          group: 'open-banking', container: 'openbank-consent-service',        port: 8106 },
   { id: 'psd2',               label: 'PSD2',             group: 'open-banking', container: 'openbank-psd2-service',           port: 8107 },
   { id: 'tpp-registry',       label: 'TPP Registry',     group: 'open-banking', container: 'openbank-tpp-registry-service',   port: 8108 },
@@ -85,12 +86,14 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'onboarding',        label: 'Onboarding',       group: 'compliance',   container: 'openbank-onboarding-service',     port: 8130 },
   { id: 'document',          label: 'Documents',        group: 'platform',     container: 'openbank-document-service',       port: 8143 },
   { id: 'lending',           label: 'Lending',          group: 'payments',     container: 'openbank-lending-service',        port: 8126 },
+  { id: 'risk-engine',       label: 'Risk Engine',      group: 'core',         container: 'openbank-risk-engine',            port: 8159 },
   { id: 'sdd',               label: 'SDD',              group: 'payments',     container: 'openbank-sdd-service',            port: 8129 },
   { id: 'copilot',           label: 'Copilot',          group: 'platform',     container: 'openbank-copilot-service',        port: 8131 },
   { id: 'fraud',             label: 'Fraud',            group: 'compliance',   container: 'openbank-fraud-service',          port: 8133 },
   { id: 'analytics-sink',    label: 'Analytics Sink',   group: 'platform',     container: 'openbank-analytics-sink',         port: 8134 },
   { id: 'anacredit',         label: 'AnaCredit',        group: 'compliance',   container: 'openbank-anacredit-service',      port: 8137 },
   { id: 'case-coordinator',  label: 'Case Coordinator', group: 'platform',     container: 'openbank-case-coordinator-agent', port: 8146 },
+  { id: 'communication',     label: 'Communication',    group: 'platform',     container: 'openbank-communication-service',  port: 8158 },
 ]
 
 export function findService(id: string): ServiceEntry | undefined {

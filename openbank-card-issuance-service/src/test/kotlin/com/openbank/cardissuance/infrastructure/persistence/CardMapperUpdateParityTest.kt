@@ -11,8 +11,10 @@ import com.openbank.cardissuance.domain.model.CardStatus
 import com.openbank.cardissuance.domain.model.CardType
 import com.openbank.cardissuance.infrastructure.persistence.entity.CardEntity
 import com.openbank.cardissuance.infrastructure.persistence.mapper.applyFrom
+import com.openbank.cardissuance.infrastructure.persistence.mapper.toDomain
 import com.openbank.cardissuance.infrastructure.persistence.mapper.toEntity
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.LocalDate
@@ -112,5 +114,19 @@ class CardMapperUpdateParityTest {
                 drifted,
             )
             .isEmpty()
+    }
+
+    @Test
+    fun `read-back of an unparseable persisted closedReason is LOUD, never a silent null`() {
+        // #9038: a corrupted persisted value must raise — getOrNull used to null the field back
+        // into the domain and the corruption stayed invisible.
+        val corrupted = card().toEntity().also { it.closedReason = "SINGLE_USE_CONSUMD" }
+        assertThatThrownBy { corrupted.toDomain() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("SINGLE_USE_CONSUMD")
+
+        val valid = card().toEntity().also { it.closedReason = "SINGLE_USE_CONSUMED" }
+        assertThat(valid.toDomain().closedReason).isEqualTo(CardClosedReason.SINGLE_USE_CONSUMED)
+        assertThat(card(closedReason = null).toEntity().toDomain().closedReason).isNull()
     }
 }

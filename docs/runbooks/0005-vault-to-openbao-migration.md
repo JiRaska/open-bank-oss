@@ -61,7 +61,7 @@ This runbook uses **Approach A**.
       KMS unseal key is reachable from the OpenBao ServiceAccount (same EKS Pod Identity / IAM role).
 - [ ] **OpenBao chart pinned + image allowed.** Add `openbao/openbao` repo, pick the 2.x chart;
       add `openbao/openbao:2.x` to the image set (third-party → not covered by the Kyverno
-      `verify-openbank-image-signatures` policy, which only gates `openbank-*` ECR images).
+      `verify-openbank-image-sbom-attestation` policy, which only gates `openbank-*` ECR images).
 - [ ] **ESO provider check.** Confirm the running external-secrets version supports the OpenBao/
       Vault-compatible API (it does — same `vault` provider).
 - [ ] **Consumer inventory.** Anything hardcoding `vault.vault.svc` (ESO ClusterSecretStore, any

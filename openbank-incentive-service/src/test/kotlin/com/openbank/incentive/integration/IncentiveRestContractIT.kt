@@ -218,6 +218,32 @@ class IncentiveRestContractIT {
             body("$", not(hasKey("idempotencyKey")))
             body("$", not(hasKey("codeDigest")))
         } Extract { path<String>("id") }
+        // An offer this service does not hold is a 404, even when the request's attributionRef has
+        // already been reserved (it has, one call above). The conflict check used to run first, so
+        // this answered 409 and the 404 branch was unreachable — which broke customer-edge's
+        // *POST an attributed customer reservation for an offer the bank does not hold* pact and,
+        // because can-i-deploy fails closed on one contract regression, every auto-deploy run
+        // (issue #9794). Asserted HERE rather than as its own @Test so the already-reserved
+        // attribution is real state rather than a fixture: with the fix reverted this line is the
+        // one that goes red.
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            header("Idempotency-Key", "customer-claim-missing-offer")
+            body(
+                """{
+                    "code":"SUMMER-0004",
+                    "productRef":"current-account",
+                    "attributionRef":"$attributionRef"
+                }
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/customer-incentives/offers/${java.util.UUID.randomUUID()}/reservations")
+        } Then {
+            statusCode(404)
+        }
+
         assertThat(string("select party_ref from promo_reservation where id = '$attributedId'"))
             .isEqualTo(customerParty.toString())
         assertThat(string("select attribution_ref::text from promo_reservation where id = '$attributedId'"))

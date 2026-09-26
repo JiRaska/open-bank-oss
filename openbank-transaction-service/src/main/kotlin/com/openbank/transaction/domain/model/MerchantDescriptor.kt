@@ -56,7 +56,23 @@ object MerchantDescriptor {
      * normalises away entirely (a bare `PRAHA 4`, an empty field) must not collide with every other
      * such descriptor in the catalogue.
      */
-    fun normalise(descriptor: String?): String? {
+    fun normalise(descriptor: String?): String? = parse(descriptor)?.key
+
+    /**
+     * The lookup key AND the town the descriptor named, if it named one.
+     *
+     * The town is stripped to reach the key — that is what makes `BILLA PRAHA 4` and `BILLA BRNO`
+     * the same merchant — and stripping it was also throwing away the only per-site location
+     * information the acquirer gives us. Both facts are true at once, so both are returned: the key
+     * identifies WHO was paid, the town narrows WHERE, and only the second may vary between two
+     * transactions with the same key.
+     *
+     * [ParsedDescriptor.cityToken] is the FIRST town token found while walking the tail inward, in
+     * its folded, upper-case form (`PLZEN`, never `Plzeň`), so it can be a stable database key. Null
+     * when the descriptor carried no town this parser recognises — which is most e-commerce
+     * descriptors, and correctly means "no location to narrow to" rather than "unknown town".
+     */
+    fun parse(descriptor: String?): ParsedDescriptor? {
         val raw = descriptor?.trim().orEmpty()
         if (raw.isEmpty()) return null
 
@@ -78,18 +94,41 @@ object MerchantDescriptor {
 
         // Strip location and legal form from the tail only, repeatedly — `… A.S. PRAHA 4 CZ` needs
         // four passes. Leading tokens are never touched: they carry the trading name.
+        var cityToken: String? = null
         var changed = true
         while (changed && tokens.isNotEmpty()) {
             changed = false
             if (isStrippable(tokens)) {
+                val dropped = tokens.last()
+                // Remember the town, not the district or the country: `PRAHA 4` yields `PRAHA`,
+                // because the district is a subdivision of a town this parser does not resolve to
+                // coordinates and pretending otherwise would invent precision.
+                if (cityToken == null && dropped in CITY_TOKENS) cityToken = dropped
                 tokens = tokens.dropLast(1)
                 changed = true
             }
         }
 
         val key = tokens.joinToString("")
-        return key.ifEmpty { null }
+        return if (key.isEmpty()) null else ParsedDescriptor(key = key, cityToken = cityToken)
     }
+
+    /**
+     * A single town name in the form [parse] produces — folded, upper-cased, punctuation removed.
+     *
+     * NOT `normalise`: that function's whole job is to STRIP town tokens, so normalising "Brno"
+     * returns null (nothing identifying is left). An operator typing a town needs the opposite
+     * operation, and reaching for the familiar one silently produces a location the read path can
+     * never match. Returns null when nothing usable remains.
+     */
+    fun foldTown(raw: String?): String? {
+        val folded = raw?.trim().orEmpty().uppercase().map { ACCENTS[it] ?: it }.joinToString("")
+        val token = folded.replace(".", "").split(Regex("[^A-Z0-9]+")).filter { it.isNotEmpty() }
+        return token.joinToString("").ifEmpty { null }
+    }
+
+    /** What one acquirer descriptor tells us: who was paid, and — sometimes — in which town. */
+    data class ParsedDescriptor(val key: String, val cityToken: String?)
 
     /**
      * True when the LAST token is a location or legal-form suffix rather than part of the name.

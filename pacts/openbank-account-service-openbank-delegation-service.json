@@ -6,6 +6,7 @@
     {
       "contents": {
         "aggregateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "approvalPolicy": "N_OF_M",
         "capabilities": [
           "ACCOUNT_READ_BALANCES"
         ],
@@ -17,6 +18,7 @@
           "amount": 1500.0,
           "currency": "CZK"
         },
+        "requiredApprovals": 3,
         "resourceId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "resourceType": "ACCOUNT",
         "validFrom": "2026-01-01T00:00:00Z"
@@ -96,6 +98,14 @@
             "matchers": [
               {
                 "match": "type"
+              }
+            ]
+          },
+          "$.requiredApprovals": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
               }
             ]
           },

@@ -147,15 +147,24 @@ jobs:
             echo "==> record-deployment ${svc} @ ${short} → sandbox"
             # WHICH version to record is decided by resolve-record-deployment-version.sh (#3223).
             # It never fabricates: `exact` when the broker has this sha, `equivalent:<sha>` when a
-            # published version is byte-identical in every build input of this service, `none`
+            # published version is byte-identical in every RECORDED SOURCE of this service, `none`
             # otherwise. The old code PUT an empty version on 404, which made 45 of 56 deployed
             # versions unverifiable and left 13 of 19 providers permanently blocking consumers.
+            #
+            # "Recorded source" includes the service's OWN src/test since #9898. The version
+            # recorded here is the counterpart of every consumer's can-i-deploy, so what has to be
+            # identical is not only the image but the PACT ARTEFACTS, and a provider's
+            # verifications come from its @Provider test class. Reusing release-please's
+            # exclude-paths hid that: a test-only @State fix in party-service resolved back to a
+            # pre-fix version forever, so account-service reported [REGRESSION] against a defect
+            # already verified green in the broker. Expect MORE `none` than before, on exactly
+            # those commits.
             sel="$(bash .github/scripts/resolve-record-deployment-version.sh "$svc" "$SHA")"
             case "$sel" in
               exact:*)      REC_VER="${sel#exact:}" ;;
               equivalent:*) REC_VER="${sel#equivalent:}"
-                            echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every build input — recording that (#3223, #3432)" ;;
-              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state."
+                            echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every recorded source — recording that (#3223, #3432)" ;;
+              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state. If that service's own src/test changed since its latest published version, that is the #9898 case: the deployed tree needs publishing, and it is NOT a provider defect."
                             continue ;;
             esac
             ok=0

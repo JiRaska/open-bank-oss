@@ -127,11 +127,15 @@
     },
     "openbank-incentive-service": {
       "component": "incentive-service",
-      "exclude-paths": ["openbank-incentive-service/src/test"]
+      "exclude-paths": [
+        "openbank-incentive-service/src/test"
+      ]
     },
     "openbank-referral-service": {
       "component": "referral-service",
-      "exclude-paths": ["openbank-referral-service/src/test"]
+      "exclude-paths": [
+        "openbank-referral-service/src/test"
+      ]
     },
     "openbank-case-coordinator-agent": {
       "component": "case-coordinator-agent",
@@ -155,6 +159,12 @@
       "component": "clearing-simulator",
       "exclude-paths": [
         "openbank-clearing-simulator/src/test"
+      ]
+    },
+    "openbank-communication-service": {
+      "component": "communication-service",
+      "exclude-paths": [
+        "openbank-communication-service/src/test"
       ]
     },
     "openbank-consent-service": {
@@ -422,6 +432,30 @@
       "component": "loyalty-service",
       "exclude-paths": [
         "openbank-loyalty-service/src/test"
+      ]
+    },
+    "openbank-wealth-service": {
+      "component": "wealth-service",
+      "exclude-paths": [
+        "openbank-wealth-service/src/test"
+      ]
+    },
+    "openbank-context-service": {
+      "component": "context-service",
+      "exclude-paths": [
+        "openbank-context-service/src/test"
+      ]
+    },
+    "openbank-risk-engine": {
+      "component": "risk-engine",
+      "exclude-paths": [
+        "openbank-risk-engine/src/test"
+      ]
+    },
+    "openbank-treasury-service": {
+      "component": "treasury-service",
+      "exclude-paths": [
+        "openbank-treasury-service/src/test"
       ]
     }
   }

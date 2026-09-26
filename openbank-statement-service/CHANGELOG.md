@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.12.4](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.3...statement-service-v0.12.4) (2026-09-23)
+
+
+### Security
+
+* **agent:** own M2M identities for the AI-agent reads and the statement search ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 7) ([#10551](https://github.com/JiRaska/open-bank-oss/issues/10551)) ([5a25631](https://github.com/JiRaska/open-bank-oss/commit/5a25631fffd69f9f5ea653d36b5b5718bb35e951))
+
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.2...statement-service-v0.12.3) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.1...statement-service-v0.12.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **statement:** guard statement_outbox created_at plausibility at INSERT ([#9322](https://github.com/JiRaska/open-bank-oss/issues/9322)) ([b97e903](https://github.com/JiRaska/open-bank-oss/commit/b97e90377d4ca9083d5b8e6cc47afaf1cbb27841))
+* **statement:** skip a debris account on the per-pocket read too, not only the account read ([#9837](https://github.com/JiRaska/open-bank-oss/issues/9837)) ([24bd8eb](https://github.com/JiRaska/open-bank-oss/commit/24bd8eb35a192a835d0e3c3c71ddc92c0cf25eab))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.0...statement-service-v0.12.1) (2026-09-08)
 
 

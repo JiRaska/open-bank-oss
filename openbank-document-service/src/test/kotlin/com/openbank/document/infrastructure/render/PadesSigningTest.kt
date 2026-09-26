@@ -9,6 +9,8 @@ import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.text.PDFTextStripper
 import org.assertj.core.api.Assertions.assertThat
+import org.bouncycastle.asn1.ASN1InputStream
+import org.bouncycastle.asn1.cms.ContentInfo
 import org.bouncycastle.cert.X509CertificateHolder
 import org.bouncycastle.cms.CMSProcessableByteArray
 import org.bouncycastle.cms.CMSSignedData
@@ -123,10 +125,17 @@ class PadesSigningTest {
         assertThat(PadesSigning.hasSignatureNamed(pdf, "party-1")).isFalse()
     }
 
-    /** Verifies a detached CMS/PKCS7 signature against the certificate embedded in it. */
+    /**
+     * Verifies a detached CMS/PKCS7 signature against the certificate embedded in it.
+     *
+     * A PDF `/Contents` entry is zero-padded to its reserved size, and BouncyCastle 1.85+ rejects
+     * trailing bytes after the DER object ("Extra data detected in stream"), so read only the first
+     * ASN.1 object — as a real PAdES verifier does — rather than handing it the padded field.
+     */
     @Suppress("UNCHECKED_CAST")
     private fun verifies(cmsBytes: ByteArray, signedContent: ByteArray): Boolean {
-        val signedData = CMSSignedData(CMSProcessableByteArray(signedContent), cmsBytes)
+        val contentInfo = ASN1InputStream(cmsBytes).use { ContentInfo.getInstance(it.readObject()) }
+        val signedData = CMSSignedData(CMSProcessableByteArray(signedContent), contentInfo)
         val signerInfo = signedData.signerInfos.signers.first()
         val selector = signerInfo.sid as Selector<X509CertificateHolder>
         val certHolder = signedData.certificates.getMatches(selector).first() as X509CertificateHolder

@@ -95,6 +95,20 @@ beforeEach(() => { posted = []; releasePost = null; postMode = 'ok'; installFetc
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('payment creation — single-flight (issues #7093, #7172)', () => {
+  it('opens as a named modal and returns focus to the editable payment form after Escape', async () => {
+    renderPage()
+    const form = await openSepaForm()
+
+    fireEvent.submit(form)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Review payment order' })
+    expect(dialog).toHaveAccessibleDescription(/Acceptance is not settlement/)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to editing' })).toHaveFocus())
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toHaveFocus())
+  })
+
   it('two submits in the SAME event-loop turn produce exactly ONE POST', async () => {
     postMode = 'hold'
     renderPage()
@@ -112,6 +126,10 @@ describe('payment creation — single-flight (issues #7093, #7172)', () => {
     })
 
     expect(posted.filter(p => p.url.includes('/api/sepa-payments'))).toHaveLength(1)
+    const dialog = screen.getByRole('alertdialog', { name: 'Review payment order' })
+    expect(dialog).toHaveAttribute('aria-busy', 'true')
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    expect(dialog).toBeInTheDocument()
 
     await act(async () => {
       releasePost?.(new Response(JSON.stringify({ id: 'pay-1' }), { status: 201 }))
@@ -175,5 +193,7 @@ describe('payment creation — single-flight (issues #7093, #7172)', () => {
     expect(posted[0].key).toMatch(/^[0-9a-f-]{8,}/)
     const body = JSON.parse(posted[0].body)
     expect(body).toMatchObject({ creditorIban: 'DE89370400440532013000', creditorName: 'Jane Doe', amount: 100, currency: 'EUR' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText('New Payment')).toHaveFocus())
   })
 })

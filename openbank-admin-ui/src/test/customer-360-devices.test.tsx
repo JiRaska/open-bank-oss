@@ -37,17 +37,17 @@ afterEach(() => {
 })
 
 describe('Customer 360 devices panel', () => {
-  it('asks notification-service through the BFF proxy, on the path DeviceResource serves', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ items: [], total: 0 })))
+  it('uses the shared party-filtered graph route', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ devices: [], unavailable: [] })))
     renderPanel()
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     const url = String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0])
-    expect(url).toBe(`/api/svc/notification-service/api/v1/devices?partyId=${PARTY}`)
+    expect(url).toBe(`/api/customer-360/${PARTY}/graph`)
   })
 
   it('renders a row per device with status and last-active, never the push token', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({
-      items: [{
+      devices: [{
         id: 'd1',
         platform: 'IOS',
         appInstance: 'inst-1',
@@ -58,7 +58,7 @@ describe('Customer 360 devices panel', () => {
         refreshedAt: '2026-08-15 09:30:00',
         lastUsedAt: '2026-08-15 09:30:00',
       }],
-      total: 1,
+      unavailable: [],
     })))
     renderPanel()
 
@@ -70,14 +70,14 @@ describe('Customer 360 devices panel', () => {
   })
 
   it('states an empty result as measured, not unknown', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ items: [], total: 0 })))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ devices: [], unavailable: [] })))
     renderPanel()
     await waitFor(() => expect(screen.getByText(/No registered devices/i)).toBeTruthy())
   })
 
   // THE load-bearing one — same shape as the adverse-state panel's.
   it('never reports an unreachable notification-service as "no devices"', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'Unknown service: notification-service' }, 404)))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'unauthorized' }, 403)))
     renderPanel()
 
     await waitFor(() => expect(screen.getByText(/Devices unavailable/i)).toBeTruthy())
@@ -85,10 +85,10 @@ describe('Customer 360 devices panel', () => {
   })
 
   it('treats a scaled-to-zero backend the same way — unknown, not empty', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'scaled_to_zero' }, 503)))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ devices: [], unavailable: ['devices'] })))
     renderPanel()
 
-    await waitFor(() => expect(screen.getByText(/scaled_to_zero/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/unreachable/i)).toBeTruthy())
     expect(screen.queryByText(/No registered devices/i)).toBeNull()
   })
 })

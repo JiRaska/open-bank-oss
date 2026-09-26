@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.domain.event
 
+import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.libs.domain.event.DomainEvent
@@ -42,6 +43,8 @@ data class DelegationOffered(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
+    val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    val requiredApprovals: Int? = null,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime? = null,
     val perTransactionLimit: EventMoney? = null,
@@ -60,6 +63,8 @@ data class DelegationActivated(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
+    val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    val requiredApprovals: Int? = null,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime? = null,
     val perTransactionLimit: EventMoney? = null,
@@ -122,6 +127,8 @@ data class DelegationReinstated(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
+    val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    val requiredApprovals: Int? = null,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime? = null,
     val perTransactionLimit: EventMoney? = null,

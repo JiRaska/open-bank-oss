@@ -63,6 +63,10 @@ class DelegationGrants(private val upstream: UpstreamClient) {
             ?.takeIf { it.isArray } ?: return emptyList()
         return grants.asSequence()
             .filter { it.path("status").asText() == "ACTIVE" }
+            // An Exposure-bearing legacy grant has no safe delivery path: document-service streams
+            // original object bytes and no component can prove a redaction, watermark or maxViews.
+            // Keep it visible through the grant read API for audit, but never surface it as a share.
+            .filter { it.path("exposure").isMissingNode || it.path("exposure").isNull }
             .filter { it.path("resourceType").asText() == resourceType }
             .filter { g -> g.path("capabilities").any { it.asText() == capability } }
             .mapNotNull { it.path("resourceId").asText(null) }

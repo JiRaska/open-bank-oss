@@ -8,9 +8,11 @@ import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckC
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
-const ACCENT = '#6366f1'
-const RECV = '#6366f1' // payee / bank A
-const PAYER = '#10b981' // payer / bank B
+const ACCENT = 'var(--accent)'
+const ACCENT_TEXT = 'var(--accent-text)'
+const RECV = 'var(--accent)' // payee / bank A
+const PAYER = 'var(--success)' // payer / bank B
+const NEUTRAL = 'var(--text-secondary)'
 const INK = 'var(--text-primary)'
 const SUB = 'var(--text-secondary)'
 
@@ -41,15 +43,15 @@ export default function QrlessPayPage() {
 
       {/* Status strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <Pill color="#059669" bg="#ecfdf5" border="#6ee7b7" Icon={CheckCircle} label={t('QR SPAYD: živé v app', 'QR SPAYD: live in app')} />
-        <Pill color="#d97706" bg="#fffbeb" border="#fcd34d" Icon={Circle} label={t('BLE proximity: v app, spící (čeká na security gates)', 'BLE proximity: in app, dormant (awaiting security gates)')} />
-        <Pill color="#94a3b8" bg="#f8fafc" border="#cbd5e1" Icon={Radio} label={t('UWB: volitelné zesílení', 'UWB: optional enhancement')} />
+        <Pill color="var(--success-text)" bg="var(--success-bg)" border="var(--success-border)" Icon={CheckCircle} label={t('QR SPAYD: živé v app', 'QR SPAYD: live in app')} />
+        <Pill color="var(--warning-text)" bg="var(--warning-bg)" border="var(--warning-border)" Icon={Circle} label={t('BLE proximity: v app, spící (čeká na security gates)', 'BLE proximity: in app, dormant (awaiting security gates)')} />
+        <Pill color="var(--text-primary)" bg="var(--surface-3)" border="var(--border-strong)" Icon={Radio} label={t('UWB: volitelné zesílení', 'UWB: optional enhancement')} />
         <Link href="/docs/adr/0095-qrlesspay-ble-proximity-spayd-payments" style={{ textDecoration: 'none' }}>
-          <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
+          <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
         </Link>
-        <Pill color="#7c3aed" bg="#f5f3ff" border="#ddd6fe" Icon={ShieldCheck} label={t('money-path', 'money-path')} />
+        <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={ShieldCheck} label={t('money-path', 'money-path')} />
         <Link href="/docs/qrlesspay-readiness" style={{ textDecoration: 'none' }}>
-          <Pill color="#d97706" bg="#fffbeb" border="#fcd34d" Icon={ScrollText} label={t('Posouzení připravenosti', 'Readiness assessment')} />
+          <Pill color="var(--warning-text)" bg="var(--warning-bg)" border="var(--warning-border)" Icon={ScrollText} label={t('Posouzení připravenosti', 'Readiness assessment')} />
         </Link>
       </div>
 
@@ -84,12 +86,12 @@ export default function QrlessPayPage() {
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
           {LAYERS.map((l, i) => (
-            <div key={i} className="card" style={{ padding: 14, borderLeft: `3px solid ${l.req ? PAYER : '#94a3b8'}` }}>
+            <div key={i} className="card" style={{ padding: 14, borderLeft: `3px solid ${l.req ? PAYER : NEUTRAL}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: INK }}>
                   <l.Icon size={14} style={{ color: ACCENT }} /> {t(l.threatCs, l.threatEn)}
                 </div>
-                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: l.req ? '#059669' : '#64748b', background: l.req ? '#ecfdf5' : '#f1f5f9', border: `1px solid ${l.req ? '#6ee7b7' : '#cbd5e1'}`, padding: '1px 7px', borderRadius: 20 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: l.req ? 'var(--success-text)' : 'var(--text-primary)', background: l.req ? 'var(--success-bg)' : 'var(--surface-3)', border: `1px solid ${l.req ? 'var(--success-border)' : 'var(--border-strong)'}`, padding: '1px 7px', borderRadius: 20 }}>
                   {l.req ? t('povinné', 'required') : t('volitelné', 'optional')}
                 </span>
               </div>
@@ -121,7 +123,7 @@ export default function QrlessPayPage() {
                   <td style={{ ...td, color: SUB }}>{t(r.qrCs, r.qrEn)}</td>
                   <td style={{ ...td, color: SUB }}>{t(r.blCs, r.blEn)}</td>
                   <td style={td}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: r.win === 'qr' ? '#d97706' : r.win === 'bl' ? '#059669' : '#64748b' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: r.win === 'qr' ? 'var(--warning-text)' : r.win === 'bl' ? 'var(--success-text)' : 'var(--text-primary)' }}>
                       {r.win === 'qr' ? t('QR', 'QR') : r.win === 'bl' ? 'QRlessPay' : t('remíza', 'tie')}
                     </span>
                   </td>
@@ -265,8 +267,8 @@ function SequenceDiagram({ t }: { t: (cs: string, en: string) => string }) {
         </marker>
       </defs>
       {/* lifelines (visible in both themes) */}
-      <line x1={RX} y1={86} x2={RX} y2={452} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3 4" opacity={0.7} />
-      <line x1={PX} y1={86} x2={PX} y2={452} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3 4" opacity={0.7} />
+      <line x1={RX} y1={86} x2={RX} y2={452} stroke={NEUTRAL} strokeWidth={1.5} strokeDasharray="3 4" />
+      <line x1={PX} y1={86} x2={PX} y2={452} stroke={NEUTRAL} strokeWidth={1.5} strokeDasharray="3 4" />
       {/* activation bars */}
       <rect x={RX - 5} y={146} width={10} height={26} rx={3} fill={RECV} opacity={0.28} />
       <rect x={RX - 5} y={254} width={10} height={26} rx={3} fill={RECV} opacity={0.28} />
@@ -274,12 +276,12 @@ function SequenceDiagram({ t }: { t: (cs: string, en: string) => string }) {
       {/* actor headers */}
       <g>
         <rect x={RX - 130} y={38} width={260} height={48} rx={12} fill="var(--accent-bg)" stroke="var(--accent-border)" />
-        <text x={RX} y={62} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={RECV}>{t('Příjemce · banka A', 'Payee · Bank A')}</text>
+        <text x={RX} y={62} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={ACCENT_TEXT}>{t('Příjemce · banka A', 'Payee · Bank A')}</text>
         <text x={RX} y={78} textAnchor="middle" fontSize={11} fill={SUB}>{t('iOS · advert + GATT server', 'iOS · advert + GATT server')}</text>
       </g>
       <g>
-        <rect x={PX - 130} y={38} width={260} height={48} rx={12} fill="#ecfdf5" stroke="#6ee7b7" />
-        <text x={PX} y={62} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={PAYER}>{t('Plátce · banka B', 'Payer · Bank B')}</text>
+        <rect x={PX - 130} y={38} width={260} height={48} rx={12} fill="var(--success-bg)" stroke="var(--success-border)" />
+        <text x={PX} y={62} textAnchor="middle" fontSize={13.5} fontWeight={700} fill="var(--success-text)">{t('Plátce · banka B', 'Payer · Bank B')}</text>
         <text x={PX} y={78} textAnchor="middle" fontSize={11} fill={SUB}>{t('Android · scan + GATT klient', 'Android · scan + GATT client')}</text>
       </g>
       {/* messages */}
@@ -295,8 +297,8 @@ function SequenceDiagram({ t }: { t: (cs: string, en: string) => string }) {
       <text x={PX} y={340} textAnchor="middle" fontSize={11} fill={SUB}>{t('podpis · blízkost (RSSI/UWB)', 'signature · proximity (RSSI/UWB)')}</text>
       <text x={PX} y={355} textAnchor="middle" fontSize={11} fill={SUB}>{t('VOP jméno↔IBAN (volitelně)', 'VOP name↔IBAN (optional)')}</text>
       {/* ⑤ pay (payer self-note) */}
-      <rect x={PX - 150} y={378} width={300} height={56} rx={10} fill="#ecfdf5" stroke="#6ee7b7" />
-      <text x={PX} y={400} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={PAYER}>{t('⑤ Návrh platby → potvrzení', '⑤ Payment proposal → confirm')}</text>
+      <rect x={PX - 150} y={378} width={300} height={56} rx={10} fill="var(--success-bg)" stroke="var(--success-border)" />
+      <text x={PX} y={400} textAnchor="middle" fontSize={12.5} fontWeight={700} fill="var(--success-text)">{t('⑤ Návrh platby → potvrzení', '⑤ Payment proposal → confirm')}</text>
       <text x={PX} y={418} textAnchor="middle" fontSize={11} fill={SUB}>{t('úhrada po IBAN / okamžitém railu', 'settled over the IBAN / instant rail')}</text>
     </svg>
   )
@@ -357,4 +359,4 @@ function Tag({ children }: { children: React.ReactNode }) {
 
 const th: React.CSSProperties = { padding: '10px 14px', fontWeight: 700, fontSize: 12 }
 const td: React.CSSProperties = { padding: '10px 14px', verticalAlign: 'top' }
-const linkBtn: React.CSSProperties = { fontSize: 12.5, fontWeight: 600, color: ACCENT, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '6px 12px', borderRadius: 8, textDecoration: 'none' }
+const linkBtn: React.CSSProperties = { fontSize: 12.5, fontWeight: 600, color: ACCENT_TEXT, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '6px 12px', borderRadius: 8, textDecoration: 'none' }

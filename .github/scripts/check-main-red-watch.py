@@ -75,6 +75,9 @@ EXIT CODES (--inspect-run)
     1  the watch could not answer -- no jobs, bad attempt, API failure. A FAILURE OF THIS GATE,
        never a "main is green" verdict.
     2  the run is RED -- escalate.
+    3  the watch could not REACH the API (rate limit, 5xx, dropped connection). Not a verdict
+       about `main` at all, and deliberately not 1: see STATUS_EXIT below for why the two are
+       different failures (#9697).
 
 Run standalone:
     .github/scripts/check-main-red-watch.py --check-declaration
@@ -94,6 +97,9 @@ import sys
 from pathlib import Path
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gatelib  # noqa: E402  -- the shared transient-failure vocabulary lives there
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW_DIR = ".github/workflows"
@@ -448,7 +454,32 @@ def render(verdict: dict) -> str:
     return "\n".join(lines)
 
 
-STATUS_EXIT = {"green": 0, "not-a-verdict": 0, "unanswerable": 1, "red": 2}
+# 3 is not "a milder 1". `unanswerable` means the watch READ the run and the run cannot support a
+# verdict — zero jobs, a conclusion no job accounts for — which is a defect worth a red. `transient`
+# means the watch never got to read anything, because the API refused to answer. Collapsing the two
+# is what produced 18 red runs in 6 hours, ten of ten sampled saying "could not answer" and none of
+# them about `main` (#9697). Noise on the control that exists to make a red main visible is the one
+# thing that hides a red main.
+STATUS_EXIT = {"green": 0, "not-a-verdict": 0, "unanswerable": 1, "red": 2, "transient": 3}
+
+
+def api_failure_exit(exc: BaseException) -> int:
+    """Decide which kind of "could not answer" an API failure is, and say so.
+
+    A free function rather than an inline branch so the self-test can falsify it directly: the
+    branch it replaced lived inside `main()`'s `except`, reachable only by driving the whole
+    online path, which is exactly the shape that goes untested and then behaves differently from
+    the comment above it.
+    """
+    if gatelib.is_gh_transient(str(exc)):
+        print(f"::warning::main-red-watch could not REACH the API: {exc}")
+        print(
+            "main-red-watch: NOT A VERDICT. The API refused to answer, so this run says nothing "
+            "about main — neither green nor red. Exit 3."
+        )
+        return STATUS_EXIT["transient"]
+    print(f"::error::main-red-watch could not answer: {exc}")
+    return STATUS_EXIT["unanswerable"]
 
 
 # --------------------------------------------------------------------------------------------
@@ -694,6 +725,40 @@ def self_test() -> int:
     check("an unparseable workflow is a finding, not a skip",
           any("unparseable" in x for x in check_declaration(REPO, wf_bad, wl, raw_ok)))
 
+    # ---- the third exit state (#9697) ------------------------------------------------------
+    # Both directions, because the dangerous one is the WIDENING: a message wrongly called
+    # transient degrades this watch to "said nothing", and a permission misconfiguration would
+    # then never be reported by the control whose job is to report.
+    for msg in (
+        "gh api repos/x/actions/runs/1/attempts/1 failed: gh: API rate limit exceeded for "
+        "installation ... (HTTP 403)",
+        "gh: Too Many Requests (HTTP 429)",
+        "You have exceeded a secondary rate limit",
+        "HTTP 503",
+        "error connecting to api.github.com: connection reset by peer",
+    ):
+        check(f"transient -> exit 3: {msg[:40]!r}",
+              api_failure_exit(RuntimeError(msg)) == 3)
+
+    for msg in (
+        "Must have admin rights to Repository.",
+        "Resource not accessible by integration",
+        "Not Found (HTTP 404)",
+        "Bad credentials",
+    ):
+        check(f"NOT transient -> exit 1: {msg[:40]!r}",
+              api_failure_exit(RuntimeError(msg)) == 1)
+
+    # An unanswerable RUN is still exit 1 — the watch read it and the run cannot support a
+    # verdict. That is a defect, not weather, and the new state must not have absorbed it.
+    check("a zero-job run stays unanswerable (exit 1), not transient",
+          STATUS_EXIT[classify_run(_run(), [])["status"]] == 1)
+
+    # The vocabulary must be non-empty, or every message above would read as FINAL while each
+    # call still returned a plausible boolean.
+    check("the shared transient vocabulary is non-empty",
+          len(gatelib.gh_transient_patterns()) > 0)
+
     print()
     if failures:
         print(f"SELF-TEST FAILED: {len(failures)} case(s)")
@@ -749,8 +814,13 @@ def main() -> int:
             meta = gh_api(f"repos/{args.repo}/actions/runs/{args.run_id}/attempts/{attempt}")[0]
             jobs = fetch_jobs_scoped(args.repo, args.run_id, attempt)
         except Exception as exc:  # noqa: BLE001 -- any failure here is "could not answer"
-            print(f"::error::main-red-watch could not answer: {exc}")
-            return 1
+            # WHICH kind of "could not answer" decides whether this is a defect or weather.
+            # `gatelib.is_gh_transient` reads the shared gh-transient-patterns.txt vocabulary —
+            # the same list gh-retry.sh and check-ruleset-context-parity.py classify against, so
+            # a message cannot be transient for one reader and final for another. Retry is NOT an
+            # alternative here: the installation rate-limit window outlives the run (#6853), which
+            # is why this degrades the VERDICT instead of trying harder.
+            return api_failure_exit(exc)
         verdict = classify_run(meta, jobs)
         print(render(verdict))
         if args.json:

@@ -1194,7 +1194,6 @@ test_four_eyes_exemptions_key_absent_is_backward_compatible if {
 		with data.rules as {"four_eyes": {"verbs": [], "actions": ["opsmessage.compose"]}}
 }
 
-
 # ---------------------------------------------------------------------------------------
 # The shared M2M identity may never reach a WRITE through a role-only operator reason
 # (GHSA-58jq-9hq3-66jr). `service-account-openbank-services` carries ROLE_OPERATOR in the
@@ -1400,4 +1399,45 @@ test_matrix_inheritance_does_not_grant_unlisted if {
 			"ROLE_OPERATOR": {"grant": ["account.freeze"]},
 			"ROLE_ADMIN": {"grant": [], "inherits": "ROLE_OPERATOR"},
 		}}
+}
+
+# ---------------------------------------------------------------------------------------
+# commstyle-publish (ADR-0285 D3/D6): a human ROLE_COMMS_APPROVER may publish; a Keycloak
+# service account may not, whatever roles it holds. The rule had no test until #9705 — the
+# "never granted to a service account" claim was prose, and #3765 is what an untested
+# "never" looks like on a live bundle. Real rules data, so a future role_action_matrix
+# grant of commstyle.publish (which matrix-allows would hand to any HUMAN, service
+# accounts included) turns the deny case red instead of silently widening the grant.
+# ---------------------------------------------------------------------------------------
+test_commstyle_publish_allows_human_approver if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-9", "type": "HUMAN", "roles": ["ROLE_COMMS_APPROVER"]},
+		"action": "commstyle.publish",
+		"resource": {"type": "commstyle", "id": "v-1"},
+	}
+		with data.rules as rules_real
+	decision.allow
+	decision.reason == "commstyle-publish"
+}
+
+test_commstyle_publish_denies_service_account_with_every_role if {
+	not rest.allow with input as {
+		"principal": {
+			"id": "service-account-openbank-services",
+			"type": "HUMAN",
+			"roles": ["ROLE_COMMS_APPROVER", "ROLE_OPERATOR", "ROLE_ADMIN"],
+		},
+		"action": "commstyle.publish",
+		"resource": {"type": "commstyle", "id": "v-1"},
+	}
+		with data.rules as rules_real
+}
+
+test_commstyle_publish_denies_human_without_approver_role if {
+	not rest.allow with input as {
+		"principal": {"id": "user-9", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMMS_EDITOR"]},
+		"action": "commstyle.publish",
+		"resource": {"type": "commstyle", "id": "v-1"},
+	}
+		with data.rules as rules_real
 }

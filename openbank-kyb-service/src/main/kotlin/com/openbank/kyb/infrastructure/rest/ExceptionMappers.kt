@@ -8,7 +8,10 @@ import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
+import com.openbank.kyb.application.usecase.StaleAttestationException
+import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
+import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -21,6 +24,16 @@ private fun error(status: Int, code: String, message: String?): Response = Respo
     .entity(mapOf("error" to code, "message" to message))
     .type(MediaType.APPLICATION_JSON)
     .build()
+
+/**
+ * A confirmation submitted against a rule text that has since changed. 409, not 400: the request
+ * was well-formed and the state moved underneath it, and the operator must re-read the new text.
+ */
+@Provider
+class StaleAttestationMapper : ExceptionMapper<StaleAttestationException> {
+    override fun toResponse(e: StaleAttestationException): Response =
+        error(CONFLICT, "REPRESENTATION_RULE_CHANGED", e.message)
+}
 
 @Provider
 class CaseNotFoundMapper : ExceptionMapper<CaseNotFoundException> {
@@ -43,6 +56,26 @@ class CaseTransitionMapper : ExceptionMapper<CaseTransitionException> {
     override fun toResponse(e: CaseTransitionException): Response = error(CONFLICT, "INVALID_TRANSITION", e.message)
 }
 
+/**
+ * A business-agreement precondition is not met (annexes not accepted, not this case's ceremony,
+ * the caller has not signed it, …). 409 with the exception's own code, so the app can tell
+ * "accept first" from "that ceremony is not yours".
+ */
+@Provider
+class AgreementConflictMapper : ExceptionMapper<AgreementConflictException> {
+    override fun toResponse(e: AgreementConflictException): Response = error(CONFLICT, e.code, e.message)
+}
+
+/**
+ * The initiator is not, verifiably, a listed representative. 422, not 403: the caller is authorised to
+ * drive their own case; it is this claim about the ENTITY that cannot be honoured.
+ */
+@Provider
+class InitiatorIdentityMismatchMapper : ExceptionMapper<InitiatorIdentityMismatchException> {
+    override fun toResponse(e: InitiatorIdentityMismatchException): Response =
+        error(UNPROCESSABLE, "INITIATOR_IDENTITY_MISMATCH", e.message)
+}
+
 @Provider
 class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> {
     override fun toResponse(e: RegistryUnavailableException): Response =
@@ -52,4 +85,5 @@ class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> 
 private const val NOT_FOUND = 404
 private const val FORBIDDEN = 403
 private const val CONFLICT = 409
+private const val UNPROCESSABLE = 422
 private const val UNAVAILABLE = 503

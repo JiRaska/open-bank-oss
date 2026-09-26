@@ -9,7 +9,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # only — GET /swift/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: "1.4.0"
+  version: "1.5.0"
   description: |
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
@@ -313,17 +313,7 @@ components:
   schemas:
     SendSwiftCommand:
       type: object
-      required:
-        - idempotencyKey
-        - messageType
-        - senderBic
-        - receiverBic
-        - transactionReference
-        - valueDate
-        - currency
-        - amountMinorUnits
-        - beneficiaryAccount
-        - beneficiaryName
+      required: [idempotencyKey, messageType, senderBic, receiverBic, transactionReference, valueDate, currency, amountMinorUnits, beneficiaryAccount, beneficiaryName]
       properties:
         idempotencyKey:
           type: string
@@ -378,6 +368,8 @@ components:
           nullable: true
           description: IBAN or account number of the ordering customer
           example: "CZ6508000000192000145399"
+        orderingCustomerAccountId:
+          type: string
         orderingCustomerName:
           type: string
           nullable: true

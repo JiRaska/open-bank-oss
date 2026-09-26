@@ -42,6 +42,10 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'clearing-service':       { container: 'openbank-clearing-service',       port: 8124 },
   'interest-service':       { container: 'openbank-interest-service',       port: 8125 },
   'lending-service':        { container: 'openbank-lending-service',        port: 8126 },
+  'risk-engine':            { container: 'openbank-risk-engine',            port: 8159 },
+  // ADR-0315: money-market deals for the treasury desk (#10618). Not in gitops yet — the
+  // service-registry guard lists it in SERVICE_MAP_NOT_YET_DEPLOYED until its workload lands.
+  'treasury-service':       { container: 'openbank-treasury-service',       port: 8160 },
   'campaign-service':       { container: 'openbank-campaign-service',       port: 8128 },
   'sdd-service':            { container: 'openbank-sdd-service',            port: 8129 },
   'fraud-service':          { container: 'openbank-fraud-service',          port: 8133 },
@@ -54,6 +58,14 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   // finrep-service is invisible to the browser and the page can only show mock data.
   'finrep-service':         { container: 'openbank-finrep-service',         port: 8140 },
   'vop-service':            { container: 'openbank-vop-service',            port: 8149 },
+  // ADR-0285 phase 2: style-version draft/submit/publish/retire + the commstyle.publish
+  // four-eyes queue. replicas: 0 until activated (openbank-communication-service PR) — routed
+  // here regardless, same as every other entry; a scaled-to-zero backend surfaces as a normal
+  // upstream connection failure, not a special case this map needs to know about.
+  'communication-service':  { container: 'openbank-communication-service',  port: 8158 },
+  // ADR-0284: legal-entity onboarding. The operator console reads the manual-review queue and
+  // writes the per-IČO representation attestation (#9711) through this same operator-token path.
+  'kyb-service':            { container: 'openbank-kyb-service',            port: 8157 },
 }
 
 // In-cluster, the upstream address must be the real Service DNS

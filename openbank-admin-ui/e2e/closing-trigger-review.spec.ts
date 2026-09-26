@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const previous = {
-  id: 'close-run-2026-07',
+  id: 'd2b7e9a0-0000-4000-8000-000000000001',
   trigger: 'SCHEDULED',
   status: 'COMPLETED',
   periodFrom: '2026-07-01',
@@ -19,7 +19,7 @@ const previous = {
 }
 const accepted = {
   ...previous,
-  id: 'close-run-2026-08',
+  id: 'd2b7e9a0-0000-4000-8000-000000000002',
   trigger: 'MANUAL',
   status: 'RUNNING',
   periodFrom: '2026-08-01',
@@ -47,6 +47,7 @@ test('reviews the latest close evidence and retains a failed catch-up trigger fo
     expect(route.request().method()).toBe('POST')
     expect(route.request().postData()).toBeNull()
     if (attempts === 1) {
+      await new Promise(resolve => setTimeout(resolve, 250))
       await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
       return
     }
@@ -55,14 +56,23 @@ test('reviews the latest close evidence and retains a failed catch-up trigger fo
   })
 
   await page.goto('/day-end?tab=eom')
-  await page.getByRole('button', { name: /Review catch-up close|Zkontrolovat catch-up uzávěrku/ }).click()
+  const trigger = page.getByRole('button', { name: /Review catch-up close|Zkontrolovat catch-up uzávěrku/ })
+  await trigger.click()
   const dialog = page.getByRole('alertdialog')
-  await expect(dialog).toContainText('close-run-2026-07 · COMPLETED · SCHEDULED')
+  const back = dialog.getByRole('button', { name: /Back to review|Zpět ke kontrole/ })
+  await expect(back).toBeFocused()
+  await back.click()
+  await expect(trigger).toBeFocused()
+  await trigger.click()
+  await expect(dialog).toContainText(`${previous.id} · COMPLETED · SCHEDULED`)
   await expect(dialog).toContainText(/1st of month · 02:30|1\. den v měsíci · 02:30/)
   await expect(dialog).toContainText(/Acceptance only confirms the start|Přijetí pouze potvrzuje zahájení/)
 
   const confirm = dialog.getByRole('button', { name: /Confirm run|Potvrdit spuštění/ })
   await confirm.click()
+  await expect(dialog).toHaveAttribute('aria-busy', 'true')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('alert')).toContainText(/Could not start the catch-up close run|Spuštění catch-up uzávěrky se nezdařilo/)
   await expect(dialog).toBeVisible()
   await confirm.click()
@@ -71,5 +81,6 @@ test('reviews the latest close evidence and retains a failed catch-up trigger fo
   await expect(page.getByText(/Catch-up close run accepted|Catch-up uzávěrka přijata/)).toBeVisible()
   await expect(page.getByText(/Running|Běží/).first()).toBeVisible()
   await expect(page.getByText(/Manual|Ruční/).first()).toBeVisible()
+  await expect(page.getByRole('region', { name: /Month-end close workspace|Pracovní plocha měsíční uzávěrky/ })).toBeFocused()
   expect(attempts).toBe(2)
 })

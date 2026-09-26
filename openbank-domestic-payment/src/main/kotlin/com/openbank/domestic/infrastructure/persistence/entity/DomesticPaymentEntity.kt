@@ -117,6 +117,9 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "reservation_id", unique = true)
     var reservationId: UUID? = null
 
+    @Column(name = "aggregate_revision", nullable = false)
+    var aggregateRevision: Long = 1
+
     /**
      * How many times the #3266 sweep has re-screened this payment. Persistence-only — deliberately
      * absent from the domain model, which describes the payment, not the recovery machinery.

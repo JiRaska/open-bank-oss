@@ -61,12 +61,12 @@ GITOPS = REPO / "openbank-infra/gitops/components"
 # in either direction — a baselined channel that becomes wired must leave this list, so the debt
 # cannot quietly become permanent.
 KNOWN_UNWIRED = {
-    # #5737 (merged) wired notification-service's `party-events-in` — and did it through the
-    # msg-override ConfigMap, not application.yaml, because the key is a dotted leaf (#686). It is
-    # therefore NOT listed here: it is wired, and recording it as debt would be a false statement
-    # in the baseline. The gate reads the ConfigMap and sees it. #5745 wired `notification-events-in`
-    # the same way, so it is gone from here too — only `delegation-events-in` remains untouched.
-    ("openbank-notification-service", "delegation-events-in"): "#5737 wired only party-events-in; this channel has no failure-strategy yet (#5745)",
+    # openbank-notification-service is OFF this list entirely as of #8346. Its `party-events-in`
+    # (#5737) and `notification-events-in` (#5745) name their DLQ through the msg-override
+    # ConfigMap because those changes also moved a dotted `group.id`; `delegation-events-in`
+    # (#8346) uses the NESTED form in application.yaml instead, which resolves in every config
+    # source, so local dev and tests get the same wiring as the pod. The gate reads both sources
+    # and sees all three.
     ("openbank-tax-reporting-service", "withholding-remitted-in"): "no KafkaUser in gitops — a Write ACL cannot be granted, so a DLQ would wedge on the send (#5745)",
     # The channels that had a DLQ BEFORE #5745, on SmallRye's implicit `dead-letter-topic-<channel>`
     # name. Naming one explicitly is a RENAME of a live topic: it strands whatever is already parked

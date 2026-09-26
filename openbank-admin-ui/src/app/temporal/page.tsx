@@ -176,9 +176,9 @@ function MetricCard({ label, value, unit, status }: {
   status?: 'good' | 'warn' | 'bad' | 'neutral'
 }) {
   const colors: Record<string, string> = {
-    good: 'var(--color-success, #22c55e)',
-    warn: 'var(--color-warning, #f59e0b)',
-    bad: 'var(--color-danger, #ef4444)',
+    good: 'var(--success-text)',
+    warn: 'var(--warning-text)',
+    bad: 'var(--danger-text)',
     neutral: 'var(--text-muted)',
   }
   const color = status ? colors[status] : 'var(--text)'
@@ -205,18 +205,18 @@ function PhaseRow({ phase, t }: { phase: typeof PHASES[0]; t: (cs: string, en: s
       gap: '16px',
       padding: '16px',
       borderRadius: '10px',
-      background: isDone ? 'rgba(34, 197, 94, 0.06)' : 'var(--card-bg)',
-      border: `1px solid ${isDone ? 'rgba(34, 197, 94, 0.25)' : 'var(--border)'}`,
+      background: isDone ? 'var(--success-bg)' : 'var(--card-bg)',
+      border: `1px solid ${isDone ? 'var(--success-border)' : 'var(--border)'}`,
       alignItems: 'flex-start',
     }}>
       <div style={{
         width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: isDone ? 'rgba(34, 197, 94, 0.15)' : 'var(--muted-bg, rgba(255,255,255,0.05))',
-        border: `2px solid ${isDone ? '#22c55e' : 'var(--border)'}`,
-        fontSize: '12px', fontWeight: 800, color: isDone ? '#22c55e' : 'var(--text-muted)',
+        background: isDone ? 'var(--success-bg)' : 'var(--surface-2)',
+        border: `2px solid ${isDone ? 'var(--success-border)' : 'var(--border)'}`,
+        fontSize: '12px', fontWeight: 800, color: isDone ? 'var(--success-text)' : 'var(--text-muted)',
       }}>
-        {isDone ? <CheckCircle size={16} color="#22c55e" /> : phase.id}
+        {isDone ? <CheckCircle size={16} color="var(--success-text)" /> : phase.id}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
@@ -226,13 +226,13 @@ function PhaseRow({ phase, t }: { phase: typeof PHASES[0]; t: (cs: string, en: s
           {phase.moneyPath && (
             <span style={{
               fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px',
-              background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)',
+              background: 'var(--danger-bg)', color: 'var(--danger-text)', border: '1px solid var(--danger-border)',
             }}>money-path</span>
           )}
           {isDone && (
             <span style={{
               fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px',
-              background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)',
+              background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)',
             }}>{t('DOKONČENO', 'DONE')}</span>
           )}
         </div>
@@ -243,7 +243,7 @@ function PhaseRow({ phase, t }: { phase: typeof PHASES[0]; t: (cs: string, en: s
           {phase.services.map(svc => (
             <span key={svc} style={{
               fontSize: '11px', padding: '2px 8px', borderRadius: '6px',
-              background: 'var(--muted-bg, rgba(255,255,255,0.06))', color: 'var(--text-muted)',
+              background: 'var(--surface-2)', color: 'var(--text-muted)',
               fontFamily: 'monospace', border: '1px solid var(--border)',
             }}>{svc}</span>
           ))}
@@ -280,7 +280,10 @@ export default function TemporalPage() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   const tabs: { id: Tab; labelCs: string; labelEn: string }[] = [
     { id: 'overview', labelCs: 'Přehled', labelEn: 'Overview' },
@@ -308,14 +311,14 @@ export default function TemporalPage() {
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
                   padding: '6px 12px', borderRadius: '20px',
-                  background: status.temporalDeployed ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
-                  border: `1px solid ${status.temporalDeployed ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                  background: status.temporalDeployed ? 'var(--success-bg)' : 'var(--warning-bg)',
+                  border: `1px solid ${status.temporalDeployed ? 'var(--success-border)' : 'var(--warning-border)'}`,
                   fontSize: '12px', fontWeight: 600,
-                  color: status.temporalDeployed ? '#22c55e' : '#f59e0b',
+                  color: status.temporalDeployed ? 'var(--success-text)' : 'var(--warning-text)',
                 }}>
                   <div style={{
                     width: '6px', height: '6px', borderRadius: '50%',
-                    background: status.temporalDeployed ? '#22c55e' : '#f59e0b',
+                    background: status.temporalDeployed ? 'var(--success-text)' : 'var(--warning-text)',
                   }} />
                   {status.temporalDeployed
                     ? t('Provozní', 'Running')
@@ -352,9 +355,9 @@ export default function TemporalPage() {
               onClick={() => setTab(tb.id)}
               style={{
                 padding: '10px 18px', fontSize: '14px', fontWeight: tab === tb.id ? 700 : 500,
-                color: tab === tb.id ? '#818cf8' : 'var(--text-muted)',
+                color: tab === tb.id ? 'var(--accent-text)' : 'var(--text-muted)',
                 background: 'transparent', border: 'none',
-                borderBottom: `2px solid ${tab === tb.id ? '#818cf8' : 'transparent'}`,
+                borderBottom: `2px solid ${tab === tb.id ? 'var(--accent-text)' : 'transparent'}`,
                 cursor: 'pointer', marginBottom: '-1px', transition: 'all 0.15s',
               }}
             >
@@ -369,11 +372,11 @@ export default function TemporalPage() {
 
             {/* Challenger callout */}
             <div style={{
-              background: 'linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.08) 100%)',
-              border: '1px solid rgba(99,102,241,0.25)',
+              background: 'linear-gradient(135deg, var(--accent-bg), color-mix(in srgb, var(--accent-bg) 72%, var(--surface-1)))',
+              border: '1px solid var(--accent-border)',
               borderRadius: '16px', padding: '24px',
             }}>
-              <div style={{ fontWeight: 800, fontSize: '16px', color: '#a5b4fc', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontWeight: 800, fontSize: '16px', color: 'var(--accent-text)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Zap size={18} />
                 {t('Proč Temporal — challenger model', 'Why Temporal — challenger model')}
               </div>
@@ -394,7 +397,7 @@ export default function TemporalPage() {
             {/* Money-path workflows in OpenBank */}
             <div>
               <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Activity size={16} color="#818cf8" />
+                <Activity size={16} color="var(--accent-text)" />
                 {t('Money-path workflowy v OpenBank', 'Money-path workflows in OpenBank')}
               </h2>
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px', maxWidth: 680 }}>
@@ -430,8 +433,8 @@ export default function TemporalPage() {
                   )
                 })}
               </div>
-              <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', fontSize: '12.5px', color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                <CheckCircle size={14} color="#22c55e" style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, background: 'var(--success-bg)', border: '1px solid var(--success-border)', fontSize: '12.5px', color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+                <CheckCircle size={14} color="var(--success-text)" style={{ flexShrink: 0, marginTop: 1 }} />
                 {t(
                   'Workery (Quarkus služby) se připojují k Temporal serveru přes gRPC a registrují workflow + activity implementace. Temporal server neobsahuje byznys logiku — ta žije výhradně v kódu workerů. Při výpadku workera Temporal čeká na jeho restart a pokračuje od posledního checkpointu.',
                   'Workers (Quarkus services) connect to the Temporal server over gRPC and register their workflow + activity implementations. The Temporal server contains no business logic — that lives exclusively in the worker code. When a worker goes down, Temporal waits for it to restart and continues from the last checkpoint.',
@@ -451,10 +454,10 @@ export default function TemporalPage() {
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: 'var(--text-muted)', fontWeight: 600, borderBottom: '1px solid var(--border)', width: '22%' }}>
                         {t('Oblast', 'Dimension')}
                       </th>
-                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#f87171', fontWeight: 600, borderBottom: '1px solid var(--border)', width: '39%' }}>
+                      <th style={{ textAlign: 'left', padding: '12px 16px', color: 'var(--danger-text)', fontWeight: 600, borderBottom: '1px solid var(--border)', width: '39%' }}>
                         {t('Před (outbox saga)', 'Before (outbox saga)')}
                       </th>
-                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#4ade80', fontWeight: 600, borderBottom: '1px solid var(--border)', width: '39%' }}>
+                      <th style={{ textAlign: 'left', padding: '12px 16px', color: 'var(--success-text)', fontWeight: 600, borderBottom: '1px solid var(--border)', width: '39%' }}>
                         {t('Po (Temporal)', 'After (Temporal)')}
                       </th>
                     </tr>
@@ -481,7 +484,7 @@ export default function TemporalPage() {
             {/* Compliance grid */}
             <div>
               <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Shield size={16} color="#818cf8" />
+                <Shield size={16} color="var(--accent-text)" />
                 {t('Regulatorní zarovnání', 'Regulatory alignment')}
               </h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
@@ -493,8 +496,8 @@ export default function TemporalPage() {
                   }}>
                     <span style={{
                       fontSize: '11px', fontWeight: 800, padding: '3px 8px', borderRadius: '6px',
-                      background: 'rgba(99,102,241,0.15)', color: '#818cf8',
-                      border: '1px solid rgba(99,102,241,0.3)', flexShrink: 0, marginTop: '2px',
+                      background: 'var(--accent-bg)', color: 'var(--accent-text)',
+                      border: '1px solid var(--accent-border)', flexShrink: 0, marginTop: '2px',
                     }}>{item.code}</span>
                     <span style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
                       {t(item.descCs, item.descEn)}
@@ -519,14 +522,14 @@ export default function TemporalPage() {
                 <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text)' }}>
                   {t('Celkový postup migrace', 'Overall migration progress')}
                 </span>
-                <span style={{ fontWeight: 800, fontSize: '16px', color: '#818cf8' }}>
+                <span style={{ fontWeight: 800, fontSize: '16px', color: 'var(--accent-text)' }}>
                   {PHASES.filter((p) => p.status === 'done').length} / {PHASES.length} {t('fází', 'phases')}
                 </span>
               </div>
               <div style={{ height: '8px', borderRadius: '8px', background: 'var(--border)', overflow: 'hidden' }}>
                 <div style={{
                   height: '100%', borderRadius: '8px',
-                  background: 'linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%)',
+                  background: 'linear-gradient(90deg, var(--accent-text), color-mix(in srgb, var(--accent-text) 72%, var(--info-text)))',
                   width: `${Math.round((PHASES.filter((p) => p.status === 'done').length / PHASES.length) * 100)}%`,
                   transition: 'width 0.5s ease',
                 }} />
@@ -543,10 +546,10 @@ export default function TemporalPage() {
             {/* Timeline note */}
             <div style={{
               padding: '14px 16px', borderRadius: '10px',
-              background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)',
+              background: 'var(--success-bg)', border: '1px solid var(--success-border)',
               fontSize: '13px', color: 'var(--text-muted)', display: 'flex', gap: '10px', alignItems: 'flex-start',
             }}>
-              <CheckCircle size={16} color="#22c55e" style={{ flexShrink: 0, marginTop: '1px' }} />
+              <CheckCircle size={16} color="var(--success-text)" style={{ flexShrink: 0, marginTop: '1px' }} />
               <span>
                 {t(
                   'Toto je referenční migrační plán z ADR-0100, ne živý stav běhů. Aktuální aktivitu a typy workflow potvrzují pouze metriky níže.',
@@ -565,10 +568,10 @@ export default function TemporalPage() {
             {!status?.available && (
               <div style={{
                 padding: '16px', borderRadius: '10px',
-                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
                 display: 'flex', gap: '10px', alignItems: 'center',
               }}>
-                <AlertTriangle size={16} color="#f59e0b" />
+                <AlertTriangle size={16} color="var(--warning-text)" />
                 <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                   {t('Prometheus nedostupný — metriky nelze načíst', 'Prometheus unavailable — metrics cannot be loaded')}
                 </span>
@@ -578,10 +581,10 @@ export default function TemporalPage() {
             {status?.available && !status.temporalDeployed && (
               <div style={{
                 padding: '16px', borderRadius: '10px',
-                background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)',
+                background: 'var(--accent-bg)', border: '1px solid var(--accent-border)',
                 display: 'flex', gap: '12px', alignItems: 'flex-start',
               }}>
-                <Clock size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
+                <Clock size={16} color="var(--accent-text)" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
                     {t('Temporal nelze potvrdit z Promethea', 'Temporal cannot be confirmed from Prometheus')}
@@ -692,7 +695,7 @@ export default function TemporalPage() {
               background: 'var(--card-bg)', border: '1px solid var(--border)',
               fontSize: '13px', color: 'var(--text-muted)', display: 'flex', gap: '10px', alignItems: 'center',
             }}>
-              <Activity size={16} color="#818cf8" />
+              <Activity size={16} color="var(--accent-text)" />
               <span>
                 {t(
                   'Podrobné dashboardy jsou dostupné v Grafaně (INTERNAL). Temporal nabízí oficiální dashboard IDs 10716 a 10717 pro import.',
@@ -713,7 +716,7 @@ export default function TemporalPage() {
               borderRadius: '12px', padding: '24px',
             }}>
               <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Server size={16} color="#818cf8" />
+                <Server size={16} color="var(--accent-text)" />
                 {t('Komponenty', 'Components')}
               </h2>
 
@@ -722,7 +725,7 @@ export default function TemporalPage() {
                   {
                     titleCs: 'Temporal Server',
                     titleEn: 'Temporal Server',
-                    icon: <Server size={18} color="#818cf8" />,
+                    icon: <Server size={18} color="var(--accent-text)" />,
                     itemsCs: ['Frontend (gRPC:7233)', 'History service', 'Matching service', 'Worker service', 'Helm chart v1.2.0'],
                     itemsEn: ['Frontend (gRPC:7233)', 'History service', 'Matching service', 'Worker service', 'Helm chart v1.2.0'],
                     ns: 'temporal',
@@ -730,7 +733,7 @@ export default function TemporalPage() {
                   {
                     titleCs: 'Persistence (CNPG)',
                     titleEn: 'Persistence (CNPG)',
-                    icon: <Database size={18} color="#22d3ee" />,
+                    icon: <Database size={18} color="var(--info-text)" />,
                     itemsCs: ['DB: temporal (core events)', 'DB: temporal_visibility (vyhledávání)', 'S3 záloha, 30d retence', 'PodMonitor → Prometheus'],
                     itemsEn: ['DB: temporal (core events)', 'DB: temporal_visibility (search)', 'S3 backup, 30d retention', 'PodMonitor → Prometheus'],
                     ns: 'temporal',
@@ -738,7 +741,7 @@ export default function TemporalPage() {
                   {
                     titleCs: 'Worker SDK (openbank-libs)',
                     titleEn: 'Worker SDK (openbank-libs)',
-                    icon: <GitBranch size={18} color="#4ade80" />,
+                    icon: <GitBranch size={18} color="var(--success-text)" />,
                     itemsCs: ['TemporalClientProducer (CDI) — dodáno', 'TemporalConfig — dodáno', 'OpenBankSaga DSL — plánováno', 'OpaActivityInterceptor — plánováno', 'DeterministicRandom (ADR-0100) — plánováno', 'Feature flag: openbank.temporal.enabled'],
                     itemsEn: ['TemporalClientProducer (CDI) — shipped', 'TemporalConfig — shipped', 'OpenBankSaga DSL — planned', 'OpaActivityInterceptor — planned', 'DeterministicRandom (ADR-0100) — planned', 'Feature flag: openbank.temporal.enabled'],
                     ns: 'service namespace',
@@ -746,7 +749,7 @@ export default function TemporalPage() {
                   {
                     titleCs: 'OPA Policy Gate (ADR-0034)',
                     titleEn: 'OPA Policy Gate (ADR-0034)',
-                    icon: <Shield size={18} color="#f59e0b" />,
+                    icon: <Shield size={18} color="var(--warning-text)" />,
                     itemsCs: ['PLÁNOVÁNO — nic z tohoto není nasazeno', 'Sidecar OPA v každém workeru', 'Policy: openbank/temporal/allow', 'Blokovalo by neoprávněné aktivity', 'Audit log každého rozhodnutí'],
                     itemsEn: ['PLANNED — none of this is deployed', 'OPA sidecar in each worker', 'Policy: openbank/temporal/allow', 'Would block unauthorized activities', 'Audit log of each decision'],
                     ns: 'service namespace',
@@ -754,7 +757,7 @@ export default function TemporalPage() {
                 ].map(comp => (
                   <div key={comp.titleEn} style={{
                     padding: '16px', borderRadius: '10px',
-                    background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)',
+                    background: 'var(--surface-2)', border: '1px solid var(--border)',
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                       {comp.icon}
@@ -771,8 +774,8 @@ export default function TemporalPage() {
                     </ul>
                     <div style={{
                       marginTop: '10px', fontSize: '11px', padding: '3px 8px',
-                      borderRadius: '6px', background: 'rgba(99,102,241,0.1)',
-                      color: '#818cf8', display: 'inline-block', fontFamily: 'monospace',
+                      borderRadius: '6px', background: 'var(--accent-bg)',
+                      color: 'var(--accent-text)', display: 'inline-block', fontFamily: 'monospace',
                     }}>
                       ns: {comp.ns}
                     </div>
@@ -803,9 +806,9 @@ export default function TemporalPage() {
                   <div key={idx} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                     <div style={{
                       width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0,
-                      background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+                      background: 'var(--accent-bg)', border: '1px solid var(--accent-border)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '11px', fontWeight: 700, color: '#818cf8',
+                      fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)',
                     }}>{idx + 1}</div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text)' }}>
@@ -842,13 +845,13 @@ export default function TemporalPage() {
                       border: '1px solid var(--border)', background: 'transparent',
                       transition: 'background 0.15s',
                     }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.06)' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-bg)' }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                     >
                       <span style={{
                         fontSize: '11px', fontWeight: 800, padding: '2px 8px', borderRadius: '6px',
-                        background: 'rgba(99,102,241,0.15)', color: '#818cf8',
-                        border: '1px solid rgba(99,102,241,0.3)', flexShrink: 0, fontFamily: 'monospace',
+                        background: 'var(--accent-bg)', color: 'var(--accent-text)',
+                        border: '1px solid var(--accent-border)', flexShrink: 0, fontFamily: 'monospace',
                       }}>{item.adr}</span>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>

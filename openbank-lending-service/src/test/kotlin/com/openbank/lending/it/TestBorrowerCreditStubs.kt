@@ -35,10 +35,17 @@ class TestBorrowerAccountLookupPort : BorrowerAccountLookupPort {
 @Alternative
 @Priority(200)
 class TestBorrowerCreditPort : BorrowerCreditPort {
-    override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> =
-        Uni.createFrom().item(Unit)
-    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> =
-        Uni.createFrom().item(Unit)
+    /** Every reference this port was asked to move customer money for (LedgerBackfillIT asserts none). */
+    val calls: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+
+    override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+        calls += reference
+        return Uni.createFrom().item(Unit)
+    }
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+        calls += reference
+        return Uni.createFrom().item(Unit)
+    }
 }
 
 /**
@@ -59,8 +66,40 @@ class TestRecordingLedgerPostingPort : com.openbank.lending.application.port.out
     val recorded: MutableList<com.openbank.lending.application.port.out.LedgerPosting> =
         java.util.Collections.synchronizedList(mutableListOf())
 
+    /**
+     * The ledger's idempotency contract, emulated: one journal per reference, a repeated reference
+     * is a no-op replay (ledger `ledger_idempotency`). LedgerBackfillIT counts journals here.
+     */
+    val journals: MutableMap<String, com.openbank.lending.application.port.out.LedgerPosting> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /** References that fail exactly once — failure injection for the stop-and-re-run path. */
+    val failOnce: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     override fun post(posting: com.openbank.lending.application.port.out.LedgerPosting): Uni<Unit> {
         recorded += posting
+        if (failOnce.remove(posting.reference)) {
+            return Uni.createFrom().failure(IllegalStateException("injected ledger failure for ${posting.reference}"))
+        }
+        journals.putIfAbsent(posting.reference, posting)
         return Uni.createFrom().item(Unit)
+    }
+
+    /** Emulates ledger-service's `Idempotent-Replayed` header: a repeated reference is REPLAYED (#10904). */
+    override fun postReportingReplay(
+        posting: com.openbank.lending.application.port.out.LedgerPosting,
+    ): Uni<com.openbank.lending.application.port.out.LedgerPostResult> {
+        recorded += posting
+        if (failOnce.remove(posting.reference)) {
+            return Uni.createFrom().failure(IllegalStateException("injected ledger failure for ${posting.reference}"))
+        }
+        val first = journals.putIfAbsent(posting.reference, posting) == null
+        return Uni.createFrom().item(
+            if (first) {
+                com.openbank.lending.application.port.out.LedgerPostResult.POSTED
+            } else {
+                com.openbank.lending.application.port.out.LedgerPostResult.REPLAYED
+            },
+        )
     }
 }

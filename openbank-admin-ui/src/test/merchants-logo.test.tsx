@@ -11,8 +11,20 @@ vi.mock('@/components/auth/AuthGuard', () => ({ Can: ({ children }: { children: 
 
 const HASH = 'a'.repeat(64)
 
-const withLogo = { descriptorKey: 'BILLA', cleanName: 'Billa', logoContentHash: HASH }
-const withoutLogo = { descriptorKey: 'ALZACZ', cleanName: 'Alza.cz', logoContentHash: null }
+const merchant = (descriptorKey: string, cleanName: string, logoContentHash: string | null) => ({
+  descriptorKey,
+  cleanName,
+  logoUrl: null,
+  logoContentHash,
+  category: null,
+  lat: null,
+  lon: null,
+  city: null,
+  country: null,
+  updatedAt: '2026-09-09T08:00:00Z',
+})
+const withLogo = merchant('BILLA', 'Billa', HASH)
+const withoutLogo = merchant('ALZACZ', 'Alza.cz', null)
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -54,6 +66,10 @@ describe('merchant logos', () => {
     expect(img.src).toContain('size=64')
     // The token is what makes a year-long immutable cache safe: replaced bytes are a new URL.
     expect(img.src).toContain(`v=${HASH.slice(0, 16)}`)
+    // Catalogue pages contain up to 50 rows. Logos below the viewport must not compete with the
+    // operator's worklist and controls during the critical render.
+    expect(img).toHaveAttribute('loading', 'lazy')
+    expect(img).toHaveAttribute('decoding', 'async')
   })
 
   /**

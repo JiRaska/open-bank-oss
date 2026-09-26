@@ -131,6 +131,19 @@ class AnalyticsConsumer {
             return
         }
 
+        // ---- A party-bearing event that carries no party: quarantine, never project.
+        // Keyed on the EVENT TYPE, not the aggregate: see [PARTY_BEARING_EVENT_TYPES].
+        if (PARTY_BEARING_EVENT_TYPES.contains(envelope.eventType) &&
+            envelope.payload[PARTY_ID_FIELD]?.toString().isNullOrBlank()
+        ) {
+            val why = "${envelope.eventType} carries no $PARTY_ID_FIELD"
+            log.errorf("Quarantining %s: aggregateId=%s", why, envelope.aggregateId)
+            deadLetters.quarantine(DeadLetterRecord(sha256(payload), payload, why, Instant.now(clock)))
+            if (::freshness.isInitialized) freshness.recordDeadLetter()
+            settle(message)
+            return
+        }
+
         // ---- Sink write: a dependency failure, NOT a bad event. Retry, then nack.
         try {
             EventRetry.withRetry(log, "analytics bronze write", envelope.eventId) {
@@ -342,6 +355,34 @@ class AnalyticsConsumer {
     companion object {
         private const val UNKNOWN = IngestAttributionMetrics.UNKNOWN
         private const val UNKNOWN_SERVICE = IngestAttributionMetrics.UNKNOWN_SERVICE
+
+        private const val PARTY_ID_FIELD = "partyId"
+
+        /**
+         * Event types whose payload MUST carry [PARTY_ID_FIELD], listed rather than derived.
+         *
+         * #8792 acceptance 2 asked for "an ACCOUNT event published without `partyId`" to be
+         * quarantined, and implementing that literally would have been a serious regression:
+         * `BALANCE_UPDATED`, `HOLD_PLACED`, `HOLD_RELEASED` and `AccountStatusChanged` are
+         * ACCOUNT-LEVEL facts and a party is not part of them, so an aggregate-keyed guard
+         * discards every balance and hold row. Hence a table of event types.
+         *
+         * Why quarantine rather than write a null: `silver_party_accounts` is built from these
+         * rows and `SegmentRule.HasAccount` reads it, so an `AccountCreated` with no party writes
+         * an ownerless account and shrinks every cohort by one with nothing erroring — the shape
+         * #2891 recorded. A dead-letter row is countable; a missing party in silver is not.
+         *
+         * Derivation is what makes this dangerous: "ACCOUNT events carry a party" is false for four
+         * of the five ACCOUNT event types this sink sees, so an aggregate-type rule would quarantine
+         * the balance and hold stream. Measured on the sandbox warehouse 2026-09-10: `AccountCreated`
+         * 19 of 19 carry a party, and 418 of the other 437 ACCOUNT events carry none by design.
+         *
+         * The entry earns its place by being READ downstream: V5 builds `silver_party_accounts`
+         * from `AccountCreated`, and `SegmentRule.HasAccount` resolves cohorts through it. An event
+         * type that nothing party-keyed consumes does not belong here — the guard would then be
+         * rejecting data on a promise no reader depends on.
+         */
+        private val PARTY_BEARING_EVENT_TYPES: Set<String> = setOf("AccountCreated")
 
         /**
          * Aggregate type -> the payload field that identifies it. ONE table, read by both

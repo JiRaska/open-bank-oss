@@ -7,7 +7,7 @@
 # never calls default_url_fetcher, or lets urllib touch the network, for anything but a
 # data: URI — no http(s) request the fetcher approves can ever be redirected), but pinning
 # a patched release is correct hygiene and satisfies the dependency-review CI gate.
-weasyprint==69.0
+weasyprint==70.0
 
 # Pinned so the Dockerfile's `pip install --upgrade pip` step is itself
 # hash-verifiable (Scorecard Pinned-Dependencies) instead of floating to

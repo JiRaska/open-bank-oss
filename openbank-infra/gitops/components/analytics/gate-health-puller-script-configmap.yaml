@@ -162,6 +162,20 @@ data:
         return iso_z.rstrip("Z").replace("T", " ")
 
 
+    def subject_count(value):
+        """Integer subject count, or None for anything else.
+
+        run-gates.py records the literal string "UNRESOLVED" when a gate could not
+        determine its corpus (e.g. a rate-limited API, #6293). The ClickHouse column is
+        Nullable(Int64), and one such string fails the WHOLE JSONEachRow insert, so every
+        other gate row of the window is lost with it. NULL is the column's existing
+        "no count" value.
+        """
+        if isinstance(value, bool):
+            return None
+        return value if isinstance(value, int) else None
+
+
     def to_row(run, rec):
         prs = run.get("pull_requests") or []
         return {
@@ -181,7 +195,7 @@ data:
             # degrading that run's rows to "no selftest cost recorded" — the same default the
             # ClickHouse column itself uses (DEFAULT 0), so old and new agree.
             "selftest_seconds": rec.get("selftest_seconds", 0),
-            "subjects": rec.get("subjects"),
+            "subjects": subject_count(rec.get("subjects")),
             "selftest_declared": bool(rec.get("selftest_declared")),
             "selftest_passed": rec.get("selftest_passed"),
             "budget_seconds": rec.get("budget_seconds"),

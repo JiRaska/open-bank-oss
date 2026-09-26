@@ -130,12 +130,24 @@ and `registrationCountry` next to `registrationNumber`/`taxId`, so ADR-0267's ac
 applies unchanged. A `PartyMandate` links a human (`agentPartyId`) to an entity
 (`principalPartyId`) with `role` (`OWNER`, `LEGAL_REPRESENTATIVE`, `AUTHORISED_SIGNATORY`),
 `authority` (`SOLE`, `JOINT`), `source` (`REGISTRY`, `POWER_OF_ATTORNEY`, `MANUAL`) and lifecycle
-`ACTIVE → REVOKED | EXPIRED`. kyb-service grants one mandate per signer the moment the case reaches
+`ACTIVE → REVOKED | EXPIRED`. It also preserves the register's exact `requiredSignatures`: `SOLE`
+is exactly 1 and `JOINT` is at least 2. A historical `JOINT` mandate whose exact threshold was lost
+stays explicitly unknown and is ineligible for quorum-based execution; it is never guessed as 2.
+kyb-service grants one mandate per signer the moment the case reaches
 `SIGNED`; grants and revocations leave through the party outbox as `PARTY_MANDATE_GRANTED` /
 `PARTY_MANDATE_REVOKED`, keyed on the entity. `GET /api/v1/parties/{agent}/acting-for` is the
 profile switcher's source of truth. A mandate is a *fact about the register*; employee-level
 access (treasurer, accountant, viewer) is **not** a mandate — it is an ADR-0232 delegation grant
 issued by a mandate holder acting for the entity.
+
+Money-moving services do not evaluate mutable mandates ad hoc at execution time. When a future
+multi-approver operation is opened, the authority resolver combines statutory mandates with any
+owner-managed employee approval group and writes an immutable, versioned requirement snapshot
+(source references, eligible party ids and threshold) onto that operation. Distinct SCA-bound
+decisions are counted atomically against the local snapshot. Later mandate changes govern new
+operations and may invalidate pending ones under an explicit policy, but never rewrite historical
+evidence. This keeps legal authority, customer workflow and execution evidence separate while
+scaling from sole traders through SMEs to corporate groups.
 
 **D4 — The customer edge switches profiles with `X-Acting-For`, fail-closed.** The JWT still
 identifies the human. `GET /customer/v1/profiles` lists the personal profile (with `hasProducts`)

@@ -508,6 +508,9 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: interest
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
@@ -527,6 +530,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8102
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

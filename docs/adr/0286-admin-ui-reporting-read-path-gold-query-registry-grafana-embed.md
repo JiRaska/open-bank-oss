@@ -222,3 +222,23 @@ off-site hops included — "no X-Frame-Options on Grafana hops" was necessary, n
 - `openbank-admin-ui/src/app/api/customer-360/[partyId]/route.ts` — the reference BFF implementation (validation-as-injection-boundary, always-200 degradation)
 - `openbank-admin-ui/src/app/regulatory/page.tsx` — the regulatory catalogue this ADR surrounds but does not re-source
 - `openbank-infra/gitops/components/analytics/clickhouse-grafana-network-policy.yaml` — the existing Grafana → ClickHouse path the embed reuses
+
+## Presentation and embedding contract
+
+The containing document's `frame-src` must allow the configured Keycloak origin as well as
+`self`: Grafana's OAuth flow navigates the frame through the identity provider. This policy
+also applies to documents from which client-side navigation can reach reporting. It does not
+change `frame-ancestors`, the tools ingress gate, or Grafana's own role mapping.
+
+The reporting frame uses the same-origin tools path, kiosk mode, the console's theme and an
+explicit UTC date range. Loading a frame alone is not evidence of a loaded dashboard; the UI
+waits for a rendered dashboard layout and offers sign-in in a separate tab plus retry if that
+cannot be established. Once ready, its height follows the same-origin dashboard document and
+suppresses nested scrolling so the embedded surface remains visually continuous with the console.
+This remains independent of the governed report results.
+
+Period-based dashboard queries use ClickHouse datasource time/date macros. Warehouse freshness
+is intentionally a current watermark independent of the selected period; an empty warehouse
+produces no freshness value. Native report charts aggregate additive counts only, preserve
+missing days as missing, and suppress totals for truncated results. Monetary values retain their
+currency in the detail table.

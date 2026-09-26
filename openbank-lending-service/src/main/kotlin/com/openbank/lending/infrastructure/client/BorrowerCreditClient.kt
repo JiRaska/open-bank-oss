@@ -7,7 +7,7 @@ import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.arc.properties.IfBuildProperty
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
@@ -38,7 +38,9 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-lending` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

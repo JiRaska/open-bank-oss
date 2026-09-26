@@ -11,27 +11,9 @@ import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
+import { parsePaymentDetailEvidence, type PaymentDetailEvidence, type PaymentRail } from '@/lib/payments/detailEvidence'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
-
-// Mirrors the list-row shape on the payments page. The record can carry more
-// fields than the table showed — the detail view surfaces all of them.
-interface Payment {
-  id: string
-  type?: 'SEPA' | 'DOMESTIC'
-  status?: string
-  amount?: number
-  currency?: string
-  debtorIban?: string
-  creditorIban?: string
-  creditorAccountNumber?: string
-  creditorBankCode?: string
-  creditorName?: string
-  remittanceInfo?: string
-  endToEndId?: string
-  createdAt?: string
-  [k: string]: unknown
-}
 
 // These two statuses are specific to payment processing. Keep their explicit
 // meaning here rather than broadening the cross-domain status vocabulary:
@@ -67,7 +49,7 @@ function PaymentDetailContent() {
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const routeKey = `${type}:${id}`
 
-  const [paymentSnapshot, setPaymentSnapshot] = useState<{ key: string; payment: Payment } | null>(null)
+  const [paymentSnapshot, setPaymentSnapshot] = useState<{ key: string; payment: PaymentDetailEvidence } | null>(null)
   const [loadingState, setLoadingState] = useState<{ key: string; active: boolean }>({ key: routeKey, active: true })
   const [unavailableSnapshot, setUnavailableSnapshot] = useState<{ key: string; kind: UnavailableKind } | null>(null)
   const [showRaw, setShowRaw] = useState(false)
@@ -88,14 +70,16 @@ function PaymentDetailContent() {
 
     // Show the handed-off row immediately on navigation (no round-trip); a
     // manual refresh retains the freshest currently displayed snapshot.
-    const handedOff = resetForRoute ? readStashedRow<Payment>('payments', id) : null
-    const stashed = handedOff?.id === id && handedOff.type === type ? handedOff : null
+    const rail: PaymentRail | null = type === 'SEPA' || type === 'DOMESTIC' ? type : null
+    const target = rail ? DETAIL_ROUTE[rail] : null
+    const handedOff = resetForRoute ? readStashedRow<unknown>('payments', id) : null
+    const stashed = rail ? parsePaymentDetailEvidence(handedOff, id, rail) : null
     if (resetForRoute) {
       setPaymentSnapshot(stashed ? { key: routeKey, payment: stashed } : null)
+      setShowRaw(false)
     }
 
-    const target = DETAIL_ROUTE[type]
-    if (!target) {
+    if (!target || !rail) {
       // A missing/unknown rail cannot be refreshed truthfully. Keep a handed-off
       // preview if present, but mark it unavailable rather than presenting it as live.
       if (stillCurrent()) {
@@ -109,12 +93,22 @@ function PaymentDetailContent() {
       const res = await fetch(route, { signal: AbortSignal.timeout(10_000), cache: 'no-store' })
       if (!res.ok) {
         const kind = await classifyBffFailure(res)
-        if (stillCurrent()) setUnavailableSnapshot({ key: routeKey, kind })
+        if (stillCurrent()) {
+          if (kind === 'unauthorized') {
+            setPaymentSnapshot(null)
+            setShowRaw(false)
+          }
+          setUnavailableSnapshot({ key: routeKey, kind })
+        }
         return
       }
-      const fresh = (await res.json()) as Payment
+      const fresh = parsePaymentDetailEvidence(await res.json(), id, rail)
       if (!stillCurrent()) return
-      setPaymentSnapshot({ key: routeKey, payment: { ...fresh, type: type as Payment['type'] } })
+      if (!fresh) {
+        setUnavailableSnapshot({ key: routeKey, kind: 'error' })
+        return
+      }
+      setPaymentSnapshot({ key: routeKey, payment: fresh })
       setUnavailableSnapshot(null)
     } catch {
       if (stillCurrent()) setUnavailableSnapshot({ key: routeKey, kind: 'unreachable' })
@@ -124,21 +118,19 @@ function PaymentDetailContent() {
   }
 
   useEffect(() => {
-    void load(true)
-    return () => { requestGeneration.current += 1 }
+    const timer = window.setTimeout(() => { void load(true) }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      requestGeneration.current += 1
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, type])
 
   const svcLabel = type === 'SEPA' ? t('SEPA-payment', 'SEPA-payment') : t('Domestic-payment', 'Domestic-payment')
-  const stalePreviewCopy = unavailable?.kind === 'unauthorized'
-    ? {
-        title: t('Relace vypršela — zobrazuji uložený náhled', 'Session expired — showing saved preview'),
-        detail: t('Uložený náhled může být zastaralý. Pro načtení živých dat se znovu přihlaste.', 'This saved preview may be stale. Sign in again to load live data.'),
-      }
-    : {
-        title: t('Živá platba není dostupná — zobrazuji uložený náhled', 'Live payment unavailable — showing saved preview'),
-        detail: t('Obnovení živých dat selhalo. Uložený náhled může být zastaralý; zkuste platbu obnovit znovu.', 'The live refresh failed. This saved preview may be stale; try refreshing the payment again.'),
-      }
+  const stalePreviewCopy = {
+    title: t('Živá platba není dostupná — zobrazuji uložený náhled', 'Live payment unavailable — showing saved preview'),
+    detail: t('Obnovení živých dat selhalo. Uložený náhled může být zastaralý; zkuste platbu obnovit znovu.', 'The live refresh failed. This saved preview may be stale; try refreshing the payment again.'),
+  }
 
   return (
     <div>
@@ -185,18 +177,18 @@ function PaymentDetailContent() {
               { label: t('Typ', 'Type'), value: payment.type ?? '—' },
               { label: t('Stav', 'Status'), value: payment.status ?? '—' },
               { label: t('Částka', 'Amount'), value: payment.amount != null ? `${Number(payment.amount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} ${payment.currency ?? ''}` : '—' },
-              { label: 'End-to-End ID', value: (payment.endToEndId as string) ?? '—', mono: true },
+              { label: 'End-to-End ID', value: payment.endToEndId ?? '—', mono: true },
               { label: t('Vytvořeno', 'Created'), value: payment.createdAt ? new Date(payment.createdAt).toLocaleString(numberLocale) : '—' },
             ]} />
           </div>
           <div className="card">
             <div className="card-header"><span className="card-header-title">{t('Strany & směrování', 'Parties & routing')}</span></div>
             <DetailRows rows={[
-              { label: t('Plátce IBAN', 'Debtor IBAN'), value: payment.debtorIban ?? '—', mono: true },
+              { label: t('Plátce IBAN / účet', 'Debtor IBAN / account'), value: payment.debtorIban ?? payment.debtorAccountNumber ?? payment.debtorAccountId ?? '—', mono: true },
               { label: t('Příjemce', 'Creditor'), value: payment.creditorName ?? '—' },
               { label: t('Příjemce IBAN', 'Creditor IBAN'), value: payment.creditorIban ?? '—', mono: true },
               { label: t('Účet / kód banky příjemce', 'Creditor account / bank'), value: payment.creditorAccountNumber ? `${payment.creditorAccountNumber}${payment.creditorBankCode ? '/' + payment.creditorBankCode : ''}` : '—', mono: true },
-              { label: t('Zpráva pro příjemce', 'Remittance info'), value: payment.remittanceInfo ?? '—' },
+              { label: t('Zpráva pro příjemce', 'Remittance info'), value: payment.remittanceInfo ?? payment.messageForPayee ?? '—' },
             ]} />
           </div>
           <div className="card" style={{ gridColumn: '1 / -1' }}>

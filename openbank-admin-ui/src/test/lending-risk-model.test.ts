@@ -51,17 +51,18 @@ describe('credit-risk aggregation', () => {
   })
 
   it('counts an override only where the human went the OTHER way', () => {
+    const human = { humanDecidedBy: 'reviewer-1', humanDecidedAt: '2026-09-02T10:00:00Z' }
     const rows = [
-      decision({ applicationId: '1', engineOutcome: 'APPROVE', status: 'DISBURSED' }),
-      decision({ applicationId: '2', engineOutcome: 'APPROVE', status: 'DECLINED' }),
-      decision({ applicationId: '3', engineOutcome: 'DECLINE', status: 'DECLINED' }),
-      decision({ applicationId: '4', engineOutcome: 'DECLINE', status: 'OFFERED' }),
+      decision({ ...human, applicationId: '1', engineOutcome: 'APPROVE', status: 'DISBURSED' }),
+      decision({ ...human, applicationId: '2', engineOutcome: 'APPROVE', status: 'DECLINED' }),
+      decision({ ...human, applicationId: '3', engineOutcome: 'DECLINE', status: 'DECLINED' }),
+      decision({ ...human, applicationId: '4', engineOutcome: 'DECLINE', status: 'OFFERED' }),
       decision({ applicationId: '5', engineOutcome: 'REFER', status: 'FOUR_EYES' }),
       decision({ applicationId: '6', engineOutcome: 'APPROVE', status: 'EXPIRED' }),
     ]
     const matrix = overrideMatrix(rows)
     const approve = matrix.find(r => r.engine === 'APPROVE')!
-    expect(approve).toMatchObject({ approved: 1, declined: 1, lapsed: 1, overridden: 1 })
+    expect(approve).toMatchObject({ approved: 1, declined: 1, lapsed: 0, overridden: 1 })
     expect(matrix.find(r => r.engine === 'DECLINE')!.overridden).toBe(1)
     // Denominator is disposed decisions only: 4 (two approved, two declined), not all six.
     expect(overrideRate(matrix)).toBeCloseTo(2 / 4, 10)
@@ -69,6 +70,33 @@ describe('credit-risk aggregation', () => {
     expect(overrideRate(overrideMatrix([decision({ status: 'FOUR_EYES' })]))).toBeNull()
     expect(disposition('REFLECTION_PERIOD')).toBe('approved')
     expect(disposition('KYC_PENDING')).toBe('inFlight')
+  })
+
+  it('requires both human evidence fields and excludes automated declines from the rate', () => {
+    const human = { humanDecidedBy: 'reviewer-1', humanDecidedAt: '2026-09-02T10:00:00Z' }
+    const matrix = overrideMatrix([
+      decision({ ...human, engineOutcome: 'APPROVE', status: 'DECLINED' }),
+      decision({ engineOutcome: 'DECLINE', status: 'DECLINED' }),
+      decision({ humanDecidedBy: human.humanDecidedBy, status: 'DISBURSED' }),
+      decision({ humanDecidedAt: human.humanDecidedAt, status: 'DISBURSED' }),
+      decision({ ...human, humanDecidedBy: ' ', status: 'DISBURSED' }),
+      decision({ humanDecisionReason: 'approved', status: 'DISBURSED' }),
+    ])
+    expect(overrideRate(matrix)).toBe(1)
+    expect(matrix.find(r => r.engine === 'APPROVE')).toMatchObject({ approved: 0, declined: 1 })
+    expect(matrix.find(r => r.engine === 'DECLINE')).toMatchObject({ approved: 0, declined: 0 })
+  })
+
+  it('preserves evidenced human approvals after expiry or withdrawal', () => {
+    const human = { humanDecidedBy: 'reviewer-1', humanDecidedAt: '2026-09-02T10:00:00Z' }
+    const matrix = overrideMatrix([
+      decision({ ...human, engineOutcome: 'DECLINE', status: 'EXPIRED' }),
+      decision({ ...human, engineOutcome: 'DECLINE', status: 'WITHDRAWN' }),
+      decision({ ...human, engineOutcome: 'APPROVE', status: 'DISBURSED' }),
+      decision({ engineOutcome: 'DECLINE', status: 'EXPIRED' }),
+    ])
+    expect(matrix.find(r => r.engine === 'DECLINE')).toMatchObject({ approved: 2, overridden: 2, lapsed: 0 })
+    expect(overrideRate(matrix)).toBeCloseTo(2 / 3)
   })
 
   it('reads thresholds from the policy payload rather than hard-coding them', () => {
@@ -115,6 +143,34 @@ describe('credit-risk aggregation', () => {
     expect(czk.unassessed).toBe(1)
     expect(czk.stages.find(s => s.stage === 'STAGE_1')!.count).toBe(1)
     expect(czk.modelVersions).toEqual(['noop-flat-v1'])
+    expect(mixes[1]).toMatchObject({ currency: 'EUR', assessed: 1, unassessed: 0, totalOutstanding: 5000, totalEcl: 150, coverage: 0.03 })
+  })
+
+  it('excludes historical snapshots and unassessed loans after derecognition', () => {
+    const active = loan({ assessment: assessment('STAGE_1', 'CURRENT', 100, 3) })
+    const loans = [
+      active,
+      loan({ status: 'CLOSED', assessment: assessment('STAGE_3', 'DPD_90_PLUS', 900, 450) }),
+      loan({ status: 'WRITTEN_OFF', currency: 'EUR', assessment: assessment('STAGE_3', 'DPD_90_PLUS', 500, 250) }),
+      loan({ status: 'CLOSED', currency: 'USD', assessment: null }),
+      loan({ status: 'SETTLED', assessment: assessment('STAGE_1', 'CURRENT', 800, 20) }),
+      loan({ status: 'UNWOUND', assessment: assessment('STAGE_1', 'CURRENT', 700, 15) }),
+    ]
+    expect(portfolioMix(loans)).toEqual(portfolioMix([active]))
+    expect(portfolioMix(loans)[0]).toMatchObject({ currency: 'CZK', assessed: 1, unassessed: 0, totalOutstanding: 100, totalEcl: 3, stage23Share: 0, npl90Share: 0 })
+    expect(vintage(loans)).toEqual(vintage([active]))
+    expect(portfolioMix(loans.slice(1))).toEqual([])
+    expect(vintage(loans.slice(1))).toEqual([])
+  })
+
+  it.each([
+    'ACTIVE', 'DELINQUENT', 'DEFAULTED', 'FORBEARANCE_ASSESSED', 'TERMINATION_NOTICED',
+    'ACCELERATED', 'EARLY_REPAYMENT_REQUESTED', 'SETTLEMENT_QUOTED', 'WITHDRAWN', 'FUTURE_STATUS',
+  ])('retains %s exposures in portfolio and vintage risk measures', status => {
+    const exposure = loan({ status, assessment: assessment('STAGE_3', 'DPD_90_PLUS', 1000, 450) })
+    const [mix] = portfolioMix([exposure])
+    expect(mix).toMatchObject({ assessed: 1, totalOutstanding: 1000, totalEcl: 450, stage23Share: 1, npl90Share: 1 })
+    expect(vintage([exposure])).toEqual([{ month: '2026-07', loans: 1, STAGE_1: 0, STAGE_2: 0, STAGE_3: 1, unassessed: 0 }])
   })
 
   it('an empty or wholly unassessed book yields null ratios, not zeroes', () => {

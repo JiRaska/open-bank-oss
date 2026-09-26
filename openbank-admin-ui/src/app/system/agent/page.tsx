@@ -10,7 +10,9 @@ import { cn } from '@/lib/utils'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { AgentCallError, classifyAgentFailure, type AgentFailureKind } from '@/lib/agent/mcpFailure'
 
 interface ToolDef {
   name: string
@@ -34,47 +36,56 @@ interface ToolResult {
 interface ModelInfo { id: string; provider: string; sensitivity: string }
 interface ModelGateway { default: string; models: ModelInfo[] }
 
-async function mcpCall(method: string, params?: unknown) {
-  const res = await fetch('/api/agent/mcp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  })
-  const json = await res.json()
-  if (json.error) throw new Error(`${json.error.code}: ${json.error.message}`)
-  return json.result
+async function mcpCall<T>(method: string, params?: unknown): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch('/api/agent/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    })
+  } catch {
+    throw new AgentCallError('unreachable')
+  }
+  const json = await res.json().catch(() => null) as { error?: unknown; result?: T } | null
+  if (!res.ok) throw new AgentCallError(classifyAgentFailure(res.status))
+  if (!json || json.error) throw new AgentCallError('error')
+  return json.result as T
 }
 
 export default function AgentPage() {
   const { t, language } = useLanguage()
   const [tools, setTools]           = useState<ToolDef[]>([])
   const [loading, setLoading]       = useState(true)
-  const [error, setError]           = useState<string | null>(null)
+  const [failure, setFailure]       = useState<AgentFailureKind | null>(null)
   const [expanded, setExpanded]     = useState<string | null>(null)
   const [serverInfo, setServerInfo] = useState<{ name: string; version: string; protocolVersion: string } | null>(null)
   const [gateway, setGateway]       = useState<ModelGateway | null>(null)
 
   const loadTools = useCallback(async () => {
-    setLoading(true); setError(null)
+    setLoading(true); setFailure(null)
     try {
-      const init = await mcpCall('initialize', {
+      const init = await mcpCall<{ serverInfo: { name: string; version: string }; protocolVersion: string }>('initialize', {
         protocolVersion: '2024-11-05',
         clientInfo: { name: 'openbank-admin-ui', version: '0.1.0' },
         capabilities: {},
       })
       setServerInfo({ name: init.serverInfo.name, version: init.serverInfo.version, protocolVersion: init.protocolVersion })
-      const list = await mcpCall('tools/list')
+      const list = await mcpCall<{ tools?: ToolDef[] }>('tools/list')
       setTools(list.tools ?? [])
       try {
         const gw = await fetch('/api/agent/chat').then(r => r.json())
         if (!gw.error) setGateway({ default: gw.default, models: gw.models ?? [] })
       } catch { /* gateway is best-effort; tools still render */ }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to connect to agent-service')
+      setFailure(e instanceof AgentCallError ? e.kind : 'error')
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { loadTools() }, [loadTools])
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadTools(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadTools])
 
   return <AuthGuard permission="agent:view">
     <div>
@@ -111,9 +122,9 @@ export default function AgentPage() {
               border: '1px solid var(--accent-border)',
               borderRadius: '6px',
             }}>
-              <span style={{ fontSize: '11px', color: 'var(--accent)', opacity: 0.7 }}>{c.label}:</span>
+              <span style={{ fontSize: '11px', color: 'var(--accent-text)', opacity: 0.85 }}>{c.label}:</span>
               <span style={{
-                fontSize: '12px', fontWeight: 600, color: 'var(--accent)',
+                fontSize: '12px', fontWeight: 600, color: 'var(--accent-text)',
                 fontFamily: c.mono ? 'JetBrains Mono, monospace' : 'inherit',
               }}>{c.value}</span>
             </div>
@@ -122,7 +133,7 @@ export default function AgentPage() {
       )}
 
       {/* Model gateway — provider-agnostic registry (ADR-0031 D6) */}
-      {!loading && !error && gateway && (
+      {!loading && !failure && gateway && (
         <div style={{ marginBottom: '30px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             <Cpu size={14} style={{ color: 'var(--accent)' }} />
@@ -135,7 +146,7 @@ export default function AgentPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace' }}>{m.id}</span>
                   {m.id === gateway.default && (
-                    <span style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', background: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>{t('výchozí', 'default')}</span>
+                    <span style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', background: 'var(--accent-light)', color: 'var(--accent-text)', border: '1px solid var(--accent-border)' }}>{t('výchozí', 'default')}</span>
                   )}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
@@ -148,35 +159,34 @@ export default function AgentPage() {
         </div>
       )}
 
-      {/* Unavailable state — agent-service is part of the planned fleet and is
-          not deployed in every environment, so a connect failure is "not
-          deployed", not an app fault. Render the calm shared panel rather than
-          a raw JSON-RPC error string. */}
-      {error && (
+      {/* Keep operational truth explicit: only a 404 means the endpoint is not
+          deployed. Authentication, reachability and unexpected failures have
+          distinct safe copy without exposing upstream or JSON-RPC details. */}
+      {failure && (
         <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
           <DataUnavailable
-            kind="not_deployed"
+            kind={failure}
             service={t('Agent-service (MCP)', 'Agent-service (MCP)')}
             feature={t('MCP nástroje', 'MCP tools')}
             lang={language}
-            detail={
-              language === 'cs'
-                ? 'Tato obrazovka vyžaduje běžící agent-service (MCP server na portu 8109). V tomto prostředí zatím nasazená není — jakmile ji ArgoCD nasadí, nástroje i model gateway se načtou automaticky.'
-                : 'This screen needs a running agent-service (MCP server on port 8109). It isn’t deployed here yet — once ArgoCD rolls it out, the tools and model gateway load automatically.'
-            }
-          />
+          >
+            <button type="button" className="btn btn-secondary" onClick={loadTools} disabled={loading}>
+              <RefreshCw size={13} aria-hidden="true" />
+              {t('Zkusit znovu', 'Try again')}
+            </button>
+          </DataUnavailable>
         </div>
       )}
 
       {/* Loading */}
-      {loading && !error && (
+      {loading && !failure && (
         <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
           <RefreshCw size={15} aria-hidden="true" className="animate-spin" style={{ color: 'var(--accent)' }} />
           {t('Připojování k MCP serveru…', 'Connecting to MCP server…')}
         </div>
       )}
 
-      {!loading && !error && (
+      {!loading && !failure && (
         <div style={{ marginBottom: '30px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             <Server size={14} style={{ color: 'var(--accent)' }} />
@@ -213,7 +223,7 @@ export default function AgentPage() {
                     </div>
                     <span style={{
                       fontSize: '10px', fontWeight: 600, padding: '3px 6px', borderRadius: '4px', textTransform: 'uppercase',
-                      background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success-border)'
+                      background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)'
                     }}>
                       {t('Dostupné', 'Available')}
                     </span>
@@ -232,7 +242,7 @@ export default function AgentPage() {
       )}
 
       {/* Tools list */}
-      {!loading && !error && (
+      {!loading && !failure && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             <Zap size={13} style={{ color: 'var(--accent)' }} />
@@ -267,40 +277,43 @@ export default function AgentPage() {
             {
               nameCs: 'OpenBank Agent Service',
               nameEn: 'OpenBank Agent Service',
-              isLive: true,
-              descCs: 'Primární MCP server — vystavuje banking nástroje (účty, platby, party, audit, sca) AI agentům. JSON-RPC 2.0 přes HTTP, OPA gate na každém tool callu (ADR-0031). Dostupný na portu 8109 v namespace platform.',
-              descEn: 'Primary MCP server — exposes banking tools (accounts, payments, party, audit, sca) to AI agents. JSON-RPC 2.0 over HTTP, OPA gate on every tool call (ADR-0031). Available on port 8109 in the platform namespace.',
+              status: serverInfo && !failure ? 'UP' : failure === 'not_deployed' ? 'NOT-DEPLOYED' : failure ? 'DEGRADED' : 'UNKNOWN',
+              statusCs: serverInfo && !failure ? 'Dostupný' : failure === 'not_deployed' ? 'Nenasazený' : failure ? 'Nedostupný' : 'Ověřuji',
+              statusEn: serverInfo && !failure ? 'Available' : failure === 'not_deployed' ? 'Not deployed' : failure ? 'Unavailable' : 'Checking',
+              tone: undefined,
+              descCs: 'Primární MCP server — vystavuje banking nástroje (účty, platby, party, audit, sca) AI agentům. JSON-RPC 2.0 přes HTTP, OPA gate na každém tool callu (ADR-0031). Po nasazení je cílový endpoint na portu 8109 v namespace platform.',
+              descEn: 'Primary MCP server — exposes banking tools (accounts, payments, party, audit, sca) to AI agents. JSON-RPC 2.0 over HTTP, OPA gate on every tool call (ADR-0031). When deployed, its target endpoint is port 8109 in the platform namespace.',
               endpoint: 'platform.svc:8109/mcp',
               adr: 'ADR-0031',
-              color: '#6366f1',
+              color: 'var(--accent)',
+              textColor: 'var(--accent-text)',
             },
             {
               nameCs: 'Grafana MCP Server',
               nameEn: 'Grafana MCP Server',
-              isLive: true,
+              status: 'INTEGRATED',
+              statusCs: 'Integrováno',
+              statusEn: 'Integrated',
+              tone: 'info' as const,
               descCs: 'Grafana Labs open-source MCP server (grafana/mcp-grafana) zpřístupňuje dashboardy, datasources, alerting a Prometheus query AI agentům. Umožňuje AI copilotovi klást přirozené dotazy jako „jaká je latence SEPA plateb za poslední hodinu?" přímo do Prometheus. Běží v observability namespace, připojuje se k Grafana na portu 3000.',
               descEn: 'Grafana Labs open-source MCP server (grafana/mcp-grafana) exposes dashboards, datasources, alerting and Prometheus query to AI agents. Lets an AI copilot ask natural questions like "what is the SEPA payment latency over the last hour?" directly into Prometheus. Running in the observability namespace, connected to Grafana on port 3000.',
               endpoint: 'observability.svc:3000 → MCP',
               adr: 'ADR-0088',
-              color: '#f59e0b',
+              color: 'var(--info)',
+              textColor: 'var(--info-text)',
             },
           ] as const).map((srv) => (
             <div key={srv.nameCs} className="card" style={{ padding: '16px', borderLeft: `3px solid ${srv.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, gap: 8 }}>
                 <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(srv.nameCs, srv.nameEn)}</span>
-                <span style={{
-                  fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '2px 8px', borderRadius: 20,
-                  color: '#059669', background: '#ecfdf5', border: '1px solid #6ee7b7', flexShrink: 0,
-                }}>
-                  {t('Live', 'Live')}
-                </span>
+                <StatusBadge status={srv.status} tone={srv.tone} label={t(srv.statusCs, srv.statusEn)} />
               </div>
               <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 10px' }}>
                 {t(srv.descCs, srv.descEn)}
               </p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '2px 8px', borderRadius: 5 }}>{srv.endpoint}</span>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: srv.color, background: `${srv.color}15`, border: `1px solid ${srv.color}40`, padding: '2px 8px', borderRadius: 5 }}>{srv.adr}</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: srv.textColor, background: `color-mix(in srgb, ${srv.color} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${srv.color} 25%, transparent)`, padding: '2px 8px', borderRadius: 5 }}>{srv.adr}</span>
               </div>
             </div>
           ))}
@@ -323,7 +336,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
   const run = async () => {
     setRunning(true); setResult(null)
     try {
-      const res: ToolResult = await mcpCall('tools/call', { name: tool.name, arguments: args })
+      const res = await mcpCall<ToolResult>('tools/call', { name: tool.name, arguments: args })
       setResult(res)
     } catch (e) {
       setResult({ content: [{ type: 'text', text: e instanceof Error ? e.message : 'Error' }], isError: true })
@@ -428,13 +441,13 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
                 padding: '8px 12px',
                 borderBottom: `1px solid ${result.isError ? 'var(--danger-border)' : 'var(--success-border)'}`,
                 display: 'flex', alignItems: 'center', gap: '7px',
-                background: result.isError ? '#fef2f2' : '#f0fdf4',
+                background: result.isError ? 'var(--danger-bg)' : 'var(--success-bg)',
               }}>
                 {result.isError
                   ? <XCircle size={13} style={{ color: 'var(--danger)' }}/>
                   : <CheckCircle2 size={13} style={{ color: 'var(--success)' }}/>
                 }
-                <span style={{ fontSize: '12px', fontWeight: 600, color: result.isError ? 'var(--danger)' : 'var(--success)' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: result.isError ? 'var(--danger-text)' : 'var(--success-text)' }}>
                   {result.isError ? t('Chyba', 'Error') : t('Výsledek', 'Result')}
                 </span>
               </div>

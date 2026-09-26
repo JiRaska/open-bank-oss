@@ -11,6 +11,7 @@ import { Users, ArrowLeft, Save } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { parseCreatedParty } from '@/lib/party/createdParty'
 import styles from './page.module.css'
 
 const PARTY_SERVICE = '/api/svc/party-service'
@@ -66,6 +67,7 @@ export default function NewPartyPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) {
         // User-initiated write: show a calm, human inline message rather than
@@ -73,7 +75,14 @@ export default function NewPartyPage() {
         setError(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
         return
       }
-      const party = await res.json()
+      const party = parseCreatedParty(await res.json().catch(() => null))
+      if (!party) {
+        setError(t(
+          'Výsledek vytvoření nelze ověřit. Subjekt již mohl vzniknout; beze změny údajů opakujte pokus bezpečně se stejným klíčem.',
+          'The creation result could not be verified. The party may already exist; retry without changing the details to safely reuse the same key.',
+        ))
+        return
+      }
       router.push(`/parties/${party.id}`)
     } catch {
       setError(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))

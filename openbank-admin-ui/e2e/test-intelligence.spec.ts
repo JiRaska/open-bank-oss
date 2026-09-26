@@ -128,12 +128,55 @@ test('never paints an unavailable evidence bundle healthy', async ({ page }) => 
 
   await page.goto('/system/tests')
 
-  await expect(page.locator('.ti-health')).toContainText(/NEEDS ATTENTION\s*1\s*signal to inspect/)
+  await expect(page.getByRole('main').locator('.ti-health')).toContainText(/NEEDS ATTENTION\s*1\s*signal to inspect/, { timeout: 10_000 })
   await expect(page.getByText('EVIDENCE HEALTHY', { exact: true })).not.toBeVisible()
   const assurance = page.getByRole('region', { name: 'Testing assurance map' })
   await expect(assurance.getByRole('button', { name: /CI evidence/ })).toContainText('unknown')
   await expect(assurance.getByRole('button', { name: /Testcontainers runtime/ })).toContainText('unknown')
   await expect(assurance).not.toContainText('passed')
+})
+
+test('recovers from HTTP 503 after an operator refreshes the report', async ({ page }) => {
+  let requests = 0
+  await page.route('**/api/test-intelligence', route => {
+    requests += 1
+    return requests === 1
+      ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
+      : route.fallback()
+  })
+
+  await page.goto('/system/tests', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByText('Report is unavailable.')).toBeVisible()
+  const refresh = page.getByRole('button', { name: 'Refresh system tests' })
+  await expect(refresh).toBeEnabled()
+  await refresh.click()
+  await expect(page.getByRole('region', { name: 'Testing assurance map' })).toBeVisible()
+  expect(requests).toBe(2)
+})
+
+test('defers advisory agent code and network work until the panel approaches view', async ({ page }) => {
+  let agentRequests = 0
+  await page.unroute('**/api/test-intelligence/agents')
+  await page.route('**/api/test-intelligence/agents', route => {
+    agentRequests += 1
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ findings: [], available: true }),
+    })
+  })
+
+  await page.goto('/system/tests')
+  await expect(page.getByRole('region', { name: 'Testing assurance map' })).toBeVisible()
+  await page.waitForTimeout(300)
+  expect(agentRequests).toBe(0)
+
+  const agent = page.getByRole('region', { name: 'Advisory test agent' })
+  await agent.scrollIntoViewIfNeeded()
+  // The Playwright server runs React in development Strict Mode, which may remount an effect;
+  // the performance contract is zero eager requests and a request only after intersection.
+  await expect.poll(() => agentRequests).toBeGreaterThan(0)
+  await expect(agent.getByText(/AI AGENT/)).toBeVisible()
 })
 
 test('keeps the evidence flow usable at the mobile breakpoint', async ({ page }) => {

@@ -235,11 +235,35 @@ EOF
   # the PDP in pass 1, and their failure mode is the 503 this stub exists to prevent (run
   # 34268765822). Anchored to the Python handler's exact branch, not the prose: the header and
   # comments mention the shape too, so an unanchored grep would match its own documentation.
-  if ! grep -qF 'self.server.server_address[1] == 8181 and self.path.startswith("/v1/data/")' "$0"; then
+  if ! grep -qF 'self.server.server_address[1] == OPA_PORT and self.path.startswith("/v1/data/")' "$0"; then
     echo "SELF-TEST FAIL 4: the OPA allow stub (8181, /v1/data/ -> {\"result\": true}) is gone"; ST_RC=1
   fi
+  # Control 5: EXERCISE the stub over a keep-alive connection — control 4's grep cannot see
+  # the regression class that failed run 34274283230, where the handler answered the first
+  # POST and then 501'd every reused connection because the unread request body was parsed
+  # as the next request line. Run the real heredoc on a throwaway port and POST TWICE on one
+  # connection (curl reuses it for consecutive URLs): both must answer 200 with the exact
+  # bare-boolean allow body OpaSidecarPolicyDecisionPoint.parseResponse accepts.
+  # Anchored to the heredoc OPENER as a line-END pattern — the bare string also occurs in this
+  # very control and its comments, and an unanchored match extracts the control, not the stub
+  # (measured twice: the first two runs of this control extracted themselves and the stub
+  # never started — the self-matching trap the control-3 comment above already documents).
+  sed -n "/STUBEOF' &\$/,/^STUBEOF/p" "$0" | sed '1d;$d' > "${ST_TMP}/stub.py"
+  FUZZ_OPA_STUB_PORT=18181 python3 "${ST_TMP}/stub.py" 18181 >/dev/null 2>&1 &
+  ST_STUB_PID=$!
+  sleep 1
+  ST_POST="$(curl -s -w '|%{http_code}' -X POST http://127.0.0.1:18181/v1/data/openbank/rest/allow \
+              -H 'Content-Type: application/json' -d '{"input":{"principal":{"id":"anonymous"}}}' \
+              http://127.0.0.1:18181/v1/data/openbank/rest/allow 2>/dev/null || true)"
+  kill "${ST_STUB_PID}" 2>/dev/null; wait "${ST_STUB_PID}" 2>/dev/null || true
+  # curl prints -w per URL, so two responses on one reused connection read
+  # `{"result": true}|200{"result": true}|200` — any 501 from an undrained body shows up here.
+  case "${ST_POST}" in
+    '{"result": true}|200{"result": true}|200') ;;
+    *) echo "SELF-TEST FAIL 5: OPA stub did not answer two keep-alive POSTs with the allow body (got: ${ST_POST})"; ST_RC=1 ;;
+  esac
   rm -rf "${ST_TMP}"
-  [ "${ST_RC}" = 0 ] && echo "self-test OK (4 controls)" || echo "self-test FAILED"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (5 controls)" || echo "self-test FAILED"
   exit "${ST_RC}"
 fi
 
@@ -308,6 +332,7 @@ for svc in $SERVICES; do
   # Never stub ports this job already provisions (postgres, redis) or shares with other infra
   # defaults (keycloak 8080, otel 4317), and never the service's own port. OPA 8181 is likewise
   # excluded from the 404 stubs — it gets its own ALLOW stub below, not a 404.
+  OPA_STUB_PORTS=""
   STUB_PORTS="$(grep -oE 'url: \$\{[A-Za-z0-9_]+:http://localhost:[0-9]+' "$APP_YAML" \
     | grep -oE '[0-9]+$' | sort -un \
     | grep -vxE "${PORT}|5432|6379|8080|4317|8181" || true)"
@@ -343,16 +368,26 @@ for svc in $SERVICES; do
   # Pass 2 sets authz.enforce=false and never calls the PDP; the stub is simply unused there.
   if grep -qE '^opa:' "$APP_YAML"; then
     echo "==> [${svc}] config declares opa: — stubbing the PDP on 8181 with an allow decision (pass-1 anonymous-grant endpoints)"
-    STUB_PORTS="$(printf '%s\n8181\n' ${STUB_PORTS} | sort -un)"
+    OPA_STUB_PORTS="8181"
   fi
+  # ONE stub process serves both behaviours, and the port sets are disjoint by construction:
+  # the 404 set above excludes 8181 explicitly, and only the OPA set adds it back — so no
+  # double-bind is possible. (The first version of the allow stub folded 8181 INTO the 404
+  # list, which worked only because one process serves both, but printed the allow port in
+  # the "404-for-everything" line — a lie in the log while triaging run 34274283230.)
   STUB_PID=""
-  if [ -n "${STUB_PORTS}" ]; then
-    echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
-    python3 - ${STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
+  if [ -n "${STUB_PORTS}" ] || [ -n "${OPA_STUB_PORTS}" ]; then
+    [ -n "${STUB_PORTS}" ] && echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
+    python3 - ${STUB_PORTS} ${OPA_STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
 import http.server
+import os
 import sys
 import threading
 import time
+
+# The port the OPA allow behaviour binds to; overridable so the self-test can exercise the
+# handler on a throwaway port without colliding with anything on 8181.
+OPA_PORT = int(os.environ.get("FUZZ_OPA_STUB_PORT", "8181"))
 
 
 class Absent(http.server.BaseHTTPRequestHandler):
@@ -365,7 +400,21 @@ class Absent(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _drain_body(self):
+        # DRAIN the request body before answering. protocol_version "HTTP/1.1" keeps the
+        # connection alive, so an unread POST body is still sitting in the socket buffer when
+        # the response goes out — and the NEXT parse_request on that keep-alive connection
+        # reads the body bytes as a request line, answering
+        # `501 Unsupported method ('{"input":...')` for a request that was never made.
+        # Measured on run 34274283230: the first psd2 PDP call got its allow, every reused
+        # connection then 501'd with exactly that message, and the interceptor mapped it to
+        # the same 503 POLICY_DECISION_POINT_UNAVAILABLE the stub exists to prevent.
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+
     def _absent(self):
+        self._drain_body()
         # OIDC token-issuer stub: the outbound oidc-client discovers the realm and mints a token
         # BEFORE the cross-service call; without these two answers the mint throws and the caller
         # answers 500 without the 404 stub ever being asked (see the caller-side comment).
@@ -386,7 +435,7 @@ class Absent(http.server.BaseHTTPRequestHandler):
         # 34268765822. `{"result": true}` is the bare-boolean allow shape
         # OpaSidecarPolicyDecisionPoint.parseResponse accepts. Everything NOT a data query
         # keeps the 404 — the stub answers allow only where a PDP answer is asked for.
-        if self.server.server_address[1] == 8181 and self.path.startswith("/v1/data/"):
+        if self.server.server_address[1] == OPA_PORT and self.path.startswith("/v1/data/"):
             self._answer(200, b'{"result": true}')
             return
         self._answer(404, b'{"status":404,"title":"absent (fuzz cross-service stub)"}')

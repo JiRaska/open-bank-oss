@@ -26,6 +26,18 @@ class LendingSecurityTest {
     @Test
     fun `no CreditRiskResource endpoint is @PermitAll`() = assertNoPermitAll(CreditRiskResource::class.java)
 
+    @Test
+    fun `no LoanBookResource endpoint is @PermitAll`() = assertNoPermitAll(LoanBookResource::class.java)
+
+    @Test
+    fun `LoanBookResource is read-only - GET only, nothing that writes`() {
+        val verbs = LoanBookResource::class.java.declaredMethods.flatMap { m ->
+            listOf(POST::class.java, PUT::class.java, DELETE::class.java, PATCH::class.java)
+                .filter { m.getAnnotation(it) != null }
+        }
+        assertThat(verbs).isEmpty()
+    }
+
     private fun assertNoPermitAll(resource: Class<*>) {
         val methods = resource.declaredMethods.filter { m ->
             m.getAnnotation(GET::class.java) != null ||

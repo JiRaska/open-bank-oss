@@ -299,19 +299,44 @@ spec:
           # -1, the boot value, is a distinct state from a healthy 0 on purpose. This is the alert
           # that would have fired on the original defect: every consumer resolved fraud-service to
           # localhost, so scoring never happened, and "no fraud found" was indistinguishable from
-          # "no fraud scoring". A rail with genuinely no traffic for an hour is the false positive
-          # to expect here — which is itself worth knowing on a payment rail.
-          expr: openbank_fraud_scoring_degraded == -1
+          # "no fraud scoring".
+          #
+          # The gauge alone cannot express that. `-1` is per-pod state reset by every restart, so on
+          # a rail with no intake the condition is permanent and `for:` can never clear it: measured
+          # 2026-09-11, all four rails (DOMESTIC/SEPA/SCT_INST/FX) read -1 with zero payment POSTs in
+          # 12h, i.e. the alert fires an hour after every deploy of every rail and stays firing. An
+          # always-on alert on the control that exists to make dead scoring visible is the one thing
+          # that hides dead scoring, so the intake guard below is what makes the signal mean what the
+          # summary claims: payments arrived AND none of them was scored.
+          #
+          # Intake is REST for all four rails (DomesticPaymentResource, SepaPaymentResource,
+          # SctInstResource, FxResource all take @POST), so a POST on the pod's own HTTP server is
+          # the transport-accurate proxy for "this rail did work". Probe and management URIs are
+          # excluded; Micrometer creates the timer on first request, so no POST series means no
+          # intake rather than a suppressed defect. A rail that is idle is no longer an alert — that
+          # is what JourneyRunFailed and the rail's own SLO burn are for.
+          expr: |
+            openbank_fraud_scoring_degraded == -1
+              and on (namespace, pod)
+            (
+              sum by (namespace, pod) (
+                increase(http_server_requests_seconds_count{method="POST", uri!~"/q/.*|/health.*"}[1h])
+              ) > 0
+            )
           for: 1h
           labels:
             severity: warning
             service: '{{ $labels.service }}'
           annotations:
-            summary: "{{ $labels.service }} has never scored a payment for fraud since it started"
+            # The [1h] window measures payment intake, which is driven by real customer traffic
+            # rather than by any scheduler — there is no period to align the window to.
+            subject_period: continuous
+            summary: "{{ $labels.service }} took payments for an hour and scored none of them"
             description: >-
               The fraud-scoring gauge on {{ $labels.service }} ({{ $labels.rail }}) has read
-              NEVER_ATTEMPTED for >1h. Either the rail has taken no traffic at all, or the scoring
-              call site is not being reached. Cross-check row growth in `fraud_scores`.
+              NEVER_ATTEMPTED for >1h while the pod was serving payment POSTs — so the rail is
+              taking traffic and the scoring call site is not being reached. Cross-check row growth
+              in `fraud_scores`.
         - alert: FraudScoringMostlySynthetic
           # The counters exist at 0.0 from the first scrape (registered eagerly, not on first
           # increment), so this ratio is well-defined from boot rather than absent until a failure.

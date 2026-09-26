@@ -7,7 +7,7 @@
 import { useCallback, useState, useEffect } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ClipboardCheck, RefreshCw, Star, CheckCircle2, XCircle, CircleSlash } from 'lucide-react'
-import { PageHeader, StatCard, StatusBadge, SWATCH_CLASS, type Tone } from '@/components/ui'
+import { LoadingState, PageHeader, StatCard, StatusBadge, SWATCH_CLASS, type Tone } from '@/components/ui'
 
 interface ReadinessService {
   service: string
@@ -162,7 +162,12 @@ export default function ReadinessPage() {
         />
       </div>
 
-      {loading && <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>{t('Načítám…', 'Loading…')}</div>}
+      {loading && (
+        <LoadingState
+          label={t('Načítám připravenost služeb…', 'Loading service readiness…')}
+          description={t('Sestavuji důkazy napříč všemi dimenzemi produkční připravenosti.', 'Assembling evidence across every production-readiness dimension.')}
+        />
+      )}
 
       {!loading && !unavailable && services.length === 0 && (
         <div style={{ padding: '40px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '12px', color: 'var(--text-secondary)' }}>

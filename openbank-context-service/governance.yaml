@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+dataDomain: compliance
+primaryDatastore: PostgreSQL
+databaseName: openbank_context
+dataLineageRole: both
+dataClassification: restricted
+retentionPolicy: source-aligned; read audit 7 years
+evidenceExported: true
+databaseLineage:
+  ownedDatabases:
+    - openbank_context
+  dependentDatabases: []

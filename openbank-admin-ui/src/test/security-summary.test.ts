@@ -3,7 +3,76 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, it, expect } from 'vitest'
-import { summarizeReachable, serviceVerdict, gradeFromScore, type ScanResultLike } from '@/lib/security/summary'
+import {
+  OWASP_CATEGORIES, parseSecurityEnvelope, summarizeReachable, serviceVerdict, gradeFromScore,
+  type ScanResultLike,
+} from '@/lib/security/summary'
+
+const contractFinding = {
+  id: 'finding-1', category: 'A01_BROKEN_ACCESS_CONTROL', severity: 'HIGH',
+  title: 'Missing authorization check', description: 'A protected operation is exposed.',
+  remediation: 'Enforce an explicit permission.', cweId: 'CWE-862', cvssScore: 8.1,
+  endpoint: '/api/v1/example',
+}
+
+const contractService = {
+  serviceName: 'example-service', serviceUrl: 'https://example.com',
+  scannedAt: '2026-09-10T02:00:00Z', durationMs: 125, reachable: true,
+  findings: [contractFinding], score: 90, grade: 'A',
+  headersPresent: { 'content-security-policy': true }, openApiAvailable: true,
+}
+
+const contractOwasp = Object.fromEntries(
+  OWASP_CATEGORIES.map(category => [category, category === contractFinding.category ? 1 : 0]),
+)
+const contractReport = {
+  reportId: 'b6ea92e9-c4b4-48af-88f5-b23705db5ef8', generatedAt: '2026-09-10T02:01:00Z',
+  totalServices: 1, reachableServices: 1, serviceResults: [contractService],
+  platformScore: 90, platformGrade: 'A', criticalFindings: 0, highFindings: 1,
+  owaspCoverage: contractOwasp, complianceStatus: { PSD2_SCA: true, OWASP_TOP10: true },
+}
+
+describe('security evidence contract', () => {
+  it('accepts the exact scanner report and preserves its typed evidence', () => {
+    expect(parseSecurityEnvelope({ available: true, report: contractReport })).toEqual({ available: true, report: contractReport })
+  })
+
+  it.each([
+    ['service count', { totalServices: 2 }],
+    ['reachable count', { reachableServices: 0 }],
+    ['finding count', { highFindings: 0 }],
+    ['platform grade', { platformGrade: 'B' }],
+    ['OWASP count', { owaspCoverage: { ...contractOwasp, A01_BROKEN_ACCESS_CONTROL: 0 } }],
+  ])('rejects a contradictory %s instead of scoring it', (_label, override) => {
+    expect(() => parseSecurityEnvelope({ available: true, report: { ...contractReport, ...override } })).toThrow('Contradictory')
+  })
+
+  it.each([
+    ['unknown severity', { ...contractFinding, severity: 'SEVERE' }],
+    ['CVSS above its scale', { ...contractFinding, cvssScore: 11 }],
+    ['invalid timestamp', { ...contractService, scannedAt: 'today' }],
+    ['score outside its scale', { ...contractService, score: 101 }],
+    ['grade inconsistent with score', { ...contractService, grade: 'F' }],
+  ])('rejects %s', (_label, invalid) => {
+    const serviceResult = 'serviceName' in invalid ? invalid : { ...contractService, findings: [invalid] }
+    expect(() => parseSecurityEnvelope({
+      available: true, report: { ...contractReport, serviceResults: [serviceResult] },
+    })).toThrow()
+  })
+
+  it('rejects duplicate service evidence', () => {
+    expect(() => parseSecurityEnvelope({
+      available: true,
+      report: { ...contractReport, totalServices: 2, reachableServices: 2, serviceResults: [contractService, contractService] },
+    })).toThrow('Duplicate service result')
+  })
+
+  it('preserves an unavailable verdict without manufacturing a report', () => {
+    expect(parseSecurityEnvelope({ available: false, reason: 'unauthorized' })).toEqual({
+      available: false, reason: 'unauthorized', detail: undefined,
+    })
+  })
+})
 
 const svc = (over: Partial<ScanResultLike>): ScanResultLike => ({
   reachable: true, score: 90, grade: 'A', findings: [], ...over,

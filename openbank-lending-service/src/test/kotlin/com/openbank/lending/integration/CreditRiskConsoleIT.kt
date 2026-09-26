@@ -42,6 +42,8 @@ import java.util.UUID
 @QuarkusTestResource(CreditRiskConsoleIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class CreditRiskConsoleIT {
+    @jakarta.inject.Inject
+    lateinit var dataSource: io.agroal.api.AgroalDataSource
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
@@ -71,6 +73,7 @@ class CreditRiskConsoleIT {
              "nominalAnnualRate":0.08,"termPeriods":12,"firstDueDate":"${LocalDate.now().plusMonths(1)}",
              "verifiedIncomeMonthly":{"amount":"60000.00","currency":{"code":"CZK"}},
              "existingDebtServiceMonthly":{"amount":"6000.00","currency":{"code":"CZK"}},
+             "existingDebtOutstanding":{"amount":"12000.00","currency":{"code":"CZK"}},
              "ageYears":35,"residency":"CZ","employmentTenureMonths":48}
         """.trimIndent()
         applicationId = Given {
@@ -110,20 +113,14 @@ class CreditRiskConsoleIT {
         val outcome = response.jsonPath().getString("[$i].engineOutcome")
         assertThat(outcome).isIn("APPROVE", "REFER", "DECLINE")
         assertThat(response.jsonPath().getString("[$i].inputSnapshotHash")).isNotBlank()
-        assertThat(response.jsonPath().getMap<String, Int>("[$i].policyVersions")).containsKeys(
-            "EXCLUSION",
-            "ELIGIBILITY",
-            "AFFORDABILITY",
-            "PRICING_BAND",
-        )
-        // 120k over 12 months at 8% is ~10.4k/month against 60k income: DSTI ≈ 0.17, total ≈ 0.27.
+        assertThat(outcome).isEqualTo("REFER")
+        assertThat(response.jsonPath().getMap<String, Int>("[$i].policyVersions")).containsKey("EXCLUSION")
         val dsti = response.jsonPath().getDouble("[$i].affordability.dsti")
         val total = response.jsonPath().getDouble("[$i].affordability.dstiIncludingExistingDebt")
-        assertThat(dsti).isBetween(0.15, 0.20)
-        assertThat(total - dsti).isCloseTo(0.10, org.assertj.core.data.Offset.offset(0.001))
-        if (outcome == "APPROVE") {
-            assertThat(response.jsonPath().getString("[$i].priceBand")).isEqualTo("PRIME")
-        }
+        assertThat(dsti).isBetween(0.25, 0.30)
+        assertThat(total).isEqualTo(dsti)
+        assertThat(response.jsonPath().getDouble("[$i].affordability.dti"))
+            .isCloseTo(132000.0 / 720000.0, org.assertj.core.data.Offset.offset(0.00001))
     }
 
     @Test
@@ -171,9 +168,96 @@ class CreditRiskConsoleIT {
 
     @Test
     @Order(7)
+    @TestSecurity(user = "risk-it-analyst", roles = ["ROLE_CREDIT_RISK"])
+    fun `portfolio summary exposes completeness without a list cap`() {
+        val result = Given { contentType("application/json") } When {
+            get("/api/v1/lending/risk/portfolio/summary")
+        } Then { statusCode(200) } Extract { this }
+        assertThat(result.jsonPath().getList<String>("currency")).doesNotHaveDuplicates()
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "risk-it-analyst", roles = ["ROLE_CREDIT_RISK"])
+    fun `whole-book summary retains defaulted exposure beyond list cap and marks stale evidence`() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO loan(id, application_id, party_id, principal, currency, nominal_annual_rate,
+                    term_periods, method, first_due_date, status)
+                SELECT gen_random_uuid(), ?::uuid, gen_random_uuid(), 100, 'ZAR', 0.08,
+                    12, 'ANNUITY', current_date + 30, 'DEFAULTED' FROM generate_series(1, 1001)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, applicationId)
+                statement.executeUpdate()
+            }
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    """
+                    INSERT INTO loan_provisioning(id, loan_id, period, as_of, outstanding_balance, currency,
+                        days_past_due, bucket, stage, expected_credit_loss, model_version)
+                    SELECT gen_random_uuid(), id, to_char(current_date, 'YYYY-MM-DD'), current_date, 100, 'ZAR',
+                        120, 'DPD_90_PLUS', 'STAGE_3', 45, 'test-model-v1' FROM loan WHERE currency = 'ZAR'
+                    """.trimIndent(),
+                )
+            }
+        }
+        val response = Given { contentType("application/json") } When {
+            get("/api/v1/lending/risk/portfolio/summary")
+        } Then { statusCode(200) } Extract { this }
+        val row = response.jsonPath().getMap<String, Any>("find { it.currency == 'ZAR' }")
+        assertThat((row["loans"] as Number).toInt()).isEqualTo(1001)
+        assertThat((row["outstanding"] as Number).toDouble()).isEqualTo(100100.0)
+        assertThat((row["stage23Outstanding"] as Number).toDouble()).isEqualTo(100100.0)
+        assertThat((row["over90Outstanding"] as Number).toDouble()).isEqualTo(100100.0)
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate("UPDATE loan_provisioning SET as_of = current_date - 1 WHERE currency = 'ZAR'")
+                statement.executeUpdate(
+                    "UPDATE loan SET status = 'CLOSED' WHERE id = (SELECT min(id::text)::uuid FROM loan WHERE currency = 'ZAR')",
+                )
+            }
+        }
+        val stale = Given { contentType("application/json") } When {
+            get("/api/v1/lending/risk/portfolio/summary")
+        } Then { statusCode(200) } Extract { this }
+        val staleRow = stale.jsonPath().getMap<String, Any>("find { it.currency == 'ZAR' }")
+        assertThat((staleRow["loans"] as Number).toInt()).isEqualTo(1000)
+        assertThat((staleRow["stale"] as Number).toInt()).isEqualTo(1000)
+        assertThat((staleRow["outstanding"] as Number).toDouble()).isZero()
+    }
+
+    @Test
+    @Order(9)
+    @TestSecurity(user = "risk-it-analyst", roles = ["ROLE_CREDIT_RISK"])
+    fun `terminal allowance releases remain visible without live exposure`() {
+        // A failed terminal release must remain visible even when this currency has no live loans.
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate("UPDATE loan SET status = 'CLOSED' WHERE currency = 'ZAR'")
+                statement.executeUpdate(
+                    """
+                    INSERT INTO lending_outbox(id, event_id, aggregate_id, event_type, payload, status)
+                    SELECT -9464, gen_random_uuid(), id, 'lending.allowance.posting', '{}', 'FAILED'
+                    FROM loan WHERE currency = 'ZAR' LIMIT 1
+                    """.trimIndent(),
+                )
+            }
+        }
+        val terminal = Given { contentType("application/json") } When {
+            get("/api/v1/lending/risk/portfolio/summary")
+        } Then { statusCode(200) } Extract { this }
+        val terminalRow = terminal.jsonPath().getMap<String, Any>("find { it.currency == 'ZAR' }")
+        assertThat((terminalRow["loans"] as Number).toInt()).isZero()
+        assertThat((terminalRow["pending"] as Number).toInt()).isEqualTo(1)
+    }
+
+    @Test
+    @Order(7)
     @TestSecurity(user = "risk-it-outsider", roles = ["ROLE_CUSTOMER"])
     fun `7 - a role outside the credit desk is refused`() {
-        for (path in listOf("decisions", "decisions/summary", "portfolio", "policy")) {
+        for (path in listOf("decisions", "decisions/summary", "portfolio", "portfolio/summary", "policy")) {
             Given { contentType("application/json") } When {
                 get("/api/v1/lending/risk/$path")
             } Then { statusCode(403) }

@@ -50,6 +50,15 @@ spec:
               kubernetes.io/metadata.name: delegation
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: kyb
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP

@@ -53,6 +53,7 @@ class SepaPaymentEventsTest {
         val event = payment.toCreatedEvent(Clock.fixed(now, ZoneOffset.UTC))
 
         assertThat(event.paymentId).isEqualTo(payment.id)
+        assertThat(event.version).isZero()
         assertThat(event.idempotencyKey).isEqualTo("idem-event")
         assertThat(event.type).isEqualTo(SepaPaymentType.SCT_INST)
         assertThat(event.status).isEqualTo(SepaPaymentStatus.RECEIVED)
@@ -75,12 +76,13 @@ class SepaPaymentEventsTest {
             status = SepaPaymentStatus.REJECTED,
             rejectReason = SepaRejectReason.SANCTIONS_HIT,
             rejectDetail = "OFAC hit",
-        )
+        ).copy(revision = 3)
         val now = Instant.parse("2026-01-02T12:00:00Z")
 
         val event = payment.toStatusChangedEvent(SepaPaymentStatus.RECEIVED, Clock.fixed(now, ZoneOffset.UTC))
 
         assertThat(event.paymentId).isEqualTo(payment.id)
+        assertThat(event.version).isEqualTo(3)
         assertThat(event.previousStatus).isEqualTo(SepaPaymentStatus.RECEIVED)
         assertThat(event.newStatus).isEqualTo(SepaPaymentStatus.REJECTED)
         assertThat(event.rejectReason).isEqualTo("SANCTIONS_HIT")

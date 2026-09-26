@@ -7,8 +7,23 @@ info:
   # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
   # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
   # on POST /term-deposits.
-  # 1.54.0 -> 1.55.0: anonymous OTP-gated sealed disclosure download.
-  version: 1.55.0
+  # 1.54.0 -> 1.55.0 (#9119): additive — GET /merchants/{descriptorKey}/logo, and merchant.logoUrl
+  # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
+  # this took the next minor.
+  # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
+  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
+  #
+  # Additive recertification review and evidence routes.
+  # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
+  # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
+  # decisions are always the human signer's.
+  # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
+  # FATCA/CRS self-certification).
+  # 1.69.0 -> 1.70.0: additive — GET /business/company (the acting-for company's register facts,
+  # representatives, signing rule and accounts). SCA routes documented as the HUMAN's under
+  # X-Acting-For (no shape change).
+  # 1.72.0 -> 1.73.0: anonymous OTP-gated sealed disclosure download.
+  version: 1.73.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -105,6 +120,36 @@ paths:
               schema: { type: string, format: binary }
         '404': { description: External disclosure unavailable }
         '502': { description: Disclosure service unavailable }
+  /net-worth:
+    get:
+      tags: [Profiles]
+      operationId: getNetWorth
+      summary: The caller's net worth, composed from the services that own each figure
+      description: |
+        Fans out to balance-service, lending-service, wealth-service and the ADR-0284 owner graph
+        (ADR-0301 D2). The party comes from the JWT; there is no path or query parameter.
+
+        A branch whose owner did not answer is UNAVAILABLE, never zero. This endpoint answers 200
+        with an honest partial tree rather than 5xx when one upstream is down, so a customer can
+        still see their cash while lending is unavailable. `totals.complete` is false whenever any
+        branch failed or was truncated, and `totals.missingBranches` names them. A client that
+        renders the totals while ignoring those fields is presenting a partial figure as final.
+
+        No currency conversion. Totals are per currency and `totals.converted` is always false; a
+        consolidated cross-currency figure is indicative only (ADR-0024) and is the client's to
+        compute through fx-service, showing the rate and its timestamp.
+
+        Declared holdings are labelled. Every leaf from wealth-service carries `valuationSource`
+        and `valuationAgeDays`: `CUSTOMER_DECLARED` means the customer typed the number and nobody
+        checked it, and a years-old figure is otherwise indistinguishable from a fresh one.
+
+        Entity stakes carry no amount at all (`valued: false`) and move no total: party-service
+        returns who may represent whom, not what an entity is worth.
+      responses:
+        '200':
+          description: The net-worth tree, possibly partial
+        '401':
+          description: Missing or invalid bearer token
   /products:
     get:
       tags: [Products]
@@ -886,6 +931,35 @@ paths:
         '403':
           description: Account does not belong to caller
 
+  /merchants/{descriptorKey}/logo:
+    get:
+      tags: [Transactions]
+      summary: A merchant's logo, as a square PNG
+      description: >-
+        Proxied from transaction-service, which stores the bitmap. The bank serves it itself for one
+        reason: a logo loaded from an external host would tell that host the customer's IP address
+        and which merchant they paid, every time a statement renders. Public business data, so there
+        is no account to own and no ownership check — authentication is the gate. Follow the
+        `merchant.logoUrl` this API returns rather than constructing the path; it carries a `v` token
+        so a replaced logo is a new URL and the response may be cached hard.
+      operationId: getMerchantLogo
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: descriptorKey, in: path, required: true, schema: {type: string}}
+        - {name: size, in: query, required: false, schema: {type: integer, enum: [64, 128], default: 64}}
+        - {name: v, in: query, required: false, description: Cache-busting token echoed from logoUrl., schema: {type: string}}
+      responses:
+        '200':
+          description: The logo bitmap
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '400':
+          description: Missing descriptor key
+        '404':
+          description: No logo stored for this merchant
+
   /statements/{accountId}:
     get:
       tags: [Statements]
@@ -1217,6 +1291,59 @@ paths:
           description: Consent does not belong to caller
         '404':
           description: Consent not found
+
+  /me/aml-profile:
+    get:
+      tags: [Profile]
+      summary: The caller's own personal AML profile
+      description: >-
+        AML Act 253/2008 §9 declaration plus the FATCA/CRS self-certification of the HUMAN behind
+        the token. The party id is taken from the token only; X-Acting-For is ignored on this route,
+        so a customer acting for a company still sees their own profile. party-service's status and
+        body are passed through.
+      operationId: getMyAmlProfile
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current profile; declaredAt says when it was last confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '404':
+          description: The customer has not declared an AML profile yet
+    put:
+      tags: [Profile]
+      summary: Declare (or re-confirm) the caller's personal AML profile
+      description: >-
+        Stores a new version (version increments on every change; history is kept). The party id
+        is taken from the token only — a partyId in the body and the X-Acting-For header are
+        ignored. A declaration carrying a risk factor (PEP, US person, cash-intensive, high-risk
+        tax residency, turnover over 500k CZK) is still stored and answers reviewStatus
+        ENHANCED_DUE_DILIGENCE, meaning the account needs a check.
+      operationId: putMyAmlProfile
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmlProfileRequest'
+      responses:
+        '200':
+          description: The stored version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '400':
+          description: >-
+            Body is not a JSON object, or party-service rejected the declaration (the error message
+            names the rule), passed through unchanged
+        '422':
+          description: The caller's party is not a natural person, or is closed
 
   /payees:
     get:
@@ -1612,6 +1739,13 @@ paths:
       responses:
         '200':
           description: Raw standing-order-service passthrough
+          headers:
+            X-Edge-Features:
+              description: >-
+                Comma-separated feature flags live in this edge build (#10281); absent when none.
+                `standingorders.replace` — an edit may send `replacesStandingOrderId`. The app
+                reads it from the list it already loads and hides the one-call edit otherwise.
+              schema: {type: string, example: 'standingorders.replace'}
           content:
             application/json:
               schema:
@@ -1627,6 +1761,20 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to act for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
+        - name: X-SCA-Challenge-Id
+          in: header
+          required: false
+          description: >-
+            Required only when the company's signing policy holds the instruction (#10281): the
+            initiator's consumed PAYMENT_INITIATION challenge is the first signature.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       requestBody:
         required: true
@@ -1649,16 +1797,56 @@ paths:
                 remittanceInfo: {type: string, nullable: true}
                 startDate: {type: string, format: date, description: Defaults to today when omitted}
                 endDate: {type: string, format: date, nullable: true}
+                replacesStandingOrderId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >-
+                    Edit (#10281): the caller's own order this one replaces. standing-order-service
+                    creates the new order and cancels this one in ONE transaction — on release, when
+                    held for signatures; a rejected or expired request leaves it untouched.
       responses:
+        '202':
+          headers:
+            X-Edge-Features:
+              description: The edge's live feature flags (see the list operation); also sent on refusals.
+              schema: {type: string, example: 'standingorders.replace'}
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the order is banded by its per-execution amount. The initiator's SCA was consumed and
+            counts as the first signature, an approval request holds the exact standing order, and nothing
+            was created upstream. It is created when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Standing order created
+          headers:
+            X-Edge-Features:
+              description: >-
+                Comma-separated feature flags live in this edge build (#10281); absent when none.
+                `standingorders.replace` — an edit may send `replacesStandingOrderId`. The app
+                reads it from the list it already loads and hides the one-call edit otherwise.
+              schema: {type: string, example: 'standingorders.replace'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StandingOrder'}
         '400':
           description: Missing or malformed field
         '403':
-          description: Debit account does not belong to caller
+          headers:
+            X-Edge-Features:
+              description: The edge's live feature flags (see the list operation); also sent on refusals.
+              schema: {type: string, example: 'standingorders.replace'}
+          description: Debit account does not belong to caller, or SCA missing/rejected on a held order
+        '501':
+          description: >-
+            `replacesStandingOrderId` sent while `standingorders.replace` is not live in this build
+            (`code: REPLACE_NOT_ENABLED`); nothing was created or cancelled.
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            instruction is refused rather than created with a single signature.
 
   /standing-orders/{id}:
     delete:
@@ -1837,6 +2025,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
       requestBody:
         required: true
@@ -1856,6 +2051,15 @@ paths:
                 constantSymbol: {type: string, nullable: true}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Payment instruction created
         '400':
@@ -1869,6 +2073,10 @@ paths:
             `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
             hold the grant, so naming their own limit is not an oracle; how much headroom remains
             is deliberately not echoed.
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /domestic-payments/{paymentId}:
     get:
@@ -1916,6 +2124,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
       requestBody:
         required: true
@@ -1933,12 +2148,25 @@ paths:
                 creditorBic: {type: string, nullable: true}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: SEPA payment instruction created
         '400':
           description: Incomplete body (need creditorIban, creditorName, amount) or unresolvable debtor
         '403':
           description: Debtor account does not belong to caller
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /sepa-payments/{paymentId}:
     get:
@@ -2095,6 +2323,21 @@ paths:
       operationId: createSddMandate
       security:
         - customerOidc: [accounts:write]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to act for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
+        - name: X-SCA-Challenge-Id
+          in: header
+          required: false
+          description: >-
+            Required only when the company's signing policy holds the instruction (#10281): the
+            initiator's consumed PAYMENT_INITIATION challenge is the first signature.
+          schema: {type: string, format: uuid}
       requestBody:
         required: true
         content:
@@ -2109,12 +2352,25 @@ paths:
                 scheme: {type: string, enum: [CORE, B2B], default: CORE}
                 sequenceType: {type: string, enum: [OOFF, FRST, RCUR, FNAL], default: RCUR}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: a mandate has no maximum amount, so the strictest rule applies. The initiator's SCA was consumed and
+            counts as the first signature, an approval request holds the exact mandate, and nothing
+            was created upstream. It is created when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: Mandate registered (idempotent on creditor identifier + UMR)
         '400':
           description: Missing accountId/creditorName/creditorIdentifier, or unresolvable debtor IBAN
         '403':
-          description: Account does not belong to caller
+          description: Account does not belong to caller, or SCA missing/rejected on a held mandate
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            instruction is refused rather than created with a single signature.
 
   /sdd/mandates/{id}/cancel:
     post:
@@ -2204,6 +2460,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
         - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -2222,12 +2485,25 @@ paths:
                 currency: {type: string, default: EUR}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: SEPA Instant payment submitted
         '400':
           description: Missing or malformed field
         '403':
           description: Debtor account does not belong to caller, or SCA missing/rejected
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /sepa-instant/{paymentId}/recall:
     post:
@@ -2269,6 +2545,13 @@ paths:
       security:
         - customerOidc: [payments:initiate]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: >-
+            Business partyId to pay for (ADR-0284 D4, mandate-checked, 403 without one). Subject to
+            the company's signing policy (#10281): may answer 202 instead of 201.
+          schema: {type: string, format: uuid}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}}
         - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -2287,6 +2570,15 @@ paths:
                 currency: {type: string, default: EUR}
                 reference: {type: string, nullable: true}
       responses:
+        '202':
+          description: >-
+            Held for co-signatures (#10281). Only under X-Acting-For, when the company's signing
+            policy needs more than one signature: the initiator's SCA was consumed and counts as the
+            first signature, an approval request holds the exact instruction, and the rail has NOT
+            been called. The payment executes when the last signer signs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentPendingApproval'}
         '201':
           description: SWIFT message accepted
           content:
@@ -2307,6 +2599,10 @@ paths:
           description: Missing or malformed field
         '403':
           description: Debtor account does not belong to caller, or SCA missing/rejected
+        '503':
+          description: >-
+            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature.
 
   /vop/verify:
     post:
@@ -2437,6 +2733,9 @@ paths:
     post:
       tags: [SCA]
       summary: Enrol a device for SCA (ADR-0021)
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: enrollDevice
       security:
         - customerOidc: [sca:enroll-device]
@@ -2458,6 +2757,9 @@ paths:
     post:
       tags: [SCA]
       summary: Initiate an SCA challenge (partyId injected from the JWT)
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: initiateChallenge
       security:
         - customerOidc: [sca:decide]
@@ -2488,6 +2790,9 @@ paths:
     post:
       tags: [SCA]
       summary: Record an out-of-band device decision (ADR-0021)
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: recordDecision
       security:
         - customerOidc: [sca:decide]
@@ -2507,6 +2812,9 @@ paths:
     get:
       tags: [SCA]
       summary: List the caller's own pending (unanswered) SCA challenges
+      description: >-
+        Always the authenticated HUMAN's, also under X-Acting-For (whose mandate check still applies,
+        fail-closed 403): strong customer authentication is of a person, never of a company.
       operationId: listPendingSca
       security:
         - customerOidc: [sca:decide]
@@ -2584,13 +2892,20 @@ paths:
   /documents:
     get:
       tags: [Documents]
-      summary: List the authenticated customer's documents
+      summary: List the authenticated customer's (or the acted-for entity's) documents
       description: >-
-        partyRef is taken from the JWT, never the query (IDOR). Object-store coordinates
-        (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
+        partyRef is taken from the JWT, never the query (IDOR); with X-Acting-For it is the
+        entity, after party-service confirms an active mandate (403 otherwise). Object-store
+        coordinates (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
       operationId: listDocuments
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: The caller's documents, newest first
@@ -2637,11 +2952,16 @@ paths:
   /documents/{id}/content:
     get:
       tags: [Documents]
-      summary: Stream a document's PDF bytes (owner only)
+      summary: Stream a document's PDF bytes (owner, acted-for entity, or share grantee)
       operationId: getDocumentContent
       security:
         - customerOidc: [accounts:read]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
         - name: id
           in: path
           required: true
@@ -2678,8 +2998,10 @@ paths:
       tags: [Documents]
       summary: Record the caller's signing decision (SCA-bound, ADR-0169)
       description: >-
-        partyRef is forced to the JWT; evidenceRef (the SCA challenge id) is verified upstream by
-        document-service against sca-service (ADR-0021).
+        partyRef is forced to the JWT's human party, also under X-Acting-For (a business agreement's
+        signers are natural persons; the header is still validated and a missing mandate is a 403);
+        evidenceRef (the SCA challenge id) is verified upstream by document-service against
+        sca-service (ADR-0021).
       operationId: recordDecision
       security:
         - customerOidc: [accounts:read]
@@ -3390,17 +3712,48 @@ paths:
         edge began reserving against it before each delegated payment. Keeping the refusal made a
         payment-capable grant unconstructible — with a ceiling this route refused it and without one
         the upstream refused it with SPEND_WITHOUT_CEILING — which also left POST /cards/delegated
-        unreachable, since it requires exactly such a grant.
+        unreachable, since it requires exactly such a grant. `exposure` is not accepted: it would
+        claim redaction, watermark or view-count enforcement that raw document delivery cannot
+        prove. The edge relays the stable 400 `EXPOSURE_UNSUPPORTED` from delegation-service before
+        any SCA is spent.
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granteePartyId, resourceType, resourceId, capabilities, grantScaSessionId]
+              properties:
+                grantorPartyId: {type: string, format: uuid, description: Optional; if present it must match the token party}
+                granteePartyId: {type: string, format: uuid}
+                resourceType: {type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT]}
+                resourceId: {type: string, format: uuid}
+                capabilities: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+                approvalPolicy: {type: string, default: SOLO}
+                requiredApprovals: {type: integer}
+                perTransactionLimit: {type: object}
+                dailyLimit: {type: object}
+                monthlyLimit: {type: object}
+                exposure: {type: object}
+                recertificationAudience:
+                  type: string
+                  enum: [PERSONAL, FOP, SME, CORPORATE]
+                  description: >-
+                    A review-only cadence selected by the grantor. It never changes access rights.
+                    FOP is 12 months, SME 6 months and CORPORATE 3 months; company size is not inferred.
+                validTo: {type: string, format: date-time}
+                grantScaSessionId: {type: string, format: uuid}
+                note: {type: string}
       responses:
         '201': {description: Grant offered}
         '400':
           description: >-
             Body is not a JSON object, or upstream validation failed — including
             `code: SPEND_WITHOUT_CEILING` when ACCOUNT_INITIATE_PAYMENT is asked for with no
-            cumulative ceiling.
+            cumulative ceiling, or `code: EXPOSURE_UNSUPPORTED` when exposure is non-null.
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
 
   /delegations/preview:
@@ -3433,13 +3786,63 @@ paths:
                 perTransactionLimit: {type: object}
                 dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
-                exposure: {type: object}
+                exposure:
+                  type: object
+                  deprecated: true
+                  description: Non-null is refused with 400 EXPOSURE_UNSUPPORTED; historical metadata is audit-only.
+                recertificationAudience:
+                  type: string
+                  enum: [PERSONAL, FOP, SME, CORPORATE]
+                  description: Review-only cadence; it never changes access rights.
                 validTo: {type: string, format: date-time}
       responses:
         '200': {description: Draft is currently eligible to proceed to SCA}
-        '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
+        '400': {description: Invalid draft, including non-null exposure (EXPOSURE_UNSUPPORTED)}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
+  /delegations/recertifications:
+    get:
+      tags: [Delegation]
+      summary: List the caller's overdue delegation review tasks
+      description: >-
+        Overdue review never automatically suspends delegated access. The customer can explicitly
+        keep, narrow or revoke each grant from the access-management experience.
+      operationId: listDelegationRecertifications
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200':
+          description: Pending review tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DelegationRecertification'}
+        '403': {description: Customer is not authorized for the active profile}
+  /delegations/recertifications/{id}/confirm:
+    post:
+      tags: [Delegation]
+      summary: Confirm that the caller reviewed a current delegation
+      operationId: confirmDelegationRecertification
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '200':
+          description: Review recorded; access has not changed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationRecertification'}
+        '404': {description: Task not found}
+        '409': {description: Task already confirmed or the delegation lifecycle changed}
 
   /profiles:
     get:
@@ -3480,6 +3883,325 @@ paths:
                         role: { type: string, nullable: true }
                         authority: { type: string, nullable: true }
 
+  /business/company:
+    get:
+      tags: [Business]
+      summary: The company the customer is acting for — register facts, representatives, signing rule, accounts
+      description: >-
+        Requires `X-Acting-For: <business partyId>` naming an entity the signed-in human holds an ACTIVE
+        mandate for; without the header, naming the human themselves, or without a mandate it is a 403.
+        Only system-of-record data: party-service (entity, mandates), kyb-service's register extract
+        (signing rule, register-only representatives) and account-service. A value no source holds is
+        null, never a placeholder.
+      operationId: getBusinessCompany
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The company profile
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessCompany'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+        '404': {description: The company party does not exist}
+
+  /business/signing-policy:
+    get:
+      tags: [Business]
+      summary: The company's signing policy, with a plain-language summary
+      description: >-
+        delegation-service owns the policy; with none stored it is derived from the register mandate
+        (SOLE any one signer, JOINT requiredSignatures) and isDerivedFromRegister is true.
+      operationId: getBusinessSigningPolicy
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: Accept-Language
+          in: header
+          required: false
+          description: "`en…` for English summaries, otherwise Czech."
+          schema: { type: string }
+      responses:
+        '200':
+          description: The policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SigningPolicy'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+    put:
+      tags: [Business]
+      summary: Propose a new signing policy (creates a POLICY_CHANGE approval request)
+      description: >-
+        A policy change is itself a signed item and needs the full round of the strictest rule;
+        the initiator is the signed-in human. Applied when the round completes.
+      operationId: changeBusinessSigningPolicy
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SigningPolicy'}
+      responses:
+        '202':
+          description: Approval request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalCreated'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/trusted-payees:
+    get:
+      tags: [Business]
+      summary: The company's trusted payees
+      description: >-
+        Payments to an ACTIVE trusted payee need one signature, unless the policy caps them.
+      operationId: listBusinessTrustedPayees
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Trusted payees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/TrustedPayee'}}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+    post:
+      tags: [Business]
+      summary: Propose a trusted payee (creates a PAYEE_ADD approval request)
+      description: >-
+        The payee becomes trusted only when the full round completes. IBAN is validated and
+        normalised; the initiator is the signed-in human, never a body field.
+      operationId: addBusinessTrustedPayee
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TrustedPayeeProposal'}
+      responses:
+        '202':
+          description: Approval request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalCreated'}
+        '400': {description: Invalid IBAN or name}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/trusted-payees/{id}:
+    delete:
+      tags: [Business]
+      summary: Propose removing a trusted payee (creates a PAYEE_REMOVE approval request)
+      description: >-
+        Needs the full round, like adding one.
+      operationId: removeBusinessTrustedPayee
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: Approval request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalCreated'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/approvals:
+    get:
+      tags: [Business]
+      summary: Approval requests of the company
+      description: >-
+        status=PENDING|DONE; mine=toSign (waiting for the signed-in human) or initiated.
+      operationId: listBusinessApprovals
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - {name: status, in: query, required: false, schema: {type: string, enum: [PENDING, DONE]}}
+        - {name: mine, in: query, required: false, schema: {type: string, enum: [toSign, initiated]}}
+      responses:
+        '200':
+          description: Approval requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BusinessApprovalRequest'}}
+        '400': {description: Unknown filter value}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /business/approvals/{id}:
+    get:
+      tags: [Business]
+      summary: One approval request, with signers, canSign and a human-readable summary
+      description: >-
+        The frozen payload exactly as it will execute, who initiated it, who signed and who can.
+      operationId: getBusinessApproval
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: Accept-Language
+          in: header
+          required: false
+          description: "`en…` for English summaries, otherwise Czech."
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The approval request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessApprovalRequest'}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+        '404': {description: No such request for this company}
+
+  /business/approvals/{id}/sign:
+    post:
+      tags: [Business]
+      summary: Sign an approval request with the signed-in human's SCA
+      description: >-
+        X-SCA-Challenge-Id must be an APPROVAL challenge dynamically linked to this approval id and
+        its payload hash (and amount/currency/creditor for a payment). The signer is always the
+        human; the initiator of a payment cannot co-sign; nobody signs twice. On the last
+        signature of a PAYMENT the edge releases it to the rail once (single-use claim,
+        Idempotency-Key = approval id) and returns the outcome in `release`.
+      operationId: signBusinessApproval
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: Accept-Language
+          in: header
+          required: false
+          description: "`en…` for English summaries, otherwise Czech."
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Signed; `release` present when this signature released a payment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessApprovalRequest'}
+        '403': {description: No mandate, SCA missing, or SCA not linked to this request}
+        '409': {description: Not pending, initiator co-signing, or already signed}
+
+  /business/approvals/{id}/reject:
+    post:
+      tags: [Business]
+      summary: Reject an approval request (any eligible signer)
+      description: >-
+        Nothing executes. The reason is optional and shown to the others.
+      operationId: rejectBusinessApproval
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: true
+          description: Business partyId; 403 without an ACTIVE mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, maxLength: 500}
+      responses:
+        '200': {description: Rejected}
+        '403': {description: No X-Acting-For, or no active mandate for the named company}
+
+  /me/approvals/pending:
+    get:
+      tags: [Business]
+      summary: Everything waiting for the signed-in human's signature, across companies
+      description: >-
+        For the personal-profile row and the profile-switcher badges. Always the human's own view;
+        X-Acting-For is ignored.
+      operationId: listMyPendingApprovals
+      security:
+        - customerOidc: [profile:read]
+      responses:
+        '200':
+          description: Per company
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/PendingApprovalsForEntity'}}
+
   /business/schemes:
     get:
       tags: [Business]
@@ -3493,6 +4215,42 @@ paths:
           schema: { type: string }
       responses:
         '200': {description: Schemes}
+
+  /business/search:
+    get:
+      tags: [Business]
+      summary: Find a company by NAME and town — the entry screen for a founder who does not know their IČO
+      description: |
+        Read-only over a public register; creates nothing. A hit carries the identifier, which still
+        goes through `/business/lookup` and the ordinary extract confirmation before any case is
+        bound — picking the wrong identically-named company is otherwise silent.
+
+        `tooManyMatches` is a third outcome next to hits and no-hits, and it is the common one for a
+        short term: the register refuses a query above its match cap and the customer is told to add
+        a town or more of the name. It is not an outage and is answered 200.
+      operationId: searchBusiness
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 2 }
+        - name: name
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 100 }
+        - name: city
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': {description: Pickable rows, possibly empty, or a tooManyMatches marker}
+        '400': {description: Missing or malformed parameter}
+        '404': {description: The country's register cannot be searched by name}
+        '503': {description: Register unavailable}
 
   /business/lookup:
     post:
@@ -3588,6 +4346,7 @@ paths:
                 dateOfBirth: { type: string, format: date, nullable: true }
       responses:
         '200': {description: Case}
+        '422': {description: 'Refused — the verified identity does not match a listed representative (INITIATOR_IDENTITY_MISMATCH)'}
 
   /business/onboarding/{id}/cosigners:
     post:
@@ -3653,6 +4412,152 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200': {description: Case}
+
+  /business/onboarding/{id}/questionnaire:
+    put:
+      tags: [Business]
+      summary: Answer the AML (Act 253/2008 §9) and FATCA/CRS questionnaire for the case
+      description: >-
+        Proxied to kyb-service as the authenticated human (never X-Acting-For). kyb-service
+        requires the caller to be the initiator or an invited signer.
+      operationId: putBusinessQuestionnaire
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessQuestionnaire' }
+      responses:
+        '200': {description: Case}
+        '400': {description: Invalid answers}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts the questionnaire}
+
+  /business/onboarding/{id}/questionnaire/prefill:
+    get:
+      tags: [Business]
+      summary: Persons already known for the case and any earlier questionnaire answers
+      operationId: getBusinessQuestionnairePrefill
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Prefill
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessQuestionnairePrefill' }
+        '404': {description: Not involved}
+
+  /business/onboarding/{id}/documents/{documentId}/content:
+    get:
+      tags: [Business]
+      summary: Stream a document of this onboarding case (agreement or disclosure) to a case participant
+      description: >-
+        Works before any mandate exists; X-Acting-For is ignored. The case is read from kyb-service
+        as the authenticated human (initiator or invited signer only). The document must carry
+        caseRef equal to the case id, otherwise 404, so the existence of other documents is never revealed.
+      operationId: getBusinessCaseDocumentContent
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': {description: kyb-service refused the caller for this case}
+        '404': {description: Case not visible to the caller, or the document does not belong to this case}
+
+  /business/onboarding/{id}/declarations:
+    put:
+      tags: [Business]
+      summary: Confirm beneficial owners, PEP status and truthfulness for the case
+      operationId: putBusinessDeclarations
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessDeclarations' }
+      responses:
+        '200': {description: Case}
+        '400': {description: truthful is false, a discrepancy note is missing, or a listed person has no PEP entry}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts declarations}
+
+  /business/onboarding/{id}/agreement:
+    post:
+      tags: [Business]
+      summary: Render (or return) the business framework agreement, its disclosures and signing ceremony
+      operationId: ensureBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: lang
+          in: query
+          required: false
+          schema: { type: string, enum: [cs, en] }
+      responses:
+        '200':
+          description: The agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessAgreement' }
+        '400': {description: lang is not cs or en}
+        '404': {description: Not involved}
+        '409': {description: Questionnaire or declarations missing, or the agreement is already signed}
+
+  /business/onboarding/{id}/agreement/accept:
+    post:
+      tags: [Business]
+      summary: Accept the disclosures, each bound to code, version and sha256
+      operationId: acceptBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisclosureAcceptance' }
+      responses:
+        '200': {description: Case}
+        '404': {description: Not involved}
+        '409': {description: The accepted set does not match the current disclosures exactly (stale)}
 
   /business/invitations/{token}/claim:
     post:
@@ -3738,6 +4643,74 @@ paths:
                     sourceService: {type: string}
                     occurredAt: {type: string, format: date-time}
 
+  /delegations/portfolios:
+    get:
+      tags: [Delegation]
+      summary: List named account portfolios for the active profile
+      description: >-
+        The active profile is derived from the customer token, or from a verified business mandate
+        selected with X-Acting-For. A portfolio is a reusable account scope for a later delegation
+        journey; it is not payment or co-signing authority.
+      operationId: listDelegationPortfolios
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200':
+          description: Portfolios owned by the active profile
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/DelegationPortfolio'}}
+        '403': {description: Selected business profile is not an active mandate of the customer}
+    post:
+      tags: [Delegation]
+      summary: Create a named account portfolio for the active profile
+      description: >-
+        ownerPartyId is derived from the authenticated profile and is therefore deliberately absent
+        from the request. Supplying it is refused. This creates no delegation grant and no payment
+        or co-signing authority.
+      operationId: createDelegationPortfolio
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateDelegationPortfolio'}
+      responses:
+        '201':
+          description: Portfolio created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationPortfolio'}
+        '400': {description: Missing idempotency key, name, or account scope}
+        '403': {description: Caller attempted to provide ownerPartyId, or selected profile is not an active mandate}
+        '422': {description: An account is not owned by the active profile}
+        '503': {description: Authoritative account ownership cannot currently be established; safe to retry}
+
+  /delegations/portfolios/{id}:
+    get:
+      tags: [Delegation]
+      summary: Read one portfolio owned by the active profile
+      description: A guessed or other profile's identifier returns 404 and reveals no existence oracle.
+      operationId: getDelegationPortfolio
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Portfolio
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationPortfolio'}
+        '403': {description: Selected business profile is not an active mandate}
+        '404': {description: Portfolio does not exist or is not owned by the active profile}
+
   /delegations/{id}:
     get:
       tags: [Delegation]
@@ -3816,6 +4789,273 @@ paths:
         '200': {description: Grant renounced}
         '403': {description: Caller is not the grantee}
 
+  /loyalty:
+    get:
+      tags: [Loyalty]
+      summary: The caller's Lístek balance, this year's earnings, next expiry and ledger history
+      description: >-
+        Party-scoped from the token. A projection of loyalty-service's summary: lot-level
+        remainingLeaves, ruleVersion and the party id are not exposed.
+      operationId: getLoyaltySummary
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltySummary'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/benefits:
+    get:
+      tags: [Loyalty]
+      summary: The reviewed benefit catalogue (prices in Lístky, never in a currency)
+      operationId: listLoyaltyBenefits
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyBenefit'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/earn-sources:
+    get:
+      tags: [Loyalty]
+      summary: The reviewed earn catalogue
+      description: A listed source is not a claim that anything awards it yet.
+      operationId: listLoyaltyEarnSources
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyEarnSource'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/redemptions:
+    post:
+      tags: [Loyalty]
+      summary: Redeem Lístky for a catalogue benefit
+      description: >-
+        The Idempotency-Key is forwarded unchanged; a retry with the same key answers
+        ALREADY_GRANTED with the original grant and burns nothing. grantStatus GRANTED means the
+        benefit is owed and published for its delivering engine, never that it has been applied.
+      operationId: redeemLoyaltyBenefit
+      security:
+        - customerOidc: [loyalty:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [benefitId]
+              properties:
+                benefitId: {type: string}
+      responses:
+        '200':
+          description: GRANTED or ALREADY_GRANTED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltyRedemption'}
+        '400': {description: Missing Idempotency-Key or benefitId}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown benefit}
+        '409':
+          description: INSUFFICIENT_LEAVES — nothing was burned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltyInsufficientLeaves'}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/grants:
+    get:
+      tags: [Loyalty]
+      summary: The caller's benefit grants, newest first
+      description: >-
+        grantStatus is reported as stored. There is no active/applied state: GRANTED means owed,
+        not delivered.
+      operationId: listLoyaltyGrants
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyGrant'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /referrals/program:
+    get:
+      tags: [Referral]
+      summary: The referral programme currently open for invites
+      description: >-
+        The newest PUBLISHED programme whose attribution window has not ended. Maker/checker
+        identities are not exposed.
+      operationId: getOpenReferralProgram
+      security:
+        - customerOidc: [referrals:read]
+      responses:
+        '200':
+          description: Open programme
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralProgramSummary'}
+        '401': {description: Unauthenticated}
+        '404': {description: No programme is currently open}
+        '502': {description: Referral service unavailable}
+
+  /referrals/invites:
+    get:
+      tags: [Referral]
+      summary: The caller's own invites, newest first
+      description: >-
+        Never carries the referee's party id or name, nor the invite token. An ISSUED invite whose
+        expiresAt has passed is returned as EXPIRED. createdAt is null when the issue instant was
+        not recorded.
+      operationId: listReferralInvites
+      security:
+        - customerOidc: [referrals:read]
+      responses:
+        '200':
+          description: Invites
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ReferralInviteSummary'}
+        '401': {description: Unauthenticated}
+        '502': {description: Referral service unavailable}
+    post:
+      tags: [Referral]
+      summary: Issue an invite as the caller
+      description: >-
+        The referrer is the token party; a party id in the body is ignored. The token is returned
+        ONCE, here — it is stored only as a hash. A reused Idempotency-Key is therefore a 409
+        IDEMPOTENCY_KEY_REUSED, not a replay: use a fresh key per invite, and after a lost response
+        read GET /referrals/invites instead of retrying.
+      operationId: issueReferralInvite
+      security:
+        - customerOidc: [referrals:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [programId]
+              properties:
+                programId: {type: string, format: uuid}
+      responses:
+        '201':
+          description: Invite issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralInviteIssued'}
+        '400': {description: Missing Idempotency-Key or malformed programId}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown programme}
+        '409':
+          description: PROGRAM_UNAVAILABLE or IDEMPOTENCY_KEY_REUSED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
+        '502': {description: Referral service unavailable}
+
+  /referrals/attributions:
+    post:
+      tags: [Referral]
+      summary: Redeem an invite token as the invited customer
+      description: >-
+        The referee is the token party; any party id in the body is ignored. A replay by the same
+        customer answers 200. Attempts are limited per customer per hour (429), counted before the
+        token is looked up, so a miss costs the same as a hit.
+      operationId: attributeReferralInvite
+      security:
+        - customerOidc: [referrals:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string, pattern: '^[A-Za-z0-9_-]{16,128}$'}
+      responses:
+        '200':
+          description: Attributed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [ATTRIBUTED]}
+        '400': {description: Missing Idempotency-Key or malformed token}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown invite}
+        '409':
+          description: SELF, ALREADY_ATTRIBUTED or REJECTED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
+        '410': {description: Invite has expired}
+        '429': {description: Too many redemption attempts}
+        '502': {description: Referral service unavailable}
+
 components:
   securitySchemes:
     customerOidc:
@@ -3838,10 +5078,505 @@ components:
       properties:
         linkSecret: { type: string, minLength: 1, maxLength: 128 }
         idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+    PaymentPendingApproval:
+      type: object
+      required: [approvalId, status, required, collected]
+      properties:
+        approvalId: {type: string, format: uuid}
+        status: {type: string, enum: [PENDING_APPROVAL]}
+        payloadSha256: {type: string, description: SHA-256 of the frozen instruction co-signers sign.}
+        required: {type: integer, minimum: 2}
+        collected: {type: integer, description: Signatures collected so far (the initiator's).}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    ApprovalCreated:
+      type: object
+      description: >-
+        A created POLICY_CHANGE / PAYEE_ADD / PAYEE_REMOVE request. It starts AWAITING_INITIATOR with
+        nothing collected: the initiator signs it via /business/approvals/{id}/sign with an APPROVAL
+        SCA challenge linked to approvalId + payloadSha256 before any co-signer is asked. Unsigned, it
+        expires after 15 minutes.
+      properties:
+        approvalId: {type: string, format: uuid}
+        status: {type: string, enum: [AWAITING_INITIATOR]}
+        payloadSha256: {type: string}
+        required: {type: integer, nullable: true}
+        collected: {type: integer}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    SigningPolicy:
+      type: object
+      additionalProperties: true
+      properties:
+        entityPartyId: {type: string, format: uuid}
+        version: {type: integer}
+        rules:
+          type: array
+          items:
+            type: object
+            properties:
+              minAmount: {type: object, nullable: true, additionalProperties: true}
+              maxAmount: {type: object, nullable: true, additionalProperties: true}
+              currency: {type: string, nullable: true}
+              requiredSignatures: {type: integer, minimum: 1}
+              groupId: {type: string, nullable: true}
+              mustIncludeGroupId: {type: string, nullable: true}
+        trustedPayeeCap: {type: object, nullable: true, additionalProperties: true}
+        summary:
+          type: array
+          items: {type: string}
+          description: Plain-language lines, Czech or English by Accept-Language (read-only).
+        isDerivedFromRegister: {type: boolean}
+    TrustedPayee:
+      type: object
+      additionalProperties: true
+      properties:
+        id: {type: string, format: uuid}
+        iban: {type: string}
+        name: {type: string}
+        bic: {type: string, nullable: true}
+        status: {type: string, enum: [ACTIVE, REMOVED]}
+    TrustedPayeeProposal:
+      type: object
+      required: [iban, name]
+      properties:
+        iban: {type: string}
+        name: {type: string, maxLength: 140}
+        bic: {type: string, nullable: true}
+    BusinessApprovalSigner:
+      type: object
+      properties:
+        partyId: {type: string, format: uuid}
+        name: {type: string, nullable: true}
+        status: {type: string, enum: [SIGNED, WAITING]}
+        signedAt: {type: string, nullable: true}
+        isYou: {type: boolean}
+        isInitiator: {type: boolean}
+    BusinessApprovalRequest:
+      type: object
+      additionalProperties: true
+      properties:
+        id: {type: string, format: uuid}
+        kind:
+          type: string
+          description: Extensible (#10281 added STANDING_ORDER and SDD_MANDATE); treat an unknown kind as a generic request.
+          x-extensible-enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE, STANDING_ORDER, SDD_MANDATE]
+        status:
+          type: string
+          description: >-
+            Owned by delegation-service (AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED,
+            RELEASED, RELEASE_FAILED); passed through, not an edge enum.
+        payload: {type: object, additionalProperties: true, description: The frozen item being signed.}
+        payloadSha256: {type: string}
+        required: {type: integer}
+        initiatorPartyId: {type: string, format: uuid}
+        expiresAt: {type: string, format: date-time}
+        signers: {type: array, items: {$ref: '#/components/schemas/BusinessApprovalSigner'}}
+        canSign: {type: boolean}
+        collected: {type: integer}
+        summaryText: {type: string}
+        release:
+          type: object
+          nullable: true
+          properties:
+            status: {type: string, enum: [RELEASED, RELEASE_FAILED, RELEASE_NOT_CLAIMED]}
+            railStatus: {type: integer, nullable: true}
+            paymentId: {type: string, nullable: true}
+            error: {type: string, nullable: true}
+    PendingApprovalsForEntity:
+      type: object
+      additionalProperties: true
+      properties:
+        entityPartyId: {type: string, format: uuid}
+        entityName: {type: string, nullable: true}
+        count: {type: integer}
+        oldestExpiresAt: {type: string, format: date-time, nullable: true}
+    BusinessCompany:
+      type: object
+      required: [partyId, representatives, accounts]
+      properties:
+        partyId: { type: string, format: uuid }
+        legalName: { type: string, nullable: true }
+        registrationNumber: { type: string, nullable: true, description: 'Register identifier (IČO for a Czech entity)' }
+        legalForm: { type: string, nullable: true, description: 'Legal form code as held by party-service' }
+        seat:
+          type: object
+          nullable: true
+          properties:
+            street: { type: string, nullable: true }
+            city: { type: string, nullable: true }
+            postalCode: { type: string, nullable: true }
+            country: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        representatives:
+          type: array
+          items:
+            type: object
+            required: [isYou]
+            properties:
+              name: { type: string, nullable: true }
+              role: { type: string, nullable: true }
+              partyId: { type: string, format: uuid, nullable: true, description: 'null for a register-listed member with no party here' }
+              isYou: { type: boolean }
+        signingRule: { type: string, nullable: true, description: 'The register text of how the company is represented' }
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              iban: { type: string, nullable: true }
+              currency: { type: string, nullable: true }
+              product: { type: string, nullable: true }
+    AmlPep:
+      type: object
+      required: [isPep]
+      properties:
+        isPep: {type: boolean}
+        category:
+          type: string
+          nullable: true
+          description: Required when isPep is true; must be empty otherwise.
+          enum: [HEAD_OF_STATE_OR_GOV, MINISTER, MP, JUDGE, CENTRAL_BANK, AMBASSADOR, MILITARY,
+                 STATE_COMPANY_BOARD, INTL_ORG, PARTY_LEADERSHIP, FAMILY_MEMBER, CLOSE_ASSOCIATE]
+        detail: {type: string, nullable: true, maxLength: 500}
+
+    AmlProfileRequest:
+      type: object
+      required: [purpose, incomeSources, occupation, expectedMonthlyTurnover, cashIntensive, pep,
+                 taxResidencies, usPerson, truthful]
+      properties:
+        purpose:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EVERYDAY_BANKING, SALARY, SAVINGS, INVESTMENTS, BUSINESS_SIDE_INCOME, OTHER]
+        purposeNote: {type: string, nullable: true, maxLength: 500, description: Required when purpose includes OTHER}
+        incomeSources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EMPLOYMENT, SELF_EMPLOYMENT, PENSION, STUDENT_SUPPORT, RENTAL, INVESTMENTS, INHERITANCE_GIFT, OTHER]
+        incomeNote: {type: string, nullable: true, maxLength: 500, description: Required when incomeSources includes OTHER}
+        occupation:
+          type: string
+          enum: [EMPLOYED, SELF_EMPLOYED, STUDENT, RETIRED, UNEMPLOYED, OTHER]
+        occupationNote: {type: string, nullable: true, maxLength: 500, description: Required when occupation is OTHER}
+        expectedMonthlyTurnover:
+          type: string
+          description: Monthly turnover band in CZK
+          enum: [UP_TO_30K, UP_TO_100K, UP_TO_500K, OVER_500K]
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies:
+          type: array
+          minItems: 1
+          description: ISO 3166-1 alpha-2 codes, no repeats. A US residency requires usPerson=true.
+          items: {type: string, pattern: '^[A-Za-z]{2}$'}
+        tin:
+          type: object
+          description: >-
+            Taxpayer identification number per NON-CZ residency, keyed by ISO 3166-1 alpha-2 code,
+            e.g. {"SK": "1234567890"}. Keys must be declared taxResidencies and must not include CZ.
+          additionalProperties: {type: string, maxLength: 64}
+        usPerson: {type: boolean, description: FATCA self-certification}
+        truthful: {type: boolean, description: Must be true}
+
+    AmlProfile:
+      type: object
+      required: [partyId, version, declaredAt, purpose, incomeSources, occupation, expectedMonthlyTurnover,
+                 cashIntensive, pep, taxResidencies, tin, usPerson, truthful, riskFactors, eddRequired,
+                 reviewStatus, pepFlag, fatcaStatus, crsStatus]
+      properties:
+        partyId: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        declaredAt: {type: string, format: date-time, description: When this version was confirmed}
+        purpose: {type: array, items: {type: string}}
+        purposeNote: {type: string, nullable: true}
+        incomeSources: {type: array, items: {type: string}}
+        incomeNote: {type: string, nullable: true}
+        occupation: {type: string}
+        occupationNote: {type: string, nullable: true}
+        expectedMonthlyTurnover: {type: string}
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies: {type: array, items: {type: string}}
+        tin:
+          type: object
+          additionalProperties: {type: string}
+        usPerson: {type: boolean}
+        truthful: {type: boolean}
+        riskFactors:
+          type: array
+          items:
+            type: string
+            enum: [PEP, US_PERSON, CASH_INTENSIVE, HIGH_RISK_COUNTRY, HIGH_TURNOVER]
+        eddRequired: {type: boolean}
+        reviewStatus:
+          type: string
+          enum: [STANDARD, ENHANCED_DUE_DILIGENCE]
+          description: ENHANCED_DUE_DILIGENCE — tell the customer the account needs a check.
+        pepFlag: {type: boolean}
+        pepCategory: {type: string, nullable: true}
+        fatcaStatus: {type: string, enum: [US_PERSON, NON_US]}
+        crsStatus: {type: string, enum: [REPORTABLE, NON_REPORTABLE]}
+
+    BusinessQuestionnaire:
+      type: object
+      required: [purpose, expectedMonthlyTurnover, sourceOfFunds, cashIntensive, countries, taxResidencies, fatcaStatus, crsStatus]
+      properties:
+        purpose: { type: string, enum: [OPERATING_ACCOUNT, SAVINGS, PAYMENTS_ESHOP, HOLDING, OTHER] }
+        purposeNote: { type: string, nullable: true }
+        expectedMonthlyTurnover: { type: string, enum: [UP_TO_100K, UP_TO_1M, UP_TO_10M, OVER_10M], description: CZK }
+        sourceOfFunds:
+          type: array
+          items: { type: string, enum: [BUSINESS_REVENUE, SHARE_CAPITAL, LOANS, INVESTMENTS, OTHER] }
+        sourceOfFundsNote: { type: string, nullable: true }
+        cashIntensive: { type: boolean }
+        countries:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        taxResidencies:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        fatcaStatus: { type: string, enum: [ACTIVE_NFFE, PASSIVE_NFFE, FINANCIAL_INSTITUTION, US_PERSON] }
+        crsStatus: { type: string, enum: [ACTIVE_NFE, PASSIVE_NFE, FINANCIAL_INSTITUTION] }
+        answeredAt: { type: string, format: date-time, readOnly: true }
+        answeredBy: { type: string, format: uuid, readOnly: true }
+    BusinessQuestionnairePrefill:
+      type: object
+      properties:
+        knownPersons:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              partyId: { type: string, format: uuid }
+              pep: { type: boolean, nullable: true }
+        previousQuestionnaire:
+          allOf:
+            - $ref: '#/components/schemas/BusinessQuestionnaire'
+          nullable: true
+    BusinessDeclarations:
+      type: object
+      required: [uboConfirmed, peps, truthful]
+      properties:
+        uboConfirmed: { type: boolean, description: true = the register's beneficial-owner list is correct }
+        uboDiscrepancyNote: { type: string, nullable: true, description: Required when uboConfirmed is false }
+        peps:
+          type: array
+          description: One entry for every listed beneficial owner and representative
+          items:
+            type: object
+            required: [name, isPep]
+            properties:
+              name: { type: string }
+              isPep: { type: boolean }
+              detail: { type: string, nullable: true }
+        truthful: { type: boolean, description: Must be true }
+        declaredAt: { type: string, format: date-time, readOnly: true }
+        declaredBy: { type: string, format: uuid, readOnly: true }
+    BusinessAgreement:
+      type: object
+      properties:
+        caseId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        templateCode: { type: string, example: RAMCOVA_SMLOUVA_PO_CS }
+        templateVersion: { type: string }
+        sha256: { type: string, description: Hash of the PDF the signers sign over }
+        sealedSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, format: uuid }
+        ceremonyStatus: { type: string, enum: [PENDING, PARTIALLY_SIGNED, COMPLETED, DECLINED, EXPIRED] }
+        signers:
+          type: array
+          items:
+            type: object
+            properties:
+              partyRef: { type: string, format: uuid }
+              status: { type: string, enum: [PENDING, SIGNED, DECLINED] }
+              signedAt: { type: string, format: date-time, nullable: true }
+        disclosures:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string, example: VOP_CS }
+              version: { type: string }
+              title: { type: string }
+              sha256: { type: string }
+              documentId: { type: string, format: uuid }
+    DisclosureAcceptance:
+      type: object
+      required: [disclosures]
+      properties:
+        disclosures:
+          type: array
+          items:
+            type: object
+            required: [code, version, sha256]
+            properties:
+              code: { type: string }
+              version: { type: string }
+              sha256: { type: string }
+    LoyaltySummary:
+      type: object
+      required: [balance, earnedThisYear, history]
+      properties:
+        balance: {type: integer, description: Unspent, unexpired Lístky}
+        earnedThisYear: {type: integer}
+        nextExpiry: {type: string, format: date-time, nullable: true}
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/LoyaltyLedgerEntry'}
+    LoyaltyLedgerEntry:
+      type: object
+      required: [id, type, leaves, occurredAt]
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string, enum: [EARN, BURN, EXPIRE, REVERSE]}
+        leaves: {type: integer}
+        earnSourceId: {type: string, nullable: true}
+        benefitId: {type: string, nullable: true}
+        occurredAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    LoyaltyBenefit:
+      type: object
+      required: [id, engine, priceLeaves, validityDays, description]
+      properties:
+        id: {type: string}
+        engine: {type: string, enum: [FEE_WAIVER, INTEREST_BONUS, FX_REFERENCE_RATE]}
+        priceLeaves: {type: integer}
+        validityDays: {type: integer}
+        description: {type: string}
+    LoyaltyEarnSource:
+      type: object
+      required: [id, leaves, validityDays]
+      properties:
+        id: {type: string}
+        leaves: {type: integer}
+        validityDays: {type: integer}
+    LoyaltyRedemption:
+      type: object
+      required: [outcome, grantId, benefitId, grantStatus]
+      properties:
+        outcome: {type: string, enum: [GRANTED, ALREADY_GRANTED]}
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus: {type: string, enum: [RESERVED, GRANTED, RELEASED, REVERSED]}
+    LoyaltyInsufficientLeaves:
+      type: object
+      required: [outcome, requiredLeaves, availableLeaves]
+      properties:
+        outcome: {type: string, enum: [INSUFFICIENT_LEAVES]}
+        requiredLeaves: {type: integer}
+        availableLeaves: {type: integer}
+    LoyaltyGrant:
+      type: object
+      required: [grantId, benefitId, grantStatus]
+      properties:
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus: {type: string, enum: [RESERVED, GRANTED, RELEASED, REVERSED]}
+        grantedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null only for a grant that never reached GRANTED.
+        validUntil: {type: string, format: date-time, nullable: true}
+    ReferralProgramSummary:
+      type: object
+      required: [id, rewardAmount, currency, qualifyingEvent, attributionWindowEndsAt]
+      properties:
+        id: {type: string, format: uuid}
+        rewardAmount: {type: string, description: 'Decimal string, e.g. "500"'}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        qualifyingEvent: {type: string}
+        attributionWindowEndsAt: {type: string, format: date-time}
+    ReferralInviteIssued:
+      type: object
+      required: [id, token, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        token: {type: string, description: Shown once; share it with the invitee}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [ISSUED]}
+    ReferralInviteSummary:
+      type: object
+      required: [id, status, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [ISSUED, ATTRIBUTED, EXPIRED, REJECTED]}
+        createdAt: {type: string, format: date-time, nullable: true}
+        expiresAt: {type: string, format: date-time}
+        attributedAt: {type: string, format: date-time, nullable: true}
+        reward:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/ReferralRewardSummary'}]
+    ReferralRewardSummary:
+      type: object
+      required: [status, amount, currency]
+      properties:
+        status: {type: string, enum: [QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVERSED]}
+        amount: {type: string, description: Decimal string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        requestedAt: {type: string, format: date-time, nullable: true}
+        rewardedAt: {type: string, format: date-time, nullable: true}
+    ReferralConflict:
+      type: object
+      required: [error, reason]
+      properties:
+        error: {type: string}
+        reason:
+          type: string
+          enum: [SELF, ALREADY_ATTRIBUTED, REJECTED, PROGRAM_UNAVAILABLE, IDEMPOTENCY_KEY_REUSED]
+    CreateDelegationPortfolio:
+      type: object
+      required: [name, accountIds]
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        accountIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: {type: string, format: uuid}
+    DelegationPortfolio:
+      type: object
+      required: [id, ownerPartyId, name, accountIds, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        ownerPartyId: {type: string, format: uuid, description: Derived active profile, never a caller supplied create field}
+        name: {type: string}
+        accountIds:
+          type: array
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
     # $ref). Kept field-for-field in step with the upstream openapi.yaml they mirror.
+
+    # Mirrors delegation-service's customer review evidence. A confirmation records only the
+    # review; no capability, lifecycle status or product authority changes through this schema.
+    DelegationRecertification:
+      type: object
+      required: [id, delegationId, expectedLifecycleRevision, audience, sequence, dueAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        delegationId: {type: string, format: uuid}
+        expectedLifecycleRevision: {type: integer, format: int64}
+        audience: {type: string, enum: [PERSONAL, FOP, SME, CORPORATE]}
+        sequence: {type: integer, minimum: 1}
+        dueAt: {type: string, format: date-time}
+        status: {type: string, enum: [PENDING, CONFIRMED]}
+        confirmedAt: {type: string, format: date-time, nullable: true}
 
     # Mirrors account-service's PocketResponse (currency-pocket / multi-currency wallet, ADR-0024).
     Pocket:
@@ -4426,6 +6161,13 @@ components:
             logoUrl:
               type: string
               nullable: true
+              description: >-
+                Path to the logo ON THIS EDGE, e.g.
+                "/customer/v1/merchants/ALZACZ/logo?size=64&v=<hash>". The edge rewrites the prefix
+                transaction-service emits so the path resolves against the host that served this
+                response; it is never an external URL, because a logo fetched from a third party
+                would tell that party who the customer paid. Absent when no logo has been ingested —
+                render what you render today, never a placeholder.
             category:
               type: string
               nullable: true

@@ -22,7 +22,9 @@ import com.openbank.transaction.domain.event.TransactionInitiatedEvent
 import com.openbank.transaction.domain.model.TransactionType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -64,6 +66,10 @@ class TransactionPactProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    /** Cleared per interaction for the negative-auth states — see [verifyPacts]. */
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     private val objectMapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -85,7 +91,41 @@ class TransactionPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The four "missing or expired token" interactions expect 401, and the class-level
+        // @TestSecurity authenticates EVERY replay as pact-verifier — so without clearing the test
+        // identity the provider answers 201 and the contract's whole point is inverted. Measured on
+        // the live broker: `{"attribute":"status","description":"expected status of 401 but was
+        // 201"}` alongside the MissingStateChangeMethod below (issue #9752).
+        //
+        // Keyed on the provider STATE, not the description: the state is one shared literal
+        // ([NEGATIVE_AUTH_STATE]) while the four descriptions differ per consumer, so a fifth
+        // consumer adding the same negative case is covered without touching this line.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    /**
+     * Serves the negative-auth interactions of the interest, sdd, sepa-payment and swift pacts.
+     *
+     * On the git-pact side these live in their own class, [TransactionNegativeAuthPactVerificationTest],
+     * which can simply omit `@TestSecurity`; a second `@PactBroker` class is not the equivalent move
+     * here, because two broker-sourced classes for one provider each fetch every pact the broker holds
+     * (this repo's "one broker-sourced @Provider test per provider" rule, and the
+     * `UnsupportedOperationException` this class's own header records). So the broker side serves them
+     * in place, with [verifyPacts] clearing the identity per interaction.
+     *
+     * This class had no handler at all, and it is the one whose results reach the broker: every main
+     * push published `success=false`, and `can-i-deploy` blocked interest, sdd and swift — three
+     * money-path services — as contract REGRESSIONs from 2026-09-07 (issue #9752).
+     */
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // Intentionally empty: the state IS the absence of an authenticated identity, and verifyPacts
+        // provides that by clearing the test identity before the replay. Declared rather than left
+        // implicit because pact-jvm fails the interaction outright when no handler matches the state
+        // name — which is exactly what it did here.
     }
 
     @State("the transaction service is available")

@@ -15,8 +15,14 @@ const FEE = {
   amount: 1.5,
   currency: 'EUR',
   frequency: 'PER_TRANSACTION',
+  description: null,
   status: 'ACTIVE',
-  waivable: false,
+  waivable: true,
+  waiveCondition: 'Monthly turnover > 1500 EUR',
+  waiverEvaluable: true,
+  waiverRule: { attribute: 'MONTHLY_TURNOVER', operator: '>', threshold: '1500', thresholdCurrency: 'EUR', textValue: null },
+  productId: 'product-1',
+  updatedAt: '2026-09-09T10:00:00Z',
 }
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -36,6 +42,8 @@ test('keeps the last fee schedule during an outage and recovers', async ({ page 
 
   await page.goto('/fees')
   await expect(page.getByText(FEE.code, { exact: true })).toBeVisible()
+  await expect(page.getByText(/Automatic:|Automaticky:/)).toBeVisible()
+  await expect(page.getByText(/monthly turnover > 1500 EUR/)).toBeVisible()
   await expect(page.getByText('1', { exact: true }).first()).toBeVisible()
 
   available = false

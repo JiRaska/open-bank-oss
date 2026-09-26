@@ -17,57 +17,13 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
-
-interface TraceSummary {
-  traceID: string
-  rootServiceName?: string
-  rootTraceName?: string
-  startTimeUnixNano?: string
-  durationMs?: number
-}
-
-interface FlatSpan {
-  spanId: string
-  parentSpanId?: string
-  name: string
-  service: string
-  startNano: number
-  endNano: number
-}
+import { parseTempoSearch, parseTempoTrace, type FlatSpan, type TraceSummary } from '@/lib/observability/tempo-evidence'
 
 // Stable per-service hue so the same service keeps its colour across spans.
 function serviceColor(service: string): string {
   let h = 0
   for (let i = 0; i < service.length; i++) h = (h * 31 + service.charCodeAt(i)) % 360
   return `hsl(${h}, 62%, 48%)`
-}
-
-function attrString(attrs: { key: string; value?: { stringValue?: string } }[] | undefined, key: string): string | undefined {
-  return attrs?.find(a => a.key === key)?.value?.stringValue
-}
-
-// Flatten an OTLP trace (Tempo /api/traces/{id}) into a sorted span list.
-// Handles both `scopeSpans` (new) and `instrumentationLibrarySpans` (older).
-function flattenTrace(otlp: unknown): FlatSpan[] {
-  const batches = (otlp as { batches?: unknown[] })?.batches ?? []
-  const spans: FlatSpan[] = []
-  for (const batch of batches as Record<string, unknown>[]) {
-    const resource = batch.resource as { attributes?: { key: string; value?: { stringValue?: string } }[] } | undefined
-    const service = attrString(resource?.attributes, 'service.name') ?? 'unknown'
-    const scopes = (batch.scopeSpans ?? batch.instrumentationLibrarySpans ?? []) as Record<string, unknown>[]
-    for (const scope of scopes) {
-      for (const s of (scope.spans ?? []) as Record<string, string>[]) {
-        const startNano = Number(s.startTimeUnixNano ?? 0)
-        const endNano = Number(s.endTimeUnixNano ?? 0)
-        if (!startNano) continue
-        spans.push({
-          spanId: s.spanId, parentSpanId: s.parentSpanId,
-          name: s.name ?? '(span)', service, startNano, endNano: endNano || startNano,
-        })
-      }
-    }
-  }
-  return spans.sort((a, b) => a.startNano - b.startNano)
 }
 
 function fmtDuration(ms: number): string {
@@ -102,8 +58,11 @@ export default function TraceExplorerPage() {
         setTraces(null)
         return
       }
-      const json = await res.json()
-      const list: TraceSummary[] = Array.isArray(json?.traces) ? json.traces : []
+      const list = parseTempoSearch(await res.json())
+      if (!list) {
+        setUnavailable({ kind: 'error' })
+        return
+      }
       setTraces(list)
       if (list.length === 0) setUnavailable({ kind: 'no_data' })
       setLastRefresh(new Date())
@@ -131,8 +90,12 @@ export default function TraceExplorerPage() {
         setSpansUnavailable(res.status === 502 ? 'unreachable' : 'error')
         return
       }
-      const json = await res.json()
-      setSpans(flattenTrace(json))
+      const parsed = parseTempoTrace(await res.json())
+      if (!parsed) {
+        setSpansUnavailable('error')
+        return
+      }
+      setSpans(parsed)
     } catch {
       setSpansUnavailable('unreachable')
     } finally {
@@ -196,6 +159,19 @@ export default function TraceExplorerPage() {
             lang={t('cs', 'en') as 'cs' | 'en'}
           />
         ) : (
+          <>
+          {unavailable && traces?.length ? (
+            <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service="tempo (observability)"
+                feature={t('Aktualizace distribuovaných tras', 'Distributed trace refresh')}
+                lang={t('cs', 'en') as 'cs' | 'en'}
+                detail={t('Zobrazen je poslední ověřený seznam tras; novější trasy mohou chybět.', 'Showing the last verified trace list; newer traces may be missing.')}
+                dense
+              />
+            </div>
+          ) : null}
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 340px) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
             {/* Trace list */}
             <div className="card" role="region" aria-label={t('Seznam posledních tras', 'Recent traces list')} style={{ padding: '8px' }}>
@@ -296,6 +272,7 @@ export default function TraceExplorerPage() {
               )}
             </div>
           </div>
+          </>
         )}
 
         {lastRefresh && (

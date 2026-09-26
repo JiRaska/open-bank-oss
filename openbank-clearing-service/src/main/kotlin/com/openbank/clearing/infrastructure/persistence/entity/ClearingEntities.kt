@@ -106,6 +106,9 @@ class ClearingItemEntity : PanacheEntityBase() {
     var status: com.openbank.clearing.domain.model.ClearingStatus =
         com.openbank.clearing.domain.model.ClearingStatus.PENDING
 
+    @Column(name = "aggregate_revision", nullable = false)
+    var revision: Long = 0
+
     @Column(name = "value_date")
     var valueDate: LocalDate? = null
 

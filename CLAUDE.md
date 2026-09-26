@@ -35,7 +35,13 @@ ADR-0029):
    from the OpenAPI diff (`oasdiff`), never forced equal to the release version.
 4. **DB change ⇒ Flyway migration + rollback note. Event change ⇒ schema versioned backward-compatibly.**
    **Config change ⇒ no duplicate YAML keys** in `application.yaml` — SmallRye/SnakeYAML keep only the
-   *last* of a repeated mapping key and silently drop the rest (CI enforces this).
+   *last* of a repeated mapping key and silently drop the rest (CI enforces this). The same trap
+   reaches `.github/gates/gates.yaml` and every YAML a gate parses with `yaml.safe_load`, and there
+   it is worse: **a guard that READS a document cannot be the thing that notices the document is
+   malformed.** Two PRs added `budget_seconds` to the same five gates within an hour on 2026-09-05;
+   `gate-observability-declarations` read the duplicate, saw a budget, called it declared and passed,
+   while `yamllint` reddened `main` for the whole queue. `check-duplicate-yaml-keys.sh` now covers
+   that path too.
 5. **Test the new behavior.** Coverage is ratchet-only (never lower); money-path services aim higher.
 6. **Derived data is never hand-edited.** Catalog, coverage, and the governance manifest are
    CI-generated — edit the source, not the artifact.
@@ -58,6 +64,11 @@ Open one for a **fleet sweep**, a **governance follow-up** (the actionable tail 
 or an **enhancement** — not for architectural decisions (→ `docs/adr`), questions (→ Discussions), or
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
+
+Autonomous work is WIP-limited across every prefix in
+`rules.yaml: autonomous_agent_prs.agent_branch_prefixes` (currently `agent/` and `codex/`). Before
+opening one of those PRs, count all open PRs under those prefixes. At the limit of three, tend or
+reuse existing work instead of opening another PR unless the user explicitly directs the new PR.
 
 ## Build
 
@@ -107,6 +118,18 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   coroutine test runner.
 - **`openbank.outbox.dispatch-enabled` defaults to `false`.** Any service with an outbox entity must
   set it `true` in `application.yaml`, or events never dispatch (no error, `attempt_count` stays 0).
+- **After changing an INTERFACE, an incremental `:test` is not evidence — Gradle will not recompile
+  the anonymous implementations that no longer satisfy it.** Adding one member to
+  `CapitalizeInterestUseCase` broke both `object : CapitalizeInterestUseCase` stubs in
+  `InterestWorkflowLivenessTest`, and **every local run stayed green**: the test file had not
+  changed, so the incremental compiler left it alone and `:test` passed against a stale class file
+  while the interface beneath it had grown an abstract member. CI builds clean and failed
+  `compileTestKotlin` on the first try. Re-run `:<svc>:build --rerun-tasks` after any interface
+  change — it is the only local invocation that reproduces what CI does, and it costs ~90 s. Same
+  hazard as the constructor/`lateinit` note under Flyway ("the constructor or field shape of any
+  class a test instantiates by hand"), reached from the other side: there the test changes and the
+  class does not, here the interface changes and the test does not. Both are invisible until
+  something compiles from scratch.
 - **CDI wiring isn't validated by `ktlintCheck` + unit tests.** Add `:svc:quarkusBuild` to your
   pre-push gate; ArC/CDI failures only surface there.
 - **Panache reactive `persist()` on an application-assigned `@Id` is INSERT-only — use `merge` for
@@ -673,6 +696,28 @@ fire from *outside* it, so they stay here:
   Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
   a competing PR squash-merges it still lists the overlap as a diff even when the content already
   agrees. Read the content, not the diff.
+- **`git checkout <ref> -- <file>` is a WHOLE-FILE take, and it reads in the diff exactly like an
+  ordinary conflict resolution.** Resolving a conflict that way took `main`'s version of one page
+  entire and dropped 112 lines — including the feature the branch existed for. The PR stayed titled
+  "protect document template drafts" while protecting nothing, and nothing in the diff said so: the
+  file simply equalled main's. Same class three times in one queue (#9685); the other two were
+  smaller but identical in shape — one side's implementation taken wholesale, the other side's
+  tests left asserting behaviour that no longer exists.
+  **Two rules, and the second is the one that actually caught them.** Prefer a union merge to a
+  whole-file take when both sides changed the file; where the whole-file take really is right
+  (main carries an equivalent implementation), *say so in the commit message*, because that
+  sentence is the only thing distinguishing a considered decision from an accident. Then, after
+  resolving ANY merge, run the WHOLE module suite — not the tests you touched. In the worst of the
+  three, the single edited test was green while the suite was already red on a file never opened;
+  in another the assertion was e2e, so a local green proved nothing at all.
+  **Deliberately NOT a gate, and the measurement is why.** The mechanical signature is exact (a
+  file where the merge's blob equals main's while the branch had changed it), but across 69 open
+  PRs it fired 577 times over 21 PRs — mostly lockfiles and migrations legitimately superseded.
+  Narrowed to "a symbol the branch declared that exists nowhere in the merged tree" it gives 3 rows,
+  of which **1 is real**: symbol-level detection cannot tell a deletion from a rename, which is
+  inherent rather than a tuning problem. Same conclusion as `entity-column-names`: a gate that
+  cries wolf about correct code is worth less than nothing. Run it as a one-off audit after a bulk
+  conflict-resolution session instead.
 - **A merge git calls CLEAN can still DELETE content — it reports no conflict when two sides add
   neighbouring entries to the same list, and keeps only one.** Not a conflict resolved badly:
   nothing to resolve, nothing printed, exit 0. Twice on 2026-08-02, both while merging `main` into
@@ -689,6 +734,33 @@ fire from *outside* it, so they stay here:
   after. One command; it is knowing to run it that costs. Most exposed: JSON/YAML maps every
   service registers itself in — the release manifest, `gates.yaml`, `rules.yaml` lists,
   `event-contract-baseline.txt`.
+- **The UNION resolution has the opposite failure to a whole-file take, and it compiles or parses
+  often enough to reach CI.** Resolving an append-only conflict by keeping both sides is right for
+  a change log and wrong the moment the other side EDITED your text rather than appending next to
+  it. Three in one merge on 2026-09-20, all from the same mechanical resolver: a threat-model
+  paragraph `main` had rewritten came back as both versions spliced into one garbled sentence; an
+  add/add on a test file emitted **two** `companion object` blocks, which at least failed to
+  compile; and an `application.yaml` gained a second `rest-client:` key under the same mapping —
+  which parses, is legal YAML, and silently drops everything but the last of the duplicated key
+  (the SmallRye/SnakeYAML trap above), so the union deleted the very TLS bucket the PR existed to
+  add. Union REMOVALS freely (a line either side deleted stays deleted, which is what a shrinking
+  baseline wants); union ADDITIONS only after checking the other side did not edit the same lines.
+  Then diff the merged result against what you merged into — `git diff origin/main --name-only` —
+  and open every file whose presence you cannot explain: the domestic-payment file was in that list
+  for no reason this PR could account for, and that is what exposed all three.
+- **A diff-scoped gate must be re-run AFTER the commit, because its subject is the commit.** Same
+  merge: `check-threat-model-diff.py --base origin/main` was run against a working tree, read exit
+  0, and was believed — then the commit landed and CI failed it. Nothing had regressed; the tree
+  the green described no longer existed, because the fix that ran between them (reverting a
+  threat-model file to `main`'s content) is exactly what removed it from the diff the gate reads.
+  A file that becomes IDENTICAL to main leaves the changed set, so its paired change — here a
+  shared `payments-services.yaml` hunk — is suddenly unaccompanied. Generalises to every gate
+  keyed on "changed files": the working tree is not the diff.
+- **An advisory gate prints its finding and exits 0, so `echo $?` reads clean on a real defect.**
+  `check-duplicate-yaml-keys.sh` DID report the duplicated `rest-client:` key above, on stdout,
+  while returning 0 and a trailing `ADVISORY mode — not failing the build`. Checking the status
+  instead of the output turned a caught defect into an uncaught one. For any advisory gate, grep
+  the OUTPUT for findings; the exit code answers a different question.
 - **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
   before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
   time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
@@ -738,9 +810,24 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   (`git rev-parse origin/<b>` reads the LOCAL tracking ref and a plain fetch never prunes),
   `probe_pr_failing_checks` (job names contain spaces, so an `awk` column is a word of the NAME),
   `probe_lint_findings` (a newline-joined file list arrives as ONE argument; post-filtering a
-  linter's output hides the failures that are not findings), and `probe_zombie_runs`.
+  linter's output hides the failures that are not findings), `probe_commit_touches_path` (below),
+  and `probe_zombie_runs`.
   Each is held to a known-positive **and** a known-negative by the enforced
   `probe-lib-known-positive` gate — `bash .github/scripts/lib/probe.sh --selftest`.
+- **`git show <sha> -- <path>` exits 0 and prints NOTHING in three different situations, and in a
+  monorepo the likeliest one is that you were standing in the wrong directory.** Pathspec arguments
+  resolve against `$PWD`, while `git status` / `--name-only` PRINT repo-root-relative paths — so
+  copying a path out of one command's output into another's argument is wrong exactly when you are
+  not at the root. Measured from inside `openbank-admin-ui/`: the root-relative path answered
+  `exit=0, 0 bytes`, the same as a path that has never existed, and the same as a genuine
+  "unchanged" — three states, one indistinguishable answer, and the two failures read as the
+  negative finding you were testing for. Use `probe_commit_touches_path <sha> <repo-root-path>`,
+  which anchors the pathspec with git's `:/` magic prefix (CWD-independent) and separates exit 1
+  ("looked; it does not") from exit 2 ("that path names no file — could not look"). The `:/` prefix
+  alone is NOT the whole fix: it cures the CWD dependence and still answers `exit 0`, empty, for a
+  misspelled path. Same family as the `--before=<bare date>` and `date -j -f` traps above; caught
+  twice within one session on #9736, the second time by `git add` erroring loudly where `git show`
+  had not.
 - **`status=in_progress` is not a measure of CI load: 189 of those runs are wedged** — the run
   record never transitioned while every one of its jobs is `completed`, the oldest from
   2026-08-09. They are **not reapable**: both `POST /actions/runs/{id}/cancel` and `.../force-cancel`
@@ -753,8 +840,17 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   regressions.
 
 ### ADR registry
+- **A stale derived ADR file reddens EVERY open PR, and each one reads as its own failure.**
+  `check-adr-registry.sh` is enforced, so when `CURRENT.md` drifted on `main` (2026-09-11: ADR-0300
+  absent from its tag listings, ADR-0285 still `planned`, the standing count 279 vs 280) the
+  `gates (registry-kotlin-data)` shard was red on every open PR — and `Validate manifests` was red
+  too, with the single message *"One or more gate shards failed"*, i.e. one cause reported twice.
+  It was found only because a test-only PR touching no ADR failed that gate. **When a gate fails on
+  a PR whose diff cannot plausibly reach it, run that gate against bare `origin/main` first** — one
+  worktree and one command, and it distinguishes "my branch is broken" from "main is broken" before
+  any branch is touched (#9711 innocent, fixed by #9720).
 - **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
-  failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
+  failing check restores the four derived files (`README.md`, `DIGEST.md`, `CURRENT.md`, `index.json`) to HEAD
   on exit, so committing after a failed check commits the *restored* content — and the next regen
   then disagrees with what you committed, failing the gate on content you never wrote (#3983).
   **Same trap in the sibling derived-file checks:** `check-eu-ai-act.sh` restores
@@ -795,6 +891,14 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `gh release create --notes` and `-f body=`; for an edit, `-F body=@file`.
   If you did use `--body`, re-read what was published (`gh pr view <n> --json body`) — grep it
   for `()` and for the phrases you meant to include.
+  **And `--body-file` has its own consequence: GitHub applies `.github/PULL_REQUEST_TEMPLATE.md`
+  only when no body is supplied, so a PR opened this way never carries the `## Security checklist`
+  section — which the enforced `security-checklist-money-path` gate requires on any PR touching a
+  money-path service.** The two rules are both right and cannot both be followed without a third
+  step: append that block to the body file yourself. Measured 2026-09-05: 50 of 67 open PRs had no
+  such section at all (#8757). The remediation is now cheap — the gate reads the LIVE body since
+  #8940, so editing the description and re-running is enough, where it previously needed an
+  otherwise-pointless empty commit to re-emit the event.
 - **`gh` needs a repo context: outside a checkout it fails with `failed to run git: fatal: not
   a git repository`,** which reads like a content or permissions problem rather than a cwd one.
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
@@ -881,14 +985,16 @@ repo is the single source of truth.
   - **Reading them: start at `docs/adr/DIGEST.md`, not at the ADRs.** It is the whole
     decision history as one line per ADR (~16k tokens vs ~400k for the fleet). Read it,
     then open only the ADRs it points you at. Grepping the fleet finds whichever ADR
-    matched a keyword, not the one that decided the thing.
+    matched a keyword, not the one that decided the thing. `docs/adr/CURRENT.md` is the
+    same lines with superseded/rejected ADRs dropped and the rest grouped by domain tag —
+    read it for what the rules ARE, the digest for how they got that way.
   - **Writing one: `docs/adr/new.sh "Title"`.** Never hand-copy an existing ADR — the
     header is a validated YAML front-matter block (`docs/adr/SCHEMA.md`), with closed
     enums and a closed tag vocabulary (`docs/adr/tags.txt`), and `new.sh` also allocates
     a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
     are rejected by CI on purpose.
   - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
-    `README.md`, `DIGEST.md` and `index.json` are DERIVED — never hand-edit them.
+    `README.md`, `DIGEST.md`, `CURRENT.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in
   `openbank-libs-domain/src/main/kotlin/com/openbank/libs/`; framework-touching

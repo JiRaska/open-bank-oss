@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.security.SecurityTelemetry
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.Priority
 import jakarta.enterprise.inject.Instance
@@ -21,20 +22,22 @@ import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.intrinsics.startCoroutineUninterceptedOrReturn
+import kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.jvm.kotlinFunction
 
 /**
  * CDI interceptor that turns [Authorize]-annotated methods into a call to
  * the injected [PolicyDecisionPoint] (ADR-0034 D5 Phase 2). Bound by the
- * [Authorize] annotation itself (it is also an `@InterceptorBinding`); no
+ * [Authorize] annotation itself (it is also an `
+@InterceptorBinding`); no
  * `beans.xml` is required because Quarkus discovers CDI components via
  * Jandex from the libs JAR (ADR-0014).
  *
@@ -136,6 +139,18 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var metrics: Instance<DomainMetrics>
 
+    // Instance<> for the same reason as `metrics` directly above: SecurityTelemetry ships in
+    // this same JAR and no-ops without a MeterRegistry, but a hard @Inject would tie every
+    // service's ArC validation to it.
+    //
+    // This is the ONLY production call site of SecurityTelemetry.recordAuthorizationDecision.
+    // Between #8554 (which added the primitive) and this change there was none at all, so
+    // `openbank.security.authz.decisions` was never registered in any registry and
+    // AuthzDenyRatioElevated — written against that exact constant in #8583 — could not fire.
+    // Measured on the sandbox 2026-09-07: the series did not exist on any of the 293 targets.
+    @Inject
+    lateinit var securityTelemetry: Instance<SecurityTelemetry>
+
     // Instance<> for the same reason as `pdp`/`securityContext` above: most services
     // never wire an ApprovalStore, so a hard @Inject would break their build.
     @Inject
@@ -158,18 +173,79 @@ class AuthorizeInterceptor {
     @ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false")
     var fourEyesEnforce: Boolean = false
 
+    /**
+     * Two dispatches of one decision, because WHERE the wait happens decides whether it deadlocks.
+     *
+     * The authorization pipeline is suspending end to end: [PolicyDecisionPoint.allow] and every
+     * [ApprovalStore] call are `suspend`. An `@AroundInvoke` method is not, so bridging was
+     * unavoidable — and the bridge was `runBlocking`, which parks the thread it runs on.
+     *
+     * For a **suspend** endpoint that thread is a Vert.x EVENT LOOP, and the pool has one thread
+     * per CPU. Measured 2026-09-13 (#9874) with `-XX:ActiveProcessorCount=2`, the hosted runner's
+     * shape: the first four-eyes request parks loop 0, the second parks loop 1, the reactive Redis
+     * completion then has no loop left to run on, and every subsequent request times out. A thread
+     * dump showed both loops inside `runBlocking` in this class. It is not a test artefact — the
+     * same arithmetic applies to a pod with `requests.cpu: 2`, and 27 of the fleet's 40 four-eyes
+     * endpoints are suspend functions.
+     *
+     * `@Blocking` is not available as an escape: Quarkus rejects it outright —
+     * `Suspendable @Blocking methods are not supported yet`. Raising
+     * `quarkus.vertx.event-loops-pool-size` only buys a bigger window, since N concurrent
+     * four-eyes calls still need N+1 loops.
+     *
+     * So a suspend endpoint is joined in ITS OWN coroutine instead:
+     * [startCoroutineUninterceptedOrReturn] runs [decide] on the calling thread until it genuinely
+     * suspends, and [proceedSuspending] hands the target a continuation of ours. Nothing is parked,
+     * so nothing has to be free for the continuation to run.
+     *
+     * A **plain** endpoint keeps the `runBlocking` bridge, and that is correct rather than a
+     * leftover: RESTEasy Reactive dispatches a non-suspend method on a WORKER thread, so the wait
+     * parks a worker the pool exists to have parked. 13 of the 40 four-eyes endpoints are this
+     * shape.
+     */
     @AroundInvoke
     fun authorize(ctx: InvocationContext): Any? {
         val annotation = ctx.method.getAnnotation(Authorize::class.java)
             ?: return ctx.proceed()
 
+        val continuationIndex = ctx.parameters.indexOfLast { it is Continuation<*> }
+        if (continuationIndex < 0) {
+            runBlocking { decide(ctx, annotation) }
+            return ctx.proceed()
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        val caller = ctx.parameters[continuationIndex] as Continuation<Any?>
+        val pipeline: suspend () -> Any? = {
+            decide(ctx, annotation)
+            // Invoke the target with a continuation of OURS in place of the caller's, so its
+            // completion resumes THIS coroutine rather than the endpoint's directly. That single
+            // substitution is what makes the pipeline suspending instead of blocking; inline
+            // because it is meaningless anywhere except right here.
+            suspendCoroutineUninterceptedOrReturn { own ->
+                val params = ctx.parameters
+                params[continuationIndex] = own
+                ctx.parameters = params
+                ctx.proceed()
+            }
+        }
+        return pipeline.startCoroutineUninterceptedOrReturn(caller)
+    }
+
+    /**
+     * The whole authorization verdict, and nothing else: it returns normally to let the call
+     * through and THROWS to refuse. It deliberately never calls `ctx.proceed()` — that belongs to
+     * whichever of the two dispatches in [authorize] invoked it, which is what lets one decision
+     * serve both a blocking and a suspending call path with no branch duplicated.
+     */
+    private suspend fun decide(ctx: InvocationContext, annotation: Authorize) {
         if (!pdp.isResolvable) {
             return onMissingPdp(ctx, annotation)
         }
         val decisionPoint = pdp.get()
 
         val query = buildQuery(ctx, annotation)
-        val decision: AuthzDecision = runBlocking {
+        val decision: AuthzDecision = run {
             runCatching { decisionPoint.allow(query) }
                 .getOrElse { ex ->
                     record(annotation.action, "pdp_unavailable", query.principal.type)
@@ -179,7 +255,7 @@ class AuthorizeInterceptor {
                             annotation.action,
                             ex.message,
                         )
-                        return@runBlocking null
+                        return@run null
                     }
                     // Propagate the domain PolicyDecisionException (503 via its ExceptionMapper in
                     // openbank-libs-runtime). A thrown JAX-RS ServiceUnavailableException was being
@@ -187,12 +263,12 @@ class AuthorizeInterceptor {
                     // mapper keyed on the concrete domain type is immune to that.
                     throw PolicyDecisionException("policy decision point unavailable: ${ex.message}", ex)
                 }
-        } ?: return ctx.proceed() // advisory + PDP unavailable: observe, do not block
+        } ?: return // advisory + PDP unavailable: observe, do not block
 
         if (!decision.allow) {
             // The rollout signal: outcome=deny + enforced=false is the "would DENY" population that
             // a service's advisory window has to show empty before AUTHZ_ENFORCE can flip.
-            record(annotation.action, "deny", query.principal.type)
+            record(annotation.action, "deny", query.principal.type, decision.reason ?: "unspecified")
             if (!enforce) {
                 log.warnf(
                     "advisory: would DENY action=%s resource=%s principal=%s reason=%s — proceeding (enforce=false)",
@@ -201,7 +277,7 @@ class AuthorizeInterceptor {
                     query.principal.id,
                     decision.reason ?: "unspecified",
                 )
-                return ctx.proceed()
+                return
             }
             log.debugf(
                 "deny: action=%s resource=%s principal=%s reason=%s",
@@ -210,10 +286,12 @@ class AuthorizeInterceptor {
                 query.principal.id,
                 decision.reason ?: "unspecified",
             )
+            m2mDecisionLine(annotation.action, query.principal.id, "deny", decision.reason)?.let(log::info)
             throw ForbiddenException(decision.reason ?: "policy denied")
         }
-        record(annotation.action, "allow", query.principal.type)
-        return requireFourEyesOrProceed(ctx, annotation, query, decision)
+        record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
+        m2mDecisionLine(annotation.action, query.principal.id, "allow", decision.reason)?.let(log::info)
+        requireFourEyes(annotation, query, decision)
     }
 
     /**
@@ -222,7 +300,7 @@ class AuthorizeInterceptor {
      * a decision must not silently allow, and an outage must not read as a flurry of policy denials
      * in the audit trail.
      */
-    private fun onMissingPdp(ctx: InvocationContext, annotation: Authorize): Any? {
+    private fun onMissingPdp(ctx: InvocationContext, annotation: Authorize) {
         // No query was built yet, so the principal type is not yet known — hence the "unknown" tag.
         record(annotation.action, "pdp_unconfigured", "unknown")
         if (!enforce) {
@@ -231,7 +309,7 @@ class AuthorizeInterceptor {
                 ctx.method.declaringClass.simpleName,
                 ctx.method.name,
             )
-            return ctx.proceed()
+            return
         }
         log.errorf(
             "no PolicyDecisionPoint bean for @Authorize method %s.%s — failing closed",
@@ -249,8 +327,31 @@ class AuthorizeInterceptor {
     private val meters: DomainMetrics?
         get() = if (metrics.isResolvable) metrics.get() else null
 
-    private fun record(action: String, outcome: String, principalType: String) =
+    /**
+     * Writes both authorization signals for one verdict. [DomainMetrics.authzDecision] is the
+     * ADR-0034 D5 rollout signal, scoped by `action` — "can this service graduate to enforce?".
+     * [SecurityTelemetry.AUTHZ_DECISIONS] is the ADR-0279 WS2 security signal, scoped by
+     * `reason` and also stamped on the trace — "is somebody being refused, and why?".
+     *
+     * [securityReason] is non-null on a real ALLOW or a real DENY only — the caller passes it as
+     * `null` for `pdp_unconfigured` (see [onMissingPdp]), and it is deliberately excluded there:
+     * a missing PolicyDecisionPoint is a wiring fault, not a verdict, and folding it into DENY
+     * would make any misconfigured service read as a 100% deny ratio — an alert that says "under
+     * enumeration attack" about a deployment mistake. Two such services were live on the sandbox
+     * when this was written (product-catalog's `catalog.read` / `catalog.list`), so this is a
+     * case that exists, not a hypothetical.
+     */
+    private fun record(action: String, outcome: String, principalType: String, securityReason: String? = null) {
         meters?.authzDecision(action, outcome, enforce, principalType)
+        if (securityReason != null && securityTelemetry.isResolvable) {
+            val decision = if (outcome == "deny") {
+                SecurityTelemetry.AuthzDecision.DENY
+            } else {
+                SecurityTelemetry.AuthzDecision.ALLOW
+            }
+            securityTelemetry.get().recordAuthorizationDecision(decision, securityReason, enforce)
+        }
+    }
 
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second
@@ -258,15 +359,10 @@ class AuthorizeInterceptor {
      * immediately) unless the service opted in via [fourEyesEnforce] AND wired
      * an [ApprovalStore] — see the class KDoc.
      */
-    private fun requireFourEyesOrProceed(
-        ctx: InvocationContext,
-        annotation: Authorize,
-        query: AuthzQuery,
-        decision: AuthzDecision,
-    ): Any? {
+    private suspend fun requireFourEyes(annotation: Authorize, query: AuthzQuery, decision: AuthzDecision) {
         val fourEyesRequired = decision.attributes["four_eyes_required"] == true
         if (!fourEyesRequired) {
-            return ctx.proceed()
+            return
         }
         if (!fourEyesEnforce) {
             // OPA asked for a second approver and we are about to proceed without one. Nothing
@@ -285,7 +381,7 @@ class AuthorizeInterceptor {
                     "— proceeding without the second-approver gate (advisory)",
                 annotation.action,
             )
-            return ctx.proceed()
+            return
         }
         if (!approvalStore.isResolvable) {
             meters?.authzFourEyes(annotation.action, "no_approval_store")
@@ -301,7 +397,7 @@ class AuthorizeInterceptor {
                     "Wire an ApprovalStore for this service or set authz.four-eyes.enforce=false until it is.",
                 annotation.action,
             )
-            return ctx.proceed()
+            return
         }
         val store = approvalStore.get()
         val maker = query.principal.id
@@ -309,11 +405,11 @@ class AuthorizeInterceptor {
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
-            val approval = awaitOffEventLoop { store.find(approvalId) }
+            val approval = store.find(approvalId)
             if (approval.satisfies(annotation.action, resourceId, maker)) {
-                awaitOffEventLoop { store.markExecuted(approvalId) }
+                store.markExecuted(approvalId)
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
-                return ctx.proceed()
+                return
             }
             log.warnf(
                 "four-eyes: approval id=%s not valid for action=%s maker=%s " +
@@ -324,7 +420,7 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = awaitOffEventLoop { store.create(annotation.action, resourceId, maker) }
+        val pending = store.create(annotation.action, resourceId, maker)
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -345,14 +441,6 @@ class AuthorizeInterceptor {
         if (!httpHeaders.isResolvable) return null
         return httpHeaders.get().getRequestHeader(APPROVAL_ID_HEADER)?.firstOrNull()
     }
-
-    /** A supplied approval only unlocks THIS exact action, resource, and original maker. */
-    private fun PendingApproval?.satisfies(action: String, resourceId: String?, maker: String): Boolean =
-        this != null &&
-            status == ApprovalStatus.APPROVED &&
-            this.action == action &&
-            this.resourceId == resourceId &&
-            makerId == maker
 
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
@@ -447,36 +535,56 @@ private fun resolveResourceField(target: Any, fieldName: String, log: Logger): A
     null
 }
 
+/** Keycloak's service-account username convention: `service-account-<clientId>`. */
+internal const val SERVICE_ACCOUNT_PREFIX = "service-account-"
+
 /**
- * Bridges a suspend [ApprovalStore] call to a synchronous result from inside
- * [AuthorizeInterceptor]'s non-suspend `@AroundInvoke` method (issue #5631).
+ * #10486: the INFO line that proves, per request, WHICH machine identity an enforced decision was
+ * about. The migration off the shared `openbank-services` client moves money-path writes to
+ * per-service principals, and "the post now arrives as service-account-openbank-lending" was
+ * otherwise observable only as a `reason` tag on a counter — never as a line an owner can grep
+ * for one request after a deploy.
  *
- * A `suspend` REST resource method is, by default, dispatched on the Vert.x
- * event-loop thread itself — the resource method's own suspension only happens
- * *after* the interceptor chain (including [AuthorizeInterceptor]) has already
- * run. Naively `runBlocking { store.find(...) }` on that same thread
- * self-deadlocks against a reactive [com.openbank.libs.approval.impl.RedisApprovalStore]:
- * Quarkus's per-request "duplicated context" is captured by whatever reactive
- * call is made while it is current, and that call's completion is dispatched
- * back onto THAT SAME context/thread — but this thread is the one parked
- * inside `runBlocking`, so the callback that would unblock it can never run.
- * This is not limited to the underlying I/O: `Vertx.executeBlocking` (an
- * earlier version of this fix) moves the actual work to a worker thread but
- * STILL explicitly propagates the calling duplicated context to its own
- * `Future`, so blocking on `future.get()` reproduces the identical deadlock
- * one hop later — measured directly (issue #5631): a Vert.x "Thread blocked"
- * warning pointing at that bridge, same shape as the original bug.
- *
- * The fix that actually works is `withContext(Dispatchers.IO)`: a plain
- * kotlinx-coroutines thread-pool hop that is NOT a Vert.x construct at all, so
- * it carries no duplicated context to propagate. [block] resumes on a thread
- * Vert.x has no thread-local context for; `Vertx.currentContext()` there is
- * null, so the reactive redis call inside it completes without needing to
- * round-trip back through the request's original (blocked) event-loop thread.
- * This is exactly the pattern [OpaSidecarPolicyDecisionPoint.allow] already
- * relies on for its own blocking HTTP call — which is why that PDP call never
- * hit this bug.
+ * Deliberately narrow, so it can sit at INFO on every money-path call:
+ * - **machine principals only** (`service-account-*`); a human or AI-agent principal returns
+ *   `null`, so no end-user subject id reaches the log (those stay at DEBUG above);
+ * - **no resource**: a resource id is often an account or party UUID, which is exactly what this
+ *   line must not carry; action + principal + reason is enough to attribute the call;
+ * - never a token or claim — the principal id is the Keycloak client's service-account NAME,
+ *   which is public in the realm template.
  */
-private fun <T> awaitOffEventLoop(block: suspend () -> T): T = runBlocking {
-    withContext(Dispatchers.IO) { block() }
+internal fun m2mDecisionLine(action: String, principalId: String, outcome: String, reason: String?): String? {
+    if (!principalId.startsWith(SERVICE_ACCOUNT_PREFIX)) return null
+    return "authz m2m decision: outcome=$outcome action=$action principal=$principalId " +
+        "reason=${reason ?: "unspecified"}"
 }
+
+/*
+ * `awaitOffEventLoop` lived here until #9874: a `runBlocking { withContext(Dispatchers.IO) { … } }`
+ * bridge used by the three suspending call sites above.
+ *
+ * Its KDoc's diagnosis of #5631 was right and is worth keeping: `Vertx.executeBlocking` propagates
+ * the CALLING duplicated context into its own `Future`, so blocking on that future self-deadlocks
+ * one hop later, and `Dispatchers.IO` avoids that because it is not a Vert.x construct and carries
+ * no context to propagate.
+ *
+ * What that fix could not avoid is the OUTER `runBlocking`. It parks whichever thread the
+ * interceptor runs on, and for a suspend endpoint that is a Vert.x event loop — of which there is
+ * one per CPU. Measured with `-XX:ActiveProcessorCount=2`: two four-eyes requests park both loops
+ * and the reactive Redis completion has nowhere left to run. [AuthorizeInterceptor.authorize] now
+ * joins the caller's coroutine instead, so no thread is parked at all and the helper has no
+ * remaining call site.
+ */
+
+/**
+ * A supplied approval only unlocks THIS exact action, resource, and original maker.
+ *
+ * Top-level rather than a class member because it reads no interceptor state, and
+ * [AuthorizeInterceptor] sits at detekt's `TooManyFunctions` bound — which fires AT the threshold,
+ * not above it.
+ */
+private fun PendingApproval?.satisfies(action: String, resourceId: String?, maker: String): Boolean = this != null &&
+    status == ApprovalStatus.APPROVED &&
+    this.action == action &&
+    this.resourceId == resourceId &&
+    makerId == maker

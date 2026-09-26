@@ -320,6 +320,23 @@ class PanacheIncentiveStore(
 
     override suspend fun reserve(command: ReserveIncentive): PromoReservation = Panache.withTransaction {
         lockedOffer(command.offerId).flatMap { offerEntity ->
+            // EXISTENCE before CONFLICT. An offer this service does not hold is a 404 whatever else
+            // is true of the request, and until this line the only null-check on `offerEntity` was
+            // inside `redeemableOffer` below — three steps and one conflict check later. So a POST
+            // naming a nonexistent offer whose `attributionRef` had already been reserved answered
+            // **409** from `existingAttribution`, and the 404 branch was unreachable for it.
+            //
+            // Measured on the live broker: customer-edge's *POST an attributed customer reservation
+            // for an offer the bank does not hold* expects 404 and got
+            // `{"attribute":"status","description":"expected status of 404 but was 409"}`, which
+            // classified customer-edge as a contract REGRESSION and failed every auto-deploy run —
+            // fail-closed on one service, so the whole fleet's deploy stopped (issue #9794).
+            //
+            // Deliberately NOT hoisting all of `redeemableOffer`: it also raises IncentiveConflict
+            // for an offer that exists but is not currently redeemable, and that check must stay
+            // AFTER the idempotency replay below, or replaying a reservation made while the offer
+            // was open would start answering 409 once the offer closed.
+            if (offerEntity == null) throw IncentiveNotFound("offer not found")
             reservations.find("offerId = ?1 and idempotencyKey = ?2", command.offerId, command.idempotencyKey)
                 .firstResult<ReservationEntity>().flatMap { replay ->
                     if (replay != null) {

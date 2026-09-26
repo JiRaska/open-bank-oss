@@ -21,6 +21,7 @@ import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
@@ -68,6 +69,31 @@ class PartyServiceMandateTest {
     }
 
     @Test
+    fun `grant rejects authority and quorum combinations that could widen legal authority`(): Unit = runBlocking {
+        val mandates = mockk<PartyMandateRepository>(relaxed = true)
+        val svc = service(partyRepoWith(company, human), mandates)
+
+        listOf(MandateAuthority.SOLE to 2, MandateAuthority.JOINT to 1).forEach { (authority, quorum) ->
+            assertThatThrownBy {
+                runBlocking {
+                    svc.grantMandate(
+                        GrantMandateCommand(
+                            company.id,
+                            human.id,
+                            MandateRole.LEGAL_REPRESENTATIVE,
+                            authority,
+                            quorum,
+                            MandateSource.REGISTRY,
+                            "registry:revision-1",
+                        ),
+                    )
+                }
+            }.isInstanceOf(PartyMandateRejectedException::class.java)
+        }
+        coVerify(exactly = 0) { mandates.save(any(), any()) }
+    }
+
+    @Test
     fun `grant binds a human to an entity, emits the event keyed on the entity, and re-grants upsert`(): Unit =
         runBlocking {
             val mandates = mockk<PartyMandateRepository>()
@@ -82,16 +108,19 @@ class PartyServiceMandateTest {
                     human.id,
                     MandateRole.LEGAL_REPRESENTATIVE,
                     MandateAuthority.JOINT,
+                    2,
                     MandateSource.REGISTRY,
                     "kyb-case:1",
                 ),
             )
 
             assertThat(result.status).isEqualTo(MandateStatus.ACTIVE)
+            assertThat(result.requiredSignatures).isEqualTo(2)
             assertThat(saved.captured.validFrom).isEqualTo(now)
             assertThat(event.captured.eventType).isEqualTo("PARTY_MANDATE_GRANTED")
             assertThat(event.captured.aggregateId).isEqualTo(company.id)
             assertThat(event.captured.envelope["agentPartyId"]).isEqualTo(human.id)
+            assertThat(event.captured.envelope["requiredSignatures"]).isEqualTo(2)
             assertThat(event.captured.envelope["sourceService"]).isEqualTo("party-service")
 
             // Second grant of the same triple updates the existing row instead of stacking a duplicate.
@@ -104,12 +133,14 @@ class PartyServiceMandateTest {
                     human.id,
                     MandateRole.LEGAL_REPRESENTATIVE,
                     MandateAuthority.SOLE,
+                    1,
                     MandateSource.REGISTRY,
                     "kyb-case:2",
                 ),
             )
             assertThat(updated.captured.id).isEqualTo(result.id)
             assertThat(updated.captured.authority).isEqualTo(MandateAuthority.SOLE)
+            assertThat(updated.captured.requiredSignatures).isEqualTo(1)
         }
 
     @Test
@@ -127,6 +158,7 @@ class PartyServiceMandateTest {
                             human.id,
                             MandateRole.OWNER,
                             MandateAuthority.SOLE,
+                            1,
                             MandateSource.MANUAL,
                             null,
                         ),
@@ -142,6 +174,7 @@ class PartyServiceMandateTest {
                             company.id,
                             MandateRole.OWNER,
                             MandateAuthority.SOLE,
+                            1,
                             MandateSource.MANUAL,
                             null,
                         ),
@@ -157,6 +190,7 @@ class PartyServiceMandateTest {
                             closed.id,
                             MandateRole.OWNER,
                             MandateAuthority.SOLE,
+                            1,
                             MandateSource.MANUAL,
                             null,
                         ),
@@ -176,6 +210,7 @@ class PartyServiceMandateTest {
                 agentPartyId = human.id,
                 role = MandateRole.LEGAL_REPRESENTATIVE,
                 authority = MandateAuthority.SOLE,
+                requiredSignatures = 1,
                 source = MandateSource.REGISTRY,
                 status = MandateStatus.ACTIVE,
                 evidenceRef = null,

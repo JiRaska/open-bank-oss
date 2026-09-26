@@ -508,7 +508,7 @@ export function JourneyEditor({
             <span
               aria-hidden="true"
               className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-base font-semibold"
-              style={{ background: 'color-mix(in srgb, var(--warning) 14%, transparent)', color: 'var(--warning)' }}
+              style={{ background: 'color-mix(in srgb, var(--warning) 14%, transparent)', color: 'var(--warning-text)' }}
             >
               ⑂
             </span>

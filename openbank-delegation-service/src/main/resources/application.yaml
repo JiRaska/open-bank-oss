@@ -61,13 +61,15 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # OUTBOUND M2M. `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
   # The default client remains the shared backend identity because the existing SCA, PID and
   # ownership REST clients depend on its established OPA grants. The disclosure client below is
   # named and opt-in, so it cannot silently change those callers' subjects.
+  # Every REST client here (sca, pid, party, account, card-issuance) targets an @RolesAllowed endpoint,
+  # so without this block the calls carry no Authorization header and 401 — surfacing as the
+  # ownership gate's fail-closed "could not be established", never as an auth problem.
+  # Same shape as party-service / document-service / sdd-service.
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     client-id: openbank-services
@@ -83,6 +85,17 @@ quarkus:
       client-id: openbank-delegation-disclosure
       credentials:
         secret: ${DISCLOSURE_OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
+    # #10486 batch 6: the party eligibility read (pid party.read) and the card ownership read
+    # (card-issuance card.read) no longer ride the shared openbank-services principal. PidServiceRestClient and
+    # CardIssuanceRestClient select this NAMED client (@OidcClientFilter("m2m")), so their principal is
+    # service-account-openbank-delegation (ROLE_API only), granted by identity upstream.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-delegation
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
       grant:
         type: client
 
@@ -117,6 +130,10 @@ quarkus:
       read-timeout: 2000
     pid-service:
       url: ${PID_SERVICE_URL:http://localhost:8103}
+      connect-timeout: 2000
+      read-timeout: 2000
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8081}
       connect-timeout: 2000
       read-timeout: 2000
     # Resource-ownership gate (ADR-0232 threat model T1): the only services that can answer
@@ -182,6 +199,16 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ADR-0312 business-signing lifecycle (APPROVAL_REQUESTED … PAYMENT_RELEASE_FAILED), keyed by
+      # approval request id. Consumers: notification-service (#10313), audit-service.
+      approval-events-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-approval-${quarkus.uuid}
+        topic: openbank.delegation.approval-events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:
@@ -191,7 +218,29 @@ mp:
         json: false
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
+      tls:
+        verification: none
       enabled: false
+
+"%prod":
+  quarkus:
+    # The authority read is a grant-issuance boundary. Production uses a named TLS bucket so
+    # trust, client identity and TLS version are one fail-closed unit; local/Pact HTTP fixtures
+    # do not need certificate material.
+    tls:
+      party-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      party-service:
+        tls-configuration-name: party-authority
 
 "%test":
   quarkus:
@@ -230,6 +279,13 @@ openbank:
     # scheduler does not.
     expiration:
       cron: "0 7 * * * ?"
+    business-signing:
+      # ADR-0312: flips PENDING / unclaimed-APPROVED approval requests past expiresAt to EXPIRED.
+      # A config expression so BusinessApprovalExpirySweepIT can drive the REAL scheduler.
+      expiry-cron: "0 */5 * * * ?"
+    recertification:
+      # A reminder-only sweep. Due tasks are idempotent and the grant remains ACTIVE after dueAt.
+      cron: "0 15 * * * ?"
   outbox:
     dispatch-enabled: true
   rate-limit:

@@ -35,6 +35,13 @@ function mockFetch(governanceOk = true) {
 describe('data-lineage flow page', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
+  it('shows a loading state before the first evidence response', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
+    render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
+    expect(screen.getByTestId('lineage-loading')).toHaveTextContent(/Loading verified data lineage/i)
+    expect(screen.queryByText('CORE · 0')).not.toBeInTheDocument()
+  })
+
   it('renders domain bands with the code-derived lineage nodes', async () => {
     vi.stubGlobal('fetch', mockFetch())
     render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
@@ -69,5 +76,59 @@ describe('data-lineage flow page', () => {
     render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
     // No crash, no raw HTTP — the shared DataUnavailable panel renders instead of the graph.
     await waitFor(() => expect(screen.queryByText('account')).not.toBeInTheDocument())
+  })
+
+  it('distinguishes a missing bundled snapshot from verified no data', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session')) return new Response('null')
+      return new Response(JSON.stringify({ available: false, services: [] }), { headers: { 'content-type': 'application/json' } })
+    }))
+    render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
+    expect(await screen.findByText(/not deployed|není nasazena/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No data yet|Zatím žádná data/i)).not.toBeInTheDocument()
+  })
+
+  it('rejects malformed 200 evidence instead of rendering an empty graph', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session')) return new Response('null')
+      return new Response(JSON.stringify({ available: true, services: 'invalid' }), { headers: { 'content-type': 'application/json' } })
+    }))
+    render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
+    expect(await screen.findByText(/Failed to load|Načtení selhalo/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No data yet|Zatím žádná data/i)).not.toBeInTheDocument()
+  })
+
+  it('retains the last verified map when refresh evidence is malformed', async () => {
+    let governanceReads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session')) return new Response('null')
+      governanceReads += 1
+      const body = governanceReads === 1
+        ? { services: SERVICES, available: true }
+        : { available: true, services: 'invalid' }
+      return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
+    expect(await screen.findByText('account')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Refresh|Obnovit/ }))
+    expect(await screen.findByText(/last verified map|poslední ověřená mapa/i)).toBeInTheDocument()
+    expect(screen.getByText('account')).toBeInTheDocument()
+  })
+
+  it('purges the verified map when a refresh loses authorization', async () => {
+    let governanceReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session')) return new Response('null')
+      governanceReads += 1
+      return governanceReads === 1
+        ? new Response(JSON.stringify({ services: SERVICES, available: true }), { headers: { 'content-type': 'application/json' } })
+        : new Response('unauthorized', { status: 401 })
+    }))
+    render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
+    expect(await screen.findByText('account')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Refresh|Obnovit/ }))
+    expect(await screen.findByText(/Session expired|Vypršela relace/i)).toBeInTheDocument()
+    expect(screen.queryByText('account')).not.toBeInTheDocument()
   })
 })

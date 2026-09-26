@@ -35,3 +35,12 @@ export function readStashedRow<T>(ns: string, id: string): T | null {
     return null
   }
 }
+
+export function clearStashedRow(ns: string, id: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(KEY(ns, id))
+  } catch {
+    // Storage can be unavailable in hardened browser modes; in-memory state is still purged.
+  }
+}

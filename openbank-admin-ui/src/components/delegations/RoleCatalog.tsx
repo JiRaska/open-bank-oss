@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle, Check, Crown, LayoutGrid, Pencil, Plus, Shield, Table2, Trash2, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import { CAPABILITIES_BY_RESOURCE, assignablePresetCapabilities, capabilityIntent, capabilityLabel, isAssignablePresetCapability, isReservedOwnershipPresetName, truthfulPresetName, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
 import { useSingleFlight } from '@/lib/mutations/singleFlight'
 import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
@@ -27,6 +27,7 @@ export function RoleCatalog() {
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState(false)
   const removeReturnFocusRef = useRef<HTMLButtonElement | null>(null)
+  const editorReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const catalogTitleRef = useRef<HTMLHeadingElement | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
@@ -45,7 +46,8 @@ export function RoleCatalog() {
 
   const rights = assignablePresetCapabilities(resource)
   const visibleRoles = roles.filter(role => role.resourceType === resource)
-  const openEditor = (role: RolePreset) => {
+  const openEditor = (role: RolePreset, trigger?: HTMLButtonElement) => {
+    editorReturnFocusRef.current = trigger ?? null
     setSaveError(false)
     setEditing(role)
   }
@@ -111,7 +113,7 @@ export function RoleCatalog() {
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 14 }}>
       <div><h2 ref={catalogTitleRef} tabIndex={-1} id="role-catalog-title" style={{ fontSize: 16, fontWeight: 700, display: 'flex', gap: 8, alignItems: 'center' }}><Shield size={17} aria-hidden="true" color="var(--accent)" />{t('Dispoziční role a práva', 'Delegation roles and rights')}</h2>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>{t('Centrální presety pro nové delegace. Změna presetu nemění již udělená práva.', 'Central presets for new delegations. Changing one never alters existing grants.')}</p></div>
-      {canManage && <button type="button" className="btn btn-primary" onClick={() => openEditor(emptyRole())}><Plus size={14} aria-hidden="true" />{t('Přidat roli', 'Add role')}</button>}
+      {canManage && <button type="button" className="btn btn-primary" onClick={event => openEditor(emptyRole(), event.currentTarget)}><Plus size={14} aria-hidden="true" />{t('Přidat roli', 'Add role')}</button>}
     </div>
     <OwnershipRoleNotice />
     {state === 'loading' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Načítám katalog…', 'Loading catalog…')}</div>}
@@ -139,11 +141,11 @@ export function RoleCatalog() {
         {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
       <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{truthfulPresetName(role)}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div><LegacyOwnershipNameEvidence rolePreset={role} /><LegacyCapabilityEvidence capabilities={role.capabilities} /></td>
         {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Součást šablony', 'Included in preset')} /> : <><span className="sr-only">{t('Není součástí šablony', 'Not included in preset')}</span><span aria-hidden="true">—</span></>}</td>)}
-        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => openEditor({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${truthfulPresetName(role)}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${truthfulPresetName(role)}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></div>
+        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={event => openEditor({ ...role, capabilities: [...role.capabilities] }, event.currentTarget)} aria-label={`${t('Upravit', 'Edit')} ${truthfulPresetName(role)}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${truthfulPresetName(role)}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></div>
       }
     </>}
-    {editing && <RoleEditor value={editing} busy={saving} failed={saveError} cancel={closeEditor} save={save} />}
-    {pendingRemoval && <DeleteRoleDialog role={pendingRemoval} busy={removing} failed={removeError} onCancel={closeRemoval} onConfirm={() => void remove(pendingRemoval)} />}
+    {editing && <RoleEditor value={editing} busy={saving} failed={saveError} cancel={closeEditor} save={save} returnFocusRef={editorReturnFocusRef} fallbackFocusRef={catalogTitleRef} />}
+    {pendingRemoval && <DeleteRoleDialog role={pendingRemoval} busy={removing} failed={removeError} onCancel={closeRemoval} onConfirm={() => void remove(pendingRemoval)} returnFocusRef={removeReturnFocusRef} fallbackFocusRef={catalogTitleRef} />}
   </section>
 }
 
@@ -156,7 +158,7 @@ export function OwnershipRoleNotice() {
   </aside>
 }
 
-export function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePreset[]; canManage: boolean; edit: (role: RolePreset) => void; remove: (role: RolePreset, trigger: HTMLButtonElement) => void }) {
+export function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePreset[]; canManage: boolean; edit: (role: RolePreset, trigger?: HTMLButtonElement) => void; remove: (role: RolePreset, trigger: HTMLButtonElement) => void }) {
   const { t } = useLanguage()
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 330px), 1fr))', gap: 12 }}>
     {roles.map(role => {
@@ -165,7 +167,7 @@ export function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePr
       return <article key={role.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'linear-gradient(145deg, var(--surface-1), var(--surface-2))' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
         <div><h3 style={{ fontSize: 15, fontWeight: 750 }}>{displayName}</h3><p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>{role.description}</p></div>
-        {canManage && <div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => edit({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${displayName}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => remove(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${displayName}`}><Trash2 size={13} aria-hidden="true" /></button></div>}
+        {canManage && <div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={event => edit({ ...role, capabilities: [...role.capabilities] }, event.currentTarget)} aria-label={`${t('Upravit', 'Edit')} ${displayName}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => remove(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${displayName}`}><Trash2 size={13} aria-hidden="true" /></button></div>}
       </div>
       <LegacyOwnershipNameEvidence rolePreset={role} />
       {unsupported.length > 0 && <><p style={{ marginTop: 10, color: 'var(--warning-text)', fontSize: 11 }}>{t('Tento starší preset před dalším použitím upravte.', 'Edit this legacy preset before reuse.')}</p><LegacyCapabilityEvidence capabilities={unsupported} /></>}
@@ -182,49 +184,53 @@ export function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePr
   </div>
 }
 
-export function DeleteRoleDialog({ role, busy, failed, onCancel, onConfirm }: { role: RolePreset; busy: boolean; failed: boolean; onCancel: () => void; onConfirm: () => void }) {
+export function DeleteRoleDialog({ role, busy, failed, onCancel, onConfirm, returnFocusRef, fallbackFocusRef }: { role: RolePreset; busy: boolean; failed: boolean; onCancel: () => void; onConfirm: () => void; returnFocusRef?: RefObject<HTMLButtonElement | null>; fallbackFocusRef?: RefObject<HTMLElement | null> }) {
   const { t } = useLanguage()
   const displayName = truthfulPresetName(role)
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = `delete-role-${role.id}-title`
-  const impactId = `delete-role-${role.id}-impact`
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.65)', display: 'grid', placeItems: 'center', padding: 20 }}
-  ><div className="card" style={{ width: 'min(440px, 100%)', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}><Dialog.Portal>
+    <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.65)' }} />
+    <Dialog.Content
+      role="alertdialog"
+      aria-modal="true"
+      aria-busy={busy}
+      onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+      onPointerDownOutside={event => { if (busy) event.preventDefault() }}
+      onInteractOutside={event => { if (busy) event.preventDefault() }}
+      onCloseAutoFocus={event => {
+        event.preventDefault()
+        const returnFocus = returnFocusRef?.current
+        const target = returnFocus?.isConnected && !returnFocus.disabled ? returnFocus : fallbackFocusRef?.current
+        target?.focus()
+      }}
+      className="card"
+      style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1201, width: 'min(440px, calc(100vw - 40px))', padding: 22 }}
+    >
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
       <AlertTriangle size={19} aria-hidden="true" style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
-      <div><h2 id={titleId} style={{ margin: 0, fontSize: 16, fontWeight: 750 }}>{t(`Smazat roli „${displayName}“?`, `Delete “${displayName}”?`)}</h2>
-        <p id={impactId} style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 12.5, lineHeight: 1.5 }}>{t('Preset přestane být dostupný pro nové delegace. Již udělená práva se nezmění ani neodvolají.', 'The preset will no longer be available for new delegations. Existing grants will not change or be revoked.')}</p></div>
+      <div><Dialog.Title style={{ margin: 0, fontSize: 16, fontWeight: 750 }}>{t(`Smazat roli „${displayName}“?`, `Delete “${displayName}”?`)}</Dialog.Title>
+        <Dialog.Description style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 12.5, lineHeight: 1.5 }}>{t('Preset přestane být dostupný pro nové delegace. Již udělená práva se nezmění ani neodvolají.', 'The preset will no longer be available for new delegations. Existing grants will not change or be revoked.')}</Dialog.Description></div>
     </div>
     {failed && <p role="alert" style={{ margin: '14px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{t('Roli se nepodařilo smazat. Nic se nezměnilo; zkuste to znovu.', 'The role could not be deleted. Nothing changed; try again.')}</p>}
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-      <button type="button" className="btn btn-secondary" autoFocus disabled={busy} onClick={onCancel}>{t('Ponechat roli', 'Keep role')}</button>
+      <Dialog.Close asChild><button type="button" className="btn btn-secondary" autoFocus disabled={busy}>{t('Ponechat roli', 'Keep role')}</button></Dialog.Close>
       <button type="button" className="btn btn-danger" disabled={busy} aria-busy={busy} onClick={onConfirm}>{busy ? t('Mažu…', 'Deleting…') : t('Smazat preset', 'Delete preset')}</button>
     </div>
-  </div></div>
+  </Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 
-export function RoleEditor({ value, busy, failed, cancel, save }: { value: RolePreset; busy: boolean; failed: boolean; cancel: () => void; save: (role: RolePreset) => Promise<void> }) {
+export function RoleEditor({ value, busy, failed, cancel, save, returnFocusRef, fallbackFocusRef }: { value: RolePreset; busy: boolean; failed: boolean; cancel: () => void; save: (role: RolePreset) => Promise<void>; returnFocusRef?: RefObject<HTMLButtonElement | null>; fallbackFocusRef?: RefObject<HTMLElement | null> }) {
   const { t } = useLanguage()
   const unsupported = value.capabilities.filter(capability => !isAssignablePresetCapability(capability))
   const [role, setRole] = useState({ ...value, name: truthfulPresetName(value), capabilities: value.capabilities.filter(isAssignablePresetCapability) })
   const reservedName = isReservedOwnershipPresetName(role.name)
   const allowed = assignablePresetCapabilities(role.resourceType)
-  const dialogRef = useRef<HTMLDivElement>(null)
   const changeResource = (resourceType: DelegationResource) => setRole({ ...role, resourceType, capabilities: [] })
   const toggle = (right: string) => setRole({ ...role, capabilities: role.capabilities.includes(right) ? role.capabilities.filter(item => item !== right) : [...role.capabilities, right] })
-  return <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="role-editor-title" aria-busy={busy} onKeyDown={event => { if (event.key === 'Escape' && !busy) cancel(); trapDialogFocus(event, dialogRef.current) }} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 16 }}><div className="card" style={{ padding: 20, width: 'min(620px, 100%)', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}><h2 id="role-editor-title" style={{ fontWeight: 700 }}>{t('Nastavení dispoziční role', 'Delegation role settings')}</h2><button type="button" className="btn btn-secondary" disabled={busy} onClick={cancel} aria-label={t('Zavřít', 'Close')}><X size={14} aria-hidden="true" /></button></div>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) cancel() }}><Dialog.Portal>
+    <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.55)' }} />
+    <Dialog.Content aria-busy={busy} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onPointerDownOutside={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }} onCloseAutoFocus={event => { event.preventDefault(); const returnFocus = returnFocusRef?.current; const target = returnFocus?.isConnected && !returnFocus.disabled ? returnFocus : fallbackFocusRef?.current; target?.focus() }} className="card" style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1001, padding: 20, width: 'min(620px, calc(100vw - 32px))', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}><Dialog.Title style={{ fontWeight: 700 }}>{t('Nastavení dispoziční role', 'Delegation role settings')}</Dialog.Title><Dialog.Close asChild><button type="button" className="btn btn-secondary" disabled={busy} aria-label={t('Zavřít', 'Close')}><X size={14} aria-hidden="true" /></button></Dialog.Close></div>
+    <Dialog.Description style={{ margin: '0 0 14px', color: 'var(--text-secondary)', fontSize: 12 }}>{t('Vyberte nejmenší rozsah práv potřebný pro tuto dispoziční roli. Změna presetu nemění již udělená práva.', 'Choose the smallest set of rights needed for this delegation role. Changing the preset does not alter existing grants.')}</Dialog.Description>
     {failed && <p role="alert" style={{ margin: '0 0 14px', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{t('Roli se nepodařilo uložit. Nic se nezměnilo; zkontrolujte údaje a zkuste to znovu.', 'The role could not be saved. Nothing changed; check the details and try again.')}</p>}
     <LegacyOwnershipNameEvidence rolePreset={value} />
     {unsupported.length > 0 && <p role="note" aria-label={t('Nepodporované právo', 'Unsupported capability')} style={{ margin: '0 0 14px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>{t('Správa dalších delegací se nevymáhá a do uloženého presetu se nevrátí. Vyberte alespoň jedno podporované právo, nebo preset smažte. Již udělená práva se nezmění.', 'Management of further delegations is not enforced and will not return to a saved preset. Select at least one supported right, or delete the preset. Existing grants will not change.')}</p>}
@@ -233,8 +239,8 @@ export function RoleEditor({ value, busy, failed, cancel, save }: { value: RoleP
     <label style={labelStyle}>{t('Popis', 'Description')}<textarea className="input" maxLength={500} value={role.description} onChange={event => setRole({ ...role, description: event.target.value })} /></label>
     <label style={labelStyle}>{t('Zdroj', 'Resource')}<select className="input" value={role.resourceType} onChange={event => changeResource(event.target.value as DelegationResource)}>{Object.keys(CAPABILITIES_BY_RESOURCE).map(resource => <option key={resource}>{resource}</option>)}</select></label>
     <fieldset style={{ border: 0, padding: 0, margin: '14px 0' }}><legend style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{t('Práva', 'Rights')}</legend>{allowed.map(right => <label key={right} title={right} style={{ display: 'flex', gap: 8, padding: 8 }}><input type="checkbox" checked={role.capabilities.includes(right)} onChange={() => toggle(right)} /><span>{rightLabel(right, t)}</span></label>)}</fieldset>
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn btn-secondary" disabled={busy} onClick={cancel}>{t('Zrušit', 'Cancel')}</button><button type="button" className="btn btn-primary" disabled={busy || reservedName || !role.name.trim() || !role.capabilities.length} aria-busy={busy} onClick={() => void save(role)}>{busy ? t('Ukládám…', 'Saving…') : t('Uložit', 'Save')}</button></div>
-  </div></div>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><Dialog.Close asChild><button type="button" className="btn btn-secondary" disabled={busy}>{t('Zrušit', 'Cancel')}</button></Dialog.Close><button type="button" className="btn btn-primary" disabled={busy || reservedName || !role.name.trim() || !role.capabilities.length} aria-busy={busy} onClick={() => void save(role)}>{busy ? t('Ukládám…', 'Saving…') : t('Uložit', 'Save')}</button></div>
+  </Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 
 function LegacyOwnershipNameEvidence({ rolePreset }: { rolePreset: RolePreset }) {

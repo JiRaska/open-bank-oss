@@ -4,6 +4,7 @@
 
 package com.openbank.dispute.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.dispute.application.port.out.ComplaintRepository
 import com.openbank.dispute.domain.model.CloseComplaintRequest
 import com.openbank.dispute.domain.model.Complaint
@@ -81,6 +82,26 @@ class ComplaintServiceTest {
         serviceAt(today).file(fileRequest()).await().indefinitely()
 
         assertThat(msg.captured.payload).contains(""""sourceService":"dispute-service"""")
+    }
+
+    @Test
+    fun `complaint event carries a stable projection version and optional evidence references`() {
+        val msg = slot<OutboxMessage>()
+        every { repo.save(any(), capture(msg)) } answers { Uni.createFrom().item(firstArg<Complaint>()) }
+        val accountId = UUID.randomUUID()
+        val transactionId = UUID.randomUUID()
+        val disputeId = UUID.randomUUID()
+
+        serviceAt(LocalDate.of(2026, 6, 9)).file(
+            fileRequest().copy(accountId = accountId, transactionId = transactionId, disputeId = disputeId),
+        ).await().indefinitely()
+
+        val payload = ObjectMapper().readTree(msg.captured.payload)
+        assertThat(payload["schemaVersion"].asInt()).isEqualTo(1)
+        assertThat(payload["sourceVersion"].asLong()).isPositive()
+        assertThat(payload["accountId"].asText()).isEqualTo(accountId.toString())
+        assertThat(payload["transactionId"].asText()).isEqualTo(transactionId.toString())
+        assertThat(payload["disputeId"].asText()).isEqualTo(disputeId.toString())
     }
 
     // ---- intake deadline clock (15 business days, CZK / CERTIS) ----
@@ -162,6 +183,7 @@ class ComplaintServiceTest {
         assertThat(result.interimReplyReason).isEqualTo("awaiting card-scheme response")
         assertThat(result.interimReplyAt).isNotNull()
         assertThat(result.status).isEqualTo(ComplaintStatus.RECEIVED)
+        assertThat(result.aggregateRevision).isEqualTo(2L)
         assertThat(saved.captured.dueDate).isEqualTo(LocalDate.of(2026, 5, 27))
     }
 
@@ -246,6 +268,8 @@ class ComplaintServiceTest {
         val result = serviceAt(LocalDate.of(2026, 6, 9)).file(fileRequest()).await().indefinitely()
         assertThat(outbox.captured.eventType).isEqualTo("complaint.received")
         assertThat(outbox.captured.aggregateId).isEqualTo(result.id)
+        val payload = ObjectMapper().readTree(outbox.captured.payload)
+        assertThat(payload["aggregateRevision"].asLong()).isEqualTo(1L)
     }
 
     private fun baseComplaint(

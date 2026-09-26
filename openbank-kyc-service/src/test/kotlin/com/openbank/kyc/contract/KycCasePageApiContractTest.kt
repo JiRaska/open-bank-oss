@@ -277,6 +277,28 @@ class KycCasePageApiContractTest {
         spec.at("/paths/${pointer(CASES_PATH)}/get/responses/200/content/application~1json/schema"),
     )
 
+    // --------------------------------------------------------------- unparseable filter is loud
+
+    @Test
+    fun `the spec declares the 400 an unparseable status filter answers`() {
+        val declared = spec.at("/paths/${pointer(CASES_PATH)}/get/responses")
+        assertThat(declared.has("400"))
+            .describedAs("%s must declare the 400 for GET %s — it is the contract since #9038", SPEC_PATH, CASES_PATH)
+            .isTrue()
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_ADMIN"])
+    fun `an unparseable status filter is a 400, never the unfiltered list`() {
+        // #9038: runCatching{}.getOrNull() used to drop the condition, answering every case with a
+        // 200 to a typo — the #8699 shape. Absent stays unfiltered, unparseable is loud.
+        given()
+            .get("$CASES_PATH?status=APPRVED")
+            .then().statusCode(400)
+        listCases("?status=APPROVED")
+        listCases()
+    }
+
     /** `(minimum, maximum)` the spec declares for the `size` query parameter. */
     private fun sizeParameterBounds(): Pair<Int, Int> {
         val schema = spec.at("/paths/${pointer(CASES_PATH)}/get/parameters")

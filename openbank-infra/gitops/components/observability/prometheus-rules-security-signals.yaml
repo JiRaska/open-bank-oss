@@ -19,6 +19,14 @@
 # the name lives there as a constant (AUTHZ_DECISIONS) so this rule and the emitter cannot
 # drift apart (#5733). The alert-metric-emitted gate enforces it.
 #
+# AND EMITTED-BY-CODE IS NOT ENOUGH. That gate reads the constant out of the Kotlin; it does
+# not ask whether anything CALLS the emitter. From #8554 until the change that added the
+# call site below, nothing did —
+# recordAuthorizationDecision had no production caller, the counter was never registered, and
+# this rule watched an empty vector while every gate stayed green. The call site is
+# AuthorizeInterceptor (libs-runtime, com.openbank.libs.authz), the fleet's only authorization
+# verdict point; if it stops calling, this rule goes quiet again rather than red.
+#
 # SEVERITY. `warning` per the estate convention (a new rule that pages is a regression even
 # when it is correct). Promotion criterion: flip to `critical` once the rule has fired on a
 # real anomaly or a purple-team drill (runbook 0018) has proven the end-to-end path.
@@ -42,19 +50,25 @@ spec:
         # hammering with stale credentials, or a delegation misconfiguration — all three
         # worth a human's eyes, none of them pageable.
         - alert: AuthzDenyRatioElevated
+          # `enforced="true"` on BOTH sides. A service inside its ADR-0034 D5 advisory window
+          # computes the same verdicts but acts on none of them, so its denies are a rollout
+          # measurement, not refusals — counting them would page on a planned pilot, the
+          # WorkflowLivenessStale shape again. Scoping the denominator too keeps the ratio a
+          # ratio: a service running half advisory would otherwise divide enforced denies by
+          # all decisions and read artificially calm.
           expr: |
             (
               sum by (namespace, service) (
-                rate(openbank_security_authz_decisions_total{decision="deny"}[10m])
+                rate(openbank_security_authz_decisions_total{decision="deny",enforced="true"}[10m])
               )
               /
               sum by (namespace, service) (
-                rate(openbank_security_authz_decisions_total[10m])
+                rate(openbank_security_authz_decisions_total{enforced="true"}[10m])
               )
             ) > 0.3
             and
             sum by (namespace, service) (
-              rate(openbank_security_authz_decisions_total[10m])
+              rate(openbank_security_authz_decisions_total{enforced="true"}[10m])
             ) > 0.05
           for: 15m
           labels:

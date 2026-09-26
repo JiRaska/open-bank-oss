@@ -36,3 +36,21 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Agent-service kill-switch event bus (ADR-0031 D7 / ADR-0244 P3). Produced by agent-service
+# when an operator halts/resumes an agent scope; consumed by case-coordinator-agent to cancel
+# running shadow incident-response cases. Lives in `messaging` (Strimzi Topic Operator namespace).
+# Single partition + RF 1 for sandbox; raise to 3 for production.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: agent-kill-switch-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

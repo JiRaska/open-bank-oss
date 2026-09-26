@@ -148,6 +148,99 @@ kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbna
   "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO vault_admin WITH GRANT OPTION;"
 kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbname> -c \
   "ALTER DEFAULT PRIVILEGES FOR ROLE openbank IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vault_admin;"
+```
+
+### 3a. Create the shared `openbank_dyn_rw` role — REQUIRED, and required FIRST
+
+**Run this before the engine config in `dynamic-db-credentials.yaml` reaches the cluster.** The
+role config there grants membership in `openbank_dyn_rw`; if the role does not exist, the GRANT
+errors and issuance fails closed — no credential is handed out. Failing closed is deliberate (the
+alternative is silently reverting to the form that caused #9689), but it means the ordering is not
+optional.
+
+Why this role exists at all: granting table privileges *directly* to each dynamic role appends an
+aclitem to `pg_class.relacl` for every granted table, on every issuance. That array is inside the
+table's single `pg_class` tuple and is PLAIN storage, so it cannot be TOASTed out of line — it
+grows until the tuple passes 8160 B and every subsequent `GRANT` fails with
+`ERROR: row is too big (SQLSTATE 54000)`. Measured 2026-09-11: `public.journal_entries` on
+`openbank_ledger` had 2351 aclitems / 7701 B, and the whole fleet had been unable to issue a
+dynamic credential since 2026-08-29 (#9689). Membership in a shared role costs one row in
+`pg_auth_members` per lease and never touches `relacl`, so the ACL array is written once and
+never grows again.
+
+Idempotent — safe to re-run. Run as `postgres` (superuser), per database:
+
+```sh
+kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbname> -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openbank_dyn_rw') THEN
+    CREATE ROLE openbank_dyn_rw NOLOGIN;
+  END IF;
+END
+$$;
+
+-- Privileges the dynamic roles inherit through membership.
+GRANT USAGE ON SCHEMA public TO openbank_dyn_rw;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openbank_dyn_rw;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO openbank_dyn_rw;
+
+-- Tables a later Flyway migration creates must be covered too, or the next migration
+-- silently strands the dynamic credentials on a subset of the schema.
+ALTER DEFAULT PRIVILEGES FOR ROLE openbank IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openbank_dyn_rw;
+ALTER DEFAULT PRIVILEGES FOR ROLE openbank IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO openbank_dyn_rw;
+
+-- vault_admin has CREATEROLE only, so it needs ADMIN OPTION to grant this membership.
+GRANT openbank_dyn_rw TO vault_admin WITH ADMIN OPTION;
+SQL
+```
+
+Verify before moving on — this must return `t`:
+
+```sh
+kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbname> -tAc \
+  "SELECT pg_has_role('vault_admin','openbank_dyn_rw','USAGE') AND
+          EXISTS (SELECT 1 FROM pg_roles WHERE rolname='openbank_dyn_rw');"
+```
+
+On PostgreSQL 18.1 (the fleet image, `ghcr.io/cloudnative-pg/postgresql:18.1`) a `CREATEROLE`
+role holds ADMIN OPTION on roles it creates, which lets `vault_admin` `GRANT`, `REVOKE` and
+`DROP` them — and that is exactly as far as it goes. ADMIN is **not** membership, so
+`vault_admin` cannot run `DROP OWNED BY`:
+
+```
+ERROR:  permission denied to drop objects
+DETAIL:  Only roles with privileges of role "v-..." may drop objects owned by it.
+```
+
+That is why the revocation statements are only `REVOKE` + `DROP ROLE`. Under membership the
+dynamic role holds no direct grants, so once the membership is revoked nothing depends on it and
+the `DROP` completes — verified end to end against a live database inside a rolled-back
+transaction. (The one-off cleanup of the pre-existing orphans in #9689 *did* need
+`DROP OWNED BY`, because those roles hold direct table grants; that runs as `postgres`, and the
+REVOKE half of it has to be executed under `SET LOCAL ROLE vault_admin` because `REVOKE` only
+removes grants whose grantor is the current user.)
+
+Confirm revocation on the first database you convert by letting one lease expire and checking
+the role is actually gone:
+
+```sh
+kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbname> -tAc \
+  "SELECT count(*) FROM pg_roles WHERE rolname LIKE 'v-%' AND rolvaliduntil < now();"
+```
+
+That count must trend to zero. If it does not, revocation is still failing and the bloat is
+merely slower — which is the exact state #9689 documents, and it is worth stopping for.
+
+**This does not reclaim existing bloat.** It stops the growth; the 2349 already-orphaned roles on
+`ledger-db` (2433 on `notifications-db`) still hold their aclitems and still have to be dropped
+before issuance can resume on an already-full table. That cleanup is tracked separately in #9689
+and is deliberately not automated here — it is a bulk `DROP ROLE` across production databases.
+
+```sh
+# (continues: collect the vault_admin passwords)
 
 # Collect all 7 passwords into the Secret the CronJob reads (service keys, not namespaces):
 kubectl create secret generic openbao-db-admin-passwords -n vault \

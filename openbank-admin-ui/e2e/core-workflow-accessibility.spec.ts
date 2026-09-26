@@ -3,6 +3,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { waitForSettledShell } from './helpers/shell'
 
 const OUTAGE_WORKFLOWS = [
   '/dashboard',
@@ -31,6 +32,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 for (const route of OUTAGE_WORKFLOWS) {
   test(`${route} has no automated WCAG A/AA violations with non-auth APIs forced unavailable`, async ({ page }) => {
     await page.goto(route)
+    await waitForSettledShell(page)
     await expect(page.locator('#main-content')).toBeVisible()
     // Several legacy consoles still use a short entry transition. Axe samples computed colours,
     // so scan the settled UI rather than a deliberately translucent animation frame.
@@ -51,13 +53,22 @@ test('/sdd has no automated WCAG A/AA violations in its healthy default state', 
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify([{
-        id: '11111111-1111-1111-1111-111111111111',
+        id: '11111111-1111-4111-8111-111111111111',
+        accountId: '22222222-2222-4222-a222-222222222222',
         umr: 'UMR-EVIDENCE-42',
+        creditorIdentifier: 'CZ98ZZZ00000000001',
         creditorName: 'Verified Utilities SE',
+        debtorName: 'Example Manufacturing a.s.',
         debtorIban: 'CZ6508000000192000145399',
         status: 'ACTIVE',
         scheme: 'CORE',
+        sequenceType: 'OOFF',
+        signatureDate: '2026-01-15',
+        b2bConfirmed: false,
+        lastCollectionDate: null,
+        lastPreNotificationDate: null,
         createdAt: '2026-08-31T08:00:00Z',
+        amendments: [],
       }]),
     })
   })

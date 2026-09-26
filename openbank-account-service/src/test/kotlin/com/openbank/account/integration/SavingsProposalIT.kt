@@ -20,7 +20,9 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
 import java.util.UUID
 
 /**
@@ -34,7 +36,8 @@ class SavingsProposalIT {
 
     class InMemoryDelegationChannel : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("delegation-events-in")
+            InMemoryConnector.switchIncomingChannelsToInMemory("delegation-events-in") +
+                InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -71,6 +74,41 @@ class SavingsProposalIT {
             }
             ).extract().path("status")
         assertThat(status).isEqualTo("APPROVED")
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `sole representative approves through the projected mandate and SCA identity binding`(): Unit = runBlocking {
+        val accountId = openAccount()
+        val delegationSource: InMemorySource<String> = connector.source("delegation-events-in")
+        delegationSource.runOnVertxContext(true)
+        delegationSource.send(delegationEvent("DelegationActivated", accountId))
+        awaitSavingsGrant(accountId)
+        val proposalId = propose(accountId)
+
+        val representative = UUID.randomUUID()
+        val partySource: InMemorySource<String> = connector.source("party-events-in")
+        partySource.runOnVertxContext(true)
+        partySource.send(mandateGrantedEvent(representative))
+        StubScaChallengeClient.party.set(representative)
+
+        var response: io.restassured.response.Response? = null
+        var attempts = 0
+        while (response?.statusCode != 200 && attempts < 40) {
+            attempts++
+            response = io.restassured.RestAssured.given()
+                .contentType("application/json")
+                .header("X-Customer-Party-Id", representative.toString())
+                .body("""{"approve": true, "scaSessionId": "${UUID.randomUUID()}"}""")
+                .post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals/$proposalId/decide")
+            if (response?.statusCode == 200) break
+            assertThat(response?.statusCode).isEqualTo(403)
+            delay(250)
+        }
+
+        assertThat(response?.statusCode).isEqualTo(200)
+        assertThat(response?.jsonPath()?.getString("status")).isEqualTo("APPROVED")
+        assertThat(persistedDecisionActor(proposalId)).isEqualTo(representative)
     }
 
     @Test
@@ -192,4 +230,36 @@ class SavingsProposalIT {
           "occurredAt": "2026-08-01T12:00:00Z"
         }
         """.trimIndent()
+
+    private fun mandateGrantedEvent(representative: UUID): String =
+        """
+        {
+          "eventType": "PARTY_MANDATE_GRANTED",
+          "partyId": "$ownerParty",
+          "mandateId": "${UUID.randomUUID()}",
+          "agentPartyId": "$representative",
+          "authority": "SOLE",
+          "requiredSignatures": 1,
+          "status": "ACTIVE"
+        }
+        """.trimIndent()
+
+    private fun persistedDecisionActor(proposalId: String): UUID? {
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.prepareStatement(
+                "SELECT decided_by FROM savings_withdrawal_proposals WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, UUID.fromString(proposalId))
+                statement.executeQuery().use { result ->
+                    check(result.next()) { "proposal $proposalId was not persisted" }
+                    return result.getObject("decided_by", UUID::class.java)
+                }
+            }
+        }
+    }
 }

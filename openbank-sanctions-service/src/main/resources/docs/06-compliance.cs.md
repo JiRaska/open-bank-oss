@@ -11,7 +11,7 @@
 | **AMLD 6 (EU 2018/1673)** | Rozšířené AML povinnosti; 10letá archivace záznamů | Všechny záznamy `SanctionsCheck` uchovány 10 let; výmaz dle GDPR přepsán |
 | **PSD2 (EU 2015/2366)** | Provádění platebních transakcí | Sankční kontrola je povinnou bránou před provedením platby (ADR-0032) |
 | **Doporučení FATF** | Posílená due diligence pro vysoce rizikové jurisdikce | Seznam `FATF_HIGH_RISK` označuje převody do/z vysoce rizikových zemí |
-| **Vyhláška ČNB 163/2014** | Požadavky České národní banky | Seznam `CNB_DOMESTIC` pro česká specifická jmenování |
+| **Zákon č. 1/2023 Sb.** | Vnitrostátní sankční seznam vedený MZV | Seznam `CNB_DOMESTIC` (import z `cz_national_sanctions`) |
 | **GDPR (EU 2016/679)** | PII v screeningových požadavcích (jméno, datum narození, identifikátory) | PII maskováno v logu; základ čl. 6 odst. 1 písm. c) – právní povinnost; výmaz přepsán AML směrnicí |
 | **DORA (EU 2022/2554)** | Operační odolnost finančních služeb | Health probes, audit eventy, záruka outboxu, SLO, runbooky |
 

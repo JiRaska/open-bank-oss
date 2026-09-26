@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071).
+dataDomain: platform
+primaryDatastore: PostgreSQL
+databaseName: openbank_communication
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: 3 years
+evidenceExported: false
+databaseLineage:
+  ownedDatabases:
+    - openbank_communication

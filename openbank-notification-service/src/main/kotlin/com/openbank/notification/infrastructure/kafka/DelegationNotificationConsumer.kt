@@ -56,13 +56,25 @@ import java.util.UUID
  * is "acceptable for notifications (no money path)". A DLQ'd/retried delegation event can therefore
  * produce a duplicate notification on redelivery, same as every other channel into this service.
  *
- * **Failure handling**: a malformed/unparseable record is a poison pill — logged and swallowed so
- * it can never wedge the partition (mirrors [PartyErasureConsumer]). No `dead-letter-queue`
- * `failure-strategy` is configured, matching this service's other two channels
- * (`notification-events-in`, `party-events-in`): [NotificationConsumer.consume] already recovers
- * every failure internally (JSON parse, closed-schema rejection, and `dispatch`'s own
- * `.onFailure().recoverWithUni`) and always completes its `Uni`, so there is nothing left here that
- * would reach a failure-strategy.
+ * **Failure handling**, two kinds, and only the first is handled here. A malformed/unparseable
+ * record is a poison pill — logged and swallowed so it can never wedge the partition (mirrors
+ * [PartyErasureConsumer]). A *processing* failure is not: [consume] returns the `Uni` it gets from
+ * [NotificationConsumer.consume], and that `Uni` FAILS. Its `.onFailure().invoke` only logs, by
+ * deliberate design — retrying from the top would persist a second row and re-send, so the single
+ * attempt is rethrown and the connector's `failure-strategy` decides.
+ *
+ * Which makes the configuration load-bearing, and this KDoc used to describe it backwards: it said
+ * no `failure-strategy` was configured, "matching this service's other two channels", and that
+ * `NotificationConsumer.consume` "always completes its `Uni`". Both were false — #5745 had already
+ * given `notification-events-in` and `party-events-in` a DLQ and turned that recovery into a
+ * rethrow. The connector default is `fail`, which STOPS the channel, so any transient dispatch
+ * failure would have silently ended every delegation notification until a pod restart. #8346 wires
+ * the DLQ (`openbank.dlq.notification.delegation-events-in`, nested form in `application.yaml` per
+ * issue #686, with its `KafkaTopic` CR and a KafkaUser `Write` grant, since a DLQ send that is
+ * denied wedges on the very failure it was added to park).
+ *
+ * Stated as the mechanism rather than the value on purpose: this class controls that the record is
+ * nacked, and `application.yaml` is what answers what the connector then does with it.
  */
 @ApplicationScoped
 class DelegationNotificationConsumer @Inject constructor(
@@ -99,6 +111,11 @@ class DelegationNotificationConsumer @Inject constructor(
     }
 
     /** The [NotificationRequest]s this event should raise — zero, one, or two (EXPIRED). */
+    @Suppress(
+        "CyclomaticComplexMethod",
+        "ComplexCondition",
+        // Event-specific recipient and validation rules must remain visibly adjacent to the event map.
+    )
     private fun requestsFor(node: JsonNode, payload: String): List<NotificationRequest> {
         val eventType = node.path("eventType").asText("")
         val template = TEMPLATE_BY_EVENT_TYPE[eventType]
@@ -115,7 +132,17 @@ class DelegationNotificationConsumer @Inject constructor(
         val grantId = node.path("aggregateId").asText(null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val grantor = node.path("grantorPartyId").asText(null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val grantee = node.path("granteePartyId").asText(null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        if (grantId == null || grantor == null || grantee == null) {
+        val reviewDue = eventType == RECERTIFICATION_DUE
+        val recertificationId = node.path("recertificationId").asText(null)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val audience = node.path("audience").asText("")
+        val dueEventIsValid = audience in REVIEW_AUDIENCES && recertificationId != null
+        if (
+            grantId == null ||
+            grantor == null ||
+            (!reviewDue && grantee == null) ||
+            (reviewDue && !dueEventIsValid)
+        ) {
             log.warnf(
                 "Dropping delegation event %s with missing/unparseable identifiers: %s",
                 eventType,
@@ -130,17 +157,24 @@ class DelegationNotificationConsumer @Inject constructor(
                 channel = NotificationChannel.PUSH,
                 template = template,
                 recipient = partyId.toString(),
-                variables = if (template == NotificationTemplate.DELEGATION_FIRST_USE) {
-                    emptyMap()
-                } else {
-                    mapOf("resourceType" to node.path("resourceType").asText(""))
+                variables = when (template) {
+                    NotificationTemplate.DELEGATION_FIRST_USE -> emptyMap()
+                    NotificationTemplate.DELEGATION_RECERTIFICATION_DUE ->
+                        mapOf("audience" to audience)
+                    else -> mapOf("resourceType" to node.path("resourceType").asText(""))
                 },
                 deepLink = "openbank://delegations/$grantId",
                 // The grant id, not a freshly minted one: it is the stable identifier a producer
                 // owns for this business event (ADR-0239 D1), letting a later outcome event be
                 // joined back to the delegation grant that caused it.
                 correlationId = grantId,
-                deduplicationKey = if (template == NotificationTemplate.DELEGATION_FIRST_USE) grantId else null,
+                deduplicationKey = when (template) {
+                    NotificationTemplate.DELEGATION_FIRST_USE -> grantId
+                    // The cycle, rather than the grant, is the notification idempotency boundary:
+                    // a later periodic review must notify again, while an outbox redelivery must not.
+                    NotificationTemplate.DELEGATION_RECERTIFICATION_DUE -> recertificationId
+                    else -> null
+                },
             )
         }
     }
@@ -149,7 +183,9 @@ class DelegationNotificationConsumer @Inject constructor(
         /** Cap on the producer-supplied payload echoed into a poison-pill warning (untrusted input). */
         const val MAX_LOGGED_PAYLOAD_CHARS = 300
         const val SPEND_CONFIRMED = "SpendConfirmed"
+        const val RECERTIFICATION_DUE = "DelegationRecertificationDue"
         const val DELEGATION_SOURCE_SERVICE = "delegation-service"
+        val REVIEW_AUDIENCES = setOf("PERSONAL", "FOP", "SME", "CORPORATE")
 
         val TEMPLATE_BY_EVENT_TYPE: Map<String, NotificationTemplate> = mapOf(
             "DelegationOffered" to NotificationTemplate.DELEGATION_OFFERED,
@@ -161,19 +197,21 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationRenounced" to NotificationTemplate.DELEGATION_RENOUNCED,
             "DelegationExpired" to NotificationTemplate.DELEGATION_EXPIRED,
             SPEND_CONFIRMED to NotificationTemplate.DELEGATION_FIRST_USE,
+            RECERTIFICATION_DUE to NotificationTemplate.DELEGATION_RECERTIFICATION_DUE,
         )
 
         /** Recipient party id(s) per event type, given (grantor, grantee) — see class KDoc. */
-        val TARGETS_BY_EVENT_TYPE: Map<String, (UUID, UUID) -> List<UUID>> = mapOf(
-            "DelegationOffered" to { _, grantee -> listOf(grantee) },
+        val TARGETS_BY_EVENT_TYPE: Map<String, (UUID, UUID?) -> List<UUID>> = mapOf(
+            "DelegationOffered" to { _, grantee -> listOf(requireNotNull(grantee)) },
             "DelegationActivated" to { grantor, _ -> listOf(grantor) },
             "DelegationDeclined" to { grantor, _ -> listOf(grantor) },
-            "DelegationRevoked" to { _, grantee -> listOf(grantee) },
-            "DelegationSuspended" to { grantor, grantee -> listOf(grantor, grantee) },
-            "DelegationReinstated" to { grantor, grantee -> listOf(grantor, grantee) },
+            "DelegationRevoked" to { _, grantee -> listOf(requireNotNull(grantee)) },
+            "DelegationSuspended" to { grantor, grantee -> listOf(grantor, requireNotNull(grantee)) },
+            "DelegationReinstated" to { grantor, grantee -> listOf(grantor, requireNotNull(grantee)) },
             "DelegationRenounced" to { grantor, _ -> listOf(grantor) },
-            "DelegationExpired" to { grantor, grantee -> listOf(grantor, grantee) },
+            "DelegationExpired" to { grantor, grantee -> listOf(grantor, requireNotNull(grantee)) },
             SPEND_CONFIRMED to { grantor, _ -> listOf(grantor) },
+            RECERTIFICATION_DUE to { grantor, _ -> listOf(grantor) },
         )
     }
 }

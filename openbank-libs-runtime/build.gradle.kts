@@ -185,10 +185,13 @@ kover {
                 classes("com.openbank.libs.persistence.outbox.AbstractOutboxEntity")
             }
         }
+        // Measured 2026-09-26 over two independent koverXmlReport runs (both 75.65% LINE, no
+        // variance observed): floor = floor(min(run1, run2)) - 2, per the fleet's
+        // flaky-koverVerify ratchet convention. Ratchet-only: never lower this.
         verify {
             rule {
                 bound {
-                    minValue = 50
+                    minValue = 73
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

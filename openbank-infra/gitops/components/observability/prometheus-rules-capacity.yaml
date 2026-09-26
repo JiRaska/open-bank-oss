@@ -162,3 +162,38 @@ spec:
           annotations:
             summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} Pending and unschedulable for ~30m"
             description: "Unschedulable for ~30 minutes (a 15m staleness clause plus a 15m `for:`). Check KarpenterNodePoolAtLimit first (cap bind), then taints/tolerations, then image pull. kubectl describe pod for the scheduler event."
+        # A node that cannot finish draining is the mirror image of the rule above: there, work
+        # cannot land; here, work cannot leave. Nothing named this condition, and the cost was
+        # three nodes terminating for 9 to 15 days (#9691) — found only because the leftover pods
+        # made two DaemonSets report `misscheduled`, which reads as a DaemonSet problem and is not
+        # one.
+        #
+        # `kube_node_deletion_timestamp` exists only while a node is mid-deletion, so the series
+        # IS the condition; measured 2026-09-11 it carried exactly the three stuck nodes and
+        # nothing else. `kube_node_spec_unschedulable` is NOT a substitute — it read 0 for all
+        # three, because Karpenter's disruption taint is not a cordon.
+        #
+        # 1h is chosen to sit clear of normal churn: a healthy Karpenter consolidation drains and
+        # removes a node in minutes, and the shortest of the three real cases had already been
+        # stuck for nine days. The usual blocker is a PodDisruptionBudget that can never permit a
+        # disruption — a single-instance CNPG cluster behind `minAvailable: 1` pins
+        # `disruptionsAllowed` at 0 forever, which is what all three of these were.
+        - alert: NodeStuckTerminating
+          expr: |
+            (time() - kube_node_deletion_timestamp) > 3600
+          for: 30m
+          labels:
+            severity: warning
+            detector: capacity
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} has been draining for over an hour"
+            description: >-
+              Deletion was requested {{ $value | humanizeDuration }} ago and eviction has not
+              finished. The node still holds workload, still counts against capacity, and whatever
+              remains on it will move on the cluster's schedule rather than yours once the drain
+              clears. Find the blocker before forcing anything — `kubectl get pods -A
+              --field-selector spec.nodeName={{ $labels.node }}`, then check each remaining pod's
+              PDB (`ALLOWED DISRUPTIONS 0` on a single-replica stateful workload is the common
+              one). Forcing the eviction of a database primary with no replica is how this becomes
+              an outage instead of a delay.

@@ -76,9 +76,13 @@ class SctInstResource @Inject constructor(
         }
     }
 
+    // #10486 batch 7: ROLE_API admits agent-service's OWN machine principal (the sepa_instant_get tool)
+    // once the shared openbank-services client loses ROLE_OPERATOR, matching the two list endpoints.
+    // OPA (enforced here) grants sctInstPayment.read to service-account-openbank-agent by identity and
+    // denies every other ROLE_API holder (sepa_instant_rest_ext.rego: service-agent-sct-inst-read).
     @GET
     @Path("/{paymentId}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sctInstPayment.read", resource = "#paymentId")
     @Operation(summary = "Get SCT Inst payment by ID")
     fun getById(@PathParam("paymentId") paymentId: UUID): Uni<Response> =

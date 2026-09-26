@@ -17,7 +17,7 @@ type Bilingual = [string, string]
 //   • Target architecture — ADR-0027 (cloud-agnostic substrate, everything
 //     stateful/identity in-cluster OSS, OpenTofu + ArgoCD GitOps).
 //   • Status overlay      — the REAL state of the openbank-sandbox EKS cluster
-//     (account 265175468565, eu-north-1) as verified against the live cluster,
+//     as verified against the live cluster,
 //     so this page documents the gap honestly instead of selling the target.
 //
 //   live    = running in the sandbox cluster / applied today
@@ -28,9 +28,9 @@ type Bilingual = [string, string]
 type Status = 'live' | 'partial' | 'planned'
 
 const STATUS_META: Record<Status, { label: Bilingual; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live:    { label: ['Živé (běží dnes)', 'Live (running today)'],            color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2 },
-  partial: { label: ['Částečné (nasazeno, neúplné)', 'Partial (deployed, incomplete)'], color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: CircleDashed },
-  planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: '#94a3b8', bg: '#f8fafc', border: '#cbd5e1', Icon: Circle },
+  live:    { label: ['Živé (běží dnes)', 'Live (running today)'],            color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  partial: { label: ['Částečné (nasazeno, neúplné)', 'Partial (deployed, incomplete)'], color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
 
 // Maps architecture node IDs → infra probe IDs from /api/infra/status
@@ -49,9 +49,9 @@ const INFRA_PROBE_MAP: Record<string, string> = {
 }
 
 const PROBE_META = {
-  UP:      { color: '#059669', bg: '#ecfdf5', Icon: Wifi,    label: 'UP' },
-  DOWN:    { color: '#dc2626', bg: '#fef2f2', Icon: WifiOff, label: 'DOWN' },
-  UNKNOWN: { color: '#94a3b8', bg: '#f8fafc', Icon: Minus,   label: '?' },
+  UP:      { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: Wifi,    label: 'UP' },
+  DOWN:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', Icon: WifiOff, label: 'DOWN' },
+  UNKNOWN: { color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Minus,   label: '?' },
 }
 
 type Node = { id: string; name: Bilingual; status: Status; desc: Bilingual }
@@ -68,14 +68,14 @@ const EDGE: Node[] = [
 
 // --- AWS substrate (only AWS-managed layer per ADR-0027) --------------------
 const SUBSTRATE: Node[] = [
-  node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený bucket se stavem OpenTofu (openbank-tofu-state-265175468565) + bootstrap. Aplikováno.', 'Remote OpenTofu state bucket (openbank-tofu-state-265175468565) + bootstrap. Applied.']),
+  node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený verzovaný bucket se stavem OpenTofu + bootstrap. Aplikováno.', 'Remote versioned OpenTofu state bucket + bootstrap. Applied.']),
   node('runner', ['EC2 / Mac mini CI runner', 'EC2 / Mac mini CI runner'], 'live', ['Self-hosted pool GitHub Actions runnerů (ADR-0040: Mac mini aktivní, EC2 studená záloha). Běží.', 'Self-hosted GitHub Actions runner pool (ADR-0040: Mac mini active, EC2 cold standby). Running.']),
-  node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: VPC 10.80.0.0/16, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: VPC 10.80.0.0/16, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
+  node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: privátní adresní prostor, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: private address space, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
   node('eks', ['EKS control plane (1.35)', 'EKS control plane (1.35)'], 'live', ['aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.', 'aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.']),
   node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', ['t4g.medium AL2023 spravovaná node group — 2 uzly Ready. Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.', 't4g.medium AL2023 managed node group — 2 nodes Ready. Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.']),
   node('kms', ['KMS CMK', 'KMS CMK'], 'live', ['Zákaznicky spravovaný klíč pro envelope šifrování EKS secrets (aws_kms_key.secrets). Aplikováno.', 'Customer-managed key for EKS secrets envelope encryption (aws_kms_key.secrets). Applied.']),
   node('iam', ['IAM (cluster/node, OIDC, Karpenter)', 'IAM (cluster/node, OIDC, Karpenter)'], 'live', ['Role clusteru + uzlů, IRSA OIDC provider, IAM pro Karpenter controller/node přes EKS Pod Identity, SQS interruption queue. Aplikováno.', 'Cluster + node roles, IRSA OIDC provider, Karpenter controller/node IAM via EKS Pod Identity, SQS interruption queue. Applied.']),
-  node('ecr', ['ECR', 'ECR'], 'live', ['Container registry pro všechny image openbank-*-service (265175468565.dkr.ecr.eu-north-1.amazonaws.com). Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Container registry for all openbank-*-service images (265175468565.dkr.ecr.eu-north-1.amazonaws.com). Actively used — images pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repo creation); IaC wiring is a follow-up.']),
+  node('ecr', ['ECR', 'ECR'], 'live', ['Privátní container registry pro všechny image openbank-*-service. Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Private container registry for all openbank-*-service images. Actively used — images are pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repository creation); IaC wiring is a follow-up.']),
   node('cloudtrail', ['CloudTrail + Config', 'CloudTrail + Config'], 'planned', ['Neměnný audit na úrovni účtu + config drift (podmínka go-live DORA čl. 12). Zatím není v IaC.', 'Immutable account-level audit + config drift (DORA Art. 12 go-live condition). Not yet in IaC.']),
   node('worm', ['S3 Object Lock (WORM archiv)', 'S3 Object Lock (WORM archive)'], 'planned', ['Write-once compliance archiv. ADR-0027 — zatím není v IaC.', 'Write-once compliance archive. ADR-0027 — not yet in IaC.']),
 ]
@@ -165,15 +165,15 @@ function CloudNodeBox({ n, selectedId, liveStatus, t, onSelect }: CloudNodeBoxPr
   const probeId = INFRA_PROBE_MAP[n.id]
   const probe = probeId && liveStatus ? liveStatus[probeId] : null
   const pm = probe ? PROBE_META[probe.status] : null
-  return <button type="button" onClick={() => onSelect(n)} title={t(...n.desc)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
+  return <button type="button" onClick={() => onSelect(n)} title={t(...n.desc)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px color-mix(in srgb, ${m.color} 35%, transparent)` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
     <StatusDot status={n.status} />
     {t(...n.name)}
-    {pm && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px', padding: '1px 5px', borderRadius: '10px', background: pm.bg, border: `1px solid ${pm.color}44`, fontSize: '10px', fontWeight: 700, color: pm.color }}><pm.Icon size={9} aria-hidden="true" />{pm.label}</span>}
+    {pm && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px', padding: '1px 5px', borderRadius: '10px', background: pm.bg, border: `1px solid ${pm.border}`, fontSize: '10px', fontWeight: 700, color: pm.color }}><pm.Icon size={9} aria-hidden="true" />{pm.label}</span>}
   </button>
 }
 
 function ArchitectureZone({ title, subtitle, accent, children }: { title: string; subtitle?: string; accent: string; children: React.ReactNode }) {
-  return <div style={{ border: `1.5px solid ${accent}`, borderRadius: '12px', padding: '14px 16px', background: `${accent}08` }}><div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}><span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', color: accent, textTransform: 'uppercase' }}>{title}</span>{subtitle && <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{subtitle}</span>}</div>{children}</div>
+  return <div style={{ border: `1.5px solid ${accent}`, borderRadius: '12px', padding: '14px 16px', background: `color-mix(in srgb, ${accent} 4%, var(--surface))` }}><div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}><span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', color: accent, textTransform: 'uppercase' }}>{title}</span>{subtitle && <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{subtitle}</span>}</div>{children}</div>
 }
 
 function ArchitectureArrow({ label }: { label?: string }) {
@@ -204,7 +204,10 @@ export default function CloudArchitecturePage() {
     }
   }, [dateLocale])
 
-  useEffect(() => { void fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void fetchStatus() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [fetchStatus])
 
   const wrap = { display: 'flex', flexWrap: 'wrap' as const, gap: '8px' }
   const selectNode = useCallback((n: Node) => setSelected(current => current?.id === n.id ? null : n), [])
@@ -237,7 +240,7 @@ export default function CloudArchitecturePage() {
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Info aria-hidden="true" size={13} />
             {t('Diagram = strategie (ADR-0027); badge', 'Diagram = strategy (ADR-0027); badge')}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: '#ecfdf5', border: '1px solid #6ee7b744', fontSize: '10px', fontWeight: 700, color: '#059669' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: 'var(--success-bg)', border: '1px solid var(--success-border)', fontSize: '10px', fontWeight: 700, color: 'var(--success-text)' }}>
               <Wifi aria-hidden="true" size={9} />UP
             </span>
             {t('= živý probe z EKS openbank-sandbox.', '= live probe from EKS openbank-sandbox.')}
@@ -259,19 +262,19 @@ export default function CloudArchitecturePage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 320px' : '1fr', gap: '16px', alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-          <ArchitectureZone title={t('Internet / Edge', 'Internet / Edge')} subtitle={t('Edge vrstva ADR-0027 — zatím neprovisionováno', 'ADR-0027 edge tier — not provisioned yet')} accent="#0ea5e9">
+          <ArchitectureZone title={t('Internet / Edge', 'Internet / Edge')} subtitle={t('Edge vrstva ADR-0027 — zatím neprovisionováno', 'ADR-0027 edge tier — not provisioned yet')} accent="var(--info-text)">
             <div style={wrap}>{EDGE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
           </ArchitectureZone>
 
           <ArchitectureArrow label={t('TLS (ACM)', 'TLS (ACM)')} />
 
-          <ArchitectureZone title={t('AWS substrate', 'AWS substrate')} subtitle={t('účet 265175468565 · eu-north-1 · jediná AWS-managed vrstva', 'account 265175468565 · eu-north-1 · the only AWS-managed layer')} accent="#f59e0b">
+          <ArchitectureZone title={t('AWS substrate', 'AWS substrate')} subtitle={t('sandbox účet · regionální nasazení · jediná AWS-managed vrstva', 'sandbox account · regional deployment · the only AWS-managed layer')} accent="var(--warning-text)">
             <div style={wrap}>{SUBSTRATE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
           </ArchitectureZone>
 
           <ArchitectureArrow />
 
-          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t('k8s 1.35 · Karpenter Graviton/Spot autoscaling', 'k8s 1.35 · Karpenter Graviton/Spot autoscaling')} accent="#7c3aed">
+          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t('k8s 1.35 · Karpenter Graviton/Spot autoscaling', 'k8s 1.35 · Karpenter Graviton/Spot autoscaling')} accent="var(--accent-text)">
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 {t('Platform bootstrap (sandbox-platform → seeduje GitOps)', 'Platform bootstrap (sandbox-platform → seeds GitOps)')}
@@ -293,7 +296,7 @@ export default function CloudArchitecturePage() {
 
           <ArchitectureArrow label={t('pull (read-only deploy key)', 'pull (read-only deploy key)')} />
 
-          <ArchitectureZone title={t('Git (jediný zdroj pravdy)', 'Git (single source of truth)')} accent="#059669">
+          <ArchitectureZone title={t('Git (jediný zdroj pravdy)', 'Git (single source of truth)')} accent="var(--success-text)">
             <div style={wrap}>
               <CloudNodeBox n={node('git', ['Git repo — openbank monorepo', 'Git repo — openbank monorepo'], 'live', ['IaC + k8s manifesty + app-of-apps. ArgoCD odsud pulluje desired state přes read-only SSH deploy key. Proti tomuto repu cluster rekonciluje.', 'IaC + k8s manifests + app-of-apps. ArgoCD pulls desired state from here via a read-only SSH deploy key. This repo is what the cluster reconciles against.'])} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />
             </div>

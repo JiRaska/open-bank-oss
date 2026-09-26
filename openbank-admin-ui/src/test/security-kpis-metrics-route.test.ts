@@ -106,13 +106,14 @@ describe('GET /api/security/kpis/metrics', () => {
     expect(body).toContain('openbank_security_kpi_generated_timestamp_seconds')
   })
 
-  it('omits non-numeric field values instead of emitting NaN', async () => {
+  it('withholds the whole snapshot when one collector claims malformed evidence', async () => {
     const snapshot = {
       ...FULL_SNAPSHOT,
       netpol: { available: true, coveragePct: 'eighty' },
     }
     const { body } = await scrape(JSON.stringify(snapshot))
     expect(body).not.toContain('openbank_security_kpi_netpol_coverage_pct')
+    expect(body).not.toContain('openbank_security_kpi_dependency_freshness_score')
     expect(body).not.toContain('NaN')
   })
 
@@ -128,10 +129,11 @@ describe('GET /api/security/kpis/metrics', () => {
     expect(body).not.toContain('openbank_security_kpi_')
   })
 
-  it('omits the timestamp gauge when generatedAt is missing or unparseable', async () => {
+  it('withholds every gauge when the snapshot timestamp is missing or unparseable', async () => {
     const { generatedAt: _omit, ...rest } = FULL_SNAPSHOT
     const { body } = await scrape(JSON.stringify(rest))
     expect(body).not.toContain('openbank_security_kpi_generated_timestamp_seconds')
+    expect(body).not.toContain('openbank_security_kpi_netpol_coverage_pct')
     const { body: badTs } = await scrape(JSON.stringify({ ...FULL_SNAPSHOT, generatedAt: 'not-a-date' }))
     expect(badTs).not.toContain('openbank_security_kpi_generated_timestamp_seconds')
   })

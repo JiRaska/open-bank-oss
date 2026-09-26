@@ -5,7 +5,7 @@
 package com.openbank.interest.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -23,12 +23,14 @@ import java.util.UUID
  * system of record for money movements. `POST /api/v1/journals` is the platform's only ledger
  * ingestion surface — the same contract transaction-service, billing-service and lending-service use.
  *
- * A service bearer token is injected by [OidcClientRequestReactiveFilter]; the call is guarded by
- * [LedgerCallGuard] (retry/timeout/circuit-breaker).
+ * A service bearer token is injected by the NAMED oidc-client `ledger` (`@OidcClientFilter`), i.e.
+ * interest-service's own Keycloak client `openbank-interest` — NOT the shared `openbank-services`
+ * client the other rest-clients here use (#10486). ledger-service grants `ledger.create` to that
+ * principal by identity; the call is guarded by [LedgerCallGuard] (retry/timeout/circuit-breaker).
  */
 @RegisterRestClient(configKey = "ledger-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@OidcClientFilter("ledger")
 @Path("/api/v1/journals")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

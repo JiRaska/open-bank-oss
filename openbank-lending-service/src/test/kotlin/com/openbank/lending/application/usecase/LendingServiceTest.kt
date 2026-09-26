@@ -33,10 +33,12 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanRateIndex
+import com.openbank.lending.domain.model.LoanRateTerms
+import com.openbank.lending.domain.model.LoanRateType
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
-import com.openbank.lending.infrastructure.adapter.NoOpCreditBureauPort
 import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
@@ -79,7 +81,28 @@ class LendingServiceTest {
 
     @org.junit.jupiter.api.BeforeEach
     fun stubEventEmitter() {
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { loans.withLocked<Any>(any(), any()) } answers {
+            loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
+        }
+        every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
+
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
     }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
@@ -99,10 +122,14 @@ class LendingServiceTest {
         clock,
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-        OriginationConfig(false),
+        OriginationConfig(false, false),
         NoOpOriginationWorkflowPort(),
         OriginationDecisionService(
-            NoOpCreditBureauPort(),
+            mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
+                every { assess(any(), any()) } returns Uni.createFrom().item(
+                    com.openbank.lending.application.port.out.CreditAssessment(null, false, "test-bureau", true),
+                )
+            },
             StarterCreditPolicy(),
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             clock,
@@ -227,6 +254,8 @@ class LendingServiceTest {
         val app = proposedApplication().copy(
             status = OriginationState.ASSESSMENT,
             verifiedIncomeMonthly = eur("50000.00"),
+            existingDebtServiceMonthly = eur("0"),
+            existingDebtOutstanding = eur("0"),
             ageYears = 35,
             residency = "CZ",
             jurisdiction = "CZ",
@@ -264,6 +293,8 @@ class LendingServiceTest {
         val app = proposedApplication().copy(
             status = OriginationState.ASSESSMENT,
             verifiedIncomeMonthly = eur("2000.00"),
+            existingDebtServiceMonthly = eur("0"),
+            existingDebtOutstanding = eur("0"),
             ageYears = 35,
             residency = "CZ",
         )
@@ -296,10 +327,14 @@ class LendingServiceTest {
             applications, loans, installments, collateral, ledger,
             valuation, riskParameters, events, clock, provisioning,
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-            OriginationConfig(true),
+            OriginationConfig(true, false),
             NoOpOriginationWorkflowPort(),
             OriginationDecisionService(
-                NoOpCreditBureauPort(),
+                mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
+                    every { assess(any(), any()) } returns Uni.createFrom().item(
+                        com.openbank.lending.application.port.out.CreditAssessment(null, false, "test-bureau", true),
+                    )
+                },
                 StarterCreditPolicy(),
                 CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
                 clock,
@@ -418,7 +453,23 @@ class LendingServiceTest {
         every { installments.saveAll(capture(rowsSlot)) } answers { Uni.createFrom().item(rowsSlot.captured) }
         stubClaim()
         every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         stubBorrowerCreditSucceeds()
 
         val loan = service.disburse(app.id, "dave").await().indefinitely()
@@ -547,7 +598,23 @@ class LendingServiceTest {
         every { installments.findAccruable(any(), any()) } returns Uni.createFrom().item(due)
         every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
 
         val outcome = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500).await().indefinitely()
 
@@ -675,7 +742,23 @@ class LendingServiceTest {
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
 
         val written = service.writeOff(
             loanId,
@@ -698,7 +781,7 @@ class LendingServiceTest {
 
         assertThatThrownBy {
             service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol")).await().indefinitely()
-        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("ACTIVE")
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("derecognized")
 
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 0) { loans.update(any()) }
@@ -765,7 +848,23 @@ class LendingServiceTest {
             Uni.createFrom().item(firstArg<List<LoanInstallment>>())
         }
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
     }
 
     @Test
@@ -1565,25 +1664,96 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `provisioning drains subsequent batches and a completed rerun posts nothing`() {
+        val first = currentLoanWithSchedule(LoanId.random())
+        val second = currentLoanWithSchedule(LoanId.random())
+        val savedRecords = mutableListOf<LoanProvisioningRecord>()
+        val postings = mutableListOf<LedgerPosting>()
+        every { loans.findUnprovisioned("2026-06", 1) } returnsMany listOf(
+            Uni.createFrom().item(listOf(first.first)),
+            Uni.createFrom().item(listOf(second.first)),
+            Uni.createFrom().item(emptyList<Loan>()),
+        )
+        listOf(first, second).forEach { (loan, schedule) ->
+            every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
+            every { installments.findByLoan(loan.id) } returns Uni.createFrom().item(schedule)
+            every { provisioning.findByLoanAndPeriod(loan.id, "2026-06") } returns Uni.createFrom().nullItem()
+            every { provisioning.findLatestByLoan(loan.id) } returns Uni.createFrom().nullItem()
+            mockRiskParameters(loan, "0.02")
+        }
+        every { provisioning.save(capture(savedRecords)) } answers { Uni.createFrom().item(savedRecords.last()) }
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
+            .await().indefinitely()
+        assertThat(outcome.loansAssessed).isEqualTo(2)
+        assertThat(outcome.journalsQueued).isEqualTo(2)
+        assertThat(savedRecords.map { it.loanId }).containsExactly(first.first.id, second.first.id)
+        assertThat(postings).hasSize(2)
+
+        val rerun = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
+            .await().indefinitely()
+        assertThat(rerun.loansAssessed).isZero()
+        assertThat(rerun.journalsQueued).isZero()
+        assertThat(savedRecords).hasSize(2)
+        assertThat(postings).hasSize(2)
+        verify(exactly = 4) { loans.findUnprovisioned("2026-06", 1) }
+    }
+
+    @Test
     fun `first provisioning cycle for a loan posts the full ECL as the delta`() {
         val loanId = LoanId.random()
         val (loan, schedule) = currentLoanWithSchedule(loanId)
         val postings = mutableListOf<LedgerPosting>()
         val savedRecords = mutableListOf<LoanProvisioningRecord>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().nullItem()
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(capture(savedRecords)) } answers { Uni.createFrom().item(savedRecords.last()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
             .await().indefinitely()
 
         assertThat(outcome.loansAssessed).isEqualTo(1)
-        assertThat(outcome.journalsPosted).isEqualTo(1)
+        assertThat(outcome.journalsQueued).isEqualTo(1)
         // No prior period: the whole Stage 1 ECL (108.00) is the delta, never a partial amount.
         assertThat(postings).hasSize(1)
         assertThat(postings.single().kind).isEqualTo(PostingKind.PROVISIONING)
@@ -1610,21 +1780,38 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val postings = mutableListOf<LedgerPosting>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         // Deteriorated: higher 12m PD this cycle, so the ECL (and thus the delta) increases.
         mockRiskParameters(loan, "0.04")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
             .await().indefinitely()
 
         // New ECL = 0.04 * 0.45 * 12000 = 216.00; prior = 108.00 -> delta = +108.00, not the full 216.00.
-        assertThat(outcome.journalsPosted).isEqualTo(1)
+        assertThat(outcome.journalsQueued).isEqualTo(1)
         assertThat(postings.single().amount).isEqualTo(eur("108.00"))
         assertThat(postings.single().amount.isPositive()).isTrue()
     }
@@ -1646,20 +1833,37 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val postings = mutableListOf<LedgerPosting>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
             .await().indefinitely()
 
         // New ECL = 108.00; prior = 216.00 -> delta = -108.00 (a release).
-        assertThat(outcome.journalsPosted).isEqualTo(1)
+        assertThat(outcome.journalsQueued).isEqualTo(1)
         assertThat(postings.single().amount).isEqualTo(eur("-108.00"))
         assertThat(postings.single().amount.isNegative()).isTrue()
     }
@@ -1680,18 +1884,19 @@ class LendingServiceTest {
             createdAt = fixedNow,
             modelVersion = "test-model-v1",
         )
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
             .await().indefinitely()
 
         assertThat(outcome.loansAssessed).isEqualTo(1)
-        assertThat(outcome.journalsPosted).isEqualTo(0)
+        assertThat(outcome.journalsQueued).isEqualTo(0)
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
         verify(exactly = 1) { provisioning.save(any()) }
@@ -1739,16 +1944,17 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
-        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-08") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
 
-        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+        service.runProvisioningCycle("2026-08", asOf, 500).await().indefinitely()
 
         // single{} asserts exactly one stage_changed event was emitted.
         val payload = emitted.single { it.eventType == "loan.stage_changed" }.payload
@@ -1781,12 +1987,13 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         // Same PD as the prior period's baseline: Stage 1 -> Stage 1, zero ECL delta.
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
 
@@ -1800,11 +2007,12 @@ class LendingServiceTest {
         val loanId = LoanId.random()
         val (loan, schedule) = currentLoanWithSchedule(loanId)
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().nullItem()
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
@@ -1812,7 +2020,8 @@ class LendingServiceTest {
         service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500).await().indefinitely()
 
         assertThat(emitted.filter { it.eventType == "loan.stage_changed" }).isEmpty()
-        assertThat(emitted.filter { it.eventType == "loan.provisioned" }).hasSize(1)
+        assertThat(emitted.filter { it.eventType == "lending.allowance.posting" }).hasSize(1)
+        assertThat(emitted.filter { it.eventType == "loan.provisioned" }).isEmpty()
     }
 
     @Test
@@ -1831,14 +2040,15 @@ class LendingServiceTest {
             createdAt = fixedNow,
             modelVersion = "test-model-v1",
         )
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().item(already)
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
             .await().indefinitely()
 
         assertThat(outcome.loansAssessed).isEqualTo(1)
-        assertThat(outcome.journalsPosted).isEqualTo(0)
+        assertThat(outcome.journalsQueued).isEqualTo(0)
         verify(exactly = 0) { installments.findByLoan(any()) }
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 0) { provisioning.save(any()) }
@@ -1879,6 +2089,146 @@ class LendingServiceTest {
         val disbursed = emitted.single { it.eventType == "loan.disbursed" }
         assertThat(occurredAtOf(disbursed)).isEqualTo(loan.disbursedAt.toInstant())
         assertThat(occurredAtOf(disbursed)).isEqualTo(expectedEventTime)
+    }
+
+    // ── ADR-0314 D5: loan rate terms ──────────────────────────────────────────────────────────
+
+    private val floating = LoanRateTerms(
+        rateType = LoanRateType.FLOATING,
+        rateIndex = LoanRateIndex.PRIBOR_3M,
+        spread = BigDecimal("0.025"),
+        resetFrequencyMonths = 3,
+        nextResetDate = firstDue.plusMonths(3),
+    )
+
+    private fun serviceWith(config: OriginationConfig) = LendingService(
+        applications, loans, installments, collateral, ledger,
+        valuation, riskParameters, events, clock, provisioning,
+        CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+        config,
+        NoOpOriginationWorkflowPort(),
+        OriginationDecisionService(
+            mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
+                every { assess(any(), any()) } returns Uni.createFrom().item(
+                    com.openbank.lending.application.port.out.CreditAssessment(null, false, "test-bureau", true),
+                )
+            },
+            StarterCreditPolicy(),
+            CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+            clock,
+        ),
+        borrowerAccounts,
+        borrowerCredit,
+        catalogLoanProfiles,
+    )
+
+    @Test
+    fun `a FLOATING application is refused while floating-rate origination is off`() {
+        // The default. Nothing reprices a floating loan at its reset date yet, so booking one would
+        // create a rate that silently never moves.
+        assertThatThrownBy {
+            service.apply(sampleRequest().copy(rateTerms = floating), "alice").await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("not enabled")
+        verify(exactly = 0) { applications.save(any()) }
+    }
+
+    @Test
+    fun `a FLOATING application is accepted when enabled and keeps its terms`() {
+        val slot: CapturingSlot<LoanApplication> = slot()
+        every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+
+        val result = serviceWith(OriginationConfig(autoApprove = false, floatingRateEnabled = true))
+            .apply(sampleRequest().copy(rateTerms = floating), "alice").await().indefinitely()
+
+        assertThat(result.rateTerms).isEqualTo(floating)
+    }
+
+    @Test
+    fun `malformed rate terms are refused before anything is saved`() {
+        val enabled = serviceWith(OriginationConfig(autoApprove = false, floatingRateEnabled = true))
+        listOf(
+            LoanRateTerms(rateType = LoanRateType.FIXED, rateIndex = LoanRateIndex.CZEONIA),
+            floating.copy(spread = null),
+            floating.copy(resetFrequencyMonths = 2),
+            floating.copy(nextResetDate = firstDue.minusDays(1)),
+        ).forEach { bad ->
+            assertThatThrownBy {
+                enabled.apply(sampleRequest().copy(rateTerms = bad), "alice").await().indefinitely()
+            }.describedAs(bad.toString()).isInstanceOf(IllegalArgumentException::class.java)
+        }
+        verify(exactly = 0) { applications.save(any()) }
+    }
+
+    @Test
+    fun `a catalog loan cannot be FLOATING`() {
+        val offeringId = UUID.fromString("10000000-0000-0000-0000-000000000099")
+        every { catalogLoanProfiles.resolvePublished(offeringId) } returns Uni.createFrom().item(
+            CatalogLoanProfile(
+                CatalogLoanSnapshot(offeringId, UUID.randomUUID(), "c".repeat(64), 2),
+                "EUR",
+                12,
+                AmortizationMethod.ANNUITY,
+                BigDecimal("0.0699"),
+                null,
+                null,
+            ),
+        )
+
+        assertThatThrownBy {
+            serviceWith(OriginationConfig(autoApprove = false, floatingRateEnabled = true))
+                .apply(sampleRequest().copy(catalogOfferingId = offeringId, rateTerms = floating), "alice")
+                .await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `disbursement carries the rate terms onto the loan and into loan disbursed`() {
+        val app = proposedApplication().copy(
+            status = OriginationState.READY_TO_DISBURSE,
+            decidedBy = "bob",
+            rateTerms = floating,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
+
+        val loan = service.disburse(app.id, "dave").await().indefinitely()
+
+        assertThat(loan.rateTerms).isEqualTo(floating)
+        val json = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(emitted.single { it.eventType == "loan.disbursed" }.payload)
+        assertThat(json["rateType"].asText()).isEqualTo("FLOATING")
+        assertThat(json["rateIndex"].asText()).isEqualTo("PRIBOR_3M")
+        assertThat(json["spread"].asText()).isEqualTo("0.025")
+        assertThat(json["resetFrequencyMonths"].asInt()).isEqualTo(3)
+        assertThat(json["nextResetDate"].asText()).isEqualTo(firstDue.plusMonths(3).toString())
+    }
+
+    @Test
+    fun `a FIXED loan disbursed says FIXED with null floating terms`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
+
+        service.disburse(app.id, "dave").await().indefinitely()
+
+        val json = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(emitted.single { it.eventType == "loan.disbursed" }.payload)
+        assertThat(json["rateType"].asText()).isEqualTo("FIXED")
+        // JSON null, not the string "null": isNull on the node, never asText().
+        assertThat(json["rateIndex"].isNull).isTrue()
+        assertThat(json["nextResetDate"].isNull).isTrue()
     }
 
     @Test
@@ -1984,22 +2334,23 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
-        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-08") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
 
-        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+        service.runProvisioningCycle("2026-08", asOf, 500).await().indefinitely()
 
         // Both events describe the same provisioning cycle, so both carry that cycle's instant —
         // NOT `asOf`, which is the accounting DATE and a different fact.
         assertThat(occurredAtOf(emitted.single { it.eventType == "loan.stage_changed" }))
             .isEqualTo(expectedEventTime)
-        assertThat(occurredAtOf(emitted.single { it.eventType == "loan.provisioned" }))
+        assertThat(occurredAtOf(preparedProvisionedEvidence(emitted)))
             .isEqualTo(expectedEventTime)
     }
 
@@ -2169,19 +2520,20 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findUnprovisioned(any(), any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
-        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
-        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-08") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(prior)
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
         every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
 
-        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+        service.runProvisioningCycle("2026-08", asOf, 500).await().indefinitely()
 
         val stage = emitted.single { it.eventType == "loan.stage_changed" }
-        val provisioned = emitted.single { it.eventType == "loan.provisioned" }
+        val provisioned = preparedProvisionedEvidence(emitted)
         assertThat(sourceServiceOf(stage)).isEqualTo("lending")
         assertThat(sourceServiceOf(provisioned)).isEqualTo("lending")
         assertLoanIdentity(stage, loanId.value)
@@ -2189,5 +2541,12 @@ class LendingServiceTest {
         // `loan.provisioned` carried no party at all before #8893, so an ECL history in the
         // warehouse could not be attributed to a borrower.
         assertThat(fieldOf(provisioned, "partyId")).isEqualTo(loan.partyId.toString())
+    }
+
+    /** Evidence is queued inside the command and becomes publishable only after ledger acknowledgement. */
+    private fun preparedProvisionedEvidence(messages: List<LendingOutboxMessage>): LendingOutboxMessage {
+        val command = messages.single { it.eventType == "lending.allowance.posting" }
+        val payload = com.fasterxml.jackson.databind.ObjectMapper().readTree(command.payload)["eventPayload"].asText()
+        return command.copy(eventType = "loan.provisioned", payload = payload)
     }
 }

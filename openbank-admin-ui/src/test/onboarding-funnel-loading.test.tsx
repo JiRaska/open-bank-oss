@@ -6,8 +6,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import OnboardingPage from '@/app/onboarding/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
-const FUNNEL = { REGISTERED: 12, KYC_OPEN: 4, KYC_UNDER_REVIEW: 1, SCA_PENDING: 3, ACTIVE: 40, BLOCKED: 1 }
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_OPERATOR'] } }, status: 'authenticated' }),
+  signIn: vi.fn(),
+}))
+
+const FUNNEL = { REGISTERED: 12, KYC_OPEN: 4, KYC_DOCUMENTS_REQUIRED: 2, KYC_UNDER_REVIEW: 1, SCA_PENDING: 3, ACTIVE: 40, BLOCKED: 1 }
 const RECORDS = { items: [], total: 0, page: 0, size: 20 }
+const record = (partyId: string, legalName: string, funnelStage: string) => ({
+  partyId, legalName, email: null, partyStatus: 'PENDING_KYC', kycCaseId: null, kycStatus: 'OPEN',
+  scaEnrolled: false, deviceCount: 0, funnelStage, blockedReason: null,
+  createdAt: '2026-09-09T10:00:00Z', updatedAt: '2026-09-09T10:01:00Z',
+})
 
 function response(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -122,5 +132,62 @@ describe('onboarding funnel loading (issue #8233)', () => {
     expect(await screen.findByText(/onboarding-service/i)).toBeVisible()
     expect(screen.queryByRole('group', { name: 'Onboarding stage filters' })).not.toBeInTheDocument()
     expect(screen.queryByText('0')).not.toBeInTheDocument()
+  })
+
+  it('never lets an older list response replace the active stage result', async () => {
+    const oldRequest = deferred<Response>()
+    const activeRequest = deferred<Response>()
+    let recordsCalls = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/onboarding/funnel')) return Promise.resolve(response(200, FUNNEL))
+      if (url.includes('/onboarding/records')) return ++recordsCalls === 1 ? oldRequest.promise : activeRequest.promise
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    renderPage()
+    const filters = await screen.findByRole('group', { name: 'Onboarding stage filters' })
+    fireEvent.click(within(filters).getByRole('button', { name: /KYC Open/ }))
+
+    await act(async () => {
+      activeRequest.resolve(response(200, {
+        items: [record('11111111-1111-4111-8111-111111111111', 'Current customer', 'KYC_OPEN')],
+        total: 1, page: 0, size: 20, stageFilter: 'KYC_OPEN',
+      }))
+      await activeRequest.promise
+    })
+    expect(await screen.findByText('Current customer')).toBeVisible()
+
+    await act(async () => {
+      oldRequest.resolve(response(200, {
+        items: [record('22222222-2222-4222-8222-222222222222', 'Stale customer', 'ACTIVE')],
+        total: 1, page: 0, size: 20,
+      }))
+      await oldRequest.promise
+    })
+    expect(screen.getByText('Current customer')).toBeVisible()
+    expect(screen.queryByText('Stale customer')).not.toBeInTheDocument()
+  })
+
+  it('purges records, funnel counts and the open drawer after authorization loss', async () => {
+    const current = record('11111111-1111-4111-8111-111111111111', 'Sensitive Customer', 'KYC_OPEN')
+    let unauthorized = false
+    vi.stubGlobal('fetch', routedFetch({
+      funnel: () => Promise.resolve(response(unauthorized ? 401 : 200, unauthorized ? { error: 'unauthorized' } : FUNNEL)),
+      records: () => Promise.resolve(response(unauthorized ? 401 : 200, unauthorized
+        ? { error: 'unauthorized' }
+        : { items: [current], total: 1, page: 0, size: 20 })),
+    }))
+
+    renderPage()
+    const row = await screen.findByRole('row', { name: /Sensitive Customer/ })
+    fireEvent.click(row)
+    expect(screen.getByRole('dialog')).toHaveTextContent('Sensitive Customer')
+    unauthorized = true
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[aria-label="Refresh onboarding"]')!)
+
+    await waitFor(() => expect(screen.queryByText('Sensitive Customer')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/session has expired|relace vypršela/)).toHaveLength(2)
   })
 })

@@ -76,7 +76,35 @@ data class Party(
      * [PartyStatus.MERGED] — the DB carries the same biconditional as a CHECK constraint.
      */
     val mergedIntoPartyId: UUID? = null,
-)
+    /**
+     * Derived from the current personal AML profile ([PartyAmlProfile]); `parties` is the source
+     * of truth other services (kyb for business onboarding) read these four facts from. Null /
+     * false until the person has declared a profile.
+     */
+    val pepFlag: Boolean = false,
+    val pepCategory: String? = null,
+    val fatcaStatus: String? = null,
+    val crsStatus: String? = null,
+) {
+    /**
+     * Whether a personal AML profile has been declared. A declaration always writes
+     * [fatcaStatus], and nothing else does, so a null [fatcaStatus] means "never declared".
+     */
+    val amlProfileDeclared: Boolean get() = fatcaStatus != null
+
+    /**
+     * The PEP fact as a reader may rely on it: `true` whenever the stored flag is set (a screening
+     * may set it before any declaration), `false` ONLY once a declaration said "not a PEP", and
+     * `null` — unknown — otherwise. The stored column defaults to false, so exposing it raw would
+     * present a person who was never asked as a known non-PEP, and a reader (kyb) would then skip
+     * the PEP question for them.
+     */
+    val knownPepFlag: Boolean? get() = when {
+        pepFlag -> true
+        amlProfileDeclared -> false
+        else -> null
+    }
+}
 
 data class Address(
     val line1: String,

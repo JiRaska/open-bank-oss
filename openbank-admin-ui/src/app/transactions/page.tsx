@@ -5,56 +5,56 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeftRight, Search, RefreshCw, Filter, X } from 'lucide-react'
+import { ArrowLeftRight, Search, SearchX, RefreshCw, Filter, X } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { EmptyState, PageHeader, StatusBadge } from '@/components/ui'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { PAYMENT_INSIGHTS } from '@/components/insights/catalog'
+import { Can } from '@/components/auth/AuthGuard'
+import {
+  parseTransactionSearchResult,
+  TRANSACTION_STATUSES,
+  TRANSACTION_TYPES,
+  type TransactionSearchResult,
+  type TransactionStatus,
+  type TransactionType,
+} from '@/lib/transactions/transactionSearchContract'
 
-const TYPE_COLOR: Record<string, string> = {
-  DEBIT:      'var(--danger)',
-  CREDIT:     'var(--success)',
-  TRANSFER:   'var(--accent)',
-  FEE:        'var(--warning)',
-  INTEREST:   '#7c3aed',
-  REVERSAL:   'var(--text-tertiary)',
-  ADJUSTMENT: 'var(--text-tertiary)',
+// A transaction type describes the movement; it is not a success/failure verdict.
+// Keep its taxonomy visually neutral and reserve semantic colour for lifecycle status.
+const TYPE_LABELS: Record<TransactionType, { cs: string; en: string }> = {
+  DEBIT: { cs: 'Debet', en: 'Debit' },
+  CREDIT: { cs: 'Kredit', en: 'Credit' },
+  TRANSFER: { cs: 'Převod', en: 'Transfer' },
+  FEE: { cs: 'Poplatek', en: 'Fee' },
+  INTEREST: { cs: 'Úrok', en: 'Interest' },
+  REVERSAL: { cs: 'Storno', en: 'Reversal' },
+  ADJUSTMENT: { cs: 'Úprava', en: 'Adjustment' },
 }
 
-interface TxResult {
-  id: string
-  referenceNumber: string
-  type: string
-  sourceAccountId?: string
-  targetAccountId?: string
-  amount: number
-  currencyCode: string
-  status: string
-  description?: string
-  valueDate: string
-  bookingDate: string
-  initiatedAt: string
-  completedAt?: string
+const STATUS_LABELS: Record<TransactionStatus, { cs: string; en: string }> = {
+  PENDING: { cs: 'Čeká', en: 'Pending' },
+  PROCESSING: { cs: 'Zpracovává se', en: 'Processing' },
+  COMPLETED: { cs: 'Dokončeno', en: 'Completed' },
+  FAILED: { cs: 'Selhalo', en: 'Failed' },
+  REVERSED: { cs: 'Stornováno', en: 'Reversed' },
 }
 
-interface SearchResult {
-  data: TxResult[]
-  count: number
-  limit: number
-  offset: number
-}
-
-const CHANNELS = ['API', 'BRANCH', 'ATM', 'MOBILE', 'INTERNET', 'BATCH']
-const STATUSES = ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REVERSED']
-const TYPES    = ['DEBIT', 'CREDIT', 'TRANSFER', 'FEE', 'INTEREST', 'REVERSAL', 'ADJUSTMENT']
 const PAGE_SIZE = 50
+const REQUEST_SIZE = PAGE_SIZE + 1
+
+interface TransactionResultPage extends TransactionSearchResult {
+  hasNextPage: boolean
+}
 
 export default function TransactionsPage() {
   const { t, language } = useLanguage()
   const [showFilters, setShowFilters] = useState(false)
   const [loading, setLoading] = useState(false)
   const [failure, setFailure] = useState<BffFailure | null>(null)
-  const [result, setResult] = useState<SearchResult | null>(null)
+  const [result, setResult] = useState<TransactionResultPage | null>(null)
   const [resultQueryKey, setResultQueryKey] = useState<string | null>(null)
   const searchGeneration = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
@@ -72,11 +72,19 @@ export default function TransactionsPage() {
   const [dateTo, setDateTo]               = useState('')
   const [amountMin, setAmountMin]         = useState('')
   const [amountMax, setAmountMax]         = useState('')
-  const [channel, setChannel]             = useState('')
 
-  const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].some(Boolean)
-  const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].join('\u0000')
+  const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].some(Boolean)
+  // Kept from this branch (the empty states read it), minus `channel`: #9410 removed that filter
+  // deliberately — neither openbank-transaction-service's openapi.yaml nor transactionSearchContract
+  // has a `channel`, so the control was sending a parameter the API does not know.
+  const hasSearchCriteria = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].some(Boolean)
+  const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].join('\u0000')
   const queryChanged = result !== null && resultQueryKey !== queryKey
+  const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo)
+  const invalidAmountRange = Boolean(amountMin && amountMax && Number(amountMin) > Number(amountMax))
+  const invalidSearchRange = invalidDateRange || invalidAmountRange
+  const typeLabel = (value: TransactionType) => TYPE_LABELS[value][language]
+  const statusLabel = (value: TransactionStatus) => STATUS_LABELS[value][language]
 
   useEffect(() => () => {
     searchGeneration.current += 1
@@ -96,12 +104,18 @@ export default function TransactionsPage() {
   }
 
   async function search(offset = 0) {
+    if (invalidSearchRange) return
     const generation = ++searchGeneration.current
     activeRequest.current?.abort()
     const controller = new AbortController()
     activeRequest.current = controller
     const requestedQueryKey = queryKey
+    const canRetainSnapshot = result !== null && resultQueryKey === requestedQueryKey
     setLoading(true); setFailure(null)
+    if (!canRetainSnapshot) {
+      setResult(null)
+      setResultQueryKey(null)
+    }
     try {
       const params = new URLSearchParams()
       if (accountId)     params.set('accountId', accountId)
@@ -116,13 +130,13 @@ export default function TransactionsPage() {
       if (dateTo)        params.set('dateTo', dateTo)
       if (amountMin)     params.set('amountMin', amountMin)
       if (amountMax)     params.set('amountMax', amountMax)
-      if (channel)       params.set('channel', channel)
-      params.set('limit', String(PAGE_SIZE))
+      // One-row lookahead removes the false "Next" affordance when a page has exactly 50 rows.
+      params.set('limit', String(REQUEST_SIZE))
       params.set('offset', String(offset))
 
       const res = await fetch(
         svcUrl('transaction-service', '/api/v1/transactions/search', Object.fromEntries(params)),
-        { cache: 'no-store', signal: controller.signal },
+        { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) },
       )
       if (generation !== searchGeneration.current) return
       if (!res.ok) {
@@ -131,12 +145,35 @@ export default function TransactionsPage() {
         // sandbox), not that the search itself failed. Distinguish the cases so
         // the operator sees a meaningful state instead of a raw "HTTP 404".
         const nextFailure = await classifyBffFailure(res)
-        if (generation === searchGeneration.current) setFailure(nextFailure)
+        if (generation === searchGeneration.current) {
+          if (res.status === 401 || res.status === 403) {
+            setResult(null)
+            setResultQueryKey(null)
+          }
+          setFailure(res.status === 401 || res.status === 403 ? 'unauthorized' : nextFailure)
+        }
         return
       }
-      const nextResult = await res.json() as SearchResult
+      const raw = await res.json() as unknown
       if (generation !== searchGeneration.current) return
-      setResult(nextResult)
+      let nextResult: TransactionSearchResult
+      try {
+        nextResult = parseTransactionSearchResult(raw)
+      } catch {
+        setFailure('error')
+        return
+      }
+      if (nextResult.limit !== REQUEST_SIZE || nextResult.offset !== offset) {
+        setFailure('error')
+        return
+      }
+      setResult({
+        ...nextResult,
+        data: nextResult.data.slice(0, PAGE_SIZE),
+        count: Math.min(nextResult.count, PAGE_SIZE),
+        limit: PAGE_SIZE,
+        hasNextPage: nextResult.data.length > PAGE_SIZE,
+      })
       setResultQueryKey(requestedQueryKey)
     } catch {
       // Network-level failure (BFF unreachable from the browser).
@@ -151,7 +188,12 @@ export default function TransactionsPage() {
     invalidatePendingSearch()
     setIban(''); setBban(''); setReferenceNumber(''); setEndToEndId('')
     setCounterparty(''); setStatus(''); setType(''); setDateFrom('')
-    setDateTo(''); setAmountMin(''); setAmountMax(''); setChannel('')
+    setDateTo(''); setAmountMin(''); setAmountMax('')
+  }
+
+  function clearSearchCriteria() {
+    clearFilters()
+    setAccountId('')
   }
 
   return (
@@ -162,6 +204,13 @@ export default function TransactionsPage() {
         icon={<ArrowLeftRight size={18} aria-hidden="true" />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Transakce', 'Transactions')}</span></div>}
       />
+
+      <Can permission="system:view">
+        <ContextualInsights dashboardUid="openbank-sla" panels={PAYMENT_INSIGHTS}
+          titleCs="Zdraví plateb" titleEn="Payment health"
+          descriptionCs="Úspěšnost, rychlost a SLA napříč platebními cestami."
+          descriptionEn="Success, speed and SLA across payment rails." />
+      </Can>
 
       <div className="card" style={{ marginBottom: '16px' }}>
         {/* Primary search bar */}
@@ -190,13 +239,20 @@ export default function TransactionsPage() {
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => setShowFilters(f => !f)} aria-expanded={showFilters} aria-controls="transaction-search-filters">
             <Filter size={13} />
-            {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax,channel].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
+            {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => search()} disabled={loading} aria-busy={loading} aria-label={loading ? t('Vyhledávání transakcí', 'Searching transactions') : t('Vyhledat transakce', 'Search transactions')}>
+          <button type="button" className="btn btn-primary" onClick={() => search()} disabled={loading || invalidSearchRange} aria-busy={loading} aria-label={loading ? t('Vyhledávání transakcí', 'Searching transactions') : t('Vyhledat transakce', 'Search transactions')}>
             {loading ? <RefreshCw size={13} aria-hidden="true" className="animate-spin" /> : <Search size={13} aria-hidden="true" />}
             {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
           </button>
         </div>
+
+        {invalidDateRange && <div id="transaction-date-range-error" role="alert" style={{ padding: '10px 16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger-border)', fontSize: '12px' }}>
+          {t('Datum od musí být nejpozději datem do.', 'The start date must be on or before the end date.')}
+        </div>}
+        {invalidAmountRange && <div id="transaction-amount-range-error" role="alert" style={{ padding: '10px 16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger-border)', fontSize: '12px' }}>
+          {t('Částka od nesmí být vyšší než částka do.', 'The minimum amount cannot exceed the maximum amount.')}
+        </div>}
 
         {/* Extended filters */}
         {showFilters && (
@@ -218,38 +274,31 @@ export default function TransactionsPage() {
                 <label htmlFor="transaction-status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
                 <select id="transaction-status" className="input" style={{ width: '100%' }} value={status} onChange={e => updateSearchField(setStatus, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
-                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  {TRANSACTION_STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)} ({s})</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-type" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Typ transakce', 'Transaction type')}</label>
                 <select id="transaction-type" className="input" style={{ width: '100%' }} value={type} onChange={e => updateSearchField(setType, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
-                  {TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="transaction-channel" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Kanál', 'Channel')}</label>
-                <select id="transaction-channel" className="input" style={{ width: '100%' }} value={channel} onChange={e => updateSearchField(setChannel, e.target.value)}>
-                  <option value="">{t('Vše', 'All')}</option>
-                  {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+                  {TRANSACTION_TYPES.map(ty => <option key={ty} value={ty}>{typeLabel(ty)} ({ty})</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-date-from" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum od', 'Date from')}</label>
-                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} value={dateFrom} onChange={e => updateSearchField(setDateFrom, e.target.value)} />
+                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} aria-invalid={invalidDateRange} aria-describedby={invalidDateRange ? 'transaction-date-range-error' : undefined} value={dateFrom} onChange={e => updateSearchField(setDateFrom, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-date-to" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum do', 'Date to')}</label>
-                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} value={dateTo} onChange={e => updateSearchField(setDateTo, e.target.value)} />
+                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} aria-invalid={invalidDateRange} aria-describedby={invalidDateRange ? 'transaction-date-range-error' : undefined} value={dateTo} onChange={e => updateSearchField(setDateTo, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-amount-min" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka od (CZK)', 'Amount from (CZK)')}</label>
-                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} placeholder="0.00" value={amountMin} onChange={e => updateSearchField(setAmountMin, e.target.value)} />
+                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} aria-invalid={invalidAmountRange} aria-describedby={invalidAmountRange ? 'transaction-amount-range-error' : undefined} placeholder="0.00" value={amountMin} onChange={e => updateSearchField(setAmountMin, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-amount-max" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka do (CZK)', 'Amount to (CZK)')}</label>
-                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} placeholder="999999.00" value={amountMax} onChange={e => updateSearchField(setAmountMax, e.target.value)} />
+                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} aria-invalid={invalidAmountRange} aria-describedby={invalidAmountRange ? 'transaction-amount-range-error' : undefined} placeholder="999999.00" value={amountMax} onChange={e => updateSearchField(setAmountMax, e.target.value)} />
               </div>
             </div>
             {hasFilters && (
@@ -276,8 +325,8 @@ export default function TransactionsPage() {
               </span>
               <span>{t(`Stránka ${Math.floor(result.offset / PAGE_SIZE) + 1}`, `Page ${Math.floor(result.offset / PAGE_SIZE) + 1}`)}</span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="table">
+            <div className="table-scroll-region" role="region" aria-label={t('Posuvná tabulka výsledků transakcí', 'Scrollable transaction results table')} tabIndex={0}>
+              <table className="table" style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
                     <th>{t('Reference', 'Reference')}</th>
@@ -292,17 +341,32 @@ export default function TransactionsPage() {
                 </thead>
                 <tbody>
                   {result.data.length === 0 ? (
-                    <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: '32px' }}>{t('Žádné transakce', 'No transactions')}</td></tr>
+                    <tr><td colSpan={8} style={{ padding: '16px' }}>
+                      <EmptyState
+                        icon={<SearchX size={22} />}
+                        title={hasSearchCriteria
+                          ? t('Žádná transakce neodpovídá zadaným kritériím', 'No transactions match your search criteria')
+                          : t('V deníku zatím nejsou žádné transakce', 'No transactions have been recorded yet')}
+                        description={hasSearchCriteria
+                          ? t('Rozšiřte hledání nebo vymažte kritéria. Prázdný výsledek znamená úspěšně dokončené hledání, ne nedostupnost služby.', 'Broaden the search or clear its criteria. An empty result means the search completed successfully, not that the service is unavailable.')
+                          : t('Vyhledávání proběhlo správně, ale transakční služba nevrátila žádný záznam.', 'The search completed successfully, but the transaction service returned no records.')}
+                        action={hasSearchCriteria ? (
+                          <button type="button" className="btn btn-secondary" onClick={clearSearchCriteria}>
+                            <X size={13} aria-hidden="true" /> {t('Vymazat kritéria', 'Clear search criteria')}
+                          </button>
+                        ) : undefined}
+                      />
+                    </td></tr>
                   ) : result.data.map(tx => (
                     <tr key={tx.id}>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>{tx.referenceNumber}</td>
-                      <td><span style={{ fontSize: '11px', fontWeight: 600, color: TYPE_COLOR[tx.type] || 'var(--text-secondary)' }}>{tx.type}</span></td>
-                      <td style={{ fontWeight: 600, color: tx.type === 'DEBIT' ? 'var(--danger)' : 'var(--success)' }}>
-                        {tx.type === 'DEBIT' ? '-' : '+'}{Number(tx.amount).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 })} {tx.currencyCode}
+                      <td><StatusBadge status={tx.type} tone="neutral" label={typeLabel(tx.type)} /></td>
+                      <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                        {tx.amount.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 })} {tx.currencyCode}
                       </td>
-                      <td><StatusBadge status={tx.status} /></td>
-                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId?.slice(0, 8)}…</td>
-                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.targetAccountId?.slice(0, 8)}…</td>
+                      <td><StatusBadge status={tx.status} label={statusLabel(tx.status)} /></td>
+                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId ? `${tx.sourceAccountId.slice(0, 8)}…` : '—'}</td>
+                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.targetAccountId ? `${tx.targetAccountId.slice(0, 8)}…` : '—'}</td>
                       <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>{tx.description || '—'}</td>
                       <td style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{tx.bookingDate}</td>
                     </tr>
@@ -324,7 +388,7 @@ export default function TransactionsPage() {
                 type="button"
                 className="btn btn-secondary btn-sm"
                 aria-label={t('Další stránka transakcí', 'Next transaction page')}
-                disabled={loading || queryChanged || result.data.length !== PAGE_SIZE}
+                disabled={loading || queryChanged || !result.hasNextPage}
                 onClick={() => search(result.offset + PAGE_SIZE)}
               >
                 {t('Další', 'Next')}
@@ -334,11 +398,12 @@ export default function TransactionsPage() {
         )}
 
         {!result && !loading && !failure && (
-          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
-            <Search size={32} style={{ opacity: 0.3, marginBottom: '12px' }} />
-            <div style={{ fontSize: '14px' }}>{t('Zadejte Account ID, IBAN, BBAN nebo jiný parametr a klikněte Hledat', 'Enter Account ID, IBAN, BBAN or another parameter and click Search')}</div>
-            <div style={{ fontSize: '12px', marginTop: '6px' }}>{t('Podporuje: UUID, IBAN (CZ65 0800…), BBAN (123456-1234567890/0800), reference číslo, protistrana, datum, částka', 'Supports: UUID, IBAN (CZ65 0800…), BBAN (123456-1234567890/0800), reference number, counterparty, date, amount')}</div>
-          </div>
+          <EmptyState
+            className="transaction-search-empty"
+            icon={<Search size={22} />}
+            title={t('Najděte transakci podle údajů, které máte po ruce', 'Find a transaction using the details you have')}
+            description={t('Začněte ID účtu, IBANem nebo BBANem. Rozšířené filtry podporují také referenci, protistranu, období, částku a stav.', 'Start with an account ID, IBAN or BBAN. Advanced filters also support reference, counterparty, date range, amount and status.')}
+          />
         )}
       </div>
     </div>

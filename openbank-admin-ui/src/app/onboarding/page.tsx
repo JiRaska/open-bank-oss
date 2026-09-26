@@ -4,60 +4,34 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
-import { PageHeader } from '@/components/ui'
+import { Drawer, PageHeader } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import {
+  ONBOARDING_STAGES as STAGES,
+  parseFunnelCounts,
+  parseOnboardingRecordPage,
+  type OnboardingRecord,
+  type OnboardingStage as Stage,
+} from '@/lib/onboarding/evidence'
 
 const SVC = 'onboarding-service'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface OnboardingRecord {
-  partyId: string
-  legalName: string | null
-  email: string | null
-  partyStatus: string
-  kycCaseId: string | null
-  kycStatus: string | null
-  scaEnrolled: boolean
-  deviceCount: number
-  funnelStage: string
-  blockedReason: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-interface RecordPage {
-  items: OnboardingRecord[]
-  total: number
-  page: number
-  size: number
-  stageFilter?: string
-}
-
-type FunnelCounts = Record<string, number>
+type FunnelCounts = Record<Stage, number>
 
 // ── Stage display config ──────────────────────────────────────────────────────
-
-const STAGES = [
-  'REGISTERED',
-  'KYC_OPEN',
-  'KYC_UNDER_REVIEW',
-  'SCA_PENDING',
-  'ACTIVE',
-  'BLOCKED',
-] as const
-
-type Stage = typeof STAGES[number]
 
 const STAGE_LABEL_CS: Record<Stage, string> = {
   REGISTERED:               'Registrován',
   KYC_OPEN:                 'KYC otevřeno',
+  KYC_DOCUMENTS_REQUIRED:  'KYC — dokumenty',
   KYC_UNDER_REVIEW:         'KYC — přezkoumání',
   SCA_PENDING:              'SCA čeká',
   ACTIVE:                   'Aktivní',
@@ -67,6 +41,7 @@ const STAGE_LABEL_CS: Record<Stage, string> = {
 const STAGE_LABEL_EN: Record<Stage, string> = {
   REGISTERED:               'Registered',
   KYC_OPEN:                 'KYC Open',
+  KYC_DOCUMENTS_REQUIRED:  'KYC Documents',
   KYC_UNDER_REVIEW:         'KYC Under Review',
   SCA_PENDING:              'SCA Pending',
   ACTIVE:                   'Active',
@@ -76,6 +51,7 @@ const STAGE_LABEL_EN: Record<Stage, string> = {
 const STAGE_COLOR: Record<Stage, string> = {
   REGISTERED:               'var(--text-muted)',
   KYC_OPEN:                 'var(--yellow)',
+  KYC_DOCUMENTS_REQUIRED:  '#f59e0b',
   KYC_UNDER_REVIEW:         'var(--accent)',
   SCA_PENDING:              '#a855f7',
   ACTIVE:                   'var(--green)',
@@ -101,9 +77,24 @@ export default function OnboardingPage() {
   const [stage, setStage] = useState<Stage | ''>('')
   const [loading, setLoading] = useState(true)
   const [listUnavail, setListUnavail] = useState<{ kind: UnavailableKind } | null>(null)
+  const countsRequest = useRef(0)
+  const recordsRequest = useRef(0)
 
   // drawer
   const [selected, setSelected] = useState<OnboardingRecord | null>(null)
+
+  const purgeAuthorizedEvidence = useCallback(() => {
+    countsRequest.current += 1
+    recordsRequest.current += 1
+    setCounts(null)
+    setRecords([])
+    setTotal(0)
+    setSelected(null)
+    setCountsLoading(false)
+    setLoading(false)
+    setCountsUnavail({ kind: 'unauthorized' })
+    setListUnavail({ kind: 'unauthorized' })
+  }, [])
 
   const stageLabel = useCallback((s: string) =>
     language === 'cs'
@@ -115,41 +106,63 @@ export default function OnboardingPage() {
   // ── Load funnel counts ──────────────────────────────────────────────────────
 
   const loadCounts = useCallback(async () => {
+    const request = ++countsRequest.current
     setCountsLoading(true); setCountsUnavail(null)
     try {
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/funnel'), { signal: AbortSignal.timeout(5000) })
-      if (!res.ok) { setCountsUnavail({ kind: await classifyBffFailure(res) }); return }
-      setCounts(await res.json())
+      if (!res.ok) {
+        const kind = await classifyBffFailure(res)
+        if (request !== countsRequest.current) return
+        if (kind === 'unauthorized') purgeAuthorizedEvidence()
+        else setCountsUnavail({ kind })
+        return
+      }
+      const parsed = parseFunnelCounts(await res.json())
+      if (request !== countsRequest.current) return
+      if (!parsed) { setCountsUnavail({ kind: 'error' }); return }
+      setCounts(parsed)
     } catch {
-      setCountsUnavail({ kind: 'unreachable' })
-    } finally { setCountsLoading(false) }
-  }, [])
+      if (request === countsRequest.current) setCountsUnavail({ kind: 'unreachable' })
+    } finally {
+      if (request === countsRequest.current) setCountsLoading(false)
+    }
+  }, [purgeAuthorizedEvidence])
 
   // ── Load records list ───────────────────────────────────────────────────────
 
   const loadRecords = useCallback(async (pg: number, stg: Stage | '') => {
-    setLoading(true); setListUnavail(null)
+    const request = ++recordsRequest.current
+    setLoading(true); setListUnavail(null); setSelected(null)
     try {
       const query: Record<string, string> = { page: String(pg), size: '20' }
       if (stg) query.stage = stg
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/records', query), { signal: AbortSignal.timeout(5000) })
-      if (!res.ok) { setListUnavail({ kind: await classifyBffFailure(res) }); setRecords([]); return }
-      const data: RecordPage = await res.json()
-      setRecords(data.items ?? [])
+      if (!res.ok) {
+        const kind = await classifyBffFailure(res)
+        if (request !== recordsRequest.current) return
+        if (kind === 'unauthorized') purgeAuthorizedEvidence()
+        else { setListUnavail({ kind }); setRecords([]) }
+        return
+      }
+      const data = parseOnboardingRecordPage(await res.json(), pg, stg)
+      if (request !== recordsRequest.current) return
+      if (!data) { setListUnavail({ kind: 'error' }); setRecords([]); return }
+      setRecords(data.items)
       setTotal(data.total ?? 0)
     } catch {
-      setListUnavail({ kind: 'unreachable' })
-      setRecords([])
-    } finally { setLoading(false) }
-  }, [])
+      if (request === recordsRequest.current) { setListUnavail({ kind: 'unreachable' }); setRecords([]) }
+    } finally {
+      if (request === recordsRequest.current) setLoading(false)
+    }
+  }, [purgeAuthorizedEvidence])
 
   const refresh = useCallback(() => {
     loadCounts()
     loadRecords(page, stage)
   }, [loadCounts, loadRecords, page, stage])
 
-  useEffect(() => { loadCounts() }, [loadCounts])
-  useEffect(() => { loadRecords(page, stage) }, [loadRecords, page, stage])
+  useEffect(() => { void Promise.resolve().then(loadCounts) }, [loadCounts])
+  useEffect(() => { void Promise.resolve().then(() => loadRecords(page, stage)) }, [loadRecords, page, stage])
 
   const handleStageFilter = (s: Stage | '') => {
     setStage(s)
@@ -185,7 +198,7 @@ export default function OnboardingPage() {
           aria-live="polite"
           aria-busy="true"
           aria-label={t('Načítání počtů funnelu…', 'Loading funnel counts…')}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: '10px', marginBottom: '20px' }}
         >
           {STAGES.map(s => (
             <div key={s} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px 8px', textAlign: 'center' }}>
@@ -202,7 +215,7 @@ export default function OnboardingPage() {
           <DataUnavailable kind={countsUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Funnel počty', 'Funnel counts')} lang={language} dense />
         </div>
       ) : (
-        <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: '10px', marginBottom: '20px' }}>
           {STAGES.map(s => {
             const count = counts?.[s] ?? 0
             const isActive = stage === s
@@ -369,19 +382,13 @@ function RecordDrawer({
   const stageColor = STAGE_COLOR[record.funnelStage as Stage] ?? 'var(--text-muted)'
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 40 }}
-      />
-      {/* Drawer */}
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: '420px',
-        background: 'var(--surface)', borderLeft: '1px solid var(--border)',
-        zIndex: 50, overflowY: 'auto', padding: '24px',
-        boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
-      }}>
+    <Drawer
+      title={t(`Detail onboardingu ${record.legalName ?? record.partyId}`, `Onboarding details for ${record.legalName ?? record.partyId}`)}
+      description={t('Stav onboardingu, identity a související bankovní odkazy.', 'Onboarding, identity and related banking status.')}
+      onClose={onClose}
+      width={420}
+    >
+      <div style={{ padding: 24 }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
@@ -390,8 +397,8 @@ function RecordDrawer({
               {record.partyId}
             </div>
           </div>
-          <button onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít', 'Close')}>
-            <X size={14} />
+          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
 
@@ -440,7 +447,7 @@ function RecordDrawer({
           )}
         </div>
       </div>
-    </>
+    </Drawer>
   )
 }
 

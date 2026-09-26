@@ -7,22 +7,30 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import TransactionsPage from '@/app/transactions/page'
 
+vi.mock('@/components/auth/AuthGuard', () => ({
+  Can: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 function transaction(index: number) {
   return {
-    id: `transaction-${index}`,
+    id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
     referenceNumber: `TXN-${String(index).padStart(3, '0')}`,
     type: 'CREDIT',
+    sourceAccountId: null,
+    targetAccountId: null,
     amount: 100 + index,
     currencyCode: 'CZK',
     status: 'COMPLETED',
+    description: null,
     valueDate: '2026-09-01',
     bookingDate: '2026-09-01',
     initiatedAt: '2026-09-01T08:00:00Z',
+    completedAt: '2026-09-01T08:00:01Z',
   }
 }
 
 function resultResponse(data: ReturnType<typeof transaction>[], offset: number) {
-  return new Response(JSON.stringify({ data, count: data.length, limit: 50, offset }), {
+  return new Response(JSON.stringify({ data, count: data.length, limit: 51, offset }), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })
@@ -36,7 +44,7 @@ afterEach(() => {
 
 describe('Transaction search pagination', () => {
   it('requests the next 50-row page with offset 50', async () => {
-    const firstPage = Array.from({ length: 50 }, (_, index) => transaction(index))
+    const firstPage = Array.from({ length: 51 }, (_, index) => transaction(index))
     const secondPage = [transaction(50)]
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input), 'https://admin.openbank.example')
@@ -60,12 +68,12 @@ describe('Transaction search pagination', () => {
     expect(screen.getByRole('button', { name: 'Next transaction page' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Previous transaction page' })).toBeEnabled()
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[0][0])).toContain('limit=50&offset=0')
-    expect(String(fetchMock.mock.calls[1][0])).toContain('limit=50&offset=50')
+    expect(String(fetchMock.mock.calls[0][0])).toContain('limit=51&offset=0')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('limit=51&offset=50')
   })
 
   it('resets to offset 0 when a changed filter is searched', async () => {
-    const firstPage = Array.from({ length: 50 }, (_, index) => transaction(index))
+    const firstPage = Array.from({ length: 51 }, (_, index) => transaction(index))
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input), 'https://admin.openbank.example')
       const offset = Number(url.searchParams.get('offset'))
@@ -88,11 +96,11 @@ describe('Transaction search pagination', () => {
     await screen.findByText('TXN-099')
     const latestUrl = String(fetchMock.mock.calls.at(-1)?.[0])
     expect(latestUrl).toContain('iban=CZ6508000000192000145399')
-    expect(latestUrl).toContain('limit=50&offset=0')
+    expect(latestUrl).toContain('limit=51&offset=0')
   })
 
   it('does not let a superseded page response replace a newer search', async () => {
-    const firstPage = Array.from({ length: 50 }, (_, index) => transaction(index))
+    const firstPage = Array.from({ length: 51 }, (_, index) => transaction(index))
     let resolveNextPage: ((response: Response) => void) | undefined
     const nextPage = new Promise<Response>(resolve => { resolveNextPage = resolve })
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

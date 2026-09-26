@@ -59,24 +59,24 @@ interface AppStatus {
 }
 
 const STATUS_META: Record<Status, { cs: string; en: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live:    { cs: 'Live (běží dnes)',            en: 'Live (running today)',         color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2 },
-  partial: { cs: 'Částečně (nasazeno, neúplné)', en: 'Partial (deployed, incomplete)', color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: CircleDashed },
-  planned: { cs: 'Plánováno',                   en: 'Planned',                      color: '#94a3b8', bg: '#f8fafc', border: '#cbd5e1', Icon: Circle },
+  live:    { cs: 'Live (běží dnes)',            en: 'Live (running today)',         color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  partial: { cs: 'Částečně (nasazeno, neúplné)', en: 'Partial (deployed, incomplete)', color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  planned: { cs: 'Plánováno',                   en: 'Planned',                      color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
 
-const LENS_META: Record<Lens, { cs: string; en: string; color: string; Icon: React.ElementType }> = {
-  governance: { cs: 'Governance',   en: 'Governance', color: '#0891b2', Icon: Scale },
-  technology: { cs: 'Technologie',  en: 'Technology', color: '#2563eb', Icon: Cpu },
-  security:   { cs: 'Bezpečnost',   en: 'Security',   color: '#dc2626', Icon: ShieldCheck },
+const LENS_META: Record<Lens, { cs: string; en: string; color: string; solid: string; Icon: React.ElementType }> = {
+  governance: { cs: 'Governance',   en: 'Governance', color: 'var(--info-text)',   solid: 'var(--info)', Icon: Scale },
+  technology: { cs: 'Technologie',  en: 'Technology', color: 'var(--accent-text)', solid: 'var(--accent)', Icon: Cpu },
+  security:   { cs: 'Bezpečnost',   en: 'Security',   color: 'var(--danger-text)', solid: 'var(--danger)', Icon: ShieldCheck },
 }
 
 function adrStatusColor(s: AdrStatus): string {
   switch (s) {
-    case 'Accepted':   return '#059669'
-    case 'Proposed':   return '#2563eb'
-    case 'Deprecated': return '#d97706'
-    case 'Rejected':   return '#dc2626'
-    default:           return '#94a3b8'
+    case 'Accepted':   return 'var(--success-text)'
+    case 'Proposed':   return 'var(--info-text)'
+    case 'Deprecated': return 'var(--warning-text)'
+    case 'Rejected':   return 'var(--danger-text)'
+    default:           return 'var(--text-primary)'
   }
 }
 
@@ -132,8 +132,8 @@ export default function CustomerAppDossierPage() {
       {loading && <div role="status" aria-live="polite" className="card" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Načítám…', 'Loading…')}</div>}
 
       {!loading && data?.available === false && (
-        <div className="card" style={{ padding: 24, borderTop: '3px solid #d97706' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: '#d97706', fontWeight: 700 }}>
+        <div className="card" style={{ padding: 24, borderTop: '3px solid var(--warning)' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--warning-text)', fontWeight: 700 }}>
             <FileWarning size={18} /> {t('Artefakt app-status.json není k dispozici', 'app-status.json artefact unavailable')}
           </div>
           <p style={{ color: 'var(--text-secondary)', marginTop: 8, fontSize: 13 }}>
@@ -148,7 +148,7 @@ export default function CustomerAppDossierPage() {
       {!loading && data?.available !== false && (
         <>
           {/* Honesty banner: where the facts come from + freshness + decision-missing */}
-          <div className="card" style={{ padding: 16, marginBottom: 16, borderTop: '3px solid #0891b2' }}>
+          <div className="card" style={{ padding: 16, marginBottom: 16, borderTop: '3px solid var(--info)' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 620 }}>
                 {t(
@@ -173,7 +173,7 @@ export default function CustomerAppDossierPage() {
               </div>
             </div>
             {decisionMissing.length > 0 && (
-              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#dc2626', fontWeight: 600 }}>
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--danger-text)', fontWeight: 600 }}>
                 <AlertTriangle size={15} />
                 {t(
                   `${decisionMissing.length} schopnost(í) bez governing ADR — rozhodnutí chybí: `,
@@ -207,7 +207,7 @@ export default function CustomerAppDossierPage() {
 
           {/* Lens filter */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-            <LensChip active={lensFilter === 'all'} onClick={() => setLensFilter('all')} color="#475569" label={t('Vše', 'All')} count={caps.length} />
+            <LensChip active={lensFilter === 'all'} onClick={() => setLensFilter('all')} color="var(--text-primary)" solid="var(--text-secondary)" label={t('Vše', 'All')} count={caps.length} />
             {(Object.keys(LENS_META) as Lens[]).map((l) => {
               const m = LENS_META[l]
               return (
@@ -216,6 +216,7 @@ export default function CustomerAppDossierPage() {
                   active={lensFilter === l}
                   onClick={() => setLensFilter(l)}
                   color={m.color}
+                  solid={m.solid}
                   Icon={m.Icon}
                   label={language === 'cs' ? m.cs : m.en}
                   count={caps.filter((c) => c.lens.includes(l)).length}
@@ -241,7 +242,7 @@ export default function CustomerAppDossierPage() {
                     {c.lens.map((l) => {
                       const lm = LENS_META[l]
                       return (
-                        <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: lm.color, background: `${lm.color}12`, border: `1px solid ${lm.color}30`, padding: '1px 6px', borderRadius: 10 }}>
+                        <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: lm.color, background: `color-mix(in srgb, ${lm.solid} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${lm.solid} 35%, var(--border))`, padding: '1px 6px', borderRadius: 10 }}>
                           <lm.Icon size={9} /> {language === 'cs' ? lm.cs : lm.en}
                         </span>
                       )
@@ -252,14 +253,14 @@ export default function CustomerAppDossierPage() {
 
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                     {c.decisionMissing && c.resolvedAdrs.length === 0 && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1px solid #fca5a5', padding: '2px 8px', borderRadius: 20 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', padding: '2px 8px', borderRadius: 20 }}>
                         <AlertTriangle size={11} /> {t('rozhodnutí chybí', 'decision missing')}
                       </span>
                     )}
                     {c.resolvedAdrs.map((a) => {
                       const col = adrStatusColor(a.status)
                       const chip = (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: col, background: `${col}12`, border: `1px solid ${col}40`, padding: '2px 8px', borderRadius: 20 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: col, background: 'var(--surface-2)', border: '1px solid var(--border-strong)', padding: '2px 8px', borderRadius: 20 }}>
                           {a.id} · {a.status}
                         </span>
                       )
@@ -282,7 +283,7 @@ export default function CustomerAppDossierPage() {
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', background: 'var(--surface-2, #f8fafc)' }}>
+                <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', background: 'var(--surface-2)' }}>
                   <th style={th}>{t('Schopnost', 'Capability')}</th>
                   <th style={th}>{t('Pohled', 'Lens')}</th>
                   <th style={th}>{t('Stav', 'State')}</th>
@@ -303,7 +304,7 @@ export default function CustomerAppDossierPage() {
                       </td>
                       <td style={td}>
                         {c.resolvedAdrs.length === 0
-                          ? <span style={{ color: '#dc2626', fontWeight: 700 }}>{t('chybí', 'missing')}</span>
+                          ? <span style={{ color: 'var(--danger-text)', fontWeight: 700 }}>{t('chybí', 'missing')}</span>
                           : c.resolvedAdrs.map((a) => a.id).join(', ')}
                       </td>
                     </tr>
@@ -313,7 +314,7 @@ export default function CustomerAppDossierPage() {
             </table>
           </div>
 
-          <p style={{ fontSize: 12, color: 'var(--text-tertiary, #94a3b8)', marginTop: 14 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 14 }}>
             {t(
               'Zdroj: openbank-app/app-status.yaml (kurátorské) + AppConfig.kt/version.txt (derivované) → scripts/generate-app-status.mjs → app-status.json. ADR statusy živě z registru. ADR-0074.',
               'Source: openbank-app/app-status.yaml (curatorial) + AppConfig.kt/version.txt (derived) → scripts/generate-app-status.mjs → app-status.json. ADR statuses live from the registry. ADR-0074.',
@@ -329,7 +330,7 @@ const th: React.CSSProperties = { padding: '10px 14px', fontWeight: 700, fontSiz
 const td: React.CSSProperties = { padding: '10px 14px', verticalAlign: 'top' }
 
 function Fact({ label, value, mono, tone }: { label: string; value: string; mono?: boolean; tone?: 'good' | 'warn' | 'muted' }) {
-  const color = tone === 'good' ? '#059669' : tone === 'warn' ? '#d97706' : 'var(--text-primary)'
+  const color = tone === 'good' ? 'var(--success-text)' : tone === 'warn' ? 'var(--warning-text)' : 'var(--text-primary)'
   return (
     <div className="card" style={{ padding: 14 }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
@@ -338,17 +339,18 @@ function Fact({ label, value, mono, tone }: { label: string; value: string; mono
   )
 }
 
-function LensChip({ active, onClick, color, label, count, Icon }: { active: boolean; onClick: () => void; color: string; label: string; count: number; Icon?: React.ElementType }) {
+function LensChip({ active, onClick, color, solid, label, count, Icon }: { active: boolean; onClick: () => void; color: string; solid: string; label: string; count: number; Icon?: React.ElementType }) {
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
         fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
         padding: '6px 12px', borderRadius: 20,
-        color: active ? '#fff' : color,
-        background: active ? color : `${color}10`,
-        border: `1px solid ${active ? color : `${color}30`}`,
+        color,
+        background: `color-mix(in srgb, ${solid} ${active ? 18 : 10}%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${solid} ${active ? 70 : 35}%, var(--border))`,
       }}
     >
       {Icon && <Icon size={13} />}

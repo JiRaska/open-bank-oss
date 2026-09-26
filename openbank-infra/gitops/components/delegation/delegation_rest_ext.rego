@@ -15,6 +15,8 @@
 #   delegation.suspend    — bank-side fraud/AML signal
 #   delegation.reinstate  — bank-side undo of a suspend
 #   delegation.check      — "does an active grant cover this?" for services with no projection
+#   delegation.recertification.read    — customer reads own pending review tasks
+#   delegation.recertification.confirm — customer records an authority-neutral review
 #
 # WHY THIS FILE IS NARROW. Every backend service authenticates on the shared `openbank-services`
 # Keycloak client, and that service account carries ROLE_OPERATOR in the realm — the trap
@@ -45,6 +47,8 @@ allowed_reasons contains "operator-delegation-write" if {
 	role in input.principal.roles
 	startswith(input.action, "delegation.")
     not startswith(input.action, "delegation.approval.")
+    not startswith(input.action, "delegation.signing.")
+    input.action != "delegation.recertification.confirm"
 }
 
 # Durable lifecycle approvals are enumerated rather than inheriting the broad delegation prefix:
@@ -91,6 +95,8 @@ allowed_reasons contains "edge-service-delegation" if {
 		"delegation.decline",
 		"delegation.renounce",
 		"delegation.revoke",
+        "delegation.recertification.read",
+        "delegation.recertification.confirm",
 		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
 		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
 		# any handler whose claimed party differs from it, so these carry no more authority than
@@ -115,4 +121,45 @@ allowed_reasons contains "service-delegation-check" if {
 	input.principal.type == "HUMAN"
 	startswith(input.principal.id, "service-account-")
 	input.action == "delegation.check"
+}
+
+# Only the authenticated customer edge may record a customer's review, regardless of other roles.
+prohibited if {
+    input.action == "delegation.recertification.confirm"
+    not input.principal.id == "service-account-openbank-edge"
+}
+
+# ADR-0312 business payment signing. Enumerated, never a prefix, and granted to the customer edge
+# ONLY: the edge authenticates the human signer, and delegation-service additionally binds every
+# signature to that human's own SCA challenge (linked to approvalId + payloadSha256) and re-reads
+# their mandate live. None of these is a staff act — there is no bank-side signing.
+#
+# `claim` (not `release`) names the single-use release claim deliberately: it is the edge taking
+# the already co-signed payment out of the hold, not a second approver's decision — the N-of-M
+# round IS the multi-person control here, enforced in the service, not by the four-eyes verb set.
+allowed_reasons contains "edge-service-business-signing" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"delegation.signing.evaluate",
+		"delegation.signing.policy.read",
+		"delegation.signing.policy.propose",
+		"delegation.signing.payees.read",
+		"delegation.signing.payees.propose",
+		"delegation.signing.approval.create",
+		"delegation.signing.approval.read",
+		"delegation.signing.approval.sign",
+		"delegation.signing.approval.reject",
+		"delegation.signing.approval.claim",
+		"delegation.signing.approval.report",
+		"delegation.signing.pending.read",
+	}
+}
+
+# Base rest.rego's operator-read-any admits the shared backend identity (HUMAN + ROLE_OPERATOR) to
+# any read, and a staff operator would otherwise reach these too. Veto the whole signing family
+# for every principal except the edge: an extra allow reason can never bypass `prohibited`.
+prohibited if {
+	startswith(input.action, "delegation.signing.")
+	input.principal.id != "service-account-openbank-edge"
 }

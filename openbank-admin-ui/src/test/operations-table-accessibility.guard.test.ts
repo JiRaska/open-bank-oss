@@ -11,7 +11,10 @@ describe('read-only operations tables', () => {
       const page = readFileSync(path.join(app, route, 'page.tsx'), 'utf8')
       expect(page, route).toContain("const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'")
       expect(page, route).toContain('aria-label={t(')
-      expect(page, route).toContain('toLocaleString(numberLocale')
+      expect(
+        page.includes('toLocaleString(numberLocale') || page.includes(', numberLocale)'),
+        `${route} must pass the active locale to its value formatter`,
+      ).toBe(true)
     }
   })
 

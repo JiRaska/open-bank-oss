@@ -10,6 +10,6 @@ describe('Parties refresh contract', () => {
     expect(source).toContain('disabled={loading || inSearchMode}')
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain("aria-label={t('Obnovit subjekty', 'Refresh parties')}")
-    expect(source).toContain('onClick={load}')
+    expect(source).toContain('onClick={() => load()}')
   })
 })

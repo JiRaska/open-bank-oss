@@ -1,0 +1,1140 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Cloud FinOps dashboard (ADR-0316) over openbank_analytics.finops_* (ClickHouse, uid
+# `clickhouse`, same pairing as dashboard-openbank-ci-gates.yaml), fed daily by
+# admin-ui/cloud-finops-collector (openbank-infra/gitops/components/admin-ui/cloud-finops-collector.yaml).
+#
+# The shape of Infracost Cloud's own dashboard — compliance %, issues detected, potential and
+# realised savings, trend — plus what that product cannot show from IaC alone: the actual AWS
+# bill next to the estimate, by month and by category.
+#
+# Every rawSql below was executed against a real clickhouse-server:24.8 with the schema in
+# analytics/cloud-finops-schema-configmap.yaml and rows written by cloud-finops-collect.py
+# (fixture inputs, two runs 20 days apart — realised savings read exactly the one finding fixed
+# between them). NOT verified: rendering in the live Grafana, and real infracost/Cost Explorer data.
+#
+# `$__timeFilter` is the grafana-clickhouse-datasource macro. Stat tiles read the latest
+# SUCCESSFUL run (finops_ingest_runs is written last), never a partially written one.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-cloud-finops
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-cloud-finops.json: |
+    {
+      "id": null,
+      "uid": "openbank-cloud-finops",
+      "title": "OpenBank — Cloud FinOps",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "1h",
+      "tags": [
+        "finops",
+        "openbank"
+      ],
+      "time": {
+        "from": "now-90d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "clickhouse",
+              "value": "clickhouse"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "ds_clickhouse",
+            "options": [],
+            "query": "grafana-clickhouse-datasource",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "ClickHouse"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 2
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "Cloud FinOps (ADR-0316). **IaC estimate** = `infracost breakdown` over the OpenTofu envs on `main`; **findings** = the versioned rules in `openbank-infra/aws/finops/cloud-finops-rules.json`; **actual** = AWS Cost Explorer. Written daily by `admin-ui/cloud-finops-collector`. Savings are conservative list-price estimates for ranking, not quotes. If the freshness tile is red, every other number here is stale."
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "IaC monthly estimate",
+          "gridPos": {
+            "x": 0,
+            "y": 2,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT iac_monthly_cost AS value FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Sum of infracost monthlyCost over every priced resource in the latest successful run. Usage-based costs (data transfer, requests) are priced at zero unless a usage file declares them, so this is a floor.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Actual spend, month to date",
+          "gridPos": {
+            "x": 4,
+            "y": 2,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT sum(amount) AS value FROM openbank_analytics.finops_aws_daily_cost FINAL WHERE usage_date >= toStartOfMonth(today())"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Cost Explorer UnblendedCost, all services. Recent days are revised by AWS for ~72h, the latest collection wins.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "FinOps compliance",
+          "gridPos": {
+            "x": 8,
+            "y": 2,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT compliance AS value FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.7
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.9
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "description": "Share of priced IaC resources with no open finding in the latest run.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Issues detected",
+          "gridPos": {
+            "x": 12,
+            "y": 2,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT findings AS value FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 20
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Open (resource, rule) findings in the latest run.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Potential savings / month",
+          "gridPos": {
+            "x": 16,
+            "y": 2,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT potential_monthly_saving AS value FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 10
+                  },
+                  {
+                    "color": "red",
+                    "value": 100
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Sum of est_monthly_saving over open findings in the latest run.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Realised savings / month (30d)",
+          "gridPos": {
+            "x": 20,
+            "y": 2,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "WITH (SELECT argMin(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs WHERE run_ts >= now() - INTERVAL 30 DAY) AS base_run SELECT sum(est_monthly_saving) AS value FROM openbank_analytics.finops_findings WHERE run_id = base_run AND (env, resource, rule_id) NOT IN (SELECT env, resource, rule_id FROM openbank_analytics.finops_findings WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs))"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Estimated monthly saving of findings present in the oldest run of the last 30 days and gone from the latest run, i.e. fixed. A finding that disappears because its rule was removed also counts, so read it next to the rules_version column.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Data freshness — hours since last successful ingest",
+          "gridPos": {
+            "x": 0,
+            "y": 7,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT dateDiff('hour', max(run_ts), now()) AS value FROM openbank_analytics.finops_ingest_runs"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "h",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 36
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Only a run that inserted AND read back every row writes finops_ingest_runs. With no row at all max(run_ts) is 1970 and this reads as decades — red, on purpose: no data must never look fresh.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Estimate vs actual — last 30 days",
+          "gridPos": {
+            "x": 6,
+            "y": 7,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT (SELECT sum(amount) FROM openbank_analytics.finops_aws_daily_cost FINAL WHERE usage_date >= today() - 30 AND usage_date < today()) - (SELECT iac_monthly_cost FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1) AS value"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Actual Cost Explorer spend over the last 30 full days minus the current IaC monthly estimate. Positive = AWS bills more than the IaC prices: usage-based charges, resources not in OpenTofu, or taxes/support.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "Resources evaluated (latest run)",
+          "gridPos": {
+            "x": 12,
+            "y": 7,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT resources AS value FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "description": "Denominator of compliance. A sudden drop means an env stopped parsing, not that the estate shrank.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "Rules version (latest run)",
+          "gridPos": {
+            "x": 18,
+            "y": 7,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT rules_version AS value FROM openbank_analytics.finops_ingest_runs ORDER BY run_ts DESC LIMIT 1"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "A step in the compliance trend coinciding with a new rules_version is a rule change, not an estate change.",
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "/.*/",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Compliance and open issues over time",
+          "gridPos": {
+            "x": 0,
+            "y": 11,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT run_ts AS time, compliance, findings FROM openbank_analytics.finops_ingest_runs WHERE $__timeFilter(run_ts) ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "spanNulls": true,
+                "pointSize": 5,
+                "showPoints": "always"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "compliance"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 1
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "findings"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "IaC estimate vs potential savings over time (monthly $)",
+          "gridPos": {
+            "x": 12,
+            "y": 11,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT run_ts AS time, iac_monthly_cost AS iac_estimate, potential_monthly_saving AS potential_saving FROM openbank_analytics.finops_ingest_runs WHERE $__timeFilter(run_ts) ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "spanNulls": true,
+                "pointSize": 5,
+                "showPoints": "always"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Actual daily spend by category (Cost Explorer)",
+          "gridPos": {
+            "x": 0,
+            "y": 19,
+            "w": 16,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT toDateTime(usage_date) AS time, category, sum(amount) AS spend FROM openbank_analytics.finops_aws_daily_cost FINAL WHERE $__timeFilter(toDateTime(usage_date)) GROUP BY time, category ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 80,
+                "stacking": {
+                  "mode": "normal"
+                },
+                "lineWidth": 1
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 15,
+          "type": "barchart",
+          "title": "Actual vs estimate by month",
+          "gridPos": {
+            "x": 16,
+            "y": 19,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT m AS month, a.actual, e.estimate FROM (SELECT toStartOfMonth(usage_date) AS m, sum(amount) AS actual FROM openbank_analytics.finops_aws_daily_cost FINAL WHERE usage_date >= toStartOfMonth(today()) - INTERVAL 5 MONTH GROUP BY m) AS a LEFT JOIN (SELECT toStartOfMonth(toDate(run_ts)) AS m, avg(iac_monthly_cost) AS estimate FROM openbank_analytics.finops_ingest_runs GROUP BY m) AS e USING m ORDER BY month"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "description": "Current month's actual is month-to-date, so it is below the estimate until the month closes.",
+          "options": {
+            "xField": "month",
+            "stacking": "none",
+            "legend": {
+              "showLegend": true,
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          }
+        },
+        {
+          "id": 16,
+          "type": "bargauge",
+          "title": "IaC estimate by environment",
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT env, sum(monthly_cost) AS monthly_cost FROM openbank_analytics.finops_iac_resources WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs) GROUP BY env ORDER BY monthly_cost DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": true
+            },
+            "showUnfilled": true
+          }
+        },
+        {
+          "id": 17,
+          "type": "bargauge",
+          "title": "IaC estimate by service category",
+          "gridPos": {
+            "x": 8,
+            "y": 27,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT category, sum(monthly_cost) AS monthly_cost FROM openbank_analytics.finops_iac_resources WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs) GROUP BY category ORDER BY monthly_cost DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": true
+            },
+            "showUnfilled": true
+          }
+        },
+        {
+          "id": 18,
+          "type": "bargauge",
+          "title": "IaC estimate by Service tag",
+          "gridPos": {
+            "x": 16,
+            "y": 27,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT if(tags['Service'] = '', '(untagged)', tags['Service']) AS service_tag, sum(monthly_cost) AS monthly_cost FROM openbank_analytics.finops_iac_resources WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs) GROUP BY service_tag ORDER BY monthly_cost DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "description": "Tags as infracost resolves them, provider default_tags included. '(untagged)' also collects resource types infracost reports no tags for.",
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": true
+            },
+            "showUnfilled": true
+          }
+        },
+        {
+          "id": 19,
+          "type": "table",
+          "title": "Estimate vs actual by category (last 30 full days)",
+          "gridPos": {
+            "x": 0,
+            "y": 35,
+            "w": 10,
+            "h": 9
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT category, round(e.estimate, 2) AS iac_estimate, round(a.actual, 2) AS actual_30d, round(a.actual - e.estimate, 2) AS diff FROM (SELECT category, sum(monthly_cost) AS estimate FROM openbank_analytics.finops_iac_resources WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs) GROUP BY category) AS e FULL OUTER JOIN (SELECT category, sum(amount) AS actual FROM openbank_analytics.finops_aws_daily_cost FINAL WHERE usage_date >= today() - 30 AND usage_date < today() GROUP BY category) AS a USING category ORDER BY abs(diff) DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "description": "Categories are coarse on purpose: an IaC resource type and a Cost Explorer SERVICE do not map one-to-one (NAT and EBS bill under EC2 - Other). 'Other' on the actual side is spend OpenTofu does not model."
+        },
+        {
+          "id": 20,
+          "type": "barchart",
+          "title": "Open findings by rule",
+          "gridPos": {
+            "x": 10,
+            "y": 35,
+            "w": 14,
+            "h": 9
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT rule_id, count() AS findings, round(sum(est_monthly_saving), 2) AS saving FROM openbank_analytics.finops_findings WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs) GROUP BY rule_id ORDER BY saving DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "xField": "rule_id",
+            "orientation": "horizontal",
+            "legend": {
+              "showLegend": true,
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          }
+        },
+        {
+          "id": 21,
+          "type": "table",
+          "title": "Top findings by estimated saving (latest run)",
+          "gridPos": {
+            "x": 0,
+            "y": 44,
+            "w": 24,
+            "h": 12
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT env, severity, rule_id, resource, resource_type, message, round(est_monthly_saving, 2) AS est_monthly_saving FROM openbank_analytics.finops_findings WHERE run_id = (SELECT argMax(run_id, run_ts) FROM openbank_analytics.finops_ingest_runs) ORDER BY est_monthly_saving DESC, severity, resource LIMIT 100"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "est_monthly_saving"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "currencyUSD"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }

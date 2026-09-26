@@ -21,8 +21,6 @@ import { FxTrendChart } from '@/components/fx/FxTrendChart'
 interface FxRate { baseCurrency: string; quoteCurrency: string; rate: number; timestamp: string }
 interface FxConversion { id: string; fromCurrency: string; toCurrency: string; fromAmount: number; toAmount: number; rate: number; status: string; createdAt: string }
 interface CnbRate { currencyCode: string; amount: number; rate: number; validFor: string; country: string; currency: string }
-interface FxTrendPoint { date: string; rate: string; timestamp: string }
-interface FxTrend { indicative: true; base: string; quote: string; points: FxTrendPoint[]; unavailable?: boolean }
 interface EcbRate { currency: string; rate: number; date: string }
 interface CurrencyMetaType { flag: string; symbol: string; name: string }
 
@@ -133,7 +131,7 @@ function CurrencyCell({ code, meta }: { code: string; meta?: CurrencyMetaType })
 function MidCell({ mid, symbol }: { mid: number; symbol?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-      {symbol && <span style={{ fontSize: '9px', color: 'var(--text-tertiary)' }}>{symbol}</span>}
+      {symbol && <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{symbol}</span>}
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{mid.toFixed(4)}</span>
     </div>
   )
@@ -144,6 +142,7 @@ export default function FxPage() {
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState<string | null>(null)
+  const [refreshFeedback, setRefreshFeedback] = useState<{ kind: 'success' | 'failure'; source: 'cnb' | 'ecb' | 'all'; denied?: boolean } | null>(null)
   // Typed unavailable reason for a failed aggregate fetch → renders the calm
   // <DataUnavailable> panel instead of leaking a raw "HTTP 500" (graceful-state rule).
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -179,21 +178,6 @@ export default function FxPage() {
   const [history, setHistory] = useState<Array<{ timestamp: string; source: string; pair: string; rate: number }>>([])
   const [activeTab, setActiveTab] = useState<'cnb' | 'ecb' | 'bank'>('bank')
 
-  // The three-calendar-month ČNB reference-mid trend (issue #7735) — real chronological data
-  // from fx-service via /api/fx/history, the SAME normalization the customer app renders
-  // (src/lib/fx/trend.ts mirrors customer-edge's mapFxHistoryList). Never a client-memory snapshot.
-  const [trend, setTrend] = useState<FxTrend | null>(null)
-  const [trendPair] = useState<{ base: string; quote: string }>({ base: 'EUR', quote: 'CZK' })
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(`/api/fx/history?base=${trendPair.base}&quote=${trendPair.quote}`, { cache: 'no-store' })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (!cancelled) setTrend(data) })
-      .catch(() => { if (!cancelled) setTrend(null) })
-    return () => { cancelled = true }
-  }, [trendPair])
-
   const loadData = useCallback(async () => {
     setLoading(true)
     setUnavailable(null)
@@ -205,12 +189,16 @@ export default function FxPage() {
       }
       const data = await res.json()
 
-      setCnbRates(data.cnb?.rates ?? [])
-      setCnbSyncedAt(data.cnb?.syncedAt ?? null)
+      if (!data.cnb?.error && Array.isArray(data.cnb?.rates)) {
+        setCnbRates(data.cnb.rates)
+        setCnbSyncedAt(data.cnb.syncedAt ?? null)
+      }
       setCnbError(data.cnb?.error ?? null)
 
-      setEcbRates(data.ecb?.rates ?? [])
-      setEcbSyncedAt(data.ecb?.syncedAt ?? null)
+      if (!data.ecb?.error && Array.isArray(data.ecb?.rates)) {
+        setEcbRates(data.ecb.rates)
+        setEcbSyncedAt(data.ecb.syncedAt ?? null)
+      }
       setEcbError(data.ecb?.error ?? null)
 
       setFxStatus((data.fxService?.status as FxStatus | undefined) ?? (data.fxService?.up ? 'up' : 'down'))
@@ -219,8 +207,8 @@ export default function FxPage() {
       // NOTE (issue #7735): this used to fabricate fake "history" rows here by re-labelling
       // the CURRENT rate-sheet snapshot with `now` as its timestamp on every refresh — a
       // client-memory illusion of a time series, never persisted, never a real observation.
-      // The real three-calendar-month CNB trend is fetched separately, from a real endpoint,
-      // in the `trend` effect below. `history` here is now only ever a genuine admin-action
+      // The real three-calendar-month CNB trend is owned by the shared FxTrendChart above.
+      // `history` here is now only ever a genuine admin-action
       // log (margin edits, overrides), appended at the moment those actions actually happen.
     } catch {
       // Timeout / abort / network — the FX aggregate endpoint didn't answer.
@@ -234,6 +222,7 @@ export default function FxPage() {
 
   const manualRefresh = async (source: 'cnb' | 'ecb' | 'all') => {
     setRefreshing(source)
+    setRefreshFeedback(null)
     try {
       const res = await fetch('/api/fx/refresh', {
         method: 'POST',
@@ -241,8 +230,14 @@ export default function FxPage() {
         body: JSON.stringify({ source }),
         signal: AbortSignal.timeout(20000),
       })
+      if (!res.ok) {
+        setRefreshFeedback({ kind: 'failure', source, denied: res.status === 401 || res.status === 403 })
+        return
+      }
       const data = await res.json()
       const now = new Date().toISOString()
+      const requested = source === 'all' ? ['cnb', 'ecb'] : [source]
+      const succeeded = requested.every(key => data?.results?.[key]?.ok === true)
       setSchedules(prev => prev.map(s => {
         const key = s.source.toLowerCase() as 'cnb' | 'ecb'
         if (source !== 'all' && key !== source) return s
@@ -250,7 +245,10 @@ export default function FxPage() {
         if (!r) return s
         return { ...s, lastRun: now, lastStatus: r.ok ? 'ok' : 'error', lastCount: r.count ?? null, nextRun: nextRunTime(s.hour, s.minute, s.days) }
       }))
+      setRefreshFeedback({ kind: succeeded ? 'success' : 'failure', source })
       await loadData()
+    } catch {
+      setRefreshFeedback({ kind: 'failure', source })
     } finally {
       setRefreshing(null)
     }
@@ -346,6 +344,16 @@ export default function FxPage() {
           </div>}
         />
 
+        {refreshFeedback && (
+          <div role={refreshFeedback.kind === 'failure' ? 'alert' : 'status'} style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '8px', background: refreshFeedback.kind === 'failure' ? 'var(--danger-bg)' : 'var(--success-bg)', color: refreshFeedback.kind === 'failure' ? 'var(--danger-text)' : 'var(--success-text)', border: `1px solid ${refreshFeedback.kind === 'failure' ? 'var(--danger-border)' : 'var(--success-border)'}` }}>
+            {refreshFeedback.denied
+              ? t('Ověření zdroje vyžaduje přihlášení a přístup k devizovým operacím.', 'Checking the source requires sign-in and FX access.')
+              : refreshFeedback.kind === 'success'
+                ? t('Požadované externí zdroje odpověděly. Aktuální kurzy se načítají samostatně níže.', 'The requested external sources responded. Current rates are loaded separately below.')
+                : t('Některý požadovaný zdroj neodpověděl. Ponecháváme zobrazené kurzy; zkuste akci znovu.', 'A requested source did not respond. Displayed rates remain available; try again.')}
+          </div>
+        )}
+
         {unavailable && (
           <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
             <DataUnavailable
@@ -432,7 +440,7 @@ export default function FxPage() {
                   <Download size={12} style={{ animation: isRefreshing('cnb') ? 'spin 1s linear infinite' : 'none' }} /> {t('Stáhnout', 'Download')}
                 </button>
               </div>
-              <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka kurzů ČNB', 'Scrollable CNB rates table')} tabIndex={0} style={{ maxHeight: '420px', overflowY: 'auto' }}>
                 {loading ? (
                   <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
                     <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', marginBottom: '6px' }} /><div>{t('Načítám…', 'Loading…')}</div>
@@ -481,7 +489,7 @@ export default function FxPage() {
                   <Download size={12} style={{ animation: isRefreshing('ecb') ? 'spin 1s linear infinite' : 'none' }} /> {t('Stáhnout', 'Download')}
                 </button>
               </div>
-              <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka kurzů ECB', 'Scrollable ECB rates table')} tabIndex={0} style={{ maxHeight: '420px', overflowY: 'auto' }}>
                 {loading ? (
                   <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
                     <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', marginBottom: '6px' }} /><div>{t('Načítám…', 'Loading…')}</div>
@@ -522,14 +530,14 @@ export default function FxPage() {
                   {editingMargin ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--success-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
                         <input type="number" aria-label={t('Nákupní marže v procentech', 'Buy margin percent')} step="0.1" min="0" max="20" value={marginDraft.buyPct}
                           onChange={e => setMarginDraft(p => ({ ...p, buyPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--danger-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
                         <input type="number" aria-label={t('Prodejní marže v procentech', 'Sell margin percent')} step="0.1" min="0" max="20" value={marginDraft.sellPct}
                           onChange={e => setMarginDraft(p => ({ ...p, sellPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
@@ -545,11 +553,11 @@ export default function FxPage() {
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: 'var(--success-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
                         −{margin.buyPct}%
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: 'var(--danger-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
                         +{margin.sellPct}%
                       </span>
                       <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setMarginDraft(margin); setEditingMargin(true) }} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -563,7 +571,7 @@ export default function FxPage() {
                 </span>
               </div>
 
-              <div style={{ maxHeight: '480px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvný bankovní kurzovní lístek', 'Scrollable bank rate sheet')} tabIndex={0} style={{ maxHeight: '480px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Publikovat', 'Publish'), t('Měna', 'Currency'), t('ECB Střed', 'ECB Mid'), t('Nákup (banka)', 'Buy (bank)'), t('Prodej (banka)', 'Sell (bank)'), t('Override', 'Override'), t('Datum', 'Date')].map(h => (
@@ -576,7 +584,7 @@ export default function FxPage() {
                         <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
                       </td></tr>
                     ) : bankRateRows.map(r => (
-                      <tr key={r.code} style={{ borderBottom: '1px solid var(--border)', opacity: r.published ? 1 : 0.45 }}
+                      <tr key={r.code} style={{ borderBottom: '1px solid var(--border)', background: r.published ? undefined : 'var(--surface-2)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}>
                         <td style={{ padding: '8px 16px' }}>
@@ -738,7 +746,7 @@ export default function FxPage() {
                                 const days = p.days ?? [...s.days]
                                 return { ...p, days: active ? days.filter(d => d !== day) : [...days, day] }
                               })}
-                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
+                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent-strong)' : 'var(--border)'}`, background: active ? 'var(--accent-strong)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
                               {t(DAY_LABELS_CS[day], DAY_LABELS_EN[day])}
                             </button>
                           )
@@ -764,50 +772,13 @@ export default function FxPage() {
           <FxTrendChart bases={cnbRates.map(rate => rate.currencyCode)} quote="CZK" lang={language} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-          <div className="card">
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <TrendingUp size={14} style={{ color: 'var(--text-primary)' }} />
-              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                {t(`3měsíční trend ČNB ${trendPair.base}/${trendPair.quote} (orientační)`, `3-Month CNB Trend ${trendPair.base}/${trendPair.quote} (indicative)`)}
-              </span>
-            </div>
-            <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
-              {trend === null && (
-                <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítání…', 'Loading…')}</div>
-              )}
-              {trend?.unavailable && (
-                <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('FX služba nedostupná', 'FX service unavailable')}</div>
-              )}
-              {trend && !trend.unavailable && trend.points.length === 0 && (
-                <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Žádná data za posledních 3 měsíce', 'No data for the last 3 months')}</div>
-              )}
-              {trend && !trend.unavailable && trend.points.length > 0 && (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {[t('Datum', 'Date'), t('Kurz (střed ČNB)', 'Rate (CNB mid)')].map(h => (
-                      <th key={h} style={{ padding: '8px 16px', position: 'sticky', top: 0, background: 'var(--surface-1)', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody>
-                    {trend.points.map(p => (
-                      <tr key={p.date} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{p.date}</td>
-                        <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{p.rate}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-
+        <div>
           <div className="card">
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <History size={14} style={{ color: 'var(--text-primary)' }} />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historie akcí operátora', 'Operator Action Log')}</span>
             </div>
-            <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+            <div role="region" aria-label={t('Posuvná historie akcí operátora', 'Scrollable operator action history')} tabIndex={0} style={{ maxHeight: '220px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                   {[t('Čas', 'Time'), t('Zdroj', 'Source'), t('Pár', 'Pair'), t('Kurz', 'Rate')].map(h => (
@@ -819,7 +790,7 @@ export default function FxPage() {
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{new Date(h.timestamp).toLocaleTimeString(numberLocale)}</td>
                       <td style={{ padding: '6px 16px', fontSize: '11px', fontWeight: 600 }}>
-                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
+                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent-strong)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
                       </td>
                       <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{h.pair}</td>
                       <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{h.rate.toFixed(4)}</td>
@@ -845,7 +816,7 @@ export default function FxPage() {
                 {t('Žádné konverze v interním systému.', 'No conversions in internal system.')}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka posledních konverzí', 'Scrollable recent conversions table')} tabIndex={0} style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Datum', 'Date'), t('Z → Na', 'From → To'), t('Částka Z', 'From'), t('Částka Na', 'To'), t('Status', 'Status')].map(h => (

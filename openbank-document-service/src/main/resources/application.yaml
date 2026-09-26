@@ -58,6 +58,16 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486 batch 5: the account lookup (account.list) no longer rides the shared openbank-services
+    # principal. AccountClient selects this NAMED client (@OidcClientFilter("m2m")), so its principal is
+    # service-account-openbank-document (ROLE_API only), granted by identity in account_rest_ext.rego.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-document
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     sca-service:
       url: ${SCA_SERVICE_URL:http://localhost:8121}
@@ -266,3 +276,24 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS: the 8443 listener must VALIDATE the caller's certificate, not merely offer
+      # TLS. `quarkus.http.ssl.client-auth` is a BUILD-TIME property, so the container env
+      # QUARKUS_HTTP_SSL_CLIENT_AUTH could never set it — Quarkus fixes the value into the image at
+      # build time and ignores a differing runtime value, leaving the listener at the default
+      # `none`. It therefore has to live in the file the image is built from.
+      #
+      # Under `%prod` specifically, and NOT at the top level: `quarkus.http.ssl.*` makes Quarkus
+      # treat TLS as intended, and with no certificate configured it then refuses to start
+      # ("Cannot set quarkus.http.insecure-requests without enabling SSL") — which is every dev run
+      # and every @QuarkusTest. `prod` is the active profile during quarkusBuild, so the value is
+      # still baked into the image; `test` and `dev` simply never see it.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port. With client-auth REQUIRED, Quarkus defaults
+      # `insecure-requests` to `disabled` and drops the HTTP listener entirely, so the
+      # readiness probe and every in-cluster plaintext caller get `connection refused`.
+      # mTLS applies to the 8443 listener only. Runtime property; see #10441.
+      insecure-requests: enabled

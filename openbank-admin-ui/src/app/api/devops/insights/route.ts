@@ -4,6 +4,7 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { trustedRepositoryPullRequestUrl } from '@/lib/security/trustedUrls'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,7 +62,11 @@ export async function GET() {
     if (!res.ok) return NextResponse.json({ findings: [], available: false })
 
     const findings = (await res.json()) as DevOpsFinding[]
-    return NextResponse.json({ findings, available: true })
+    const safeFindings = findings.map(finding => ({
+      ...finding,
+      proposalPrUrl: trustedRepositoryPullRequestUrl(finding.proposalPrUrl),
+    }))
+    return NextResponse.json({ findings: safeFindings, available: true })
   } catch {
     return NextResponse.json({ findings: [], available: false })
   }

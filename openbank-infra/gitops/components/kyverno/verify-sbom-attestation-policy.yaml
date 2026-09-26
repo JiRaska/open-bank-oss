@@ -1,14 +1,21 @@
-# SBOM-attestation verification policy (ADR-0030 D4 step 4, ADR-0121 Axis 2).
-# Requires every openbank-* image pulled into the cluster to carry a cosign-signed
-# CycloneDX SBOM attestation (predicateType https://cyclonedx.org/bom), produced by
-# `cosign attest --type cyclonedx --key awskms:///alias/openbank-cosign-signing`
-# on every image push (auto-deploy.yml).
+# Image signature + SBOM-attestation verification policy (ADR-0030 D4, ADR-0121 Axis 2).
+# Requires every openbank-* image pulled into the cluster to carry a valid cosign
+# signature AND a cosign-signed CycloneDX SBOM attestation (predicateType
+# https://cyclonedx.org/bom), both against the KMS key and both produced on every image
+# push (auto-deploy.yml, via the shared cosign helper).
 #
-# This is a SEPARATE ClusterPolicy from verify-openbank-image-signatures on purpose:
-# the signature rule is Enforce (live since 2026-06-11) and must stay Enforce, while
-# this attestation rule stages Audit -> Enforce independently. A single policy would
-# couple both rules to one validationFailureAction (kyverno 3.2.6) — exactly how the
-# first signature-Enforce attempt broke the fleet (#770 revert).
+# ONE POLICY, ONE verifyImages ENTRY — since 2026-09-13, and on purpose (#9805 item 4).
+# This used to be a SEPARATE ClusterPolicy from verify-openbank-image-signatures, so that
+# the signature rule could stay Enforce while this rule staged Audit -> Enforce on its own;
+# one policy would have coupled both to one validationFailureAction, which is how the first
+# signature-Enforce attempt broke the fleet (#770 revert). That staging finished long ago
+# (both Enforce since 2026-07-12), and the separation turned out to be unsafe on Kyverno
+# v1.12.5: it keeps ONE verification status per image and lets whichever verify policy is
+# evaluated last decide it for all of them, so an image failing its signature was admitted
+# whenever this SBOM check happened to run last. Within a single entry Kyverno verifies the
+# attestors first and returns on failure, then the attestations, and writes the status
+# once. The cost is rollback granularity (runbook 0011 §3b). Split them again only after an
+# upgrade to Kyverno >= v1.19.0, which scopes the status per policy (kyverno/kyverno#16800).
 #
 # Rollout (mirrors the signature policy's staging; rules.yaml provenance.enforce_criteria):
 #   1. (done) Audit — surface images without the SBOM attestation as PolicyReport
@@ -34,13 +41,17 @@ kind: ClusterPolicy
 metadata:
   name: verify-openbank-image-sbom-attestation
   annotations:
-    policies.kyverno.io/title: Verify OpenBank image SBOM attestations (ADR-0030 D4 step 4)
+    policies.kyverno.io/title: Verify OpenBank image signature + SBOM attestation (ADR-0030 D4)
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
-      Enforces that every openbank-* container image carries a cosign-signed
-      CycloneDX SBOM attestation (predicateType https://cyclonedx.org/bom,
-      KMS public key). Graduated from Audit to Enforce 2026-07-12 (ADR-0144
+      Enforces that every openbank-* container image carries a valid Cosign
+      signature AND a cosign-signed CycloneDX SBOM attestation (predicateType
+      https://cyclonedx.org/bom), both against the KMS public key. The signature
+      check was a separate policy (verify-openbank-image-signatures) until
+      2026-09-13; it moved into this policy's single verifyImages entry because
+      Kyverno v1.12.5 lets separate verify policies overwrite each other's
+      verdict per image (#9805 item 4). Graduated from Audit to Enforce 2026-07-12 (ADR-0144
       graduation, rules.yaml provenance.enforce_criteria) after the running
       fleet was fully redeployed with attested images.
 spec:
@@ -75,6 +86,24 @@ spec:
           # way, but a poisoned PolicyReport entry defeats the whole point of step 1
           # (surfacing real violations) and would silently pass step 2's redeploy check.
           useCache: false
+          # The image SIGNATURE, folded in from verify-openbank-image-signatures (#9805 item 4).
+          # It lives in THIS entry on purpose. Kyverno v1.12.5 records one verification status
+          # per image, and each verifyImages entry of each policy overwrites it, so two
+          # separate policies (or two entries) let the last-evaluated one decide for both: an
+          # image failing its signature could be admitted whenever the SBOM check ran last.
+          # Within one entry Kyverno verifies the attestors first and returns on failure, then
+          # the attestations — one verdict per image, deterministic. Do not split this back
+          # into two policies before Kyverno scopes verdicts per policy (>= v1.19.0).
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEASBZ76uZt2fJEJp0RiQx1hnJgbGV
+                      M2Uw+35xUGfcZpBvpA+4nTW5zy2VVZ2JxT++6Gt0wPuUyL7aJpOAvqDvJw==
+                      -----END PUBLIC KEY-----
+                    signatureAlgorithm: sha256
           attestations:
             - predicateType: https://cyclonedx.org/bom
               attestors:

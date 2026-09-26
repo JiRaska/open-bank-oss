@@ -103,6 +103,10 @@ spec:
                 secretKeyRef:
                   name: control-liveness-sentinel-secrets
                   key: LIVENESS_GITHUB_TOKEN
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
           resources:
             requests:
               cpu: 100m

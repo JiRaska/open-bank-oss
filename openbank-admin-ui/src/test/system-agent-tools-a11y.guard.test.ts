@@ -15,4 +15,15 @@ describe('system agent tool cards accessibility', () => {
     expect(source).toContain('<Play size={13} aria-hidden="true"')
     expect(source).toContain('<RefreshCw size={13} aria-hidden="true"')
   })
+
+  it('renders a safe, classified failure state instead of claiming every failure is undeployed', () => {
+    const source = read()
+    expect(source).toContain("setFailure(e instanceof AgentCallError ? e.kind : 'error')")
+    expect(source).toContain('kind={failure}')
+    expect(source).toContain("{t('Zkusit znovu', 'Try again')}")
+    expect(source).not.toContain('kind="not_deployed"')
+    expect(source).not.toContain('setError(')
+    expect(source).not.toContain('setFailure(e instanceof Error ? e.message')
+    expect(source).not.toMatch(/#[0-9a-f]{6}\b/i)
+  })
 })

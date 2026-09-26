@@ -10,15 +10,19 @@
 #   data.agents.*  ← agents.yaml  (charter lookup for the AI_AGENT branch)
 # so the bundle ships all four sources. The mount layout the Deployment reproduces:
 #   rest.rego        -> /bundle/rest.rego        (package openbank.rest)
+#   document_rest_ext.rego -> /bundle/document_rest_ext.rego (same package, merged)
 #   agents.rego      -> /bundle/agents.rego      (package openbank.agents)
 #   rules-data.yaml  -> /bundle/rules/data.yaml  (loads as data.rules.*)
 #   agents-data.yaml -> /bundle/agents/data.yaml (loads as data.agents.*)
 #   manifest.json    -> /bundle/.manifest
 #
-# document-service is not a money-path service, but external disclosure export is a
-# high-impact document boundary. Its action-specific extension names the one dedicated
-# delegation-service subject that may request a sealed artifact; base role rules must
-# never make this capability available to the fleet-wide M2M identity.
+# document-service is NOT in rules.yaml: money_path_services. It relies on rest.rego's
+# base allow reasons plus one extension, document_rest_ext.rego, which grants kyb-service
+# the business onboarding agreement actions (document.business-agreement.*), vetoes the
+# customer edge from them, and — for external disclosure export, a high-impact document
+# boundary — names the one dedicated delegation-service subject that may request a sealed
+# artifact; base role rules must never make that capability available to the fleet-wide
+# M2M identity.
 #
 # A checksum annotation rolls the Deployment when the policy changes (subPath mounts do
 # not hot-reload). After editing any source below, re-run this script + commit.
@@ -26,7 +30,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 REST=../../../../openbank-libs/governance/policies/rest.rego
-EXT=./document_rest_ext.rego
+REST_EXT=document_rest_ext.rego
 AGENTS=../../../opa/policies/agents.rego
 RULES=../../../../openbank-libs/governance/rules-opa-data.yaml
 AGENTS_DATA=../../../../openbank-libs/governance/agents-opa-data.yaml
@@ -34,7 +38,7 @@ MANIFEST=../../../opa/bundle.manifest
 OUT=document-service-opa-bundle.yaml
 
 # Portable SHA-256: prefer sha256sum (Linux), fall back to shasum -a 256 (macOS).
-CHECKSUM=$(cat "$REST" "$EXT" "$AGENTS" "$RULES" "$AGENTS_DATA" "$MANIFEST" | \
+CHECKSUM=$(cat "$REST" "$REST_EXT" "$AGENTS" "$RULES" "$AGENTS_DATA" "$MANIFEST" | \
   (command -v sha256sum >/dev/null 2>&1 && sha256sum || shasum -a 256) | cut -c1-16)
 
 {
@@ -55,7 +59,7 @@ CHECKSUM=$(cat "$REST" "$EXT" "$AGENTS" "$RULES" "$AGENTS_DATA" "$MANIFEST" | \
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST" | sed 's/[[:space:]]*$//'
   echo "  document_rest_ext.rego: |"
-  sed 's/^/    /' "$EXT" | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS" | sed 's/[[:space:]]*$//'
   echo "  rules-data.yaml: |"

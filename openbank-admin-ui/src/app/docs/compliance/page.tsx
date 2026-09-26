@@ -121,15 +121,15 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
 ]
 
 const STATUS_CONFIG: Record<string, { label: Bilingual; color: string; bg: string; border: string; icon: React.ReactNode }> = {
-  compliant: { label: ['V souladu', 'Compliant'], color: '#16a34a', bg: '#f0fdf4', border: '#86efac', icon: <CheckCircle2 size={14} /> },
-  partial:   { label: ['Částečně', 'Partial'],    color: '#d97706', bg: '#fffbeb', border: '#fde68a', icon: <AlertTriangle size={14} /> },
-  gap:       { label: ['Mezera', 'Gap'],          color: '#dc2626', bg: '#fef2f2', border: '#fecaca', icon: <XCircle size={14} /> },
+  compliant: { label: ['V souladu', 'Compliant'], color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', icon: <CheckCircle2 size={14} /> },
+  partial:   { label: ['Částečně', 'Partial'],    color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', icon: <AlertTriangle size={14} /> },
+  gap:       { label: ['Mezera', 'Gap'],          color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', icon: <XCircle size={14} /> },
 }
 
 const ITEM_STATUS = {
-  ok:   { color: '#16a34a', icon: <CheckCircle2 size={12} /> },
-  warn: { color: '#d97706', icon: <AlertTriangle size={12} /> },
-  fail: { color: '#dc2626', icon: <XCircle size={12} /> },
+  ok:   { color: 'var(--success-text)', icon: <CheckCircle2 size={12} /> },
+  warn: { color: 'var(--warning-text)', icon: <AlertTriangle size={12} /> },
+  fail: { color: 'var(--danger-text)', icon: <XCircle size={12} /> },
 }
 
 export default function CompliancePage() {
@@ -155,19 +155,19 @@ export default function CompliancePage() {
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         {([
-          { id: 'compliant', label: ['V souladu', 'Compliant'] as Bilingual, value: okItems, total: totalItems, color: '#16a34a', bg: '#f0fdf4' },
-          { id: 'warnings', label: ['Upozornění', 'Warnings'] as Bilingual, value: warnItems, total: totalItems, color: '#d97706', bg: '#fffbeb' },
-          { id: 'coverage', label: ['Pokrytí', 'Coverage'] as Bilingual, value: `${Math.round(okItems/totalItems*100)}%`, total: null, color: '#2563eb', bg: '#eff6ff' },
-          { id: 'frameworks', label: ['Rámce', 'Frameworks'] as Bilingual, value: COMPLIANCE_AREAS.length, total: null, color: '#7c3aed', bg: '#faf5ff' },
+          { id: 'compliant', label: ['V souladu', 'Compliant'] as Bilingual, value: okItems, total: totalItems, color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+          { id: 'warnings', label: ['Upozornění', 'Warnings'] as Bilingual, value: warnItems, total: totalItems, color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+          { id: 'coverage', label: ['Pokrytí', 'Coverage'] as Bilingual, value: `${Math.round(okItems/totalItems*100)}%`, total: null, color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
+          { id: 'frameworks', label: ['Rámce', 'Frameworks'] as Bilingual, value: COMPLIANCE_AREAS.length, total: null, color: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)' },
         ]).map(stat => (
           <div key={stat.id} style={{
-            padding: '16px', background: stat.bg, border: `1px solid ${stat.color}30`,
+            padding: '16px', background: stat.bg, border: `1px solid ${stat.border}`,
             borderRadius: 'var(--r-lg)',
           }}>
             <div style={{ fontSize: '24px', fontWeight: 700, color: stat.color }}>
-              {stat.value}{stat.total ? <span style={{ fontSize: '14px', opacity: 0.6 }}>/{stat.total}</span> : ''}
+              {stat.value}{stat.total ? <span style={{ fontSize: '14px' }}>/{stat.total}</span> : ''}
             </div>
-            <div style={{ fontSize: '12px', color: stat.color, opacity: 0.8, marginTop: '2px' }}>{t(...stat.label)}</div>
+            <div style={{ fontSize: '12px', color: stat.color, fontWeight: 600, marginTop: '2px' }}>{t(...stat.label)}</div>
           </div>
         ))}
       </div>
@@ -175,11 +175,11 @@ export default function CompliancePage() {
       {/* Disclaimer */}
       <div style={{
         padding: '12px 16px', marginBottom: '20px',
-        background: '#eff6ff', border: '1px solid #bfdbfe',
+        background: 'var(--info-bg)', border: '1px solid var(--info-border)',
         borderRadius: 'var(--r-lg)', display: 'flex', gap: '10px',
       }}>
-        <Info size={14} style={{ color: '#2563eb', flexShrink: 0, marginTop: '1px' }} />
-        <div style={{ fontSize: '12px', color: '#1e40af', lineHeight: 1.5 }}>
+        <Info size={14} style={{ color: 'var(--info-text)', flexShrink: 0, marginTop: '1px' }} />
+        <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
           {t('Tento report reflektuje technickou implementaci databázových schémat a API. Plná regulatorní compliance vyžaduje také právní dokumentaci, interní politiky, školení zaměstnanců a pravidelné audity. Doporučujeme konzultaci s regulatorním právníkem před podáním žádosti o bankovní licenci u ČNB.', 'This report reflects the technical implementation of database schemas and APIs. Full regulatory compliance also requires legal documentation, internal policies, staff training and regular audits. We recommend consulting a regulatory lawyer before applying for a banking licence with the CNB.')}
         </div>
       </div>

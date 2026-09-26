@@ -3,12 +3,23 @@ import { signInAsOperator } from './helpers/auth'
 
 const amlCase = {
   id: 'aml-2026-0042',
-  customerName: 'Acme Trading s.r.o.',
-  customerType: 'CORPORATE',
+  partyId: 'party-acme-42',
+  accountId: 'account-7',
+  transactionId: 'transaction-9',
+  customerReference: 'ACME-TRADING-42',
+  screeningType: 'TRANSACTION_MONITORING',
   riskLevel: 'CRITICAL',
   status: 'ESCALATED',
-  score: 94,
-  timestamp: '2026-08-31T12:00:00Z',
+  alertCode: 'TXN_THRESHOLD',
+  alertDetail: 'Aggregate threshold exceeded',
+  matchedEntity: null,
+  decisionReason: 'MLRO review required',
+  assignedAnalyst: 'analyst-7',
+  decidedBy: 'analyst-4',
+  screenedAt: '2026-08-31T12:00:00Z',
+  decidedAt: '2026-08-31T12:05:00Z',
+  createdAt: '2026-08-31T12:00:00Z',
+  updatedAt: '2026-08-31T12:05:00Z',
 }
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -36,16 +47,17 @@ test('keeps escalated AML evidence visible after a failed refresh', async ({ pag
 
   await page.goto('/aml')
 
-  await expect(page.getByText('Acme Trading s.r.o.')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('ACME-TRADING-42')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText(/AML case escalated|AML případ byl eskalován/)).toBeVisible()
-  await expect(page.getByText('94', { exact: true })).toBeVisible()
+  await expect(page.getByText('TXN_THRESHOLD', { exact: true })).toBeVisible()
+  await expect(page.getByText('analyst-7')).toBeVisible()
 
   unavailable = true
   await page.getByRole('button', { name: /Obnovit AML případy|Refresh AML cases/ }).click()
 
   await expect(page.getByText(/Zobrazen je poslední úspěšný snapshot|Showing the last successful snapshot/)).toBeVisible({ timeout: 25_000 })
-  await expect(page.getByText('Acme Trading s.r.o.')).toBeVisible()
-  await expect(page.getByText('94', { exact: true })).toBeVisible()
+  await expect(page.getByText('ACME-TRADING-42')).toBeVisible()
+  await expect(page.getByText('TXN_THRESHOLD', { exact: true })).toBeVisible()
   await expect(page.getByText(/AML case escalated|AML případ byl eskalován/)).toBeVisible()
   await expect(page.getByText(/zatím neeviduje žádné AML případy|no AML cases recorded yet/)).toHaveCount(0)
 })

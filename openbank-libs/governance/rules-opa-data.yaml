@@ -156,6 +156,16 @@ money_path_services:
                                             # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                             # joins the #3679 cohort.
   - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                            # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                            # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                            # may move, which is money-path for the same reason sca/consent/vop/
+                                            # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                            # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                            # repair money movement; card.create/activate are SCA-bound customer
+                                            # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                            # without the cardholder's SCA today — add a verb here when one ships.
+                                            # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+  - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
 money_path_action_prefixes:
   sepa-payment: [sepaPayment]
@@ -235,6 +245,18 @@ four_eyes:
   actions:
     - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                          # core also enforces maker != checker for standalone installs.
+    - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
+                                         # playbook version. Confirmed no M2M caller — the only allow
+                                         # rule for this action (rest.rego commstyle-publish) requires
+                                         # HUMAN + (ROLE_COMMS_APPROVER or ROLE_ADMIN) and explicitly
+                                         # excludes any service-account-* principal id; D6 deliberately
+                                         # never grants commstyle.publish to a service account
+                                         # (shared_m2m_matrix_write_grants stays empty for it). Also
+                                         # enforced at the application layer, independently: the
+                                         # draft's own maker can never be the caller here
+                                         # (CommunicationStyleService.publish), D3's literal "the
+                                         # maker can never approve their own version" — two separate
+                                         # checks, not one restated twice.
     - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                          # Confirmed no M2M caller — the only allow rule for this
                                          # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
@@ -552,6 +574,51 @@ authz:
         - lending.collateralDecide
         - lending.approval.read
         - lending.approval.decide
+    # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
+    # here rather than only in the realm; this is that declaration, and it is deliberately ONE
+    # read action rather than the role's full duty set. What is missing is missing on purpose:
+    #
+    #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
+    #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
+    #   has no service-account exclusion, and cannot express one. Both of those actions are write
+    #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
+    #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+    #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
+    #   that the bank's voice is set by people. Granting either through the matrix would add a
+    #   second permit path that drops that exclusion — a silent widening no policy layer can veto
+    #   (see shared_m2m_matrix_write_grants below for why the veto is reason-keyed and cannot
+    #   cover matrix-allows). `test_commstyle_publish_denies_service_account_with_every_role`
+    #   pins the intent; it would still pass, because it asserts the reason, not the decision.
+    #
+    #   commstyle.approval.read is safe and is here: its rule
+    #   (`commstyle-read-publish-approval`) deliberately omits the service-account exclusion
+    #   already, so this entry is a provable subset of today's effective grant and changes no
+    #   decision — the same seeding property the matrix was built on.
+    #
+    # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
+    # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
+    # editor duty has no action name for the matrix to key on. Declaring the editor role here
+    # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+    ROLE_COMMS_APPROVER:
+      grant:
+        - commstyle.approval.read
+    # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+    # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+    # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+    # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+    # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+    # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+    # here on purpose: every treasury action, the reads included, is granted in
+    # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+    # treasury depends on this matrix.
+    ROLE_RISK:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
+    ROLE_FINANCE:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
 
 shared_m2m_write_prohibition:
   # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

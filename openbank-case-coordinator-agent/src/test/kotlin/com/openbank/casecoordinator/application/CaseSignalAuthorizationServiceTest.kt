@@ -48,7 +48,7 @@ class CaseSignalAuthorizationServiceTest {
         val evidence = slot<CaseSignalEvidence>()
         val query = slot<CaseCollaborationPolicyQuery>()
 
-        val result = service.authorize("case-1", "rca-investigator", "case.contribute")
+        val result = service.authorize("case-1", "operator-1", "rca-investigator", "case.contribute")
 
         assertThat(result).isInstanceOf(CaseSignalAuthorizationResult.Authorized::class.java)
         verify { policy.decide(capture(query)) }
@@ -57,10 +57,13 @@ class CaseSignalAuthorizationServiceTest {
         verify { repository.tryRecordAuthorized(capture(evidence), 8) }
         assertThat(evidence.captured.stage).isEqualTo(CaseSignalEvidenceStage.AUTHORIZED)
         assertThat(evidence.captured.policyDecisionId).isEqualTo("opa-decision-7")
+        assertThat(evidence.captured.authenticatedPrincipal).isEqualTo("operator-1")
         coVerify {
             audit.publish(
                 match<AuditEvent> {
-                    it.operation == "case.contribute" &&
+                    it.actorId == "operator-1" &&
+                        it.payload["asserted_agent_id"] == "rca-investigator" &&
+                        it.operation == "case.contribute" &&
                         it.resourceId == "case-1" &&
                         it.result == AuditResult.SUCCESS &&
                         it.payload["policy_decision_id"] == "opa-decision-7"
@@ -82,7 +85,7 @@ class CaseSignalAuthorizationServiceTest {
         )
         coEvery { audit.publish(any()) } returns Unit
 
-        val result = service.authorize("case-1", "rca-investigator", "case.join")
+        val result = service.authorize("case-1", "operator-1", "rca-investigator", "case.join")
 
         assertThat(result).isEqualTo(CaseSignalAuthorizationResult.Denied)
         verify {

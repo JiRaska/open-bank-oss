@@ -102,8 +102,8 @@ export const DELEGATION_SCENARIOS: readonly Scenario[] = [
     label: { cs: 'Korporace', en: 'Corporate' },
     eyebrow: { cs: 'Řízení přístupů ve velkém', en: 'Access governance at scale' },
     summary: {
-      cs: 'Jemnozrnné granty jsou společný základ; organizační mandáty a portfoliové řízení jsou zatím cílový model.',
-      en: 'Fine-grained grants are the common foundation; organisational mandates and portfolio governance remain a target model.',
+      cs: 'Jemnozrnné granty a ověřené statutární mandáty jsou společný základ; portfoliové řízení zůstává cílový model.',
+      en: 'Fine-grained grants and verified statutory mandates are the common foundation; portfolio governance remains a target model.',
     },
     example: {
       cs: 'Cílový model: korporace → treasury tým → portfolio účtů → oddělené navržení a schválení',
@@ -118,11 +118,15 @@ export const DELEGATION_SCENARIOS: readonly Scenario[] = [
         cs: 'Vlastní kombinace práv zůstává viditelná bez domýšlení firemní role z pouhého názvu.',
         en: 'A custom rights set stays visible without inferring a company role from its name.',
       },
+      {
+        cs: 'Přepnutí na firemní profil ověří aktivní mandát; neznámý, neplatný nebo nedostupný důkaz přístup odmítne.',
+        en: 'Switching to a company profile verifies an active mandate; an unknown, invalid or unavailable proof refuses access.',
+      },
     ],
     next: [
       {
-        cs: 'Autoritativní vazba organizace → člen → statutární nebo interní mandát.',
-        en: 'An authoritative organisation → member → statutory or internal mandate relationship.',
+        cs: 'Spravované interní mandáty a členství vedle již ověřených statutárních mandátů.',
+        en: 'Managed internal mandates and membership alongside the already verified statutory mandates.',
       },
       {
         cs: 'Skupiny účtů, pravidla oddělení povinností a vynucené schválení N-z-M.',

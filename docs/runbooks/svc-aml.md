@@ -30,7 +30,7 @@ triaging an incident that starts on `aml`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8117` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `aml`); dashboards in Grafana.
 - Logs: `kubectl logs -n aml deploy/aml-service -f`, or Loki
   `{namespace="aml"}`.

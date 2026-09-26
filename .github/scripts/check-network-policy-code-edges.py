@@ -262,10 +262,6 @@ def report(found, deploy_env_urls, admitted, selected=None):
 # this list, and ALSO when a listed edge no longer reproduces — a fixed entry must be
 # deleted, so the baseline can only shrink.
 KNOWN_MISSING = {
-    ("aml", "account-service", "accounts", 8100):
-        "AccountServiceClient uses its @ConfigProperty default; no env in gitops. "
-        "Best-effort sweep resolution only (the client's own KDoc says a case must "
-        "never fail because account-service is unreachable), so the drop is silent.",
     ("customer-edge", "audit-service", "audit", 8113):
         "URL lives only in customer-edge's src/main/resources/application.yaml.",
     ("platform", "vllm", "copilot", 8000):

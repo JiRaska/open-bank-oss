@@ -11,6 +11,8 @@ set -euo pipefail
 
 SOURCE_SHA="${1:?source SHA is required}"
 MAIN_SHA="${2:?main SHA is required}"
+EVENT_NAME="${3:-unknown}"
+OPEN_DEPLOY_PR_EXISTS="${4:-false}"
 ADMIN_UI_MANIFEST="openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
 DEPLOY_SUBJECT_PREFIX="chore(admin-ui): deploy "
 
@@ -28,6 +30,14 @@ git cat-file -e "${MAIN_SHA}^{commit}" 2>/dev/null \
 source_subject="$(git log -1 --format=%s "$SOURCE_SHA")"
 if [[ "$source_subject" == "${DEPLOY_SUBJECT_PREFIX}"* ]]; then
   reject "Skipping self-generated GitOps commit; its image is already built, signed and attested."
+fi
+
+# Automatic sources for one SHA are serialized by the workflow concurrency group. Once the
+# first admitted run opens its deterministic deploy branch, a later automatic source would only
+# rebuild the same commit under a different immutable tag and invalidate exact-head review. A
+# workflow_dispatch is an explicit operator refresh and intentionally remains an override.
+if [ "$EVENT_NAME" != "workflow_dispatch" ] && [ "$OPEN_DEPLOY_PR_EXISTS" = "true" ]; then
+  reject "Skipping duplicate automatic deploy for ${SOURCE_SHA}; its deploy branch already exists."
 fi
 
 if [ "$SOURCE_SHA" = "$MAIN_SHA" ]; then

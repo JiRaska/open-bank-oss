@@ -1,0 +1,10 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/context-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "notes": [
+    "Initial overlay for issue #9945. No component-specific human verdict has been asserted; release evidence keeps every discovered finding under_investigation until artifact-backed triage is recorded here."
+  ],
+  "statements": []
+}

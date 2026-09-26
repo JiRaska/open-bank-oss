@@ -183,6 +183,51 @@ class PartyEventConsumerTest {
         coVerify(exactly = 3) { kycCaseRepository.anonymizeByPartyId(partyId, any()) }
     }
 
+    @Test
+    fun `an AML profile declaration with risk factors is routed to EDD with the published factors`(): Unit =
+        runBlocking {
+            val partyId = UUID.randomUUID()
+            coEvery { kycService.escalateForDeclaredAmlRisk(partyId, listOf("PEP", "CASH_INTENSIVE")) } returns
+                caseFor(partyId).copy(riskLevel = RiskLevel.HIGH)
+
+            consumer.consume(
+                """{"eventType":"PARTY_UPDATED","partyId":"$partyId","changeKind":"AML_PROFILE_DECLARED",""" +
+                    """"eddRequired":true,"amlRiskFactors":["PEP","CASH_INTENSIVE"]}""",
+            )
+
+            coVerify(exactly = 1) { kycService.escalateForDeclaredAmlRisk(partyId, listOf("PEP", "CASH_INTENSIVE")) }
+        }
+
+    @Test
+    fun `a declaration without risk factors and an ordinary PARTY_UPDATED route nothing`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+
+        consumer.consume(
+            """{"eventType":"PARTY_UPDATED","partyId":"$partyId","changeKind":"AML_PROFILE_DECLARED",""" +
+                """"eddRequired":false,"amlRiskFactors":[]}""",
+        )
+        consumer.consume("""{"eventType":"PARTY_UPDATED","partyId":"$partyId","materiality":"NON_MATERIAL"}""")
+        // eddRequired alone is not enough: only an AML profile declaration is routed here.
+        consumer.consume("""{"eventType":"PARTY_UPDATED","partyId":"$partyId","eddRequired":true}""")
+
+        coVerify(exactly = 0) { kycService.escalateForDeclaredAmlRisk(any(), any()) }
+    }
+
+    @Test
+    fun `a transient failure while routing to EDD is rethrown, not acked`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { kycService.escalateForDeclaredAmlRisk(partyId, any()) } throws TransientDbFailure()
+
+        assertThrows<TransientDbFailure> {
+            runBlocking {
+                consumer.consume(
+                    """{"eventType":"PARTY_UPDATED","partyId":"$partyId","changeKind":"AML_PROFILE_DECLARED",""" +
+                        """"eddRequired":true,"amlRiskFactors":["US_PERSON"]}""",
+                )
+            }
+        }
+    }
+
     private fun caseFor(partyId: UUID) = KycCase(
         id = UUID.randomUUID(),
         partyId = partyId,

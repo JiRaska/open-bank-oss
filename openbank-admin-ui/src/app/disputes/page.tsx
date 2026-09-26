@@ -7,46 +7,47 @@ import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { MessageSquareWarning, Search, CheckCircle2, Clock, RefreshCw, AlertTriangle, Timer } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
-
-interface Dispute {
-  id: string; referenceNumber: string; disputeType: string; status: string
-  claimantAccountId: string; transactionId: string; amount: number; currency: string
-  slaDeadline: string; createdAt: string
-}
+import {
+  disputeDaysRemaining,
+  isDisputeSlaBreached,
+  isTerminalDispute,
+  parseDisputeList,
+  type DisputeRecord,
+} from '@/lib/disputes/disputePortfolio'
+import { ComplaintContextInvestigation } from '@/components/context/ComplaintContextInvestigation'
+import { ContextAssignmentAdministration } from '@/components/context/ContextAssignmentAdministration'
 
 export default function DisputesPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking, reload } = useServiceResource<Dispute[]>(
-    svcUrl('dispute-service', '/api/v1/disputes'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as Dispute[]) : ((raw as { disputes?: Dispute[] }).disputes ?? [])) },
+  const { data, loading, unavailable, waking, reload } = useServiceResource<DisputeRecord[]>(
+    '/api/disputes',
+    { select: parseDisputeList },
   )
   const disputes = data ?? []
   const hasSnapshot = data !== null
   const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   const filtered = disputes.filter(d =>
-    d.referenceNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    d.disputeType?.toLowerCase().includes(search.toLowerCase()) ||
-    d.status?.toLowerCase().includes(search.toLowerCase())
+    d.reference.toLowerCase().includes(search.toLowerCase()) ||
+    d.disputeType.toLowerCase().includes(search.toLowerCase()) ||
+    d.status.toLowerCase().includes(search.toLowerCase())
   )
 
-  const open = disputes.filter(d => ['OPEN', 'UNDER_REVIEW', 'PENDING_EVIDENCE'].includes(d.status))
-  const resolved = disputes.filter(d => ['RESOLVED', 'CLOSED', 'CHARGEBACK_ISSUED'].includes(d.status))
-  const slaBreached = disputes.filter(d => d.slaDeadline && new Date(d.slaDeadline) < new Date() && !['RESOLVED', 'CLOSED'].includes(d.status))
+  const open = disputes.filter(d => !isTerminalDispute(d.status))
+  const resolved = disputes.filter(d => isTerminalDispute(d.status))
+  const now = new Date()
+  const slaBreached = disputes.filter(d => isDisputeSlaBreached(d, now))
 
-  const slaStatus = (deadline: string, status: string) => {
-    if (['RESOLVED', 'CLOSED'].includes(status)) return null
+  const slaStatus = (deadline: string | null, status: DisputeRecord['status']) => {
+    if (isTerminalDispute(status)) return null
     if (!deadline) return null
-    // eslint-disable-next-line react-hooks/purity -- SLA days-remaining display is inherently time-relative; the deadline is stable server data.
-    const now = Date.now()
-    const daysLeft = Math.ceil((new Date(deadline).getTime() - now) / 86400000)
+    const daysLeft = disputeDaysRemaining(deadline, now)
     if (daysLeft < 0) return <span style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: 700 }}>{t('PORUŠENÍ SLA', 'SLA BREACH')}</span>
     if (daysLeft <= 5) return <span style={{ fontSize: '11px', color: 'var(--warning)', fontWeight: 600 }}>{daysLeft}{t('d zbývá', 'd left')}</span>
     return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{daysLeft}{t('d zbývá', 'd left')}</span>
@@ -57,7 +58,7 @@ export default function DisputesPage() {
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           title={t('Reklamace & Spory', 'Disputes & Complaints')}
-          subtitle={t('Správa sporů — chargeback · SLA 45 dní · PSD2 čl. 73', 'Dispute management — chargeback · SLA 45 days · PSD2 Art. 73')}
+          subtitle={t('Portfolio všech stavů · lhůta každého případu · PSD2 čl. 73', 'All-status portfolio · each case’s resolution deadline · PSD2 Art. 73')}
           icon={<MessageSquareWarning size={18} aria-hidden="true" />}
           actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ServiceStatusBadge
@@ -85,6 +86,9 @@ export default function DisputesPage() {
           </p>
         </div>}
 
+        <ContextAssignmentAdministration />
+        <ComplaintContextInvestigation />
+
         {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
           {t('Aktualizuji spory; poslední snapshot zůstává dostupný.', 'Refreshing disputes; the last snapshot remains available.')}
         </p>}
@@ -95,7 +99,7 @@ export default function DisputesPage() {
             display: 'flex', alignItems: 'center', gap: '10px' }}>
             <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--danger-text)' }}>
-              {slaBreached.length} {t(slaBreached.length > 1 ? 'sporů překročilo SLA 45 dní' : 'spor překročil SLA 45 dní', slaBreached.length > 1 ? 'disputes exceeded the 45-day SLA' : 'dispute exceeded the 45-day SLA')} — {t('vyžaduje okamžité řešení', 'requires immediate action')}
+              {slaBreached.length} {t(slaBreached.length > 1 ? 'sporů překročilo lhůtu řešení' : 'spor překročil lhůtu řešení', slaBreached.length > 1 ? 'disputes exceeded their resolution deadline' : 'dispute exceeded its resolution deadline')} — {t('vyžaduje okamžité řešení', 'requires immediate action')}
             </span>
           </div>
         )}
@@ -130,7 +134,7 @@ export default function DisputesPage() {
                 ? t('Služba běží, zatím žádné spory.', 'The service is running; no disputes yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka sporů', 'Scrollable disputes table')}>
               <table className="table">
                 <thead><tr>
                   {[t('Reference', 'Reference'), t('Typ', 'Type'), t('Transakce', 'Transaction'), t('Částka', 'Amount'), t('Status', 'Status'), t('SLA', 'SLA'), t('Vytvořeno', 'Created')].map(h => (
@@ -139,7 +143,7 @@ export default function DisputesPage() {
                 </tr></thead>
                 <tbody>{filtered.map(d => (
                   <tr key={d.id}>
-                    <td className="mono" style={{ fontWeight: 600 }}>{d.referenceNumber}</td>
+                    <td className="mono" style={{ fontWeight: 600 }}>{d.reference}</td>
                     <td style={{ color: 'var(--text-secondary)' }}>{d.disputeType}</td>
                     <td className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{d.transactionId?.slice(0, 8)}…</td>
                     <td style={{ fontWeight: 600 }}>
@@ -148,7 +152,7 @@ export default function DisputesPage() {
                     <td>
                       <StatusBadge status={d.status} />
                     </td>
-                    <td>{slaStatus(d.slaDeadline, d.status)}</td>
+                    <td>{slaStatus(d.resolutionDeadline, d.status)}</td>
                     <td style={{ color: 'var(--text-tertiary)' }}>{d.createdAt ? new Date(d.createdAt).toLocaleString(numberLocale) : '—'}</td>
                   </tr>
                 ))}</tbody>

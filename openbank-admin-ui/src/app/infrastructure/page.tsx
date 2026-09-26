@@ -15,8 +15,11 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
 import { PageHeader, StatusBadge, TONE_BORDER_LEFT_CLASS, statusTone } from '@/components/ui'
 import { cn } from '@/lib/utils'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { EVENT_INSIGHTS } from '@/components/insights/catalog'
+import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
 
-type InfraStatus = 'UP' | 'DOWN' | 'UNKNOWN'
+type InfraStatus = InfrastructureStatus
 
 interface InfraComponent {
   id: string
@@ -55,12 +58,7 @@ const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'karpenter',       name: 'Karpenter',          probeNote: 'TCP :8080 · node autoscaler (Spot/arm64)', icon: <Cpu size={20} /> },
 ]
 
-interface StatusResult {
-  id: string
-  status: InfraStatus
-  latencyMs: number | null
-  checkedAt: string | null
-}
+type StatusResult = InfrastructureStatusResult
 
 type KafkaTopic = {
   name: string
@@ -119,36 +117,48 @@ export default function InfrastructurePage() {
     try {
       const res = await fetch('/api/infra/status', { cache: 'no-store' })
       if (!res.ok) {
-        setStatuses({})
         setUnavailable({ kind: res.status === 404 ? 'not_deployed' : 'unreachable' })
       } else {
-        setStatuses(await res.json())
+        try {
+          setStatuses(parseInfrastructureStatuses(await res.json() as unknown))
+          setUnavailable(null)
+          setLastRefresh(new Date())
+        } catch {
+          setUnavailable({ kind: 'error' })
+        }
       }
     } catch {
-      setStatuses({})
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
-      setLastRefresh(new Date())
     }
   }, [])
 
   useEffect(() => {
-    loadKafkaTopics()
+    const initialKafkaId = window.setTimeout(loadKafkaTopics, 0)
     const kafkaId = setInterval(loadKafkaTopics, 30_000)
-    return () => clearInterval(kafkaId)
+    return () => {
+      clearTimeout(initialKafkaId)
+      clearInterval(kafkaId)
+    }
   }, [loadKafkaTopics])
 
   useEffect(() => {
-    load()
+    const initialId = window.setTimeout(load, 0)
     const id = setInterval(load, 15_000)
-    return () => clearInterval(id)
+    return () => {
+      clearTimeout(initialId)
+      clearInterval(id)
+    }
   }, [load])
 
   useEffect(() => {
-    loadLifecycle()
+    const initialLifecycleId = window.setTimeout(loadLifecycle, 0)
     const id = setInterval(loadLifecycle, 60_000)
-    return () => clearInterval(id)
+    return () => {
+      clearTimeout(initialLifecycleId)
+      clearInterval(id)
+    }
   }, [loadLifecycle])
 
   const upCount = Object.values(statuses).filter(s => s.status === 'UP').length
@@ -191,6 +201,11 @@ export default function InfrastructurePage() {
         </div>}
       />
 
+      <ContextualInsights dashboardUid="openbank-evb" panels={EVENT_INSIGHTS}
+        titleCs="Tok událostí" titleEn="Event processing"
+        descriptionCs="Spolehlivost předávání, dead letters a služby, ve kterých se práce hromadí."
+        descriptionEn="Delivery reliability, dead letters and services where work accumulates." />
+
       {unavailable && (
         <div style={{
           background: 'var(--surface-2)', border: '1px solid var(--border)',
@@ -201,6 +216,9 @@ export default function InfrastructurePage() {
             service={t('Gatus monitoring agent', 'Gatus monitoring agent')}
             feature={t('Stav infrastruktury', 'Infrastructure status')}
             lang={language}
+            detail={Object.keys(statuses).length > 0
+              ? t('Zobrazen je poslední ověřený snapshot infrastruktury; aktuální obnova selhala a stav se mohl změnit.', 'The last verified infrastructure snapshot is shown; the current refresh failed and status may have changed.')
+              : undefined}
             dense
           />
         </div>

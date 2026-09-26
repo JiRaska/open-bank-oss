@@ -18,9 +18,9 @@ export const dynamic = 'force-dynamic'
 
 function statusStyle(s: ControlStatus): { color: string; bg: string } {
   switch (s) {
-    case 'enforced': return { color: 'var(--success)', bg: 'var(--success-bg)' }
-    case 'partial':  return { color: 'var(--info, #2563eb)', bg: 'var(--info-bg, #dbeafe)' }
-    case 'audit':    return { color: 'var(--warning)', bg: 'var(--warning-bg)' }
+    case 'enforced': return { color: 'var(--success-text)', bg: 'var(--success-bg)' }
+    case 'partial':  return { color: 'var(--info-text)', bg: 'var(--info-bg)' }
+    case 'audit':    return { color: 'var(--warning-text)', bg: 'var(--warning-bg)' }
     default:         return { color: 'var(--text-tertiary)', bg: 'var(--surface-2)' }
   }
 }
@@ -135,7 +135,7 @@ export default async function ControlTowerPage() {
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                       {c.live && (
                         <span title={t('Stav odvozen z reálného manifestu', 'Status derived from a real manifest')}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700, color: 'var(--success)' }}>
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700, color: 'var(--success-text)' }}>
                           <Radio size={10} /> LIVE
                         </span>
                       )}
@@ -159,7 +159,7 @@ export default async function ControlTowerPage() {
                     {c.frameworks.map(f => (
                       <span key={f} title={fwName(f)} style={{
                         fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px',
-                        background: 'var(--accent-bg)', color: 'var(--accent)',
+                        background: 'var(--accent-bg)', color: 'var(--accent-text)',
                       }}>
                         {f}
                       </span>

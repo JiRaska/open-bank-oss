@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.26.7](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.6...card-issuance-service-v0.26.7) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.26.6](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.5...card-issuance-service-v0.26.6) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.26.5](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.4...card-issuance-service-v0.26.5) (2026-09-13)
+
+
+### Bug Fixes
+
+* **card-issuance:** corrupted persisted closedReason is LOUD, never a silent null ([#9413](https://github.com/JiRaska/open-bank-oss/issues/9413)) ([ddbcf34](https://github.com/JiRaska/open-bank-oss/commit/ddbcf34540eed292135967fd570e163ff0338078))
+* **card-issuance:** guard card_outbox created_at plausibility at INSERT ([#9301](https://github.com/JiRaska/open-bank-oss/issues/9301)) ([c939593](https://github.com/JiRaska/open-bank-oss/commit/c939593177452aa5778d873e25fce5c43045256d))
+
 ## [0.26.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.3...card-issuance-service-v0.26.4) (2026-09-08)
 
 

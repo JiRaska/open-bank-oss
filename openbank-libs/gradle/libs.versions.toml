@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.3.20"
+kotlin = "2.4.10"
 quarkus = "3.38.0"
 quarkus-plugin = "3.38.0"
 coroutines = "1.8.1"
@@ -22,7 +22,7 @@ junit = "5.11.0"
 # 3.27.7 (issue #461): closes GHSA-rqfh-9r24-8c9r. Test-only dependency.
 assertj = "3.27.7"
 mockk = "1.13.12"
-kover = "0.9.1"
+kover = "0.9.9"
 wiremock = "3.9.2"
 avro = "1.11.3"
 apicurio-registry = "2.6.2.Final"
@@ -65,7 +65,7 @@ pdfbox = "3.0.3"
 # 1.84 deliberately matches the version already resolved (and verified in
 # gradle/verification-metadata.xml) as a transitive dependency elsewhere in this build, rather
 # than introducing a second, differently-pinned BC version with its own fresh verification gap.
-bouncycastle = "1.84"
+bouncycastle = "1.85"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }

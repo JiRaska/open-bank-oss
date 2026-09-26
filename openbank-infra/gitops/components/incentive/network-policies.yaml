@@ -44,6 +44,9 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: campaign
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP

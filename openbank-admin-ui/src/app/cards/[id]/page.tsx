@@ -43,6 +43,7 @@ import { CardLimitsPanel } from '@/components/cards/CardLimitsPanel'
 import { CardControlsPanel } from '@/components/cards/CardControlsPanel'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
 import { quotaOf } from '@/lib/cards/entitlements'
+import { parseAccountRef, parseCard, parseCardEntitlements, parseCardList, parsePartyRef } from '@/lib/cards/clientContract'
 import type { CardTransition } from '@/lib/cards/lifecycle'
 import type { AccountRef, Card, CardEntitlements, PartyRef } from '@/lib/cards/types'
 
@@ -82,6 +83,7 @@ export default function CardDetailPage() {
 
   const { data: card, loading, unavailable, waking, reload } = useServiceResource<Card>(
     id ? svcUrl('card-issuance-service', `/api/v1/cards/${id}`) : null,
+    { select: parseCard },
   )
   const showingRetainedSnapshot = unavailable !== null && card !== null
 
@@ -102,11 +104,11 @@ export default function CardDetailPage() {
   const accountId = card?.accountId
   const productCode = card?.productCode
 
-  const fetchJson = useCallback(async <T,>(url: string): Promise<T | null> => {
+  const fetchJson = useCallback(async <T,>(url: string, parse: (raw: unknown) => T): Promise<T | null> => {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(8000), cache: 'no-store' })
       if (!res.ok) { await classifyBffFailure(res); return null }
-      return (await res.json()) as T
+      return parse(await res.json())
     } catch {
       return null
     }
@@ -116,10 +118,10 @@ export default function CardDetailPage() {
     if (!partyId) return
     let cancelled = false
     void (async () => {
-      const p = await fetchJson<PartyRef>(svcUrl('party-service', `/api/v1/parties/${partyId}`))
+      const p = await fetchJson(svcUrl('party-service', `/api/v1/parties/${partyId}`), parsePartyRef)
       if (!cancelled) setParty(p)
-      const cards = await fetchJson<Card[]>(svcUrl('card-issuance-service', `/api/v1/cards/party/${partyId}`))
-      if (!cancelled) setSiblings(Array.isArray(cards) ? cards : null)
+      const cards = await fetchJson(svcUrl('card-issuance-service', `/api/v1/cards/party/${partyId}`), parseCardList)
+      if (!cancelled) setSiblings(cards)
     })()
     return () => { cancelled = true }
   }, [partyId, fetchJson])
@@ -128,7 +130,7 @@ export default function CardDetailPage() {
     if (!accountId) return
     let cancelled = false
     void (async () => {
-      const a = await fetchJson<AccountRef>(svcUrl('account-service', `/api/v1/accounts/${accountId}`))
+      const a = await fetchJson(svcUrl('account-service', `/api/v1/accounts/${accountId}`), parseAccountRef)
       if (!cancelled) setAccount(a)
     })()
     return () => { cancelled = true }
@@ -138,8 +140,9 @@ export default function CardDetailPage() {
     if (!partyId || !productCode) return
     let cancelled = false
     void (async () => {
-      const e = await fetchJson<CardEntitlements>(
+      const e = await fetchJson(
         svcUrl('card-issuance-service', `/api/v1/cards/party/${partyId}/entitlements`, { productCode }),
+        parseCardEntitlements,
       )
       if (!cancelled) setEntitlements(e)
     })()

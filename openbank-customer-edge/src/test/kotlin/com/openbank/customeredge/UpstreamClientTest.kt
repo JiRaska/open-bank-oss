@@ -163,6 +163,46 @@ class UpstreamClientTest {
     }
 
     @Test
+    fun `postToService keeps the path under the allowed service authority`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.postToService(
+                baseUrl,
+                "/api/v1/business/invitations/token_123/claim",
+                "party-9",
+                "{}",
+            )
+
+            assertThat(response.status).isEqualTo(200)
+            assertThat(requests.single().path).isEqualTo("/api/v1/business/invitations/token_123/claim")
+        }
+    }
+
+    @Test
+    fun `postToService rejects a network-path reference before making a request`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.postToService(baseUrl, "//evil.example/steal", "party-9", "{}")
+
+            assertThat(response.status).isEqualTo(502)
+            assertThat(requests).isEmpty()
+        }
+    }
+
+    @Test
+    fun `postToService rejects a disallowed service authority before making a request`() {
+        withServer { client, _, requests ->
+            val response = client.postToService(
+                "http://evil.example",
+                "/api/v1/business/invitations/token_123/claim",
+                "party-9",
+                "{}",
+            )
+
+            assertThat(response.status).isEqualTo(502)
+            assertThat(requests).isEmpty()
+        }
+    }
+
+    @Test
     fun `post with extraHeaders forwards them and applies them after the standard headers`() {
         withServer { client, baseUrl, requests ->
             client.post(

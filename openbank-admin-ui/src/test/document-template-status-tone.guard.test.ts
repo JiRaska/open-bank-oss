@@ -6,8 +6,11 @@ import { describe, expect, it } from 'vitest'
 describe('document template status presentation', () => {
   it('uses the shared semantic badge rather than a page-local colour map', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/document-templates/page.tsx'), 'utf8')
+    const uiImports = source.match(/import \{([^}]*)\} from '@\/components\/ui'/)?.[1] ?? ''
 
-    expect(source).toContain("import { PageHeader, StatusBadge, type Tone } from '@/components/ui'")
+    expect(uiImports).toMatch(/\bPageHeader\b/)
+    expect(uiImports).toMatch(/\bStatusBadge\b/)
+    expect(uiImports).toMatch(/\btype Tone\b/)
     expect(source).toContain("DRAFT: 'warning'")
     expect(source).toContain("PUBLISHED: 'success'")
     expect(source).toContain("RETIRED: 'neutral'")

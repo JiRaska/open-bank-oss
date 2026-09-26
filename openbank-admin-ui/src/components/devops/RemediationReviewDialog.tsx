@@ -12,10 +12,10 @@
 
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 import { DORA_METRIC_LABEL } from '@/lib/devops/doraMetricLabels'
 
@@ -32,7 +32,7 @@ const REMEDIATION_KIND_LABEL: Record<DevOpsFinding['remediationKind'], { cs: str
 }
 
 export function RemediationReviewDialog({
-  finding, approve, busy, failed, onCancel, onConfirm,
+  finding, approve, busy, failed, onCancel, onConfirm, onRestoreFocus,
 }: {
   finding: DevOpsFinding
   approve: boolean
@@ -40,9 +40,10 @@ export function RemediationReviewDialog({
   failed: boolean
   onCancel: () => void
   onConfirm: () => void
+  onRestoreFocus?: () => void
 }) {
   const { t } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const action = approve ? t('Schválit nález', 'Approve finding') : t('Zamítnout nález', 'Reject finding')
   const titleId = `devops-decision-${finding.id}-title`
   const impactId = `devops-decision-${finding.id}-impact`
@@ -50,31 +51,32 @@ export function RemediationReviewDialog({
   const remediation = REMEDIATION_KIND_LABEL[finding.remediationKind]
   const dora = finding.doraMetricImpacted ? DORA_METRIC_LABEL[finding.doraMetricImpacted] : null
 
-  // No text field to carry autoFocus (unlike the /approvals reason textarea) — move focus into
-  // the dialog itself so a screen reader announces it and Escape/Tab work from the first render.
-  useEffect(() => { dialogRef.current?.focus() }, [])
-
   return (
-    <div
-      ref={dialogRef}
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={impactId}
-      aria-busy={busy}
-      tabIndex={-1}
-      onKeyDown={event => {
-        if (event.key === 'Escape' && !busy) onCancel()
-        trapDialogFocus(event, dialogRef.current)
-      }}
-      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
-    >
-      <div className="card" style={{ width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+    <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+        <Dialog.Content
+          role="alertdialog"
+          aria-busy={busy}
+          onOpenAutoFocus={event => {
+            event.preventDefault()
+            cancelRef.current?.focus()
+          }}
+          onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+          onPointerDownOutside={event => { if (busy) event.preventDefault() }}
+          onInteractOutside={event => { if (busy) event.preventDefault() }}
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            onRestoreFocus?.()
+          }}
+          className="card"
+          style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(560px, calc(100vw - 40px))', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
+        >
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <AlertTriangle aria-hidden="true" size={19} style={{ color: approve ? 'var(--warning)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
           <div>
-            <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {finding.title}</h2>
-            <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            <Dialog.Title asChild><h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {finding.title}</h2></Dialog.Title>
+            <Dialog.Description asChild><p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
               {approve
                 ? t(
                   'Tímto zaznamenáte lidské schválení navrhované nápravy. Potvrzení může spustit operační zásah.',
@@ -84,7 +86,7 @@ export function RemediationReviewDialog({
                   'Tímto zaznamenáte lidské zamítnutí navrhované nápravy. Náprava se neprovede.',
                   'This records human rejection of the proposed remediation. The remediation will not proceed.',
                 )}
-            </p>
+            </p></Dialog.Description>
           </div>
         </div>
 
@@ -120,9 +122,11 @@ export function RemediationReviewDialog({
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>
-            {t('Zpět ke kontrole', 'Back to review')}
-          </button>
+          <Dialog.Close asChild>
+            <button ref={cancelRef} type="button" className="btn btn-secondary" disabled={busy}>
+              {t('Zpět ke kontrole', 'Back to review')}
+            </button>
+          </Dialog.Close>
           <button
             type="button"
             className={approve ? 'btn btn-primary' : 'btn btn-danger'}
@@ -135,7 +139,8 @@ export function RemediationReviewDialog({
               : approve ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit zamítnutí', 'Confirm rejection')}
           </button>
         </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

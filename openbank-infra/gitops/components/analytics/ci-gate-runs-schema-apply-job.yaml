@@ -83,7 +83,7 @@ spec:
               # terminator to RS=";\n". The remaining records match the repository convention:
               # every real statement ends with a semicolon followed by a newline.
               total=0
-              for script in /sql/ci/ci-gate-runs.sql /sql/campaign/campaign-engagement.sql; do
+              for script in /sql/ci/ci-gate-runs.sql /sql/campaign/campaign-engagement.sql /sql/finops/cloud-finops.sql; do
                 echo "Splitting and applying ${script} to ${CLICKHOUSE_URL}"
                 rm -f /tmp/stmt*.sql
                 grep -v '^[[:space:]]*--' "$script" \
@@ -120,6 +120,9 @@ spec:
             - name: campaign-sql
               mountPath: /sql/campaign
               readOnly: true
+            - name: finops-sql
+              mountPath: /sql/finops
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
@@ -129,3 +132,7 @@ spec:
         - name: campaign-sql
           configMap:
             name: campaign-engagement-schema
+        # Cloud FinOps tables (ADR-0316), fed by admin-ui/cloud-finops-collector.
+        - name: finops-sql
+          configMap:
+            name: cloud-finops-schema

@@ -54,7 +54,12 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
 (c) agent-service→downstream services (service bearer), (d) agent-service→OPA (localhost sidecar),
 (e) agent-service→Kafka (mTLS, KafkaUser `agent-service`, `Write, Describe` on
 `openbank.agent.audit.events` and deliberately no `Read` — a component may append to the trail
-about itself and may not read it back; `openbank-infra/gitops/components/agent/kafka-agent-mtls.yaml`).
+about itself and may not read it back; `openbank-infra/gitops/components/agent/kafka-agent-mtls.yaml`);
+(f) *(removed 2026-09-21, #10383 — no client exists; kept for the history below)*
+agent-service→`openbank-communication-service`, client-credentials, read-only
+(PublishedStyleProvider, ADR-0285 D5) — fetches the published style for the `ui-assistant`
+persona, cached with a short TTL, no baseline fallback (see T-I3). NOT wired into
+`AgentChatService.systemPrompt()` or `CatalogReviewService` yet (infrastructure only).
 
 ## 2. STRIDE
 
@@ -136,6 +141,17 @@ about itself and may not read it back; `openbank-infra/gitops/components/agent/k
 - **T-I2 — prompt-injection exfiltration (FIND-S4-05).** Untrusted tool results are wrapped in
   data markers; the system prompt forbids following embedded instructions; the charter allow-list +
   gate bound what any missed phrasing could reach. PII is masked on every agent data scope.
+- **T-I3 — `communication-service` leg (ADR-0285 D5).** **Information disclosure / tampering** — a
+  compromised communication-service serves a poisoned style, or the read exposes something it
+  shouldn't. The read is read-only, client-credentials, `GET .../published` only — no write path,
+  no customer or operator data crosses this boundary (style content is bank-authored prose, never
+  PII). Moot today regardless: nothing composes the fetched style into a live prompt yet
+  (PublishedStyleProvider is unused infrastructure, not wired into `AgentChatService.systemPrompt()`
+  or `CatalogReviewService`), and unlike `openbank-copilot-service`'s equivalent provider it has no
+  git-registered-baseline fallback to poison in the first place — `ui-assistant`'s ADR-0148 registry
+  entry has never been split into `core.v1`/`style.v1`, so a total failure returns `null`, not a
+  substitute prompt. Blast radius reassessed when a composition cutover is actually proposed —
+  *open, tracked with that follow-up*.
 
 ### Denial of service
 
@@ -161,3 +177,21 @@ about itself and may not read it back; `openbank-infra/gitops/components/agent/k
   operator's roles) is a follow-up. Requires admin-ui pod compromise to exploit; deny tier untouched.
 - **D3b:** author≠approver codified in agent policy (not only GitHub branch protection).
 - Explicit per-run OTel trace already live (D7, #2385); LLM-level Langfuse observability planned.
+- **`AgentChatService`/`CatalogReviewService` composition cutover (T-I3, ADR-0285 D5):**
+  the unwired PublishedStyleProvider was removed (#10383); the cutover reintroduces the read. Unlike
+  copilot-service, there is no `core.v1`/`style.v1` registry split for `ui-assistant` to compose
+  yet — that is a separate, later decision (registry entry + ADR-0148 evals), not this change.
+
+## 4. Change log
+
+- **2026-09-21 (#10383):** Removed PublishedStyleProvider, PublishedStylePort and
+  CommunicationStyleClient/CommunicationStyleAdapter — zero production consumers, and the
+  client's URL was never supplied in gitops (it fell back to localhost). Trust boundary (f) no
+  longer exists; T-I3 is moot until the composition cutover rebuilds the read with its URL wired.
+- **2026-09-11 (ADR-0285 D5 client infra, T-I3):** Added PublishedStyleProvider (client-credentials
+  read of `communication-service`'s published style for the `ui-assistant` persona, cache + short
+  TTL, no baseline fallback) and CommunicationStyleClient/CommunicationStyleAdapter.
+  Infrastructure only — not called from `AgentChatService.systemPrompt()` or `CatalogReviewService`,
+  no runtime behaviour change. New trust boundary (f): outbound, read-only, no customer or operator
+  data crosses it. See T-I3 and the matching open item.
+- **2026-09-21** — **Own machine identity for the charter-gated read tools (#10486 batch 7).** `TransactionServiceClient`, `SepaInstantServiceClient` and `InterestServiceClient` now mint from a NAMED oidc-client `m2m`, Keycloak client `openbank-agent` (`ROLE_API` only), instead of the shared `openbank-services` client. Upstream grants follow the charters: transaction list/read and SCT Inst list/read are granted, because a charter holds `query.ledger.readonly` / `query.payments.readonly`. Interest gets **no** grant, because no charter holds `query.interest.readonly` (ui-assistant denies it explicitly). The interest tools were already unreachable at the agent gate, and are now unreachable upstream as well. `AgentMachineGrantCharterAlignmentTest` fails if a charter gains that capability without the matching upstream rule. **STRIDE-S:** a new credential at Vault KV `keycloak/agent-service`, projected by `agent-service-m2m-oidc`, env ref `optional: false`. Its compromise reaches four reads, against the shared secret's fleet-wide operator reach. **Repudiation improves:** upstream decisions name the agent runtime. The other read clients (account, balance, catalog, ledger, AML, sanctions, FX, clearing, dispute) stay on the shared client for now. Rollback: revert the commit.

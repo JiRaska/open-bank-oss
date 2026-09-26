@@ -40,7 +40,10 @@ test.describe('SCT Inst payee verification', () => {
       expect(body.creditorIban).toBe('DE89370400440532013000')
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ status: body.creditorName.startsWith('Wrong') ? 'no_match' : 'match' }),
+        body: JSON.stringify({
+          status: body.creditorName.startsWith('Wrong') ? 'no_match' : 'match',
+          verifiedAt: '2026-09-10T08:15:30Z',
+        }),
       })
     })
 

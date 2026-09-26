@@ -159,7 +159,17 @@ class PartyResource {
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("status") statusParam: String?,
     ): Response {
-        val status = statusParam?.uppercase()?.let { runCatching { PartyStatus.valueOf(it) }.getOrNull() }
+        // #9038: absent status means unfiltered; an UNPARSEABLE one must not silently drop the
+        // condition and answer the full list with a 200 (the #8699 shape). libs-runtime maps
+        // IllegalArgumentException to 400; never a service-local mapper (#526).
+        val status = statusParam?.uppercase()?.let {
+            runCatching { PartyStatus.valueOf(it) }
+                .getOrElse { _ ->
+                    throw IllegalArgumentException(
+                        "unknown status '$it'; expected one of ${PartyStatus.entries.joinToString()}",
+                    )
+                }
+        }
         // ADR-0067 pilot: first live feature-flag evaluation in the fleet. Cosmetic, fail-static —
         // surfaces the resolved variant in a response header so the flip is observable via curl,
         // without changing the response body or any business logic. Flag-as-code: party-list-enriched.
@@ -188,13 +198,20 @@ class PartyResource {
     }
 
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
+    // #10486 batch 3: ROLE_API admits kyb-service's OWN machine principal, which creates the
+    // entity party for a business onboarding case. ROLE_API is held by every service account, so
+    // it is narrowed twice: by identity in party_rest_ext.rego (`service-kyb-party-m2m`) and,
+    // because party-service still runs AUTHZ_ENFORCE=false (advisory), by
+    // [requireNamedPartyCreateCaller] here.
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
+    @Authorize(action = "party.create")
     @Operation(summary = "Create a new party (customer or company)")
     suspend fun createParty(
         req: CreatePartyRequest,
         // Nullable by necessity — JAX-RS injects null for an absent header (#526, #3624).
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
+        requireNamedPartyCreateCaller(securityIdentity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         val classification = req.classification()
         require(classification != PartyClassification.SYNTHETIC || securityIdentity.hasRole("ROLE_ADMIN")) {
@@ -845,6 +862,12 @@ fun Party.toResponse() = mapOf(
     // ADR-0179: non-null only on a MERGED party — tells a consumer holding a stale id which
     // party to follow instead.
     "mergedIntoPartyId" to mergedIntoPartyId,
+    // Derived from the personal AML profile — the source of truth kyb and other readers use for
+    // these four facts. null means UNKNOWN (never declared); pepFlag is never a defaulted false.
+    "pepFlag" to knownPepFlag,
+    "pepCategory" to pepCategory.takeIf { knownPepFlag == true },
+    "fatcaStatus" to fatcaStatus,
+    "crsStatus" to crsStatus.takeIf { amlProfileDeclared },
 )
 
 fun PartyGdprExport.toResponse() = mapOf(

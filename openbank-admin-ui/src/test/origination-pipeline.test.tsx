@@ -162,4 +162,22 @@ describe('lending console', () => {
     // A filter that leaves everything visible is a filter that lied about being applied.
     expect(screen.queryByText('250,000 CZK')).toBeNull()
   })
+
+  it('aborts every in-flight evidence request when the console unmounts', async () => {
+    const signals: AbortSignal[] = []
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal
+      if (!signal) throw new Error('lending request must be abortable')
+      signals.push(signal)
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+    }))
+
+    const view = render(React.createElement(Providers, null, React.createElement(LendingPage)))
+    await waitFor(() => expect(signals).toHaveLength(4))
+    view.unmount()
+
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+  })
 })

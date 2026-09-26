@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA CLIENT certificate for transaction-service's mTLS read of fx-service (8443, client auth
+# REQUIRED) — the cross-currency rate lookup. Distinct from transaction-service-internal-tls, which is
+# the SERVER certificate for this service's own 8443 listener: one identifies the workload as a caller,
+# the other as a callee, and mixing them would put a server cert in a client key-store bucket.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: transaction-internal-tls
+  namespace: payments
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: transaction-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: transaction-service.payments.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

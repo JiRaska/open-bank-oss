@@ -85,4 +85,7 @@ class IctIncidentEntity : PanacheEntityBase {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    @Column(name = "aggregate_revision", nullable = false)
+    var aggregateRevision: Long = 0
 }

@@ -186,15 +186,15 @@ class SanctionsListServiceTest {
 
     @Test
     fun `refresh falls back to zero when stored count is null and importer returns zero`(): Unit = runBlocking {
-        val list = sampleList(listType = "CNB_DOMESTIC", lastEntryCount = null)
-        coEvery { repo.findByListType("CNB_DOMESTIC") } returns list
-        coEvery { importer.importList(SanctionsListType.CNB_DOMESTIC, any()) } returns
-            ListImportResult.skippedNotEntityBased("CNB has no feed")
-        coEvery { repo.markUpdated("CNB_DOMESTIC", 0) } returns list
+        val list = sampleList(listType = "FATF_HIGH_RISK", lastEntryCount = null)
+        coEvery { repo.findByListType("FATF_HIGH_RISK") } returns list
+        coEvery { importer.importList(SanctionsListType.FATF_HIGH_RISK, any()) } returns
+            ListImportResult.skippedNotEntityBased("FATF is country-risk")
+        coEvery { repo.markUpdated("FATF_HIGH_RISK", 0) } returns list
 
-        service.refresh("CNB_DOMESTIC")
+        service.refresh("FATF_HIGH_RISK")
 
-        coVerify { repo.markUpdated("CNB_DOMESTIC", 0) }
+        coVerify { repo.markUpdated("FATF_HIGH_RISK", 0) }
     }
 
     @Test

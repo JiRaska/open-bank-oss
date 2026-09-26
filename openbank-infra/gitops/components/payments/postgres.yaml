@@ -16,6 +16,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -82,6 +99,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -148,6 +182,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -214,6 +265,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -280,6 +348,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -346,6 +431,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
@@ -392,6 +494,23 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
@@ -432,6 +551,10 @@ metadata:
   name: sepa-payment-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 19 2 * * *"
   backupOwnerReference: self
   cluster:
@@ -445,6 +568,23 @@ metadata:
 spec:
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -504,6 +644,23 @@ metadata:
 spec:
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   # HA (ADR-0159): primary + hot standby with async streaming replication and
   # CNPG-managed automated failover. `enablePodAntiAffinity` + required
   # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
@@ -564,6 +721,10 @@ metadata:
   name: transaction-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 25 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -576,6 +737,10 @@ metadata:
   name: sepa-instant-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 35 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -588,6 +753,10 @@ metadata:
   name: domestic-payment-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 45 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -600,6 +769,10 @@ metadata:
   name: clearing-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 55 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -612,6 +785,10 @@ metadata:
   name: swift-service-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 5 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -624,6 +801,10 @@ metadata:
   name: settlement-service-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 15 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -636,6 +817,10 @@ metadata:
   name: standing-order-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 25 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -648,6 +833,10 @@ metadata:
   name: card-issuance-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 35 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore

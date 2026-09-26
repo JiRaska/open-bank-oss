@@ -48,6 +48,16 @@ import java.util.UUID
  * ack that loses an Art. 17 erasure silently, but they are different incidents — read
  * `application.yaml` per channel rather than assuming either. (#5751 wires all three to
  * `dead-letter-queue`, with explicit `openbank.dlq.onboarding.<channel>` topics.)
+ *
+ * **A recognised event type carrying an unparseable status is NOT a poison pill (#9038).** The old
+ * `runCatching { X.valueOf(raw) }.getOrNull() ?: return null` mapped a typo'd or renamed status
+ * onto the same path as an event type we legitimately ignore: the record was acked, the
+ * UNRECOGNISED counter moved, and the funnel silently stopped seeing the party. That conflates two
+ * different situations — "we don't care about this event type" (ack, correct) and "we care, the
+ * producer changed the vocabulary, and every replay will fail the same way until the code or the
+ * data is fixed" (nack; the DLQ keeps it for exactly that investigation). So the parsers throw
+ * [UnparseableStatusException] for the second case, and the consume methods rethrow it after
+ * recording the FAILED metric.
  */
 @ApplicationScoped
 class OnboardingEventConsumer(private val clock: Clock) {
@@ -94,6 +104,10 @@ class OnboardingEventConsumer(private val clock: Clock) {
 
         val event = try {
             parsePartyEvent(node)
+        } catch (e: UnparseableStatusException) {
+            // Recognised event type, unrecognised status vocabulary: nack, do not ack (#9038).
+            metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.FAILED)
+            throw e
         } catch (e: Exception) {
             log.errorf(e, "[party-events-in] Failed to map event: %.200s", payload)
             metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.FAILED)
@@ -136,7 +150,9 @@ class OnboardingEventConsumer(private val clock: Clock) {
             "PARTY_STATUS_CHANGED", "KYC_STATUS_UPDATED", "KYC_STATUS_CHANGED" -> {
                 val rawStatus = node.path("newStatus").asText().takeIf { it.isNotBlank() }
                     ?: node.path("status").asText()
-                val stage = runCatching { PartyStage.valueOf(rawStatus) }.getOrNull() ?: return null
+                val stage = runCatching { PartyStage.valueOf(rawStatus) }.getOrElse {
+                    throw UnparseableStatusException(type, rawStatus, PartyStage::class.simpleName ?: "PartyStage")
+                }
                 OnboardingEvent.PartyStatusChanged(partyId, stage, occurredAt)
             }
             else -> null
@@ -168,7 +184,9 @@ class OnboardingEventConsumer(private val clock: Clock) {
                         "KYC_CASE_REJECTED" -> "REJECTED"
                         else -> return null
                     }
-                val stage = runCatching { KycStage.valueOf(rawStatus) }.getOrNull() ?: return null
+                val stage = runCatching { KycStage.valueOf(rawStatus) }.getOrElse {
+                    throw UnparseableStatusException(type, rawStatus, KycStage::class.simpleName ?: "KycStage")
+                }
                 OnboardingEvent.KycStatusChanged(partyId, caseId, stage, occurredAt)
             }
             else -> null
@@ -206,6 +224,10 @@ class OnboardingEventConsumer(private val clock: Clock) {
         }
         val event = try {
             parse(node)
+        } catch (e: UnparseableStatusException) {
+            // Recognised event type, unrecognised status vocabulary: nack, do not ack (#9038).
+            metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
+            throw e
         } catch (e: Exception) {
             log.errorf(e, "[%s] Failed to map event: %.200s", topic, payload)
             metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
@@ -274,3 +296,14 @@ private fun partyIdOf(event: OnboardingEvent): UUID = when (event) {
     is OnboardingEvent.KycStatusChanged -> event.partyId
     is OnboardingEvent.DeviceEnrolled -> event.partyId
 }
+
+/**
+ * A recognised event type carried a status value the enum no longer knows (#9038). Distinct from
+ * "event type we ignore" (parsed to null, acked) and from "malformed JSON" (logged, acked): this
+ * one means the producer's vocabulary drifted from ours, and every replay fails identically until
+ * code or data changes — exactly what the DLQ exists to hold. Thrown by the parsers, recorded as
+ * FAILED, then rethrown so the record is nacked. Extends [IllegalStateException] so any catch site
+ * that already special-cases mapping failures still sees it as one.
+ */
+class UnparseableStatusException(eventType: String, rawStatus: String, enumName: String) :
+    IllegalStateException("Event $eventType carried status '$rawStatus' not present in $enumName")

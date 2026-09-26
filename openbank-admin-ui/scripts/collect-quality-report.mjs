@@ -34,19 +34,20 @@ function collectCoverage(service) {
 
 // ── Pitest ───────────────────────────────────────────────────────────────────
 
-async function collectMutation(service) {
-  const xmlPath = path.join(REPO_ROOT, service, 'build', 'reports', 'pitest', 'mutations.xml')
+export async function collectMutation(service, repoRoot = REPO_ROOT) {
+  const xmlPath = path.join(repoRoot, service, 'build', 'reports', 'pitest', 'mutations.xml')
   if (!fs.existsSync(xmlPath)) return null
 
   const raw = fs.readFileSync(xmlPath, 'utf-8')
   const parsed = await parseStringPromise(raw, { explicitArray: true })
   const mutations = parsed?.mutations?.mutation ?? []
 
-  let killed = 0, survived = 0, noCoverage = 0, total = 0
+  let killed = 0, timedOut = 0, survived = 0, noCoverage = 0, total = 0
   for (const m of mutations) {
     total++
     const status = m.$.status
     if (status === 'KILLED') killed++
+    else if (status === 'TIMED_OUT') timedOut++
     else if (status === 'SURVIVED') survived++
     else if (status === 'NO_COVERAGE') noCoverage++
   }
@@ -56,11 +57,16 @@ async function collectMutation(service) {
     targetPackage: `com.openbank.${service.replace('openbank-', '').replace(/-service$/, '').replace(/-/g, '.')}.domain`,
     totalMutants: total,
     killed,
+    timedOut,
     survived,
     noCoverage,
-    score: total > 0 ? Math.round((killed / total) * 100) : null,
+    score: total > 0 ? Math.floor(((killed + timedOut) * 100 + Math.floor(total / 2)) / total) : null,
     reportedAt: fs.statSync(xmlPath).mtime.toISOString(),
   }
+}
+
+export async function collectMutations(services = MONEY_PATH_SERVICES, repoRoot = REPO_ROOT) {
+  return (await Promise.all(services.map(service => collectMutation(service, repoRoot)))).filter(Boolean)
 }
 
 // ── Pact contracts ────────────────────────────────────────────────────────────
@@ -160,7 +166,47 @@ export async function providerHasMainVersion(baseUrl, auth, provider) {
   }
 }
 
-export async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider) {
+function canonicalPact(value) {
+  if (Array.isArray(value)) return value.map(canonicalPact)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalPact(value[key])]))
+  }
+  return value
+}
+
+function committedPact(pactFile) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'pacts', pactFile), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+async function equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact) {
+  const base = baseUrl.replace(/\/$/, '')
+  const headers = { Accept: 'application/hal+json' }
+  if (auth) headers.Authorization = auth
+  try {
+    const versionUrl = `${base}/pacticipants/${encodeURIComponent(consumer)}/branches/main/latest-version`
+    const versionResponse = await fetch(versionUrl, { headers, signal: AbortSignal.timeout(15000) })
+    if (!versionResponse.ok) return null
+    const version = (await versionResponse.json())?.number
+    if (typeof version !== 'string' || !version) return null
+    const pactUrl = `${base}/pacts/provider/${encodeURIComponent(provider)}/consumer/${encodeURIComponent(consumer)}/version/${encodeURIComponent(version)}`
+    const pactResponse = await fetch(pactUrl, { headers, signal: AbortSignal.timeout(15000) })
+    if (!pactResponse.ok) return null
+    const publishedPact = await pactResponse.json()
+    if (publishedPact === null || typeof publishedPact !== 'object' || Array.isArray(publishedPact)) return null
+    delete publishedPact._links
+    return JSON.stringify(canonicalPact(publishedPact)) === JSON.stringify(canonicalPact(committedPact)) ? version : null
+  } catch {
+    // A failed proof of equivalence is not a failed verification and never authorizes
+    // replacing the committed pact's version with a different broker version.
+    return null
+  }
+}
+
+export async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider, committedPact = null) {
   if (!consumerVersion) return { status: 'pending', verifiedAt: null, providerVersion: null }
   // Matrix API — pin the consumer to the commit that authored this exact pact
   // file. Pin the provider to its latest main-branch version so a newer feature
@@ -180,6 +226,15 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
   if (!res.ok) {
+    // An unpublished provider can make the Matrix API answer 400 before it can
+    // return an empty matrix. Confirm the missing main version independently;
+    // any other 400 (or an inconclusive version probe) remains a query error.
+    if ((res.status === 400 || res.status === 404) && !(await providerHasMainVersion(baseUrl, auth, provider))) {
+      return {
+        status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'no-provider-main-version',
+        detail: `${provider} has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet.`,
+      }
+    }
     return {
       status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'query-error',
       detail: `Pact Broker matrix query returned HTTP ${res.status} for ${consumer} → ${provider}.`,
@@ -188,6 +243,13 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
 
   const body = await res.json()
   const rows = Array.isArray(body?.matrix) ? body.matrix : []
+  if (rows.length === 0 && committedPact) {
+    const equivalentVersion = await equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact)
+    if (equivalentVersion && equivalentVersion !== consumerVersion) {
+      const latest = await fetchPairVerification(baseUrl, auth, consumer, equivalentVersion, provider)
+      return { ...latest, consumerVersion: equivalentVersion }
+    }
+  }
   const verifs = rows.map(r => r?.verificationResult).filter(Boolean)
   const providerVersion = rows.map(r => r?.providerVersion?.number).find(version => typeof version === 'string') ?? null
 
@@ -221,10 +283,11 @@ export async function enrichWithVerification(contracts) {
   let resolved = 0
   for (const c of contracts) {
     try {
-      const v = await fetchPairVerification(baseUrl, auth, c.consumer, c.consumerVersion, c.provider)
+      const v = await fetchPairVerification(baseUrl, auth, c.consumer, c.consumerVersion, c.provider, committedPact(c.pactFile))
       c.status = v.status
       c.verifiedAt = v.verifiedAt
       c.providerVersion = v.providerVersion
+      if (v.consumerVersion) c.consumerVersion = v.consumerVersion
       c.interactions = c.interactions.map(i => ({ ...i, status: v.status }))
       c.reasonCode = v.reasonCode ?? null
       c.detail = v.detail ?? null
@@ -279,7 +342,7 @@ async function main() {
     testResults = JSON.parse(fs.readFileSync(path.resolve('test-results.json'), 'utf-8'))
   } catch { /* not available */ }
 
-  const mutations = (await Promise.all(MONEY_PATH_SERVICES.map(collectMutation))).filter(Boolean)
+  const mutations = await collectMutations()
   const contracts = await enrichWithVerification(collectContracts())
   const serviceScores = buildServiceScores(testResults, mutations, contracts)
 

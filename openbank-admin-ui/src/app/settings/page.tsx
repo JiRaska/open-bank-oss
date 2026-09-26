@@ -3,40 +3,26 @@
 
 'use client'
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { User, Bell, Shield, Globe, Key, Info } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { ROLE_LABELS } from '@/lib/auth/roles'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, Tabs, type TabItem } from '@/components/ui'
 
 type Tab = 'profile' | 'notifications' | 'security' | 'api' | 'regional'
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('profile')
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const { t } = useLanguage()
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  const tabs: TabItem<Tab>[] = [
     { id: 'profile', label: t('Profil', 'Profile'), icon: <User size={14} aria-hidden="true" /> },
     { id: 'notifications', label: t('Oznámení', 'Notifications'), icon: <Bell size={14} aria-hidden="true" /> },
     { id: 'security', label: t('Zabezpečení', 'Security'), icon: <Shield size={14} aria-hidden="true" /> },
     { id: 'api', label: t('API klíče', 'API Keys'), icon: <Key size={14} aria-hidden="true" /> },
     { id: 'regional', label: t('Jazyk', 'Language'), icon: <Globe size={14} aria-hidden="true" /> },
   ]
-
-  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const next = event.key === 'ArrowDown' || event.key === 'ArrowRight'
-      ? (index + 1) % tabs.length
-      : event.key === 'ArrowUp' || event.key === 'ArrowLeft'
-        ? (index - 1 + tabs.length) % tabs.length
-        : event.key === 'Home' ? 0
-          : event.key === 'End' ? tabs.length - 1 : -1
-    if (next < 0) return
-    event.preventDefault()
-    setTab(tabs[next].id)
-    tabRefs.current[next]?.focus()
-  }
 
   return <AuthGuard permission="settings:view"><div>
     <PageHeader
@@ -46,9 +32,9 @@ export default function SettingsPage() {
       subtitle={t('Skutečné předvolby a přístup k účtu', 'Actual account preferences and access')}
     />
     <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-      <div role="tablist" aria-label={t('Sekce nastavení', 'Settings sections')} className="card" style={{ width: '200px', flexShrink: 0, padding: '8px' }}>
-        {tabs.map((item, index) => <button key={item.id} ref={element => { tabRefs.current[index] = element }} id={`settings-tab-${item.id}`} role="tab" type="button" tabIndex={tab === item.id ? 0 : -1} onKeyDown={event => moveTabFocus(event, index)} onClick={() => setTab(item.id)} aria-selected={tab === item.id} aria-controls={`settings-panel-${item.id}`} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px', borderRadius: '6px', border: 'none', borderLeft: tab === item.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === item.id ? 'var(--accent-light)' : 'transparent', color: tab === item.id ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: tab === item.id ? 600 : 400, fontSize: '13px', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>{item.icon}{item.label}</button>)}
-      </div>
+      <Tabs items={tabs} value={tab} onChange={setTab} label={t('Sekce nastavení', 'Settings sections')}
+        idPrefix="settings" orientation="vertical" variant="rail" className="card"
+        style={{ width: 200, flexShrink: 0, padding: 8 }} />
       <div style={{ flex: 1 }}>
         <div id="settings-panel-profile" role="tabpanel" aria-labelledby="settings-tab-profile" hidden={tab !== 'profile'}><ProfileTab /></div>
         <div id="settings-panel-notifications" role="tabpanel" aria-labelledby="settings-tab-notifications" hidden={tab !== 'notifications'}><UnavailableSettings title={t('Předvolby oznámení', 'Notification preferences')} detail={t('Osobní předvolby zatím nemají podporovaný backendový kontrakt. Konzole proto nezobrazuje falešné přepínače ani neukládá zdánlivé změny.', 'Personal notification preferences do not yet have a supported backend contract. This console therefore does not show fake switches or pretend to save changes.')} /></div>
@@ -68,7 +54,7 @@ function ProfileTab() {
   const roles = session?.user?.roles ?? []
   const initials = (name || email || '?').split(/\s+/).map(word => word[0]).join('').slice(0, 2).toUpperCase()
   return <div className="card"><div className="card-header"><span className="card-header-title">{t('Informace o profilu', 'Profile information')}</span></div><div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--border)' }}><div aria-hidden="true" style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--accent)', display: 'grid', placeItems: 'center', fontSize: '20px', fontWeight: 700, color: '#fff' }}>{initials}</div><div><div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{name || '—'}</div><div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>{email || '—'}</div></div></div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--border)' }}><div aria-hidden="true" style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--accent-strong)', display: 'grid', placeItems: 'center', fontSize: '20px', fontWeight: 700, color: 'var(--accent-strong-text)' }}>{initials}</div><div><div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{name || '—'}</div><div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>{email || '—'}</div></div></div>
     <div><div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>{t('Role (Keycloak)', 'Roles (Keycloak)')}</div><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{roles.length === 0 ? <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>—</span> : roles.map(role => { const meta = ROLE_LABELS[role]; return <span key={role} style={{ fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '10px', color: meta?.color ?? 'var(--text-secondary)', background: meta?.bg ?? 'var(--surface-3)' }}>{meta?.label ?? role}</span> })}</div><p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '10px 0 0' }}>{t('Profil a přístup spravuje Keycloak; údaje nahoře jsou skutečná přihlášená identita.', 'Keycloak manages the profile and access; the details above are the actual signed-in identity.')}</p></div>
   </div></div>
 }

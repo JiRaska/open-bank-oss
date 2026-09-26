@@ -1,8 +1,8 @@
 ---
 date: 2026-08-22
-decision-status: proposed
-delivery-status: planned
-followup: "#6426 — explicit approval required before writing the charter/rules authorization grant"
+decision-status: accepted
+delivery-status: shipped
+followup: "#5839 — seven-day shadow run and human graduation decision require observed pilot evidence"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -12,6 +12,12 @@ summary: "Case collaboration is a separately governed, OPA-gated Temporal signal
 ---
 
 # ADR-0271 — OPA-gated case collaboration shadow pilot
+
+**Delivery note (2026-09-22).** The dedicated case policy, generated projection, fail-closed
+coordinator PEP and four-stage evidence chain are live. The approved pilot grant now intersects
+`rca-investigator`'s `case.join`/`case.contribute` charter claims with one rules-matrix entry for
+`INCIDENT_RESPONSE` + `SHADOW`, rollout `incident-triage-shadow-2026-08-20`, capped at eight signals
+per case. Operational graduation remains #5839 and cannot be inferred from this shipped control.
 
 ## Context
 
@@ -97,6 +103,15 @@ unrelated service that consumes the shared MCP/REST `agents.rego` bundle.
 - The Control Room can later render each stage from evidence without inferring a solid
   edge from a charter declaration.
 - Operator mutations remain a later ADR after this collaboration path is proven.
+
+## Delivery check
+
+Run `python3 .github/scripts/gen-case-collaboration-opa-data.py --check`; it must report an
+equivalent projection containing one enabled `rca-investigator` grant. Then evaluate the committed
+case-coordinator bundle with `opa eval` for two controls: `case.contribute` on
+`INCIDENT_RESPONSE`/`SHADOW` must allow, while the same principal on `HITL` must deny. A deployed
+pilot is not complete until the `case_signal_evidence` table contains correlated `AUTHORIZED`,
+`INVOKED`, `CONSUMED` and `PERSISTED` records; an empty table is a traffic shortfall, not success.
 
 ## Compliance impact
 

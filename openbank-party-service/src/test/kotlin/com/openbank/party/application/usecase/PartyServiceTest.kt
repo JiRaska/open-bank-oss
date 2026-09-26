@@ -98,7 +98,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         service.updateKycStatus(original.id, KycStatus.APPROVED)
 
@@ -112,7 +112,7 @@ class PartyServiceTest {
         val original = sampleParty(status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS)
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         service.updateKycStatus(original.id, KycStatus.REJECTED)
 
@@ -208,7 +208,7 @@ class PartyServiceTest {
         val original = sampleParty()
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         val result = service.updateParty(
             UpdatePartyCommand(
@@ -285,7 +285,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         val result = service.updateKycStatus(original.id, KycStatus.APPROVED)
 
@@ -305,7 +305,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         service.updateKycStatus(original.id, KycStatus.APPROVED)
 
@@ -322,7 +322,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         service.updateAmlStatus(original.id, AmlStatus.CLEARED)
 
@@ -340,7 +340,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         service.updateAmlStatus(original.id, AmlStatus.BLOCKED)
 
@@ -353,7 +353,7 @@ class PartyServiceTest {
         val original = sampleParty(status = PartyStatus.ACTIVE, kycStatus = KycStatus.IN_PROGRESS)
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
+        stubModify(service.partyRepo, updatedSlot, eventSlot)
 
         val result = service.updateKycStatus(original.id, KycStatus.REJECTED)
 
@@ -372,8 +372,7 @@ class PartyServiceTest {
             val original = sampleParty(status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS)
             val updatedSlot = slot<Party>()
             coEvery { service.partyRepo.findById(original.id) } returns original
-            coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers
-                { updatedSlot.captured }
+            stubModify(service.partyRepo, updatedSlot, eventSlot)
 
             val result = service.updateKycStatus(original.id, KycStatus.EXPIRED)
 

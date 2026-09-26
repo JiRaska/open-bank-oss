@@ -20,7 +20,9 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
+import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
 import jakarta.annotation.security.RolesAllowed
@@ -59,6 +61,7 @@ class TransactionResource(
     private val transactionUseCase: TransactionUseCase,
     private val transactionRepository: PanacheTransactionRepository,
     private val merchantCatalog: MerchantCatalogRepository,
+    private val merchantLocations: MerchantLocationRepository,
 ) {
 
     @GET
@@ -78,7 +81,11 @@ class TransactionResource(
         // display-only: `description` is passed through untouched, because disputes and SPAYD are
         // built from the raw acquirer descriptor and must not inherit a prettified name.
         val merchants = merchantCatalog.findByDescriptors(page.data.map { it.description })
-        return Response.ok(page.toResponse(merchants)).build()
+        // A second bounded read, for the same reason as the first: a chain's coordinates depend on
+        // WHICH town the descriptor named, and the catalogue row cannot know that. Keyed by the pair,
+        // one query per page.
+        val locations = merchantLocations.findByKeys(locationKeys(page.data.map { it.description }))
+        return Response.ok(page.toResponse(merchants, locations)).build()
     }
 
     @GET
@@ -142,7 +149,11 @@ class TransactionResource(
     }
 
     @POST
-    @RolesAllowed(Roles.OPERATOR)
+    // #10486: ROLE_API is admitted so a per-service machine identity (ROLE_API only) can reach
+    // OPA at all — RBAC runs before it. OPA is then the whole control for ROLE_API callers, and it
+    // is identity-gated: transaction_rest_ext.rego grants transaction.create to five named
+    // service accounts and denies every other ROLE_API holder.
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "transaction.create", resource = "")
     @Operation(summary = "Initiate a new transaction")
     suspend fun initiateTransaction(
@@ -179,7 +190,12 @@ class TransactionResource(
     @POST
     @Path("/{transactionId}/reverse")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "transaction.reverse", resource = "")
+    // `resource = "#transactionId"` binds the four-eyes approval to THIS reversal. `transaction.reverse`
+    // is four_eyes_required (rules.yaml four_eyes.verbs: `reverse`), and the interceptor stamps the
+    // PendingApproval with query.resource?.id — so with an empty resource every approval is created and
+    // matched at resourceId=null, and a checker's approval to reverse transaction A would satisfy a
+    // reversal of transaction B by the same maker. Same defect class as #3521 (sanctions.clear). See #4754.
+    @Authorize(action = "transaction.reverse", resource = "#transactionId")
     @Operation(summary = "Reverse a completed transaction — R-transaction return path (ADR-0111)")
     suspend fun reverseTransaction(
         @PathParam("transactionId") transactionId: UUID,
@@ -220,7 +236,20 @@ class TransactionResource(
     @POST
     @Path("/merge-sweep")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "transaction.sweep", resource = "")
+    // `resource = "#request.idempotencyKey"` is load-bearing for the four-eyes gate, not decoration —
+    // the same reasoning `party.merge` carries, and this endpoint is the OTHER half of the identity-merge
+    // path (#4754, refs #1984). `transaction.sweep` is four_eyes_required (rules.yaml four_eyes.verbs:
+    // `sweep`), and the interceptor stamps the PendingApproval with query.resource?.id — so with an empty
+    // resource every approval is created and matched at resourceId=null, and an approval a checker granted
+    // for one sweep would satisfy a DIFFERENT sweep by the same maker, to different accounts, for a
+    // different amount.
+    //
+    // The idempotency key, not `mergeReference`: a single merge reference covers every account pair swept
+    // in that merge, so binding to it would let an approval for one pocket satisfy the sweep of another.
+    // The key is per-request unique and is what the maker replays on the `X-Approval-Id` retry, so the
+    // approval resolves for the exact request it was granted for and no other. Asserted both ways in
+    // MergeSweepApprovalBindingIT — including the negative, which is the whole control.
+    @Authorize(action = "transaction.sweep", resource = "#request.idempotencyKey")
     @Operation(
         summary = "Sweep a duplicate party's balance to the surviving party during an identity merge (ADR-0179)",
     )
@@ -366,7 +395,22 @@ data class MerchantResponse(
     val source: String = "ENRICHED",
 )
 
-data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: String?, val country: String?)
+/**
+ * Where the merchant is — and how much that answer is worth.
+ *
+ * [precision] is `EXACT` only where the coordinates are about the place the money was spent: a
+ * single-site merchant, or a location resolved from the device that took the payment. For a chain
+ * it is `CITY`, because a brand has no single location and the seeded coordinates were a pin in
+ * Prague that put every Billa purchase in the country at one address. A client may caption the town
+ * for `CITY`; it must not drop a pin claiming a street.
+ */
+data class MerchantGeoResponse(
+    val lat: Double,
+    val lon: Double,
+    val city: String?,
+    val country: String?,
+    val precision: String,
+)
 
 /**
  * How much of the content hash goes in the logo URL. A 64-bit prefix: the token only has to
@@ -375,7 +419,12 @@ data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: Strin
  */
 private const val LOGO_VERSION_CHARS = 16
 
-private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
+/**
+ * @param location the merchant's row for the town THIS transaction's descriptor named, when there is
+ *   one. It wins over the catalogue's own coordinates, which for a chain are a representative pin
+ *   for the whole brand and cannot be about a particular purchase.
+ */
+private fun MerchantCatalogEntity.toResponse(location: MerchantLocationEntity? = null) = MerchantResponse(
     cleanName = cleanName,
     // Null when no logo has been ingested — absence stays absence, and a client renders whatever
     // it renders today. The hash makes the URL change whenever the bytes do, which is what lets
@@ -385,14 +434,41 @@ private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
     category = category,
     // Both coordinates or neither — the column constraint enforces it, and this mirrors it so a
     // half-populated row can never become a pin at latitude 0.
-    geo = if (lat != null && lon != null) {
-        MerchantGeoResponse(lat = lat!!, lon = lon!!, city = city, country = country)
-    } else {
-        null
+    geo = when {
+        location != null -> MerchantGeoResponse(
+            lat = location.lat,
+            lon = location.lon,
+            city = location.city,
+            country = location.country,
+            precision = location.geoPrecision,
+        )
+        lat != null && lon != null -> MerchantGeoResponse(
+            lat = lat!!,
+            lon = lon!!,
+            city = city,
+            country = country,
+            precision = geoPrecision,
+        )
+        else -> null
     },
 )
 
-private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) = TransactionResponse(
+/**
+ * The (merchant, town) pairs a page of descriptions can resolve to a location.
+ *
+ * Only descriptors that named a town produce a pair: with no town there is nothing to narrow to,
+ * and asking for `<merchant>|` would either miss or — worse — match a row someone had keyed on the
+ * empty string.
+ */
+private fun locationKeys(descriptions: List<String?>): Set<Pair<String, String>> =
+    descriptions.mapNotNull { MerchantDescriptor.parse(it) }
+        .mapNotNull { parsed -> parsed.cityToken?.let { parsed.key to it } }
+        .toSet()
+
+private fun Transaction.toResponse(
+    merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
+    locations: Map<String, MerchantLocationEntity> = emptyMap(),
+) = TransactionResponse(
     id = id,
     referenceNumber = referenceNumber,
     type = type.name,
@@ -409,11 +485,17 @@ private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity>
     rail = rail?.name,
     instructionType = instructionType?.name,
     merchantCategory = merchantCategory,
-    merchant = MerchantDescriptor.normalise(description)?.let { merchants[it] }?.toResponse(),
+    merchant = MerchantDescriptor.parse(description)?.let { parsed ->
+        merchants[parsed.key]?.toResponse(
+            location = parsed.cityToken?.let { locations["${parsed.key}|$it"] },
+        )
+    },
 )
 
-private fun CursorPage<Transaction>.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) =
-    CursorPage(data = data.map { it.toResponse(merchants) }, pagination = pagination)
+private fun CursorPage<Transaction>.toResponse(
+    merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
+    locations: Map<String, MerchantLocationEntity> = emptyMap(),
+) = CursorPage(data = data.map { it.toResponse(merchants, locations) }, pagination = pagination)
 
 /**
  * Strict enum parsing for request inputs (issue #8699). The previous

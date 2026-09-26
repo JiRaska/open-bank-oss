@@ -27,10 +27,11 @@ class ResilientPartyEligibilityClientTest {
     private val client = ResilientPartyEligibilityClient(rest)
     private val partyId: UUID = UUID.randomUUID()
 
-    private fun pidAnswers(core: PidCoreAttributes?) {
+    private fun pidAnswers(core: PidCoreAttributes?, partyType: String? = null) {
         coEvery { rest.getParty(partyId) } returns PidPartyResponse(
             id = partyId,
             status = "ACTIVE",
+            partyType = partyType,
             kycAttributes = PidKycAttributes("FULL"),
             coreAttributes = core,
         )
@@ -72,5 +73,12 @@ class ResilientPartyEligibilityClientTest {
         assertThat(eligibility.displayName).isNull()
         assertThat(eligibility.active).isTrue()
         assertThat(eligibility.kycLevel).isEqualTo("FULL")
+    }
+
+    @Test
+    fun `party type is carried only for review-context validation`(): Unit = runBlocking {
+        pidAnswers(null, partyType = "COMPANY")
+
+        assertThat(client.eligibilityOf(partyId).partyType).isEqualTo("COMPANY")
     }
 }

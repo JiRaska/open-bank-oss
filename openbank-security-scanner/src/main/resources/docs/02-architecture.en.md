@@ -32,14 +32,16 @@ graph TB
     rest[REST<br/>SecurityScannerResource<br/>IctIncidentResource]
     scanner[Application<br/>SecurityScannerService<br/>IctIncidentService]
     dom[Domain<br/>SecurityScanResult / PlatformSecurityReport<br/>IctIncident / SecurityFinding<br/>Severity / OwaspCategory / IncidentStatus]
-    mem[In-memory state<br/>ConcurrentHashMap<br/>lastResults / lastReport / incidents]
-    emit["Kafka emitter<br/>@Channel ict-incident-events-out"]
+    mem[In-memory scan state<br/>ConcurrentHashMap<br/>lastResults / lastReport]
+    db[(Postgres<br/>ict_incidents + outbox)]
+    emit["Outbox relay<br/>@Channel ict-incident-outbox-out"]
     sched["Scheduler<br/>@Scheduled every 30m"]
   end
 
   sched --> scanner
   rest --> scanner
   scanner --> dom
+  scanner --> db --> emit
   scanner --> mem
   scanner --> emit
   scanner -- "HTTP probes" --> fleet[(fleet services)]
@@ -60,7 +62,7 @@ com.openbank.securityscanner/          ◄── the only package root
 ├── application/
 │   ├── SecurityScannerService         scan pipeline, in-memory result cache
 │   └── IctIncidentService             DORA incident lifecycle, durable Postgres store,
-│                                      direct @Channel Kafka emitter
+│                                      transactional outbox relay
 └── infrastructure/
     └── rest/
         ├── SecurityScannerResource    scan + report endpoints, @Scheduled trigger
@@ -112,15 +114,17 @@ fun scheduledScan() { scanner.scanAll(serviceList()) }
 
 ```
 IctIncidentService (report / status change / regulatory report)
-    ↓ @Channel("ict-incident-events-out") — direct SmallRye emitter
+    ↓ one database transaction — incident state + aggregate revision + outbox row
+IctIncidentOutboxDispatcher
+    ↓ @Channel("ict-incident-outbox-out")
 openbank.security.ict.incident
     ↓
 audit-service
 ```
 
 Scan results are **not** emitted as events at all — they are served over REST
-(`GET /api/v1/security/report`) and nowhere else. Emission is fire-and-forget: there is no
-outbox, so a Kafka outage loses the incident event with no local record of it (#4709).
+(`GET /api/v1/security/report`) and nowhere else. Incident emission is replayable from the outbox;
+a Kafka outage leaves the row processable instead of losing the event.
 
 ## Components from `openbank-libs`
 

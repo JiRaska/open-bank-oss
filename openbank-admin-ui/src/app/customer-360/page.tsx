@@ -4,19 +4,23 @@
 
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
-import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
+import { parseCustomer360Evidence, type Customer360Evidence } from '@/lib/customer360/evidence'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
 import { LipaPanel } from '@/components/party/LipaPanel'
 import { DevicesPanel } from '@/components/party/DevicesPanel'
 import { DocumentsPanel } from '@/components/party/DocumentsPanel'
 import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
+import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import { clearSelectedCustomerGraphFacts, selectCustomerGraphFacts } from '@/lib/context/customerGraphClient'
+
+const CUSTOMER_360_TIMEOUT_MS = 10_000
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
@@ -33,7 +37,7 @@ import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 export default function Customer360Page() {
   const { t, language } = useLanguage()
   const [selected, setSelected] = useState<PartyHit | null>(null)
-  const [data, setData] = useState<Customer360 | null>(null)
+  const [data, setData] = useState<Customer360Evidence | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -43,17 +47,41 @@ export default function Customer360Page() {
   // name. Guard it at the source instead of relying on the button state.
   const generation = useRef(0)
 
+  useEffect(() => () => {
+    if (selected) clearSelectedCustomerGraphFacts(selected.id)
+  }, [selected])
+
   const load360 = async (party: PartyHit) => {
     const gen = ++generation.current
+    void selectCustomerGraphFacts(party.id)
     setSelected(party)
     setLoading(true)
     setFailure(null)
     setData(null)
     try {
-      const res = await fetch(`/api/customer-360/${encodeURIComponent(party.id)}`, { cache: 'no-store' })
-      const body = (await res.json()) as Customer360
+      const res = await fetch(`/api/customer-360/${encodeURIComponent(party.id)}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CUSTOMER_360_TIMEOUT_MS),
+      })
       if (gen !== generation.current) return // a newer selection won; this answer is about someone else
+      if (res.status === 401 || res.status === 403) {
+        clearSelectedCustomerGraphFacts(party.id)
+        setSelected(null)
+        setFailure('unauthorized')
+        return
+      }
       if (res.status === 400) {
+        setFailure('error')
+        return
+      }
+      if (!res.ok) {
+        setFailure('unreachable')
+        return
+      }
+      const raw = await res.json()
+      if (gen !== generation.current) return
+      const body = parseCustomer360Evidence(raw, party.id)
+      if (!body) {
         setFailure('error')
         return
       }
@@ -99,6 +127,10 @@ export default function Customer360Page() {
 
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
 
+      {!loading && !failure && data && selected && (
+        <CustomerContextGraph key={selected.id} evidence={data} partyName={partyDisplayName(selected)} />
+      )}
+
       {/* Issue #4265. Deliberately OUTSIDE every `data`/`loading`/`failure` branch below: this panel
           reads engagement-service, not ClickHouse, so a silver layer that is down or a party with no
           projected events must not hide an active fraud hold. Those are independent sources and the
@@ -122,6 +154,15 @@ export default function Customer360Page() {
           feature={t('Customer 360', 'Customer 360')}
           lang={language === 'cs' ? 'cs' : 'en'}
         />
+      )}
+
+      {!loading && data && data.excludedCount > 0 && (
+        <div role="status" className="card" style={{ marginBottom: '20px', padding: '12px 16px', color: 'var(--warning-text)' }}>
+          {t(
+            `Vyloučeno neplatných projekčních záznamů: ${data.excludedCount}. Souhrny používají pouze ověřené události.`,
+            `Invalid projection records excluded: ${data.excludedCount}. Summaries use validated events only.`,
+          )}
+        </div>
       )}
 
       {/* A party that exists but has no projected events. Stated as exactly that — the source is up,

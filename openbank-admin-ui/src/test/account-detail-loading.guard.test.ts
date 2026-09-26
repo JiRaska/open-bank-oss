@@ -10,4 +10,19 @@ describe('account detail loading contract', () => {
     expect(source).toContain('<RefreshCw size={14} aria-hidden="true"')
     expect(source).toContain("t('Načítám účet…', 'Loading account…')")
   })
+
+  it('prevents a superseded account request from replacing newer route evidence', () => {
+    const source = readFileSync(path.resolve(__dirname, '../app/accounts/[id]/page.tsx'), 'utf8')
+    expect(source).toContain('const loadSequence = useRef(0)')
+    expect(source).toContain('const sequence = ++loadSequence.current')
+    expect(source).toContain('if (sequence !== loadSequence.current) return')
+    expect(source).toContain('return () => { loadSequence.current += 1 }')
+  })
+
+  it('binds the loader effect to the current route identity without a stale closure', () => {
+    const source = readFileSync(path.resolve(__dirname, '../app/accounts/[id]/page.tsx'), 'utf8')
+    expect(source).toContain('const load = useCallback(async () => {')
+    expect(source).toContain('}, [id, unverifiableAccountMessage])')
+    expect(source).toContain('}, [load])')
+  })
 })

@@ -39,8 +39,10 @@ class DelegationEventConsumerTest {
         resourceType: String = "ACCOUNT",
         resourceId: UUID? = accountId,
         revision: Long? = 1,
+        approvalPolicy: String? = null,
+        requiredApprovals: Int? = null,
     ): String = objectMapper.writeValueAsString(
-        mapOf(
+        mutableMapOf<String, Any?>(
             "eventType" to type,
             "aggregateId" to grantId,
             "grantorPartyId" to grantor,
@@ -53,7 +55,10 @@ class DelegationEventConsumerTest {
             "validTo" to "2027-07-31T12:00:00Z",
             "occurredAt" to "2026-08-01T12:00:00Z",
             "lifecycleRevision" to revision,
-        ),
+        ).apply {
+            approvalPolicy?.let { put("approvalPolicy", it) }
+            requiredApprovals?.let { put("requiredApprovals", it) }
+        },
     )
 
     @Test
@@ -70,6 +75,34 @@ class DelegationEventConsumerTest {
                         it.active &&
                         "ACCOUNT_READ_BALANCES" in it.capabilities &&
                         it.perTransactionLimitAmount?.compareTo("5000.00".toBigDecimal()) == 0
+                },
+                1,
+            )
+        }
+    }
+
+    @Test
+    fun `activation projects exact N of M policy for an operation snapshot`(): Unit = runBlocking {
+        consumer.consume(event("DelegationActivated", approvalPolicy = "N_OF_M", requiredApprovals = 3))
+
+        coVerify {
+            repository.applyActive(
+                match<DelegatedAccessGrant> {
+                    it.approvalPolicy == "N_OF_M" && it.requiredApprovals == 3
+                },
+                1,
+            )
+        }
+    }
+
+    @Test
+    fun `legacy activation without policy projects as SOLO rather than inventing a quorum`(): Unit = runBlocking {
+        consumer.consume(event("DelegationActivated"))
+
+        coVerify {
+            repository.applyActive(
+                match<DelegatedAccessGrant> {
+                    it.approvalPolicy == DelegatedAccessGrant.APPROVAL_POLICY_SOLO && it.requiredApprovals == null
                 },
                 1,
             )

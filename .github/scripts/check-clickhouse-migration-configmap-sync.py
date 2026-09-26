@@ -47,8 +47,10 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import gatelib  # noqa: E402
+import gatelib
 
 REPO = Path(__file__).resolve().parents[2]
 MIGRATIONS_DIR = REPO / "openbank-analytics-sink/src/main/resources/clickhouse"
@@ -74,15 +76,55 @@ def migration_numbers(migrations_dir: Path) -> dict[int, list[str]]:
 
 
 def configmap_numbers(text: str) -> dict[int, str]:
-    """ConfigMap key number -> key name. A repeated number here is also a collision, but YAML
-    itself already forbids duplicate mapping keys, so in practice this only ever holds one name
-    per number; kept as a dict (not a set) so a future format change cannot silently under-count."""
+    """ConfigMap key number -> key name, for keys that are actually IN `data`.
+
+    WHY THIS PARSES YAML RATHER THAN LINES (#8893). The line regex matches any two-space-indented
+    `<nn>-name.sql:` key ANYWHERE in the document, and this file puts `data` first and
+    `kind`/`metadata` last. A migration appended to the end of the file therefore lands under
+    `metadata:` — a place ClickHouse never reads — while looking correct in a diff and satisfying
+    the old parser. Measured: a key mis-nested exactly that way left this gate and its DDL sibling
+    both green, which is the failure this gate exists to prevent, one level up.
+
+    The line scan is kept as a SECOND question, not a replacement: a DDL-shaped key outside `data`
+    is reported explicitly rather than merely being absent, because "you put it in the wrong
+    block" and "you forgot it" need different fixes.
+    """
     numbers: dict[int, str] = {}
-    for line in text.splitlines():
-        m = CONFIGMAP_KEY_RE.match(line)
+    for key in _data_keys(text):
+        m = CONFIGMAP_KEY_RE.match(f"  {key}:")
         if m:
-            numbers[int(m.group(1))] = line.strip().rstrip(":|").strip().rstrip(":")
+            numbers[int(m.group(1))] = key
     return numbers
+
+
+def _data_keys(text: str) -> list[str]:
+    """Keys of the ConfigMap's `data` mapping. Empty when the document will not parse."""
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(doc, dict):
+        return []
+    data = doc.get("data")
+    return sorted(data.keys()) if isinstance(data, dict) else []
+
+
+def misplaced_ddl_keys(text: str) -> list[str]:
+    """DDL-shaped keys that parse into some block OTHER than `data` — the mis-nesting above."""
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(doc, dict):
+        return []
+    misplaced: list[str] = []
+    for block, value in doc.items():
+        if block == "data" or not isinstance(value, dict):
+            continue
+        for key in value:
+            if isinstance(key, str) and CONFIGMAP_KEY_RE.match(f"  {key}:"):
+                misplaced.append(f"{block}.{key}")
+    return sorted(misplaced)
 
 
 def findings(repo: Path) -> tuple[list[str], int]:
@@ -104,6 +146,13 @@ def findings(repo: Path) -> tuple[list[str], int]:
 
     cm_text = gatelib.read_text(CONFIGMAP_PATH)
     cm_numbers = configmap_numbers(cm_text)
+
+    for key in misplaced_ddl_keys(cm_text):
+        out.append(
+            f"{key} is a DDL key outside `data` in {CONFIGMAP_PATH.relative_to(repo)} — "
+            "ClickHouse only runs keys under `data`, so this migration would never be applied "
+            "on a fresh boot despite looking present in the file"
+        )
 
     missing = sorted(set(mig_numbers) - set(cm_numbers))
     for number in missing:
@@ -188,13 +237,41 @@ def self_test() -> int:
         else:
             print(f"self-test ok: {name}")
 
-    cm_sample = "  09-synthetic-provenance.sql: |\n    -- some sql\n  not-a-key-line\n"
+    cm_sample = (
+        "apiVersion: v1\n"
+        "data:\n"
+        "  09-synthetic-provenance.sql: |\n"
+        "    -- some sql\n"
+        "kind: ConfigMap\n"
+        "metadata:\n"
+        "  name: clickhouse-init\n"
+    )
     got_numbers = configmap_numbers(cm_sample)
     if got_numbers != {9: "09-synthetic-provenance.sql"}:
         print(f"SELF-TEST FAIL: configmap_numbers parse (got {got_numbers})")
         failed += 1
     else:
-        print("self-test ok: configmap key regex parses the real key shape and ignores SQL body lines")
+        print("self-test ok: a key under `data` is counted")
+
+    # The known-positive this gate was blind to before #8893: same key, wrong block.
+    misnested = cm_sample.replace(
+        "  name: clickhouse-init\n",
+        "  name: clickhouse-init\n  14-credit-lifecycle.sql: |\n    -- some sql\n",
+    )
+    if configmap_numbers(misnested) != {9: "09-synthetic-provenance.sql"}:
+        print("SELF-TEST FAIL: a key under `metadata` must NOT count as present")
+        failed += 1
+    elif misplaced_ddl_keys(misnested) != ["metadata.14-credit-lifecycle.sql"]:
+        print(f"SELF-TEST FAIL: mis-nested key not reported (got {misplaced_ddl_keys(misnested)})")
+        failed += 1
+    else:
+        print("self-test ok: a DDL key outside `data` is both uncounted and reported")
+
+    if misplaced_ddl_keys(cm_sample):
+        print("SELF-TEST FAIL: a correct document must report no misplaced keys")
+        failed += 1
+    else:
+        print("self-test ok: a correct document reports no misplaced keys")
 
     # --- against the live repo: prove the actual fix is in sync --------------------------------
     live_out, live_total = findings(REPO)

@@ -1,0 +1,20 @@
+# Declared-holding lifecycle events — published by wealth-service through its transactional
+# outbox (ADR-0301): declared / revalued / withdrawn. Documented in
+# openbank-contracts/openbank-wealth-service/asyncapi.yaml.
+#
+# No DLQ topic here on purpose: this service has NO incoming channel. A dead-letter topic is
+# wired in the same change that introduces a consumer's rethrow, never speculatively — an unused
+# topic is one more thing an alert can be scoped to and find empty (#5745, #5752).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.wealth.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

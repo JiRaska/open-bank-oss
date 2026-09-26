@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: finops-lifecycle-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   gate:
     name: Version lifecycle gate
@@ -29,9 +33,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Enforce rules.yaml finops version policy
         run: python3 openbank-infra/scripts/check-version-lifecycle.py
-      - name: Validate finops_tiers (ADR-0057, declared side — advisory)
-        # Advisory until the measured classifier lands and rules.yaml flips
-        # finops_tiers.enforced to `block`; the script always exits 0 for now.
+      - name: Validate finops_tiers (ADR-0057, declared side — enforced)
+        # No longer advisory. rules.yaml `finops_tiers.enforced` is `enforce`, and the script
+        # reads that value rather than a flag: config bugs have always exited 1, and policy
+        # findings now do too. The step name carries "enforced" because
+        # check-advisory-gate-registration.py classifies a step by its NAME — an advisory-looking
+        # name over a blocking script is exactly the registration mismatch that gate reports.
         run: python3 openbank-infra/scripts/check-finops-tiers.py
 
   audit:

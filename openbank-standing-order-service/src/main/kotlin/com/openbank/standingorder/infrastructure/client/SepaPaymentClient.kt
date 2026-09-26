@@ -5,6 +5,7 @@
 package com.openbank.standingorder.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -27,12 +28,16 @@ import java.util.UUID
  * so a Kafka redelivery replays the same payment (sepa-payment returns the cached 201) rather than
  * paying twice.
  *
- * The outbound M2M token is minted by the `openbank-services` oidc-client (ROLE_OPERATOR), which
- * sepa-payment's createPayment accepts (`@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")`).
+ * The outbound M2M token is minted by the named oidc-client `m2m`, standing-order-service's OWN
+ * Keycloak client `openbank-standing-order` (ROLE_API only). sepa-payment's createPayment admits
+ * ROLE_API at the RBAC layer and its OPA grants `sepaPayment.create` to this principal by identity
+ * (#10486).
  */
 @RegisterRestClient(configKey = "sepa-payment-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-standing-order` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 interface SepaPaymentClient {
 
     @POST

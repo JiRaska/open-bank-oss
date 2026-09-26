@@ -30,7 +30,7 @@ triaging an incident that starts on `audit`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8113` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `audit`); dashboards in Grafana.
 - Logs: `kubectl logs -n audit deploy/audit-service -f`, or Loki
   `{namespace="audit"}`.

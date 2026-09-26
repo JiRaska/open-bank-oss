@@ -78,7 +78,9 @@ test('keeps quick search truthful through an outage and retry', async ({ page })
   await expect(input).toHaveValue('nov')
   await expect(dialog.getByRole('listbox')).toHaveAttribute('aria-busy', 'false')
 
-  await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/\/parties\/party-42$/)
+  await Promise.all([
+    page.waitForURL(/\/parties\/party-42$/, { waitUntil: 'domcontentloaded', timeout: 15_000 }),
+    page.keyboard.press('Enter'),
+  ])
   expect(attempts).toBe(2)
 })

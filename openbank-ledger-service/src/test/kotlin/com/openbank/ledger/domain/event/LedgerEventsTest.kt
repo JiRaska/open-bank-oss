@@ -29,6 +29,7 @@ class LedgerEventsTest {
         assertThat(event.occurredAt).isEqualTo(fixedInstant)
         assertThat(event.entryNumber).isEqualTo(42L)
         assertThat(event.lineCount).isEqualTo(2)
+        assertThat(event.sourceService).isEqualTo("ledger-service")
     }
 
     @Test

@@ -1,0 +1,31 @@
+# Kafka mTLS identity + ACLs for openbank-wealth-service (ADR-0137 Tier 2).
+#
+# wealth-service only PRODUCES openbank.wealth.events (its outbox). It consumes nothing today,
+# so it holds no Read ACL and needs no consumer group: the ACL set is the whole statement of what
+# this identity can do, and it stays that narrow until issue #9773 adds the lending-collateral
+# consumer (ADR-0301 D3), which is the same change that must wire its dead-letter topic.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
+# service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same name in
+# `messaging`; ESO projection into `wealth` is done by kafka-mtls-externalsecrets.yaml.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: wealth-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.wealth.events
+          patternType: literal
+        operations: [Write, Describe]

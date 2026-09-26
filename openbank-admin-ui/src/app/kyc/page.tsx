@@ -13,50 +13,14 @@ import Link from 'next/link'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
+import { parseKycCaseEvidence, parseKycCasePageEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
 
 const KYC_SERVICE = '/api/svc/kyc-service'
 
 const PAGE_SIZE = 20
 
-interface KycCase {
-  id: string; partyId: string; status: string
-  checks: { checkType: string; status: string }[]
-  reviewedBy?: string; createdAt: string; updatedAt: string
-}
-
-/**
- * `KycCasePage` as kyc-service publishes it (openapi.yaml 1.8.0, #8164) — `required: [items,
- * total, page, size, statusFilter]`. The page envelope has always been what `GET /api/v1/kyc/cases`
- * serves; only the document was wrong, and until #8163 nothing on either side replayed the contract.
- * The provider half is now pinned by `KycCasePageApiContractTest`; this is the consumer half.
- */
-interface KycCasePage {
-  items: KycCase[]
-  total: number
-  page: number
-  size: number
-  statusFilter: string | null
-}
-
-/**
- * Accept the envelope only when it is actually one. The page used to take
- * `Array.isArray(data) ? data : data.items ?? [data]`, which renders *something* for any JSON at
- * all — a shape drift became an empty table rather than a visible failure, which is the same
- * silence that let the spec and the implementation disagree in the first place.
- */
-function isKycCasePage(value: unknown): value is KycCasePage {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<KycCasePage>
-  return Array.isArray(candidate.items)
-    && typeof candidate.total === 'number' && Number.isInteger(candidate.total) && candidate.total >= 0
-    && typeof candidate.page === 'number' && Number.isInteger(candidate.page) && candidate.page >= 0
-    && typeof candidate.size === 'number' && Number.isInteger(candidate.size) && candidate.size > 0
-    && candidate.items.length <= candidate.size
-    && candidate.items.every(item => Boolean(item) && typeof item === 'object' && typeof item.id === 'string')
-}
-
 export default function KycPage() {
-  const [cases, setCases]     = useState<KycCase[]>([])
+  const [cases, setCases]     = useState<KycCaseEvidence[]>([])
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading] = useState(true)
@@ -68,11 +32,15 @@ export default function KycPage() {
   const [partyIdInput, setPartyIdInput] = useState('')
   const [loadedPartyId, setLoadedPartyId] = useState<string | null>(null)
   const loadedPartyIdRef = useRef<string | null>(null)
+  const activeLoad = useRef<AbortController | null>(null)
   const [selectedParty, setSelectedParty] = useState<PartyHit | null>(null)
   const [page, setPage] = useState(0)
   const [pagination, setPagination] = useState<{ total: number; page: number; size: number } | null>(null)
 
   const load = useCallback(async (requestedPartyId = partyId, requestedPage = page) => {
+    activeLoad.current?.abort()
+    const controller = new AbortController()
+    activeLoad.current = controller
     const scope = requestedPartyId || null
     // Two different contracts behind one page. The party-scoped route answers a single
     // KycCaseResponse or 404; the collection route answers a paginated KycCasePage, always.
@@ -82,7 +50,8 @@ export default function KycPage() {
       const url = partyScoped
         ? `${KYC_SERVICE}/api/v1/kyc/cases/party/${requestedPartyId}`
         : `${KYC_SERVICE}/api/v1/kyc/cases?page=${requestedPage}&size=${PAGE_SIZE}`
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) })
+      if (controller.signal.aborted) return
       if (!res.ok) {
         const kind = await classifyBffFailure(res)
         // "No case for this party" is a statement only the PARTY-scoped route can make: 404 is
@@ -102,11 +71,18 @@ export default function KycPage() {
         return
       }
       const data: unknown = await res.json()
+      if (controller.signal.aborted) return
       if (partyScoped) {
-        setCases(data ? [data as KycCase] : [])
+        const verifiedCase = parseKycCaseEvidence(data, requestedPartyId)
+        if (!verifiedCase) {
+          setCases([]); setPagination(null); setUnavailable({ kind: 'error' })
+          return
+        }
+        setCases([verifiedCase])
         setPagination(null)
       } else {
-        if (!isKycCasePage(data) || data.page !== requestedPage || data.size !== PAGE_SIZE) {
+        const verifiedPage = parseKycCasePageEvidence(data, requestedPage, PAGE_SIZE)
+        if (!verifiedPage) {
           // The envelope is not the one the spec publishes, or it is not the window we asked
           // for. Rendering it anyway would mean paging controls computed from numbers that
           // describe a different page.
@@ -117,13 +93,13 @@ export default function KycPage() {
         }
         // `total` and the page itself are separate backend statements. A case opened or purged
         // between them can leave an in-range page empty; walk back once for an authoritative one.
-        const lastPage = data.total === 0 ? 0 : Math.floor((data.total - 1) / data.size)
+        const lastPage = verifiedPage.total === 0 ? 0 : Math.floor((verifiedPage.total - 1) / verifiedPage.size)
         if (requestedPage > lastPage) {
           setPage(lastPage)
           return
         }
-        setCases(data.items)
-        setPagination({ total: data.total, page: data.page, size: data.size })
+        setCases(verifiedPage.items)
+        setPagination({ total: verifiedPage.total, page: verifiedPage.page, size: verifiedPage.size })
       }
       loadedPartyIdRef.current = scope
       setLoadedPartyId(scope)
@@ -135,11 +111,23 @@ export default function KycPage() {
         loadedPartyIdRef.current = null
         setLoadedPartyId(null)
       }
-      setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+      if (!controller.signal.aborted) setUnavailable({ kind: 'unreachable' })
+    } finally {
+      if (activeLoad.current === controller) {
+        activeLoad.current = null
+        setLoading(false)
+      }
+    }
   }, [partyId, page])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => {
+      const controller = activeLoad.current
+      activeLoad.current = null
+      controller?.abort()
+    }
+  }, [load])
 
   const filtered = cases.filter(c =>
     !search || c.id.includes(search) || c.partyId.includes(search) || c.status.includes(search.toUpperCase())
@@ -265,8 +253,8 @@ export default function KycPage() {
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                    {c.checks?.map(ch => (
-                      <StatusBadge key={ch.checkType} status={ch.status} label={ch.checkType?.replace(/_/g, ' ') ?? ch.checkType} />
+                    {c.checks.map(ch => (
+                      <StatusBadge key={ch.id} status={ch.status} label={ch.checkType.replace(/_/g, ' ')} />
                     ))}
                   </div>
                 </td>

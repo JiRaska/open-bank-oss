@@ -148,7 +148,7 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"VALIDATED",""" +
+                payload = """{"paymentId":"$paymentId","version":${updated.revision},"status":"VALIDATED",""" +
                     """"occurredAt":"${updated.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
@@ -165,7 +165,8 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"REJECTED","reason":"SANCTIONS_HIT",""" +
+                payload = """{"paymentId":"$paymentId","version":${updated.revision},""" +
+                    """"status":"REJECTED","reason":"SANCTIONS_HIT",""" +
                     """"occurredAt":"${updated.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
@@ -232,7 +233,7 @@ open class SepaPaymentActivitiesImpl(
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = rejected.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","status":"REJECTED",""" +
+                    payload = """{"paymentId":"$paymentId","version":${rejected.revision},"status":"REJECTED",""" +
                         """"occurredAt":"${rejected.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                     createdAt = Instant.now(clock),
                 ),
@@ -252,7 +253,7 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"PROCESSING",""" +
+                payload = """{"paymentId":"$paymentId","version":${processing.revision},"status":"PROCESSING",""" +
                     """"occurredAt":"${processing.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
@@ -270,7 +271,7 @@ open class SepaPaymentActivitiesImpl(
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = completed.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","status":"COMPLETED",""" +
+                    payload = """{"paymentId":"$paymentId","version":${completed.revision},"status":"COMPLETED",""" +
                         """"occurredAt":"${completed.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                     createdAt = Instant.now(clock),
                 ),

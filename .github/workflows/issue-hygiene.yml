@@ -1,10 +1,10 @@
 # -----------------------------------------------------------------------------
 # Issue hygiene — the link-in-PR lint (ADR-0052, rules.yaml: issues).
 #
-# Every PR's "Linked issues" section must be consciously addressed: either a
-# real reference (Closes/Fixes/Resolves/Refs #<n>) or an explicit N/A. Leaving
-# the template placeholder untouched is the failure this gate prevents — it is
-# the producer that lets rules.yaml flip `issues.enforced` advisory -> block.
+# Every PR must target `main`, and its "Linked issues" section must be
+# consciously addressed: either a real reference (Closes/Fixes/Resolves/Refs
+# #<n>) or an explicit N/A. A non-main base can make GitHub close the PR and its
+# issue while shipping nothing; #9385/#9392 demonstrated that failure mode.
 #
 # Lives in its own workflow (not ci.yml) so it can subscribe to the `edited`
 # event: fixing the PR body must re-evaluate THIS check without re-running the
@@ -42,6 +42,17 @@ jobs:
             const author = pr.user?.login ?? ''
             const labels = (pr.labels ?? []).map(l => l.name)
             const headRef = pr.head?.ref ?? ''
+            const baseRef = pr.base?.ref ?? ''
+
+            // A PR merged into an intermediate branch can look complete, close its issue, and
+            // disappear from the backlog without ever reaching production. This repository has
+            // one integration branch; dependent work waits for its prerequisite on `main`.
+            if (baseRef !== 'main') {
+              core.setFailed(
+                `issue-hygiene: PR targets '${baseRef || '(unknown)'}', but every PR must target `
+                + '`main`. Change the base branch before review or merge.')
+              return
+            }
 
             // --- Exemptions -------------------------------------------------
             const botAuthor = author.endsWith('[bot]')

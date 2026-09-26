@@ -1,0 +1,11 @@
+-- Idempotency backstop for POST /api/v1/clearing/submit (ADR-0298, burn-down #8351).
+-- A payment enters clearing exactly once; the use case replays an existing item for the same
+-- payment_id check-first, and this index is the backstop for the true-concurrency race (two
+-- parallel submits of the same payment) — the loser re-reads the winner instead of stacking a
+-- second PENDING row that a clearing cycle would sweep into a batch and settle twice.
+--
+-- If the SELECT below ever answers non-zero, deduplicate those rows BEFORE applying:
+--   SELECT payment_id, count(*) FROM clearing_items GROUP BY payment_id HAVING count(*) > 1;
+--
+-- Rollback: DROP INDEX IF EXISTS uq_clearing_items_payment;
+CREATE UNIQUE INDEX uq_clearing_items_payment ON clearing_items(payment_id);

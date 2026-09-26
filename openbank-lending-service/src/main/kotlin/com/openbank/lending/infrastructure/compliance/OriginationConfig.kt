@@ -17,6 +17,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 class OriginationConfig(
     @param:ConfigProperty(name = "lending.origination.auto-approve", defaultValue = "false")
     val autoApprove: Boolean,
+    /**
+     * ADR-0314 D5: FLOATING loans can be modelled, stored and published, but nothing reprices one at
+     * its reset date yet. Until that engine exists, originating one would book a loan whose rate
+     * silently never moves, so the switch stays off and a FLOATING application is a 400.
+     */
+    @param:ConfigProperty(name = "lending.origination.floating-rate-enabled", defaultValue = "false")
+    val floatingRateEnabled: Boolean,
 ) {
     companion object {
         const val SANDBOX_ACTOR = "sandbox-auto-approval"

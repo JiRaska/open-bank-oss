@@ -93,12 +93,33 @@ CHART_CREATED: dict[str, dict[str, str]] = {
 }
 
 UNSCRAPED_DESC = (
-    "This cluster is declared in gitops and Prometheus has no scrape target for it, so every "
-    "Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing "
-    "and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup "
-    "state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, "
-    "or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+    "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, "
+    "so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, "
+    "PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of "
+    "firing for it. Its backup state is unknown, not healthy. Set "
+    "spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in "
+    ".github/scripts/check-cnpg-scrape-coverage.py with a reason."
 )
+
+# The OTHER half of what the single alert used to conflate. Measured 2026-09-11: of the three
+# instances PostgresClusterUnscraped was firing, two were namespaces that DO NOT EXIST
+# (incentive, communication) -- so the remedy the alert printed, "set enablePodMonitor on the
+# Cluster", named a Cluster nobody had ever deployed. Opposite subjects, opposite remedies: one
+# is a monitoring gap on a running database, the other is an Argo Application that never
+# delivered its namespace. `kube_namespace_created` (kube-state-metrics, one series per existing
+# namespace) is what tells them apart.
+NOT_DEPLOYED_DESC = (
+    "This cluster is declared in gitops and its NAMESPACE does not exist in the cluster, so "
+    "nothing was ever deployed for it to scrape. Do NOT enable a PodMonitor -- there is no "
+    "Cluster object to set it on. The subject is the Argo Application that should have created "
+    "the namespace: check `kubectl get application -A` for one OutOfSync/Missing, or with no "
+    "Application at all. Either deploy it, or delete the declaration so the expected set "
+    "describes the fleet that exists rather than one that was planned."
+)
+
+# `kube_namespace_created` exists once per EXISTING namespace. Reduced to a bare (namespace)
+# vector so it can be joined on the one label the expected series shares with it.
+NAMESPACE_EXISTS_EXPR = "(max by (namespace) (kube_namespace_created))"
 
 
 def instance_down_desc(ns: str, cluster: str) -> str:
@@ -231,21 +252,52 @@ def render(clusters: dict[str, dict]) -> str:
         "            )",
         "",
         "        - alert: PostgresClusterUnscraped",
-        "          # Fires when a cluster this repo declares has NO scrape target in Prometheus.",
-        "          # `unless` is the whole alert: it yields the expected series that has no",
-        "          # counterpart, which is a real vector -- where the sibling threshold alerts",
-        "          # yield an empty one and stay silent forever.",
+        "          # Fires when a cluster this repo declares has NO scrape target in Prometheus",
+        "          # AND its namespace EXISTS -- i.e. something is deployed there and nobody is",
+        "          # watching it. `unless` is the core of the alert: it yields the expected series",
+        "          # that has no counterpart, which is a real vector -- where the sibling threshold",
+        "          # alerts yield an empty one and stay silent forever.",
+        "          #",
+        "          # The `and on (namespace)` join is what keeps the REMEDY true. Without it this",
+        "          # alert also caught clusters whose namespace had never been created, and told",
+        "          # the operator to set enablePodMonitor on a Cluster that does not exist. Those",
+        "          # are PostgresClusterDeclaredNotDeployed's, below.",
         "          #",
         "          # 15m absorbs a rollout: a Cluster being recreated loses its target briefly.",
         "          expr: |",
-        "            openbank:cnpg_cluster_expected",
-        "              unless on (namespace, cluster) openbank:cnpg_cluster_scraped",
+        "            (",
+        "              openbank:cnpg_cluster_expected",
+        "                unless on (namespace, cluster) openbank:cnpg_cluster_scraped",
+        "            )",
+        f"            and on (namespace) {NAMESPACE_EXISTS_EXPR}",
         "          for: 15m",
         "          labels:",
         "            severity: critical",
         "          annotations:",
-        '            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is declared but NOT scraped"',
+        '            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is deployed but NOT scraped"',
         f'            description: "{UNSCRAPED_DESC}"',
+        "",
+        "        - alert: PostgresClusterDeclaredNotDeployed",
+        "          # The complement of the alert above, over the same unscraped set: the namespace",
+        "          # itself is absent, so there is no database, no PodMonitor to enable and no",
+        "          # backup to be worried about -- only a gitops declaration describing a fleet",
+        "          # that was never delivered. Warning, not critical: nothing is at risk; the",
+        "          # expected set is simply wrong, which is what erodes every alert built on it.",
+        "          #",
+        "          # 30m (longer than the sibling's 15m) absorbs a first-time Argo sync creating",
+        "          # the namespace and the Cluster in sequence.",
+        "          expr: |",
+        "            (",
+        "              openbank:cnpg_cluster_expected",
+        "                unless on (namespace, cluster) openbank:cnpg_cluster_scraped",
+        "            )",
+        f"            unless on (namespace) {NAMESPACE_EXISTS_EXPR}",
+        "          for: 30m",
+        "          labels:",
+        "            severity: warning",
+        "          annotations:",
+        '            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is declared in gitops but its namespace does not exist"',
+        f'            description: "{NOT_DEPLOYED_DESC}"',
     ]
     return "\n".join(lines) + "\n"
 
@@ -261,19 +313,29 @@ FIXTURE_HEADER = """\
 #
 # Case 1 is the negative case (absence MUST page). Cases 2 and 3 are the controls that stop it
 # passing vacuously: a rule that fired unconditionally would pass case 1 and fail both.
+#
+# Cases 4 and 5 hold the SPLIT between the two alerts, in both directions. The unscraped set is
+# identical for both; only `kube_namespace_created` separates them, so each case asserts the one
+# alert that must fire AND the sibling that must not. Drop the kube_namespace_created series and
+# case 1 goes red -- which is the point: it is the only thing distinguishing a deployed database
+# nobody scrapes from a namespace that was never created.
 """
 
 
 def render_fixture(clusters: dict[str, dict]) -> str:
-    """Fixture for the coverage alert: every declared cluster scraped except one hold-out."""
+    """Fixture for the coverage alerts: every declared cluster scraped except one hold-out."""
     keys = sorted(clusters)
     holdout = keys[0]
     hn, hc = clusters[holdout]["namespace"], clusters[holdout]["name"]
+    # A second hold-out, in a DIFFERENT namespace, so case 5 can assert the mirror direction
+    # (deployed-but-unscraped) against a namespace whose existence case 4 removes.
+    other = next((k for k in keys if clusters[k]["namespace"] != hn), None)
+    namespaces = sorted({c["namespace"] for c in clusters.values()})
 
-    def up_series(exclude: str | None, value: str) -> list[str]:
+    def up_series(exclude: set[str], value: str) -> list[str]:
         out = []
         for k in keys:
-            if k == exclude:
+            if k in exclude:
                 continue
             c = clusters[k]
             out += [
@@ -285,22 +347,43 @@ def render_fixture(clusters: dict[str, dict]) -> str:
             ]
         return out
 
+    def ns_series(exclude: set[str] = frozenset()) -> list[str]:
+        """`kube_namespace_created` -- kube-state-metrics writes one per EXISTING namespace. This
+        is the series that tells 'deployed but unscraped' from 'never deployed at all'; a
+        namespace omitted here is one that does not exist."""
+        out = []
+        for ns in namespaces:
+            if ns in exclude:
+                continue
+            out += [
+                f'      - series: \'kube_namespace_created{{namespace="{ns}"}}\'',
+                '        values: "1600000000+0x40"',
+            ]
+        return out
+
     L = [FIXTURE_HEADER, "rule_files:", "  - prometheus-rules-db.yaml",
          "  - prometheus-rules-cnpg-coverage.yaml", "", "evaluation_interval: 1m", "", "tests:"]
 
-    L += [f"  # 1. NEGATIVE CASE: {holdout} has no scrape target at all. Absence must page.",
+    L += [f"  # 1. NEGATIVE CASE: {holdout} has no scrape target at all, and its namespace",
+          "  #    EXISTS. Absence must page as UNSCRAPED.",
           "  - interval: 1m",
           '    name: "a declared cluster with no scrape target is a finding, not a silence"',
           "    input_series:"]
-    L += up_series(holdout, "1+0x40")
+    L += up_series({holdout}, "1+0x40")
+    L += ns_series()
     L += ["    alert_rule_test:", "      - eval_time: 30m",
           "        alertname: PostgresClusterUnscraped", "        exp_alerts:",
           "          - exp_labels:", "              severity: critical",
           f"              namespace: {hn}", f"              cluster: {hc}",
           f"              origin: {clusters[holdout]['origin']}",
           "            exp_annotations:",
-          f'              summary: "CNPG cluster {hn}/{hc} is declared but NOT scraped"',
+          f'              summary: "CNPG cluster {hn}/{hc} is deployed but NOT scraped"',
           f'              description: "{UNSCRAPED_DESC}"',
+          "      # MIRROR: the namespace exists, so the not-deployed half must stay silent. Both",
+          "      # directions, or the split is untested.",
+          "      - eval_time: 40m",
+          "        alertname: PostgresClusterDeclaredNotDeployed",
+          "        exp_alerts: []",
           "      # The threshold alerts a human would expect to catch this: all silent. That",
           "      # silence IS the defect -- it is why the coverage alert has to exist.",
           "      - eval_time: 40m", "        alertname: PostgresNoRecoveryPoint",
@@ -310,13 +393,16 @@ def render_fixture(clusters: dict[str, dict]) -> str:
           "        exp_alerts: []", "      - eval_time: 40m",
           "        alertname: PostgresInstanceDown", "        exp_alerts: []", ""]
 
-    L += ["  # 2. CONTROL: with every cluster scraped, the alert must be SILENT.",
+    L += ["  # 2. CONTROL: with every cluster scraped, BOTH alerts must be SILENT.",
           "  - interval: 1m",
           '    name: "a fully scraped fleet reports nothing unscraped"',
           "    input_series:"]
-    L += up_series(None, "1+0x40")
+    L += up_series(frozenset(), "1+0x40")
+    L += ns_series()
     L += ["    alert_rule_test:", "      - eval_time: 30m",
-          "        alertname: PostgresClusterUnscraped", "        exp_alerts: []", ""]
+          "        alertname: PostgresClusterUnscraped", "        exp_alerts: []",
+          "      - eval_time: 40m",
+          "        alertname: PostgresClusterDeclaredNotDeployed", "        exp_alerts: []", ""]
 
     L += ["  # 3. CONTROL: DOWN is not UNSCRAPED. `up == 0` means the target EXISTS and the",
           "  #    scrape failed -- PostgresInstanceDown's job. Conflating the two would",
@@ -324,7 +410,8 @@ def render_fixture(clusters: dict[str, dict]) -> str:
           "  - interval: 1m",
           '    name: "a scraped-but-down cluster pages as DOWN, never as unscraped"',
           "    input_series:"]
-    L += up_series(holdout, "1+0x40")
+    L += up_series({holdout}, "1+0x40")
+    L += ns_series()
     L += [f'      - series: \'up{{container="postgres",namespace="{hn}",pod="{hc}-1",job="{hc}"}}\'',
           '        values: "0+0x40"',
           "    alert_rule_test:", "      - eval_time: 30m",
@@ -335,7 +422,55 @@ def render_fixture(clusters: dict[str, dict]) -> str:
           f"              pod: {hc}-1", '              container: postgres',
           f"              job: {hc}", "            exp_annotations:",
           f'              summary: "Postgres {hn}/{hc}-1 is down"',
-          f'              description: "{instance_down_desc(hn, hc)}"']
+          f'              description: "{instance_down_desc(hn, hc)}"', ""]
+
+    L += [f"  # 4. THE SPLIT: {holdout} is unscraped exactly as in case 1, and this time its",
+          f"  #    NAMESPACE does not exist -- no kube_namespace_created{{namespace=\"{hn}\"}}.",
+          "  #    Nothing is deployed, so the PodMonitor remedy would name a Cluster object that",
+          "  #    was never created. It must page as DECLARED-NOT-DEPLOYED and NOT as unscraped.",
+          "  - interval: 1m",
+          '    name: "a declared cluster whose namespace does not exist is not a monitoring gap"',
+          "    input_series:"]
+    L += up_series({holdout}, "1+0x40")
+    L += ns_series(exclude={hn})
+    L += ["    alert_rule_test:", "      - eval_time: 40m",
+          "        alertname: PostgresClusterDeclaredNotDeployed", "        exp_alerts:",
+          "          - exp_labels:", "              severity: warning",
+          f"              namespace: {hn}", f"              cluster: {hc}",
+          f"              origin: {clusters[holdout]['origin']}",
+          "            exp_annotations:",
+          f'              summary: "CNPG cluster {hn}/{hc} is declared in gitops but its namespace does not exist"',
+          f'              description: "{NOT_DEPLOYED_DESC}"',
+          "      - eval_time: 40m",
+          "        alertname: PostgresClusterUnscraped", "        exp_alerts: []", ""]
+
+    if other is not None:
+        on_, oc = clusters[other]["namespace"], clusters[other]["name"]
+        L += ["  # 5. BOTH DIRECTIONS AT ONCE. Two clusters, identically unscraped, in namespaces",
+              "  #    that differ only in existence. The unscraped set is the same for both alerts,",
+              "  #    so this is the case that fails if the kube_namespace_created join is dropped",
+              "  #    from either expression -- one alert would then claim both clusters.",
+              "  - interval: 1m",
+              '    name: "the unscraped set partitions by namespace existence, with nothing lost"',
+              "    input_series:"]
+        L += up_series({holdout, other}, "1+0x40")
+        L += ns_series(exclude={hn})
+        L += ["    alert_rule_test:", "      - eval_time: 40m",
+              "        alertname: PostgresClusterUnscraped", "        exp_alerts:",
+              "          - exp_labels:", "              severity: critical",
+              f"              namespace: {on_}", f"              cluster: {oc}",
+              f"              origin: {clusters[other]['origin']}",
+              "            exp_annotations:",
+              f'              summary: "CNPG cluster {on_}/{oc} is deployed but NOT scraped"',
+              f'              description: "{UNSCRAPED_DESC}"',
+              "      - eval_time: 40m",
+              "        alertname: PostgresClusterDeclaredNotDeployed", "        exp_alerts:",
+              "          - exp_labels:", "              severity: warning",
+              f"              namespace: {hn}", f"              cluster: {hc}",
+              f"              origin: {clusters[holdout]['origin']}",
+              "            exp_annotations:",
+              f'              summary: "CNPG cluster {hn}/{hc} is declared in gitops but its namespace does not exist"',
+              f'              description: "{NOT_DEPLOYED_DESC}"']
     # No trailing blank line: yamllint's empty-lines rule is an ERROR at 1 > 0.
     return "\n".join(L).rstrip("\n") + "\n"
 
@@ -490,8 +625,20 @@ def self_test() -> int:
         for key, c in clusters.items():
             if f"cluster: {c['name']}" not in out:
                 print(f"SELF-TEST FAIL: {key} missing from the generated rule"); ok = False
-        if "PostgresClusterUnscraped" not in out:
-            print("SELF-TEST FAIL: generated rule has no alert"); ok = False
+        for alert in ("PostgresClusterUnscraped", "PostgresClusterDeclaredNotDeployed"):
+            if f"alert: {alert}" not in out:
+                print(f"SELF-TEST FAIL: generated rule has no {alert}"); ok = False
+        # The join on namespace existence IS the split. Without it on BOTH expressions the two
+        # alerts are the same alert twice, and every fixture case below would still pass.
+        if out.count("kube_namespace_created") != 2:
+            print("SELF-TEST FAIL: both alerts must join on kube_namespace_created"); ok = False
+        # Its whole point is a DIFFERENT remedy: the subject is an Argo Application that never
+        # delivered the namespace, so prescribing enablePodMonitor names an object that does
+        # not exist -- the exact wrong instruction the single conflated alert used to print.
+        tail = out.split("- alert: PostgresClusterDeclaredNotDeployed", 1)[-1]
+        if "enablePodMonitor: true" in tail or "NOT_SCRAPED" in tail:
+            print("SELF-TEST FAIL: the not-deployed alert must not prescribe a PodMonitor")
+            ok = False
 
         # 3b. the fixture must hold out exactly one cluster and scrape the rest -- otherwise
         # the negative case is not a negative case.
@@ -500,6 +647,12 @@ def self_test() -> int:
             print("SELF-TEST FAIL: fixture has no input series"); ok = False
         if "exp_alerts: []" not in fx:
             print("SELF-TEST FAIL: fixture has no must-NOT-fire control"); ok = False
+        # The series that distinguishes the two alerts must be SUPPLIED by the fixture, or
+        # every case is about an expression that can only ever match nothing.
+        if "kube_namespace_created" not in fx:
+            print("SELF-TEST FAIL: fixture supplies no kube_namespace_created series"); ok = False
+        if "PostgresClusterDeclaredNotDeployed" not in fx:
+            print("SELF-TEST FAIL: fixture never exercises the not-deployed alert"); ok = False
 
         # 4. a stale NOT_SCRAPED entry must fail in BOTH directions
         NOT_SCRAPED["st/good-db"] = "covered now"

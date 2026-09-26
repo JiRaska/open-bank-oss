@@ -224,6 +224,8 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 
 ## 6. Change log
 
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there. The `${OIDC_TLS_VERIFICATION:...}` knob stays, but its default is now `required`.
+
 - **2026-08-26** — The operator approval inbox gains a bounded, read-only
   `GET /api/v1/fees/approvals` edge. It returns pending approval workflow metadata
   (random id, action, resource id, maker id and creation time) only to human `ROLE_OPERATOR` or
@@ -267,3 +269,4 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   boundary change: same callers, same authn/authz, same downstream calls. The change is that
   caller input is now validated *before* persistence rather than by the schema, closing a 500 and
   the case-variant idempotency-key gap described in §4.
+- **2026-09-21** — **Account reads move to the service's own machine identity (#10486 batch 5).** `AccountRestClient` (`GET /api/v1/accounts/active`, `GET /api/v1/accounts/{id}`) now mints its bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-billing` (`ROLE_API` only), instead of the shared `openbank-services` client. account-service grants it exactly `account.list` and `account.read` (`service-billing-account-read`). **STRIDE-S:** a new credential. Keycloak generates its secret in the live realm; the owner's provisioning script stores it at Vault KV `keycloak/billing-service` (`client_secret`); the `billing-service-m2m-oidc` ExternalSecret projects it, and the repo never sees it. The env ref is `optional: false`, so an unseeded entry blocks the new pod loudly. Compromise reaches only those two account reads. The fee-posting ledger client and the catalog and balance clients stay on the shared client until their own edges migrate (`M2mOidcClientIdentityWiringTest`). Rollback: revert the commit.

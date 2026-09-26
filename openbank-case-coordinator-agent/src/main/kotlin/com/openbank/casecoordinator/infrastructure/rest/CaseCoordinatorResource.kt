@@ -11,6 +11,7 @@ import com.openbank.casecoordinator.application.CaseOpenService
 import com.openbank.casecoordinator.application.CaseSignalAuthorizationResult
 import com.openbank.casecoordinator.application.CaseSignalAuthorizationService
 import com.openbank.casecoordinator.application.CaseThreadService
+import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.application.workflow.CaseWorkflow
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseSummary
@@ -37,8 +38,8 @@ import jakarta.ws.rs.core.Response
 /**
  * Case-coordinator REST surface (ADR-0244): case-open authority (D9), the signal ingress that
  * feeds a running CaseWorkflow, and the Phase 2 read API (#4185) projecting case history into the
- * ADR-0246 thread view. Every capability decision goes through the in-process CaseCapabilityGate
- * (D2); the OPA bundle evaluating the same decisions is Phase 4 scope.
+ * ADR-0246 thread view. Collaboration signals require both the OPA-backed policy decision and the
+ * in-process CaseCapabilityGate fail-safe (ADR-0271); neither layer can grant independently.
  */
 @Path("/api/v1/case-coordinator")
 @Produces(MediaType.APPLICATION_JSON)
@@ -50,6 +51,7 @@ class CaseCoordinatorResource(
     private val temporalConfig: TemporalConfig,
     private val identity: SecurityIdentity,
     private val signalAuthorization: CaseSignalAuthorizationService,
+    private val killSwitchState: CaseKillSwitchStatePort,
 ) {
 
     data class Status(val service: String, val status: String)
@@ -155,11 +157,15 @@ class CaseCoordinatorResource(
     @Path("/cases/{caseId}/signals")
     @Blocking
     @RolesAllowed("ROLE_ADMIN", "ROLE_OPERATOR")
+    // Boundary orchestration enumerates the closed signal vocabulary and its distinct HTTP outcomes.
+    @Suppress("CyclomaticComplexMethod")
     fun signal(@PathParam("caseId") caseId: String?, request: SignalRequest?): Response {
         val id = requireNotNull(caseId) { "caseId path parameter is required" }
         requireNotNull(request) { "request body is required" }
         val type = requireNotNull(request.type) { "type is required" }
         val agentId = requireNotNull(request.agentId) { "agentId is required" }
+        val authenticatedPrincipal = identity.principal.name
+        if (killSwitchState.pilotHaltReason() != null) return pilotHaltedResponse()
         // Authorisation before availability, deliberately ahead of the Temporal check (#4834). The
         // claimed agentId is carried into the workflow as the AUTHOR of the contribution, which is
         // the guarantee ADR-0244 rests on — "who detected is never who coordinated" — so it must be
@@ -173,7 +179,7 @@ class CaseCoordinatorResource(
             else -> throw IllegalArgumentException("unknown signal type '$type'")
         }
         val collaborationAuthorization = capability?.let {
-            when (val result = signalAuthorization.authorize(id, agentId, it)) {
+            when (val result = signalAuthorization.authorize(id, authenticatedPrincipal, agentId, it)) {
                 is CaseSignalAuthorizationResult.Authorized -> result
                 CaseSignalAuthorizationResult.Denied -> return Response.status(Response.Status.FORBIDDEN)
                     .entity(errorBody("signal '$type' denied for the requested agent")).build()
@@ -194,7 +200,7 @@ class CaseCoordinatorResource(
                 // it against the four known signal literals, so it is a bounded server-side value.
                 .entity(errorBody("signal '$type' denied for the requested agent")).build()
         }
-        return deliver(id, type, agentId, request, capability, collaborationAuthorization)
+        return deliver(id, type, agentId, request, capability, collaborationAuthorization, authenticatedPrincipal)
     }
 
     private fun capable(type: String, agentId: String): Boolean = when (type) {
@@ -212,6 +218,7 @@ class CaseCoordinatorResource(
         request: SignalRequest,
         capability: String?,
         authorization: CaseSignalAuthorizationResult.Authorized?,
+        authenticatedPrincipal: String,
     ): Response {
         val stub = workflowClient.newWorkflowStub(CaseWorkflow::class.java, id)
         return try {
@@ -222,6 +229,7 @@ class CaseCoordinatorResource(
                         request.role ?: "participant",
                         requireNotNull(authorization).signalId,
                         authorization.rolloutId,
+                        authenticatedPrincipal,
                     ),
                 )
                 "contribute" -> stub.contribute(
@@ -232,6 +240,7 @@ class CaseCoordinatorResource(
                         contested = request.contested ?: false,
                         signalId = requireNotNull(authorization).signalId,
                         rolloutId = authorization.rolloutId,
+                        authenticatedPrincipal = authenticatedPrincipal,
                     ),
                 )
                 "supersede" -> stub.supersede(
@@ -246,7 +255,7 @@ class CaseCoordinatorResource(
                 else -> stub.requestSynthesis(SynthesisRequest(agentId))
             }
             if (capability != null && authorization != null) {
-                signalAuthorization.recordInvoked(id, agentId, capability, authorization)
+                signalAuthorization.recordInvoked(id, agentId, capability, authorization, authenticatedPrincipal)
             }
             Response.accepted().build()
         } catch (e: WorkflowNotFoundException) {
@@ -277,3 +286,6 @@ class CaseCoordinatorResource(
         val log: org.jboss.logging.Logger = org.jboss.logging.Logger.getLogger(CaseCoordinatorResource::class.java)
     }
 }
+
+private fun pilotHaltedResponse(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+    .entity(mapOf("error" to "incident-response shadow pilot is halted by governance")).build()

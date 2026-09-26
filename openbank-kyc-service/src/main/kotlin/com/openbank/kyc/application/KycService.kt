@@ -69,6 +69,12 @@ data class KycCaseResult(val case: KycCase, val created: Boolean)
 class KycService {
 
     companion object {
+        /** The `amlRiskFactors` value party-service publishes for a self-declared PEP. */
+        const val DECLARED_PEP = "PEP"
+
+        /** A PEP check already under review, or failed, is not overwritten by a declaration. */
+        private val PEP_SETTLED = setOf(CheckStatus.MANUAL_REVIEW, CheckStatus.FAILED)
+
         /** Minimum reason length enforced by the ČNB four-eyes audit trail mandate (AML Act §8). */
         const val MIN_REASON_LENGTH = 10
     }
@@ -300,6 +306,54 @@ class KycService {
             anyFailed -> KycCaseStatus.REJECTED
             else -> currentStatus
         }
+    }
+
+    /**
+     * The customer's own AML declaration (party-service's personal AML profile, `PARTY_UPDATED`
+     * with `changeKind=AML_PROFILE_DECLARED`) carried risk factors — route the party's OPEN case to
+     * enhanced due diligence through the same escalation a PEP screening hit uses: `riskLevel`
+     * floors at [RiskLevel.HIGH] so the operator queue surfaces it, and a self-declared PEP puts
+     * the `PEP_SCREENING` check into [CheckStatus.MANUAL_REVIEW] (never an automated verdict).
+     * The reason is appended to the case notes.
+     *
+     * A party with no active case, or whose case is already terminal, is left alone and `null` is
+     * returned: the sandbox auto-approve path keeps behaving as today, and a closed case is not
+     * reopened by a declaration. A replay of the same declaration changes nothing.
+     */
+    suspend fun escalateForDeclaredAmlRisk(partyId: UUID, riskFactors: List<String>): KycCase? {
+        val case = repo.findActiveByPartyId(partyId)?.takeUnless { it.status.isTerminal } ?: return null
+        val now = Instant.now(clock)
+        val note = "EDD: customer AML declaration risk factors [${riskFactors.joinToString(",")}]"
+        val checks = if (DECLARED_PEP in riskFactors) {
+            case.checks.map {
+                if (it.checkType == CheckType.PEP_SCREENING && it.status !in PEP_SETTLED) {
+                    it.copy(
+                        status = CheckStatus.MANUAL_REVIEW,
+                        result = "self-declared PEP (AML profile)",
+                        performedAt = now,
+                    )
+                } else {
+                    it
+                }
+            }
+        } else {
+            case.checks
+        }
+        val updated = case.copy(
+            riskLevel = escalate(case.riskLevel),
+            checks = checks,
+            notes = if (case.notes?.contains(note) ==
+                true
+            ) {
+                case.notes
+            } else {
+                listOfNotNull(case.notes, note).joinToString("\n")
+            },
+            updatedAt = now,
+        )
+        val changed = updated.riskLevel != case.riskLevel || updated.notes != case.notes || checks != case.checks
+        if (!changed) return null
+        return repo.update(updated, KycEvents.caseStatusChanged(updated, now))
     }
 
     /** Escalate risk one notch on a PEP hit (never downgrades); floors at [RiskLevel.HIGH] (ADR-0116). */

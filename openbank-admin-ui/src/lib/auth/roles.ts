@@ -23,6 +23,19 @@ export const ROLES = {
   CATALOG_READ: "CATALOG_SCOPE_READ",
   CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
   CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
+  // ADR-0285 D6, phase 2: the write path the phase-1 communication:view comment above
+  // anticipated. Maker (drafts/submits a style version) and checker (publishes/retires,
+  // decides the commstyle.publish four-eyes queue) — never the same person on the same
+  // draft, enforced server-side (CommunicationStyleService.publish).
+  COMMS_EDITOR: "ROLE_COMMS_EDITOR",
+  COMMS_APPROVER: "ROLE_COMMS_APPROVER",
+  // #10618 department roles (realm-template.json). RISK and FINANCE drive the "Balance sheet &
+  // risk" section; the two treasury roles drive the "Treasury" section (openbank-treasury-service,
+  // ADR-0315) and unlock nothing outside it.
+  RISK:       "ROLE_RISK",
+  FINANCE:    "ROLE_FINANCE",
+  TREASURY_DEALER:   "ROLE_TREASURY_DEALER",
+  TREASURY_APPROVER: "ROLE_TREASURY_APPROVER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -34,7 +47,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -65,6 +78,29 @@ export const PERMISSIONS = {
   // Credit-risk console (ADR-0230 D1): the same set CreditRiskResource admits — the desk that may
   // read the ADR-0214 evidence bundle, and nobody wider (it exposes every applicant's income).
   "lending:risk:view":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
+  // Balance sheet & risk (#10618). Reads mirror RiskResource/CurveSetResource's class-level
+  // @RolesAllowed minus OPERATOR/API — the section belongs to the two departments and ADMIN. The
+  // writes mirror the method-level @RolesAllowed on POST /snapshots and POST /curve-sets: FINANCE
+  // reads, only RISK (and ADMIN) produces. OPA additionally refuses every service account.
+  "balance-sheet:view":            [ROLES.ADMIN, ROLES.RISK, ROLES.FINANCE],
+  "balance-sheet:snapshot:create": [ROLES.ADMIN, ROLES.RISK],
+  "balance-sheet:curves:upload":   [ROLES.ADMIN, ROLES.RISK],
+  // Lending ledger backfill (#10746/#10618): exactly LedgerBackfillResource's @RolesAllowed. One
+  // role set for every step on purpose — the four-eyes split is maker != checker between two
+  // PEOPLE (LedgerBackfillService, 422), not two roles, so the UI cannot express it as a grant.
+  "ledger-backfill:view":          [ROLES.ADMIN, ROLES.FINANCE],
+  "ledger-backfill:propose":       [ROLES.ADMIN, ROLES.FINANCE],
+  "ledger-backfill:decide":        [ROLES.ADMIN, ROLES.FINANCE],
+  "ledger-backfill:execute":       [ROLES.ADMIN, ROLES.FINANCE],
+  // Treasury (ADR-0315, #10618): exactly TreasuryResource's @RolesAllowed. Reads are the
+  // class-level set (ADMIN + both desk roles). Drafting/submitting is DEALER only and approving
+  // (approve/reject/settle/mature/reverse) APPROVER only — ADMIN is deliberately NOT in either
+  // write set, because the method-level @RolesAllowed does not admit it. Cancel admits both desk
+  // roles. Four-eyes between two PEOPLE is the domain's 422, not a role split.
+  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
+  "treasury:deal:create":   [ROLES.TREASURY_DEALER],
+  "treasury:deal:approve":  [ROLES.TREASURY_APPROVER],
+  "treasury:deal:cancel":   [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -121,6 +157,16 @@ export const PERMISSIONS = {
   // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
   "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Business onboarding (ADR-0284). BOTH lines mirror kyb-service's own
+  // @RolesAllowed(OPERATOR, ADMIN, KYC) — on the representation routes AND on `GET /cases`, which
+  // additionally calls requireOperator(). COMPLIANCE is deliberately absent from `view` as well as
+  // from `attest`: it appears on neither side, nor in rules.yaml's role_action_matrix for any
+  // kyb.* action, nor in kyb_rest_ext.rego's operator-kyb-review reason. Granting it `view` would
+  // render a nav item whose FIRST fetch 403s, i.e. a whole page of DataUnavailable — the exact
+  // "a link that 403s on click is worse than a hidden one" trap this file warns about above.
+  // Nav/route gating only: the BFF relays the operator's own bearer and kyb-service + OPA decide.
+  "business-onboarding:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "business-onboarding:attest": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -209,6 +255,14 @@ export const PERMISSIONS = {
   // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
   // put two role vocabularies in the console for a surface that cannot yet be written to.
   "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
+  // Phase 2 write path (ADR-0285 D6). Maker drafts/submits; ADMIN can do both for break-glass,
+  // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
+  "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
+  "communication:style:decide":  [ROLES.ADMIN, ROLES.COMMS_APPROVER],
+  // ADR-0285 D4: golden-set entries are CRUD-only, no four-eyes (nothing an editor writes here
+  // reaches a customer without a separate change wiring the replay engine) — same maker-only
+  // grant as style:propose.
+  "communication:golden-set:manage": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
@@ -251,16 +305,17 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding']],
   ['identity-cases:view', ['/identity-cases']],
+  ['business-onboarding:view', ['/business-onboarding']],
   ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions', '/merchants']],
-  ['payment-rails:view', ['/swift', '/clearing']],
+  ['payment-rails:view', ['/swift', '/clearing', '/sdd']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['cards:view', ['/cards']],
   ['payments:view', [
-      '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant',
+      '/payments', '/product-catalog', '/standing-orders', '/sepa-instant',
       '/fx', '/fees', '/lending',
   ]],
   ['interest:view', ['/interest']],
@@ -279,6 +334,11 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['campaign:create', ['/campaigns/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
   ['lending:risk:view', ['/lending/risk']],
+  ['balance-sheet:view', ['/balance-sheet']],
+  ['ledger-backfill:view', ['/balance-sheet/ledger-backfill']],
+  ['treasury:view', ['/treasury']],
+  ['treasury:deal:create', ['/treasury/deals/new']],
+  ['treasury:deal:approve', ['/treasury/approvals']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
@@ -286,6 +346,12 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['notifications:view', ['/notifications']],
   ['agent:view', ['/system/agent']],
+  // Longest-prefix-wins: '/communication/edit' must be registered so it beats the bare
+  // '/communication' entry below for anything under it, since ROUTE_PREFIXES only does a
+  // startsWith match (no wildcards) — a dynamic segment can only differentiate a permission
+  // when it comes AFTER the differentiating literal, which is why the editor lives at
+  // /communication/edit/[personaKey], not /communication/[personaId]/edit.
+  ['communication:style:propose', ['/communication/edit']],
   ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
@@ -311,17 +377,25 @@ export function hasAnyRole(roles: string[], ...required: Role[]): boolean {
   return required.some(r => roles.includes(r))
 }
 
+// These badges carry text, so each `color` has to clear AA 4.5:1 on its own `bg`. Four of the seven
+// did not — Admin 4.41:1, Payments 3.60:1, Auditor 3.07:1, API 3.54:1 — and the values below are the
+// measured minimum plus headroom. API is the one worth noting: no axe sweep could have found it,
+// because that role never rendered in a test session, so the table had to be measured directly (#9749).
 export const ROLE_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  ROLE_ADMIN:      { label: "Admin",      color: "#dc2626", bg: "#fef2f2" },
+  ROLE_ADMIN:      { label: "Admin",      color: "#d52424", bg: "#fef2f2" },
   ROLE_OPERATOR:   { label: "Operator",   color: "#2563eb", bg: "#eff6ff" },
   ROLE_VIEWER:     { label: "Viewer",     color: "#6b7280", bg: "#f9fafb" },
   ROLE_COMPLIANCE: { label: "Compliance", color: "#7c3aed", bg: "#faf5ff" },
-  ROLE_PAYMENTS:   { label: "Payments",   color: "#059669", bg: "#f0fdf4" },
-  ROLE_AUDITOR:    { label: "Auditor",    color: "#d97706", bg: "#fffbeb" },
-  ROLE_API:        { label: "API",        color: "#0891b2", bg: "#ecfeff" },
+  ROLE_PAYMENTS:   { label: "Payments",   color: "#04815a", bg: "#f0fdf4" },
+  ROLE_AUDITOR:    { label: "Auditor",    color: "#ab5e04", bg: "#fffbeb" },
+  ROLE_API:        { label: "API",        color: "#067b98", bg: "#ecfeff" },
   ROLE_SUPERVISOR: { label: "Supervisor", color: "#be185d", bg: "#fdf2f8" },
   ROLE_KYC:        { label: "KYC",        color: "#0d9488", bg: "#f0fdfa" },
   ROLE_KYC_OPENER: { label: "KYC Opener", color: "#0d9488", bg: "#f0fdfa" },
   ROLE_KYC_REVIEWER: { label: "KYC Reviewer", color: "#115e59", bg: "#ccfbf1" },
   ROLE_DEMO:       { label: "Demo",       color: "#64748b", bg: "#f8fafc" },
+  ROLE_RISK:       { label: "Risk",       color: "#be185d", bg: "#fdf2f8" },
+  ROLE_FINANCE:    { label: "Finance",    color: "#04815a", bg: "#f0fdf4" },
+  ROLE_TREASURY_DEALER:   { label: "Treasury Dealer",   color: "#1d4ed8", bg: "#eff6ff" },
+  ROLE_TREASURY_APPROVER: { label: "Treasury Approver", color: "#6d28d9", bg: "#f5f3ff" },
 }

@@ -11,27 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
-
-// Shape served by openbank-product-catalog GET /api/v1/fees — the bank-wide fee
-// schedule, flattened from the per-product Fee model. The UI no longer hardcodes
-// any of this; pricing is owned by the catalog service.
-interface FeeScheduleItem {
-  id: string
-  code: string
-  name: string
-  type: string
-  amount: number
-  currency: string
-  frequency: string
-  description: string | null
-  waivable: boolean
-  waiveCondition: string | null
-  productId: string
-  productCode: string
-  productName: string
-  status: string
-  updatedAt: string
-}
+import { describeWaiverRule, FeeScheduleContractError, parseFeeSchedule, type FeeScheduleItem } from '@/lib/fees/feeScheduleContract'
 
 export default function FeesPage() {
   const { t, language } = useLanguage()
@@ -57,21 +37,19 @@ export default function FeesPage() {
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const data = await res.json()
-      if (!Array.isArray(data)) {
-        setUnavailable({ kind: 'error' })
-        return
-      }
-      setFees(data as FeeScheduleItem[])
-    } catch {
+      setFees(parseFeeSchedule(await res.json()))
+    } catch (error) {
       // Timeout / abort / network — product-catalog didn't answer.
-      setUnavailable({ kind: 'unreachable' })
+      setUnavailable({ kind: error instanceof FeeScheduleContractError ? 'error' : 'unreachable' })
     } finally {
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   const filtered = useMemo(() => {
     return fees.filter(f => {
@@ -92,6 +70,7 @@ export default function FeesPage() {
 
   const uniqueTypes = useMemo(() => Array.from(new Set(fees.map(f => f.type))).sort(), [fees])
   const activeCount = fees.filter(f => f.status === 'ACTIVE').length
+  const automatedWaivers = fees.filter(f => f.waivable && f.waiverEvaluable).length
 
   return (
     <AuthGuard permission="payments:view">
@@ -111,7 +90,7 @@ export default function FeesPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
           <StatCard label={t('Celkem poplatků', 'Total Fees')} value={fees.length} icon={<Receipt size={14} aria-hidden="true" />} />
           <StatCard label={t('Aktivní (na aktivním produktu)', 'Active (on active product)')} value={activeCount} tone="success" />
-          <StatCard label={t('Kategorie poplatků', 'Fee Categories')} value={uniqueTypes.length} />
+          <StatCard label={t('Automatická waiver pravidla', 'Automated waiver rules')} value={automatedWaivers} />
         </div>
 
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -160,7 +139,7 @@ export default function FeesPage() {
                 <th>{t('Typ', 'Type')}</th>
                 <th>{t('Částka', 'Amount')}</th>
                 <th>{t('Měna', 'Currency')}</th>
-                <th>{t('Frekvence', 'Frequency')}</th>
+                <th>{t('Waiver pravidlo', 'Waiver rule')}</th>
                 <th>{t('Status', 'Status')}</th>
               </tr>
             </thead>
@@ -204,7 +183,11 @@ export default function FeesPage() {
                     {fee.amount.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                   </td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{fee.currency}</td>
-                  <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{fee.frequency}</td>
+                  <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: 240 }}>
+                    {!fee.waivable ? t('Nelze prominout', 'Not waivable') : fee.waiverEvaluable && fee.waiverRule
+                      ? <><strong style={{ color: 'var(--success-text)' }}>{t('Automaticky:', 'Automatic:')}</strong> {describeWaiverRule(fee.waiverRule)}</>
+                      : <><strong style={{ color: 'var(--warning-text)' }}>{t('Manuální posouzení:', 'Manual review:')}</strong> {fee.waiveCondition ?? t('podle schválené výjimky', 'under an approved exception')}</>}
+                  </td>
                   <td><StatusBadge status={fee.status} /></td>
                 </tr>
               ))}

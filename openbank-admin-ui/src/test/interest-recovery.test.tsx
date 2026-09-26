@@ -56,6 +56,18 @@ afterEach(() => {
 })
 
 describe('interest snapshot recovery', () => {
+  it('never combines unlike currencies into a monetary total', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, [
+      FIRST_ACCRUAL,
+      { ...FIRST_ACCRUAL, id: 'accrual-eur', currency: 'EUR', accruedAmount: 20 },
+    ])))
+
+    await renderPage()
+
+    expect(await screen.findByText('Multiple currencies')).toBeVisible()
+    expect(screen.queryByText('30.25')).not.toBeInTheDocument()
+  })
+
   it('keeps the last successful rows visible after a failed refresh and releases single-flight after success', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(200, [FIRST_ACCRUAL]))
@@ -106,7 +118,7 @@ describe('interest snapshot recovery', () => {
 
   it.each([
     { status: 401, body: { error: 'unauthorized' }, title: 'Session expired' },
-    { status: 403, body: { error: 'forbidden' }, title: 'Access denied' },
+    { status: 403, body: { error: 'forbidden' }, title: 'Session expired' },
   ])('keeps a retained privileged snapshot blocked through an HTTP $status retry', async ({ status, body, title }) => {
     let resolveRetry!: (response: Response) => void
     const retryResponse = new Promise<Response>(resolve => { resolveRetry = resolve })

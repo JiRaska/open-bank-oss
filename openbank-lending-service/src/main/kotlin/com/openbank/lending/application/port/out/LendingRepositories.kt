@@ -93,6 +93,9 @@ interface CreditDecisionQueryRepository {
 }
 
 interface LoanRepository {
+    /** Serializes a loan operation with its local writes in one transaction. */
+    fun <T> withLocked(loanId: LoanId, operation: (Loan?) -> Uni<T>): Uni<T>
+
     fun save(loan: Loan): Uni<Loan>
     fun findById(id: LoanId): Uni<Loan?>
     fun findByParty(partyId: UUID): Uni<List<Loan>>
@@ -101,12 +104,22 @@ interface LoanRepository {
     /** ACTIVE loans still on the books, ordered deterministically — drives the provisioning cycle scan. */
     fun findActive(limit: Int): Uni<List<Loan>>
 
+    /** Active loans not yet assessed for this reporting key; each completed batch leaves this set. */
+    fun findUnprovisioned(period: String, limit: Int): Uni<List<Loan>>
+
     /** Per-status totals across the whole loan book (issue #3294). See the note on
      *  [LoanApplicationRepository.summariseByState]. */
     fun summariseByState(): Uni<List<LoanStateSummary>>
 
     /** Every loan regardless of status, newest disbursement first. Capped by the caller. */
     fun findRecent(limit: Int): Uni<List<Loan>>
+
+    /**
+     * Loans NOT in any of [offBook] statuses, ordered by id, at most [limit] rows (the caller asks
+     * for one more than it accepts to detect an over-cap book). Read-only: drives the risk-engine
+     * loan-book read (ADR-0314 D4).
+     */
+    fun findOnBook(offBook: Set<com.openbank.lending.domain.model.LoanStatus>, limit: Int): Uni<List<Loan>>
 }
 
 interface InstallmentRepository {
@@ -128,6 +141,9 @@ interface InstallmentRepository {
      * Already-paid rows are never touched: history is never rewritten. Returns the number deleted.
      */
     fun deleteUnpaid(loanId: LoanId): Uni<Int>
+
+    /** Every installment of [loanIds] (paid or not), ordered by loan then number. Read-only (ADR-0314 D4). */
+    fun findByLoans(loanIds: Collection<UUID>): Uni<List<LoanInstallment>>
 }
 
 interface CollateralRepository {
@@ -142,6 +158,10 @@ interface CollateralRepository {
  * provisioning cycle reads the prior period's row to compute the ledger delta, then inserts the new one.
  */
 interface ProvisioningRepository {
+    fun findLatestByLoan(loanId: LoanId): Uni<LoanProvisioningRecord?>
+
+    fun summariseActive(asOf: java.time.LocalDate): Uni<List<com.openbank.lending.domain.model.CreditPortfolioSummary>>
+
     /** The most recent record strictly before [period] for this loan, if any — the delta baseline. */
     fun findLatestBefore(loanId: LoanId, period: String): Uni<LoanProvisioningRecord?>
 

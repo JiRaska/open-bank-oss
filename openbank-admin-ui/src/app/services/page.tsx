@@ -37,6 +37,7 @@ const STATIC_CANDIDATES = [
   { id: 'balance',             label: 'Balance Service',       group: 'core' },
   { id: 'product-catalog',     label: 'Product Catalog',       group: 'core' },
   { id: 'pid',                 label: 'PID Service',           group: 'identity' },
+  { id: 'kyb',                 label: 'KYB Service',           group: 'identity' },
   { id: 'party',               label: 'Party Service',         group: 'identity' },
   { id: 'sca',                 label: 'SCA Service',           group: 'identity' },
   { id: 'consent',             label: 'Consent Service',       group: 'open-banking' },

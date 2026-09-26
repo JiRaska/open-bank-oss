@@ -50,6 +50,7 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Private-CA server certificate for the disclosure-export listener. The original HTTP listener
-# remains for existing callers while delegation-service uses only this TLS listener.
+# Private-CA server certificate for document-service's east-west mTLS listener (8443). The existing HTTP listener
+# remains during the east-west TLS migration; new consumers use the parallel 8443 listener. Same shape as
+# account-service-internal-tls and party-service-internal-tls. delegation-service's disclosure-export
+# client uses this listener exclusively, never the plain HTTP one.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

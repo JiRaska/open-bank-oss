@@ -91,7 +91,22 @@ kover {
 // Pact rootDir + Pact Broker property forwarding centralised into
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
-// fleet-standard block, so nothing service-specific remains here.
+// fleet-standard block, so nothing service-specific remains here — except the heap below.
+
+// The default 512m test fork OOMs this module once the trace-contract IT adds another Quarkus
+// boot: `java.lang.OutOfMemoryError: Java heap space`, reproduced twice on #9012 (8m24s and
+// 9m36s before dying), never on main. 2g matches the override account-service, lending-service
+// and product-catalog-service already carry.
+//
+// NOTE for whoever reads this next: account-service's copy of this override says that a SECOND
+// module OOMing is the signal to raise the heap in build-logic and to count the Quarkus boots
+// per module instead of paying for them. This is that second module. Deliberately NOT done here
+// — a fleet ratchet across ~50 modules is not a decision a trace-contract PR should make
+// silently, and the boot count it asks for has not been measured. The signal is now on the
+// record twice.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.

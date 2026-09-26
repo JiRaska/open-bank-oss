@@ -36,6 +36,7 @@ export function TestAgentPanel() {
   const [findings, setFindings] = useState<TestAgentFinding[]>([])
   const [available, setAvailable] = useState<boolean | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [analysisError, setAnalysisError] = useState(false)
   const [governance, setGovernance] = useState<AgentGovernance | null>(null)
   const visibleFindings = [...findings]
     .sort((left, right) => FINDING_SEVERITY_ORDER[left.severity] - FINDING_SEVERITY_ORDER[right.severity])
@@ -58,12 +59,22 @@ export function TestAgentPanel() {
       </div>}
       {canAnalyze && <button className="btn btn-secondary btn-sm" disabled={analyzing} onClick={() => {
         setAnalyzing(true)
+        setAnalysisError(false)
         void fetch('/api/test-intelligence/agents', { method: 'POST' }).then(async response => {
-          if (!response.ok) { setAvailable(false); return }
+          // A failed refresh says nothing about the already loaded snapshot. Keep that evidence
+          // visible and report the refresh as its own retryable state; otherwise one transient
+          // POST failure turns real findings into a false "agent unavailable" empty panel.
+          if (!response.ok) { setAnalysisError(true); return }
           const body = await response.json() as { findings: TestAgentFinding[]; available: boolean; governance?: AgentGovernance }
           setFindings(body.findings); setAvailable(body.available); setGovernance(body.governance ?? null)
-        }).catch(() => setAvailable(false)).finally(() => setAnalyzing(false))
+        }).catch(() => setAnalysisError(true)).finally(() => setAnalyzing(false))
       }} style={{ marginBottom: 12 }}><Sparkles size={13}/>{analyzing ? t('Analyzuji snapshot…', 'Analyzing snapshot…') : t('Analyzovat aktuální evidence', 'Analyze current evidence')}</button>}
+      {analysisError && <p role="alert" style={{ margin: '0 0 12px', padding: '9px 10px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>
+        {t(
+          'Novou analýzu se nepodařilo dokončit. Níže zůstává poslední úspěšně načtená evidence; akci můžete bezpečně zopakovat.',
+          'The new analysis could not be completed. The last successfully loaded evidence remains below; you can safely try again.',
+        )}
+      </p>}
       {available === null ? <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Načítám agentní nálezy…', 'Loading agent findings…')}</span>
         : !available ? <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Agent v tomto prostředí není dostupný. Měřená evidence výše zůstává úplná a beze změny.', 'The agent is unavailable in this environment. Measured evidence above remains complete and unchanged.')}</span>
           : findings.length === 0 ? <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('Žádné aktivní nálezy. To není důkaz bezchybnosti; jen aktuální výstup agentova omezeného charteru.', 'No active findings. This is not proof of correctness; only the current output of the agent’s bounded charter.')}</span>

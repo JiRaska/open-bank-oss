@@ -55,6 +55,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 RECORD_MARKER = "<!-- flake-record:"
+RECORD_ID_MARKER = "<!-- flake-record-id:"
 
 
 # --------------------------------------------------------------------------------------------
@@ -200,6 +201,7 @@ def render_comment(record: dict) -> str:
         f"| head | `{(record.get('head_sha') or '')[:9]}` on `{record.get('head_branch') or ''}` |\n"
         f"| detected | {record['detected_at']} |\n\n"
         f"Tests found failing at the prior attempt:\n{test_lines}\n\n"
+        f"{RECORD_ID_MARKER}{record['run_id']}:{record['final_attempt']} -->\n"
         f"{RECORD_MARKER}{json.dumps(record, sort_keys=True)} -->\n"
     )
     return body
@@ -411,6 +413,7 @@ def self_test() -> int:
     }
     comment = render_comment(record)
     check("rendered comment names the job", record["job"] in comment)
+    check("rendered comment carries a stable run-attempt identity marker", "flake-record-id:123:2" in comment)
     check("rendered comment embeds a machine-readable JSON payload", RECORD_MARKER in comment)
     roundtrip = extract_records_from_comments([comment, "an unrelated human comment with no marker"])
     check("exactly one record recovered from two comments, one with no marker", len(roundtrip) == 1)

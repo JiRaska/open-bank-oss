@@ -4,10 +4,19 @@
 
 package com.openbank.kyb.application.port.`in`
 
+import com.openbank.kyb.application.port.out.BusinessAgreementView
+import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.KnownPerson
+import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
+import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.domain.model.RepresentationDecision
 import java.time.LocalDate
 import java.util.UUID
 
@@ -44,9 +53,76 @@ data class ClaimInvitationCommand(val token: String, val partyId: UUID)
 
 data class SignCommand(val caseId: UUID, val signerPartyId: UUID, val signatureRef: String)
 
-data class ResolveReviewCommand(val caseId: UUID, val requiredSignatures: Int, val operator: String)
+data class AnswerQuestionnaireCommand(val caseId: UUID, val callerPartyId: UUID, val questionnaire: Questionnaire)
+
+data class MakeDeclarationsCommand(val caseId: UUID, val callerPartyId: UUID, val declarations: Declarations)
+
+data class PrepareAgreementCommand(val caseId: UUID, val callerPartyId: UUID, val lang: String)
+
+data class AcceptDisclosuresCommand(
+    val caseId: UUID,
+    val callerPartyId: UUID,
+    val disclosures: List<AcceptedDisclosure>,
+)
+
+/**
+ * What the app may pre-fill: the people already known as customers (PEP taken from their profile,
+ * so the app does not ask) and the questionnaire this caller last answered on ANOTHER case.
+ */
+data class QuestionnairePrefill(val knownPersons: List<KnownPerson>, val previousQuestionnaire: Questionnaire?)
+
+data class ResolveReviewCommand(
+    val caseId: UUID,
+    val requiredSignatures: Int,
+    val operator: String,
+    val requiredSignerRoles: List<String> = emptyList(),
+)
+
+/**
+ * An operator confirms how one entity is represented (#9711). Keyed by identifier, and bound to the
+ * exact register text that was on screen — [ruleTextHash] is supplied by the caller so a rule that
+ * changed between rendering the form and submitting it is rejected rather than silently confirmed.
+ */
+data class AttestRepresentationCommand(
+    val scheme: IdentifierScheme,
+    val identifier: String,
+    val ruleTextHash: String,
+    val confirmedSigners: Int,
+    val confirmedRoles: List<String>,
+    val operator: String,
+    val note: String? = null,
+)
+
+interface RepresentationAttestationUseCase {
+    /** What the store says about this entity's CURRENT register text, for rendering the review form. */
+    suspend fun decisionFor(scheme: IdentifierScheme, identifier: String): RepresentationDecision?
+
+    suspend fun attest(cmd: AttestRepresentationCommand): RepresentationAttestation
+
+    suspend fun history(scheme: IdentifierScheme, identifier: String): List<RepresentationAttestation>
+}
 
 data class RejectCaseCommand(val caseId: UUID, val reason: String, val operator: String)
+
+/**
+ * Find a company by name instead of by identifier (issue #9707). [country] selects the register
+ * through the country pack; the scheme follows from it.
+ */
+data class SearchRegistryCommand(
+    val country: String,
+    val name: String,
+    val city: String? = null,
+    val limit: Int = RegistrySearchQuery.DEFAULT_LIMIT,
+)
+
+interface RegistrySearchUseCase {
+    /**
+     * Null when the register for [SearchRegistryCommand.country] cannot search — distinct from an
+     * empty result, so the caller can hide the search box rather than show one that never finds
+     * anything.
+     */
+    suspend fun search(cmd: SearchRegistryCommand): RegistrySearchResult?
+}
 
 interface RegistryLookupUseCase {
     /**
@@ -66,6 +142,11 @@ interface BusinessOnboardingUseCase {
     suspend fun matchInitiator(cmd: MatchInitiatorCommand): BusinessOnboardingCase
     suspend fun inviteCosigners(cmd: InviteCosignersCommand): BusinessOnboardingCase
     suspend fun claimInvitation(cmd: ClaimInvitationCommand): BusinessOnboardingCase
+    suspend fun answerQuestionnaire(cmd: AnswerQuestionnaireCommand): BusinessOnboardingCase
+    suspend fun makeDeclarations(cmd: MakeDeclarationsCommand): BusinessOnboardingCase
+    suspend fun questionnairePrefill(caseId: UUID, callerPartyId: UUID): QuestionnairePrefill
+    suspend fun prepareAgreement(cmd: PrepareAgreementCommand): BusinessAgreementView
+    suspend fun acceptDisclosures(cmd: AcceptDisclosuresCommand): BusinessOnboardingCase
     suspend fun sign(cmd: SignCommand): BusinessOnboardingCase
     suspend fun abandon(caseId: UUID, callerPartyId: UUID): BusinessOnboardingCase
     suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase

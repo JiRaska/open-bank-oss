@@ -43,14 +43,14 @@ const READINESS = {
 
 const CONSENTS = [
   {
-    id: 'c1', partyId: '11111111-1111-1111-1111-111111111111',
+    id: '11111111-1111-4111-8111-111111111111', partyId: '11111111-1111-4111-8111-111111111111',
     granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
     granteeName: 'Party marketing preferences',
     scopes: ['MARKETING_COMMS_EMAIL'], accountIbans: null, status: 'ACTIVE',
     validFrom: '2026-07-01T00:00:00Z', validTo: '2027-06-30T00:00:00Z', createdAt: '2026-07-01T00:00:00Z',
   },
   {
-    id: 'c2', partyId: '22222222-2222-2222-2222-222222222222',
+    id: '22222222-2222-4222-8222-222222222222', partyId: '22222222-2222-4222-8222-222222222222',
     granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
     granteeName: 'Party marketing preferences',
     scopes: ['MARKETING_COMMS_PUSH'], accountIbans: null, status: 'REVOKED',
@@ -63,7 +63,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/services/governance', route =>
       route.fulfill({
         status: 200,
-        body: JSON.stringify({ items: [
+        body: JSON.stringify({ available: true, timestamp: '2026-09-10T03:00:00Z', items: [
           { serviceName: 'account-service', dataDomain: 'core' },
           { serviceName: 'ledger-service', dataDomain: 'core' },
           { serviceName: 'aml-service', dataDomain: 'compliance' },
@@ -81,10 +81,12 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     )
 
     await page.goto('/dashboard')
+    const main = page.locator('#main-content:visible')
+    await expect(main).toHaveCount(1)
 
-    await expect(page.getByText('Healthy services', { exact: true })).toBeVisible()
-    await expect(page.getByText('1/2', { exact: true })).toBeVisible()
-    await expect(page.getByText('Average check latency', { exact: true })).toBeVisible()
+    await expect(main.getByText('Healthy services', { exact: true })).toBeVisible()
+    await expect(main.getByText('1/2', { exact: true })).toBeVisible()
+    await expect(main.getByText('Average check latency', { exact: true })).toBeVisible()
     // Health discovery does not measure any of these. Rendering a proxy as a fact is unsafe.
     await expect(page.getByText('Security Grade', { exact: true })).toHaveCount(0)
     await expect(page.getByText('Error Rate', { exact: true })).toHaveCount(0)
@@ -96,18 +98,18 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // The approved dashboard direction is deliberately denser than the old generic-card
     // layout: four factual metrics at desktop, then a two-column service overview. These
     // geometry checks make that information hierarchy a browser-observable contract.
-    const metricGrid = page.locator('[aria-label="Platform key metrics"]')
+    const metricGrid = main.locator('[aria-label="Platform key metrics"]')
     expect(await metricGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4)
     expect(await metricGrid.locator('.stat-card').first().evaluate(el => getComputedStyle(el).borderTopLeftRadius)).toBe('14px')
 
-    const serviceGrid = page.locator('[aria-label="Services by group"]')
+    const serviceGrid = main.locator('[aria-label="Services by group"]')
     expect(await serviceGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2)
 
     // The shell is part of the operator experience, not decorative page chrome: the
     // navigation rail and command bar must retain their deliberate working geometry.
-    expect(Math.round((await page.locator('#admin-sidebar').boundingBox())!.width)).toBe(264)
-    expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
-    expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
+    expect(Math.round((await page.locator('#admin-sidebar:visible').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('header:visible').boundingBox())!.height)).toBe(60)
+    expect(await main.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
 
     // The Explorer portrait is deliberately oversized and clipped by the guide,
     // but its top (and therefore its head) must remain inside the visible banner.
@@ -131,7 +133,10 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/system/readiness')
+    const main = page.locator('#main-content:visible')
+    await expect(main).toHaveCount(1)
 
     const swatch = page.locator('.tone-swatch').first()
     await expect(swatch).toBeVisible()
@@ -156,6 +161,14 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // The digit must actually be inside it — zero content width renders an empty box.
     expect((await small.textContent())?.trim()).not.toBe('')
 
+    // The shell can be completing its bounded theme transition while the geometry assertions
+    // run. Wait for the semantic badge's light-theme endpoint before measuring contrast.
+    const successBadge = page.locator('.badge-success').first()
+    await expect.poll(() => successBadge.evaluate(element => {
+      const style = getComputedStyle(element)
+      return { color: style.color, background: style.backgroundColor }
+    })).toEqual({ color: 'rgb(3, 116, 84)', background: 'rgb(236, 253, 245)' })
+
     const scan = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze()
@@ -169,15 +182,20 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
     await page.goto('/system/readiness')
+    const main = page.locator('#main-content:visible')
+    await expect(main).toHaveCount(1)
+    await expect(main.locator('.stat-card')
+      .filter({ has: page.locator('.stat-label', { hasText: /^Services$/ }) })
+      .locator('.stat-value').first()).toHaveText('2')
 
     // Anchor on the LABEL element with an exact-match regex: a plain `hasText: 'GO'` is a
     // substring match, so it also selects the "NO-GO" card and the locator resolves to two
     // elements under strict mode.
     const colourOf = (label: string) =>
-      page
+      main
         .locator('.stat-card')
         .filter({ has: page.locator('.stat-label', { hasText: new RegExp(`^${label}$`) }) })
-        .locator('.stat-value')
+        .locator('.stat-value').first()
         .evaluate(el => getComputedStyle(el).color)
 
     // GO and NO-GO carry a verdict, so their VALUES must differ in colour from each other
@@ -232,14 +250,39 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
   })
 
   test('the dark token theme changes shared surfaces without collapsing status distinction', async ({ page }) => {
+    // `.stat-card` carries `transition: all 0.2s ease`, so flipping the theme starts a 200ms
+    // animation and an axe scan issued straight after samples a colour pair that exists in
+    // NEITHER palette — an interpolated background such as #5a5f69, which is simply white on its
+    // way to #111827. That reads as a contrast violation on the shared surfaces while the settled
+    // theme is fine, and it is non-deterministic: the sampled instant, and therefore the reported
+    // ratio, moves with machine speed and with any change to the LIGHT token the animation starts
+    // from. Emulating reduced motion collapses every transition to .01ms via the media query
+    // globals.css already carries, so the scan measures the theme rather than the crossfade.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
+    await page.addInitScript(() => window.localStorage.setItem('ob-admin-theme', 'light'))
     await page.goto('/system/readiness')
 
     const body = page.locator('body')
+    const themeToggle = page.getByRole('button', { name: 'Switch to the dark theme' })
+    await expect(themeToggle).toBeVisible()
+    await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
     const lightBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
-    await page.locator('html').evaluate(el => el.classList.add('dark'))
+    await themeToggle.click()
+    await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+    await expect(page.getByRole('button', { name: 'Switch to the light theme' })).toBeVisible()
+    await expect.poll(async () => (await page.context().cookies()).find(cookie => cookie.name === 'ob-admin-theme')?.value).toBe('dark')
+    const serverResponse = await page.request.get('/system/readiness')
+    expect(await serverResponse.text()).toMatch(/<html[^>]*class="dark"/)
+    await page.reload()
+    await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+    await expect(page.getByRole('button', { name: 'Switch to the light theme' })).toBeVisible()
+    await page.waitForFunction(
+      light => getComputedStyle(document.body).backgroundColor !== light,
+      lightBackground,
+    )
     const darkBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
     expect(darkBackground).not.toBe(lightBackground)
 

@@ -9,12 +9,12 @@
 // split. Session-gated (NextAuth → Keycloak), like every other admin route. ClickHouse has no npm
 // client in this project, so we talk to its HTTP interface with fetch; URL + creds stay in env.
 //
-// House style (mirrors /api/test-results, /api/finops/costs): this route ALWAYS 200s with a typed
-// body. If ClickHouse is unreachable or empty, it returns `available: false` so the page degrades to
-// a calm DataUnavailable state instead of surfacing a raw HTTP error.
+// An empty successful query is distinct from an operational failure: the former is a 200 with
+// `available: false`; the latter is a safe 502 without leaking ClickHouse diagnostics.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { ONBOARDING_STEPS, type FunnelAnalytics, type FunnelStep, type SignOutcome, type FailReason, type KycMethod } from '@/lib/onboarding/funnelAnalyticsContract'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,34 +25,6 @@ const CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD
 const DB = 'openbank_analytics'
 
 // Step order + Czech/English labels shared with the client via the payload.
-const STEP_ORDER = ['WELCOME', 'IDENTITY', 'EMAIL', 'AGREEMENT', 'PASSKEY', 'SIGN'] as const
-
-// ── Types returned to the client ────────────────────────────────────────────
-
-interface FunnelStep {
-  step: string
-  stepOrdinal: number
-  viewed: number
-  completed: number
-  holdAbandons: number
-  dropOffPct: number      // (viewed - completed) / viewed * 100
-  medianSeconds: number | null
-}
-interface SignOutcome { day: string; attempts: number; successes: number; failures: number }
-interface FailReason { reason: string; failures: number }
-interface KycMethod { method: string; sessions: number }
-
-export interface FunnelAnalytics {
-  available: boolean
-  from: string
-  to: string
-  steps: FunnelStep[]
-  signOutcomes: SignOutcome[]
-  failReasons: FailReason[]
-  kycMethods: KycMethod[]
-  error?: string
-}
-
 // ── ClickHouse HTTP helper ──────────────────────────────────────────────────
 
 /** Run one SQL statement over the ClickHouse HTTP interface and return the JSON `data` rows. */
@@ -156,7 +128,7 @@ export async function GET(req: NextRequest) {
 
     // Walk the canonical step order so the funnel is always complete + ordered, even if a step has
     // no rows yet in the selected range.
-    const steps: FunnelStep[] = STEP_ORDER.map((step, i) => {
+    const steps: FunnelStep[] = ONBOARDING_STEPS.map((step, i) => {
       const r = funnelByStep.get(step)
       const viewed = num(r?.viewed)
       const completed = num(r?.completed)
@@ -195,12 +167,13 @@ export async function GET(req: NextRequest) {
       available: hasData, from, to, steps, signOutcomes, failReasons, kycMethods,
     }
     return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } })
-  } catch (e) {
-    // ClickHouse unreachable / query error → degrade to a calm empty state (never a raw 5xx).
-    console.error('onboarding funnel-analytics failed:', e)
+  } catch {
+    // Keep infrastructure diagnostics server-side and preserve the difference between no rows and
+    // a query that did not produce evidence at all.
+    console.error('onboarding funnel-analytics query failed')
     return NextResponse.json(
-      { ...empty, error: e instanceof Error ? e.message : String(e) },
-      { headers: { 'Cache-Control': 'no-store' } },
+      empty,
+      { status: 502, headers: { 'Cache-Control': 'no-store' } },
     )
   }
 }

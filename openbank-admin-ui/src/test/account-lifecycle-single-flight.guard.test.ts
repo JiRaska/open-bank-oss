@@ -10,7 +10,7 @@ const read = () => readFileSync(path.resolve(__dirname, '../app/accounts/[id]/pa
 describe('account lifecycle mutation guard', () => {
   it('prevents duplicate lifecycle writes before React state can rerender', () => {
     const source = read()
-    expect(source).toContain("import { useEffect, useRef, useState } from 'react'")
+    expect(source).toMatch(/import \{[^}]*\buseRef\b[^}]*\} from 'react'/)
     expect(source).toContain('const actionInFlight = useRef(false)')
     expect(source).toContain('if (!account || actionInFlight.current) return')
     expect(source).toContain('actionInFlight.current = true')

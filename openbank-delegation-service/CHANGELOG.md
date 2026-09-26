@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.17.1...delegation-service-v0.18.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.17.0...delegation-service-v0.17.1) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.16.0...delegation-service-v0.17.0) (2026-09-19)
+
+
+### Features
+
+* **delegation:** business payment signing - N-of-M approvals, trusted payees, single-use release ([#10315](https://github.com/JiRaska/open-bank-oss/issues/10315)) ([94da2b7](https://github.com/JiRaska/open-bank-oss/commit/94da2b7a8c62f9da48db60ac6477063b0af40b5b))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.15.0...delegation-service-v0.16.0) (2026-09-13)
+
+
+### Features
+
+* **delegation:** add customer recertification workflow ([#9215](https://github.com/JiRaska/open-bank-oss/issues/9215)) ([eb207f0](https://github.com/JiRaska/open-bank-oss/commit/eb207f06ee2367511d3cf99da284a6b2f62ed392))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.14.0...delegation-service-v0.15.0) (2026-09-13)
+
+
+### Features
+
+* **delegation:** add managed account portfolios ([#9286](https://github.com/JiRaska/open-bank-oss/issues/9286)) ([7e92be5](https://github.com/JiRaska/open-bank-oss/commit/7e92be54bf327573ad0b5229faa20f646c17dc51))
+* **delegation:** enforce organization grant authority ([#9522](https://github.com/JiRaska/open-bank-oss/issues/9522)) ([4f77c79](https://github.com/JiRaska/open-bank-oss/commit/4f77c792d4609251a843082b9ce0c8a09f1ad5ed))
+* **delegation:** project approval policy to account ([#9401](https://github.com/JiRaska/open-bank-oss/issues/9401)) ([58e3bbd](https://github.com/JiRaska/open-bank-oss/commit/58e3bbd91b1691ad05a150b53e02a4f0f6fb4df4))
+
+
+### Bug Fixes
+
+* **delegation:** guard delegation_outbox created_at plausibility at INSERT ([#9399](https://github.com/JiRaska/open-bank-oss/issues/9399)) ([b32ca68](https://github.com/JiRaska/open-bank-oss/commit/b32ca6806cd558c28922b052b4350b4900170f03))
+* **delegation:** replay-safe role-preset creation + ADR-0289 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9049](https://github.com/JiRaska/open-bank-oss/issues/9049)) ([4ee3ed2](https://github.com/JiRaska/open-bank-oss/commit/4ee3ed286a74e4aad7c4b0a70a9e5267a90f6b59))
+
+
+### Security
+
+* **delegation:** fail closed unsupported exposure ([#9171](https://github.com/JiRaska/open-bank-oss/issues/9171)) ([312cb9f](https://github.com/JiRaska/open-bank-oss/commit/312cb9fdf80e99d0b56bb25e4d342f167debcb46))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.3...delegation-service-v0.14.0) (2026-09-08)
 
 

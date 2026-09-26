@@ -51,6 +51,16 @@ class MerchantCatalogEntity : PanacheEntityBase {
     var country: String? = null
 
     /**
+     * What [lat]/[lon] on THIS row can answer — [GeoPrecision].
+     *
+     * `CITY` for every seeded row, and that is a correction rather than a default: V16 pinned each
+     * brand at one Prague coordinate, so a Billa purchase in Brno resolved 185 km from where it
+     * happened. A chain has no single location, and the fix is to stop claiming one.
+     */
+    @Column(name = "geo_precision", nullable = false)
+    var geoPrecision: String = GeoPrecision.CITY
+
+    /**
      * [MerchantLogoEntity.contentHash] when a logo has been ingested for this merchant, else null.
      *
      * Denormalised so the per-page enrichment read can decide whether to emit a logo URL without a

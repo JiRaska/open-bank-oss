@@ -79,6 +79,7 @@ describe('sanctions-list enablement review', () => {
     const dialog = screen.getByRole('alertdialog')
     const keep = screen.getByRole('button', { name: 'Keep automatic updates' })
     const apply = screen.getByRole('button', { name: 'Pause automatic updates' })
+    expect(document.activeElement).toBe(keep)
     keep.focus()
     fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(apply)

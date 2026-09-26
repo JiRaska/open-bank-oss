@@ -8,7 +8,7 @@
 - **Runs 6 OWASP Top 10 checks** on each service: security headers (A05), sensitive data in health endpoint (A02), OpenAPI exposure (A05 info-disclosure), unauthenticated actuator endpoints (A01), CORS wildcard misconfiguration (A05), and service reachability (A05).
 - **Scores each service** 0–100 and assigns a letter grade (A+ → F), computing a `PlatformSecurityReport` covering all services.
 - **Manages ICT incidents** — compliance officers can report, track, and update the lifecycle of DORA-grade ICT incidents through the `IctIncidentResource` API. Incidents are persisted in the `ict_incidents` register and remain queryable across pod restarts.
-- **Emits ICT incident events** directly to the Kafka topic `openbank.security.ict.incident`. There is no outbox and no transactional guarantee; scan results are not published as events at all.
+- **Persists ICT incident events atomically** with incident state and relays them from a claim-safe outbox to `openbank.security.ict.incident` when dispatch is enabled; scan results are not published as events.
 
 ## What the service does NOT do
 
@@ -17,7 +17,7 @@
 - Does not scan infrastructure or network layer — application-layer HTTP checks only.
 - Does not enforce remediation — it reports findings; humans and processes own the response.
 - Does not store full HTTP response bodies — only metadata, findings, headers presence map, and scores.
-- Does not persist anything. Scan results and ICT incidents are in-memory only and are lost on pod restart (see [04 — Data](./04-data.md)).
+- Scan results remain in-memory and are lost on pod restart. ICT incidents are persisted in Postgres (see [04 — Data](./04-data.md)).
 
 ## Position in the domain
 
@@ -28,7 +28,7 @@
    │     security-scanner         │ ──────────────────►  │   admin-ui      │
    │     (this service)           │                      │ (security page) │
    └──────────────┬───────────────┘                      └─────────────────┘
-                  │ direct Kafka emitter (ICT incidents only)
+                  │ transactional outbox relay (ICT incidents only)
                   ▼
          openbank.security.ict.incident
                   │

@@ -17,11 +17,9 @@
 # ScaVerificationAdapter -> sca-service on every SIGNED decision (ADR-0021/ADR-0162 D4).
 #
 # Not a money-path service (rules.yaml: money_path_services does not list it); OPA
-# sidecar bundle is the minimal, no-service-extension shape (document-service-opa-bundle.yaml
-# / gen-document-service-opa-bundle.sh — mirrors notification-service's bundle, which
-# has no <svc>_rest_ext.rego of its own), relying on rest.rego's base allow reasons
-# (operator-read-any, compliance-read-any, customer-self-action, etc.) until a
-# document-domain-specific carve-out is actually needed.
+# sidecar bundle (document-service-opa-bundle.yaml / gen-document-service-opa-bundle.sh)
+# is rest.rego's base allow reasons plus document_rest_ext.rego (kyb-service's business
+# onboarding agreement grant).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,7 +50,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "edb02a84aa550aef"
+        openbank.tech/policy-checksum: "7fc82d3ce899a4b6"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -66,7 +64,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-1cff9564
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-8b93bf77
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -76,15 +74,29 @@ spec:
             - name: management
               containerPort: 8088
           env:
-            # The sealed external-disclosure export is exposed on a parallel private-CA TLS
-            # listener. Existing in-cluster HTTP callers remain untouched during the fleet
-            # transport migration.
+            # Parallel private-CA TLS listener for new east-west clients (first: the three document
+            # callers of #10383 — domestic-payment, sepa-payment, statement-service — and
+            # delegation-service's sealed external-disclosure export). HTTP/8143 stays for existing
+            # callers until their own reviewed migrations; same shape as party-service's and
+            # account-service's 8443 listeners. ASVS V9.1 forbids a NEW plaintext http:// env, so a
+            # caller can only be pointed here once this listener exists.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
-              value: /mnt/document-tls/tls.crt
+              value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
-              value: /mnt/document-tls/tls.key
+              value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time value baked into this service's application.yaml
+            # (quarkus.http.ssl.client-auth). That property is BUILD TIME fixed, so this env can
+            # never set it — Quarkus ignores a differing runtime value and warns. It is kept, in
+            # the same spelling, so the manifest states the listener's posture and cannot silently
+            # disagree with the image.
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_MANAGEMENT_HOST
               value: "0.0.0.0"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
@@ -97,6 +109,15 @@ spec:
                   name: document-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # #10486 batch 5: document-service's OWN Keycloak client (openbank-document, ROLE_API only) for
+            # its account lookup - the named oidc-client `m2m`. optional: false so an unseeded Vault entry is a
+            # loud CreateContainerConfigError. Run provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: document-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # sca-service REST client base URL (application.yaml:
             # quarkus.rest-client.sca-service.url) — used by ScaChallengeClient /
             # ScaVerificationAdapter for every SIGNED signature-ceremony decision.
@@ -257,8 +278,8 @@ spec:
               drop:
                 - ALL
           volumeMounts:
-            - name: document-tls
-              mountPath: /mnt/document-tls
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -284,8 +305,7 @@ spec:
         # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
         # all @Authorize-annotated endpoints in document-service. Bundle mounted from
         # document-service-opa-bundle ConfigMap (gen-document-service-opa-bundle.sh) —
-        # the minimal shape (no service-specific rest-ext.rego), mirroring
-        # notification-service.
+        # rest.rego plus document_rest_ext.rego.
         - name: opa
           image: docker.io/openpolicyagent/opa:1.17.0
           imagePullPolicy: IfNotPresent
@@ -321,6 +341,10 @@ spec:
               subPath: rest.rego
               readOnly: true
             - name: opa-bundle
+              mountPath: /bundle/document_rest_ext.rego
+              subPath: document_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
               mountPath: /bundle/agents.rego
               subPath: agents.rego
               readOnly: true
@@ -354,7 +378,7 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
-        - name: document-tls
+        - name: internal-tls
           secret:
             secretName: document-service-internal-tls
             optional: false
@@ -426,19 +450,9 @@ spec:
     - name: management
       port: 8088
       targetPort: management
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: document-service
-  namespace: documents
-  labels:
-    app.kubernetes.io/name: document-service
-    prometheus: kube-prometheus
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: document-service
-  podMetricsEndpoints:
-    - port: management
-      path: /q/metrics
+# Scraped by the fleet-wide PodMonitor observability/openbank-services (it selects any pod
+# with an app.kubernetes.io/name label, in this namespace, on the port named `management` at
+# /q/metrics). A per-service PodMonitor/ServiceMonitor here would be a SECOND scrape pool over
+# the identical URL: Prometheus then stores every series twice under two `job` labels, and an
+# alert over them fires once per pool. Measured 2026-09-07 on the sandbox --
+# BillingOutboxDeadLettered held two instances differing only by job= -- so do not re-add one.

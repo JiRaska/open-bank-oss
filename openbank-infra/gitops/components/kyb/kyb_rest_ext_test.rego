@@ -39,3 +39,18 @@ test_staff_may_read_beneficial_owners if {
 test_edge_may_not_read_beneficial_owners if {
 	not "edge-service-kyb" in rest.allowed_reasons with input as {"principal": edge, "action": "kyb.ubo.read"}
 }
+
+# Business-contract spec (W2): the customer answers the AML questionnaire, makes the declarations and
+# accepts/signs the agreement through the edge only. A shared backend service account gets none of it.
+test_edge_may_drive_the_agreement_steps if {
+	every action in {"kyb.case.questionnaire", "kyb.case.declarations", "kyb.case.agreement"} {
+		"edge-service-kyb" in rest.allowed_reasons with input as {"principal": edge, "action": action}
+	}
+}
+
+test_shared_service_account_may_not_drive_the_agreement_steps if {
+	every action in {"kyb.case.questionnaire", "kyb.case.declarations", "kyb.case.agreement"} {
+		not "edge-service-kyb" in rest.allowed_reasons with input as {"principal": shared, "action": action}
+		not "operator-kyb-review" in rest.allowed_reasons with input as {"principal": shared, "action": action}
+	}
+}
