@@ -202,7 +202,8 @@ def self_test() -> int:
         # Known-negative: Jackson's JsonNode.path("field") is a METHOD CALL, not the UriInfo
         # property this gate targets. A prior draft's alias regex matched the bare `.path` before
         # the `(` and misfired here (measured false-positive on real
-        # openbank-customer-edge/CustomerEdgeResource.kt, whose hundreds of `node.path("field")`
+        # openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/
+        # CustomerEdgeResource.kt, whose hundreds of `node.path("field")`
         # calls share a file with an unrelated `iban.startsWith("CZ")`).
         (svc / "JacksonPath.kt").write_text(
             'val code = request.path("code").takeIf { it.isTextual }?.textValue()\n'
