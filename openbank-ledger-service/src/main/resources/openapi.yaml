@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.19.0
+  version: 1.20.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -86,6 +86,14 @@ paths:
               description: URL of the created journal entry (/api/v1/journals/{journalId}).
               schema:
                 type: string
+            Idempotent-Replayed:
+              description: >
+                `true` when `idempotencyKey` had already been posted and this call only replayed it,
+                so nothing new was booked; `false` when this call posted the journal. A replay answers
+                with the same 201 and the same body as the original, so this header is the only way
+                to tell the two apart (#10904).
+              schema:
+                type: boolean
           content:
             application/json:
               schema:
