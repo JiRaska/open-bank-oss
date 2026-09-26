@@ -140,6 +140,9 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.balance.ledger-events-in
+          # Preserve the original String payload for replay, without JSON-string wrapping.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.ledger.journal.posted
         group.id: openbank-balance-service

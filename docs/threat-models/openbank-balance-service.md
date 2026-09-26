@@ -378,3 +378,17 @@ Policy tests assert reservation admission, deny other balance actions and unrela
 and reject the wrong principal type. They do not prove token issuance or the full distributed
 workflow. Roll back this grant only after disabling new ledger-projection originations and
 draining their workflows; otherwise the cover step will be denied again.
+
+## Failed projection records
+
+With projection enabled, malformed JSON and malformed booked-change events fail processing
+and are parked by the configured Kafka dead-letter handler instead of being acknowledged as
+successful. The DLQ explicitly serializes String values without JSON-string wrapping so the
+original payload remains available for diagnosis and controlled replay. Existing topic and
+write ACL declarations are retained. Operators must correct the cause before replay and retain
+the original journal/account/currency identity used for deduplication.
+
+`LedgerProjectionDlqIT` verifies two poison records reach the real broker's DLQ unchanged,
+then a valid event and its acknowledged redelivery apply one booked movement and consume
+matching cover. This does not prove upstream ledger delivery, OIDC enforcement or a full
+settlement workflow.
