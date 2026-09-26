@@ -261,6 +261,86 @@ openbank:
         gl-account-types:
           INCOME: current-year-result
           EXPENSE: current-year-result
+    # ADR-0313 phase 2: Pillar 1 credit-risk capital, STANDARDISED APPROACH. A VERSIONED parameter
+    # set — bump parameter-set-version on any change here; every /capital result names the id and
+    # version it was computed with. Risk weights: BCBS d424 "Basel III: Finalising post-crisis
+    # reforms" (Dec 2017), Part I. Minimum ratios: bcbs189 "Basel III: A global regulatory framework
+    # ..." (Dec 2010, rev. June 2011) ¶50. EU CRR Part Three Title II Chapter 2 is NOT applied.
+    # Every key is required (CapitalConfig is a mapping; the domain rejects missing or unknown keys,
+    # risk weights outside [0, 12.5] and minimum ratios outside (0, 1]) — nothing has a code default.
+    capital:
+      sa:
+        parameter-set-id: bcbs-d424-sa
+        parameter-set-version: "1"
+        source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
+        factors:
+          rw-sovereign-unrated: 1.00             # d424 ¶7 Table 1 (unrated)
+          # d424 ¶8 is a NATIONAL DISCRETION ("a lower risk weight may be applied") for the bank's
+          # own central bank in domestic currency, funded in it. 0 is the value the discretion is
+          # normally exercised with; it applies ONLY in classification.domestic-currency below, and
+          # is shown as a discretion in every result. Set it to rw-sovereign-unrated to decline it.
+          rw-sovereign-domestic-currency: 0
+          rw-bank-scra-grade-a: 0.40             # d424 ¶21 Table 7 base (¶22-23)
+          rw-bank-scra-grade-b: 0.75             # d424 ¶21 Table 7 base (¶25-27)
+          rw-bank-scra-grade-c: 1.50             # d424 ¶21 Table 7 base (¶28-29)
+          rw-retail-regulatory: 0.75             # d424 ¶55
+          rw-retail-other: 1.00                  # d424 ¶57
+          rw-corporate-unrated: 1.00             # d424 ¶40 Table 10 (unrated), ¶41
+          rw-defaulted: 1.50                     # d424 ¶92 (specific provisions < 20%)
+          rw-cash: 0                             # d424 ¶96(i)
+          rw-cash-items-in-collection: 0.20      # d424 ¶97
+          rw-other-asset: 1.00                   # d424 ¶95
+          min-cet1-ratio: 0.045                  # bcbs189 ¶50
+          min-tier1-ratio: 0.06                  # bcbs189 ¶50
+          min-total-capital-ratio: 0.08          # bcbs189 ¶50 (the 8% own-funds requirement)
+        classification:
+          # d424 ¶55's criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's "individual
+          # person" cannot be verified from the snapshot: not-defaulted loans are "other retail"
+          # (¶57, 100%). corporate-unrated (¶40-41 / ¶58, also 100%) is the equivalent reading for
+          # SMEs; regulatory-retail (75%) only with evidence of ALL ¶55 criteria.
+          retail-treatment: other-retail
+          # No external ratings and no counterparty capital disclosures in the data: every bank
+          # exposure is SCRA (d424 ¶17(b), ¶21), and ¶23 / ¶26 send a counterparty whose published
+          # requirements are not made available to Grade C. Short-term weights (¶30, original
+          # maturity ≤ 3 months) need maturities a GL balance does not carry, so base weights.
+          bank-scra-grade: C
+          # The currency the d424 ¶8 discretion covers (the ČNB, in CZK).
+          domestic-currency: CZK
+          # GL code -> class. ONLY accounts named here (or by type below) are classified; any
+          # other ASSET balance is listed as not classified, never weighted. Deliberately absent:
+          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash), 1100-1113 clearing
+          # and scheme settlement (counterparty not known), 1400-1403 loan loss allowance (not
+          # allocated to loans, so ¶92 netting cannot use it), 1990-1997 FX position accounts.
+          gl-accounts:
+            "1001": bank                         # nostro
+            "1002": bank                         # nostro EUR
+            "1500": bank                         # money-market placements with banks
+            "1501": bank
+            "1520": bank                         # accrued interest follows its principal
+            "1521": bank
+            "1510": central-bank                 # ČNB deposit facility (ADR-0315)
+            "1200": retail                       # Loans Receivable, only when read at GL level
+            "1201": retail                       # (lending read off); contract-level loans are
+            "1202": retail                       # weighted per instrument with their IFRS 9 stage
+            "1203": retail
+            "1300": other-asset                  # interest receivable (¶95)
+            "1301": other-asset
+            "1302": other-asset
+            "1303": other-asset
+            "6000": own-funds-cet1               # CET1 capital instruments
+            "6010": own-funds-cet1               # CET1 share premium
+            "6020": own-funds-cet1               # retained earnings
+            "6030": own-funds-cet1               # other reserves
+            "6040": own-funds-cet1-deduction     # CET1 regulatory deductions (debit balance)
+            "6050": own-funds-at1
+            "6060": own-funds-tier2
+          # Not credit exposures. EQUITY outside 6000-6060 is NOT own funds; INCOME / EXPENSE not
+          # yet closed to retained earnings are not counted as capital either.
+          gl-account-types:
+            LIABILITY: not-an-exposure
+            EQUITY: not-an-exposure
+            INCOME: not-an-exposure
+            EXPENSE: not-an-exposure
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
