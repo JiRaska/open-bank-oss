@@ -4,7 +4,9 @@
 
 package com.openbank.consent.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
 import com.openbank.consent.application.port.`in`.CheckConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
@@ -22,6 +24,7 @@ import com.openbank.consent.infrastructure.rest.dto.RevokeConsentRequest
 import com.openbank.consent.infrastructure.rest.dto.ValidateConsentRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
@@ -77,8 +80,9 @@ class ConsentResource(
         val idempotencyKey = request.tppTransactionId?.takeIf { it.isNotBlank() }
             ?: xRequestId?.takeIf { it.isNotBlank() }
 
+        val requestHash = fingerprint("POST", CONSENTS_PATH, request)
         idempotencyKey?.let { key ->
-            idempotencyStore.get(consentCreateKey(request.granteeId, request.partyId, key))?.let { cached ->
+            idempotencyStore.lookup(consentCreateKey(request.granteeId, request.partyId, key), requestHash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -106,8 +110,9 @@ class ConsentResource(
         idempotencyKey?.let { key ->
             idempotencyStore.save(
                 consentCreateKey(request.granteeId, request.partyId, key),
-                201,
-                objectMapper.writeValueAsString(responseBody),
+                requestHash = requestHash,
+                statusCode = 201,
+                responseBody = objectMapper.writeValueAsString(responseBody),
             )
         }
 
@@ -235,8 +240,26 @@ class ConsentResource(
         return ConsentCheckResponse(granted = granted)
     }
 
+    /**
+     * Binds the idempotency key to the request it was first used for (#10916): the deserialised
+     * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
+     * while any field value does.
+     */
+    private fun fingerprint(method: String, path: String, body: Any): String =
+        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
+
+    private val canonicalMapper: ObjectMapper by lazy {
+        objectMapper.copy()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+    }
+
     private fun consentCreateKey(granteeId: String, partyId: UUID, requestId: String) =
         "consent:create:$granteeId:$partyId:$requestId"
+
+    private companion object {
+        const val CONSENTS_PATH = "/api/v1/consents"
+    }
 }
 
 /**

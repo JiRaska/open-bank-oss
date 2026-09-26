@@ -42,6 +42,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 |---|---|---|
 | **S**poofing | TPP impersonates party to create consent | OIDC + SCA binding; party identity verified upstream |
 | **T**ampering | Scope/grantee escalation after creation | Immutable scope post-activation; state machine; audit |
+| **T**ampering | A `tppTransactionId` / `X-Request-ID` reused with a different create body is answered with the first consent, so the TPP acts on a consent with other scopes or accounts than it asked for (#10946) | The key is bound to a SHA-256 fingerprint of method, path and the sorted-key request body; a mismatch is refused 422 `IDEMPOTENCY_KEY_REUSED` and creates nothing. Records stored before the fingerprint existed replay as before until their TTL lapses |
 | **R**epudiation | Party denies granting consent | AuditEvent per transition; SCA evidence retained |
 | **I**nfo disclosure | `validate` leaks consent details to wrong caller | Caller authz (`@Authorize consent.validate` + `@RolesAllowed`); response is a consent-scoped projection (scopes / covered IBANs / frequencyPerDay) to an already-authenticated resource server — no party PII |
 | **D**oS | Consent spam / validate flooding | Rate limit; cache validate decisions briefly |
@@ -56,6 +57,10 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-09-26** — Consent creation binds its idempotency key to a request fingerprint
+  (#10916, #10946). Same key + same body still replays; same key + different body is now 422
+  `IDEMPOTENCY_KEY_REUSED` instead of a replay of the first consent. No new endpoint, caller or
+  privilege; the inbound surface gains one error response.
 - **2026-09-07** — Suppression creation is now replay-safe (#8351, ADR-0293). A retried
   `POST /api/v1/suppressions` stacked a second identical active row; `SuppressionService.create`
   now checks the natural key (partyId, scope, value) over active rows and replays the original
