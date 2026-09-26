@@ -21,8 +21,9 @@ import javax.sql.DataSource
 /**
  * #10916 — an `Idempotency-Key` is bound to the request it was first used with. Driven through the
  * real REST endpoint with the real Redis store: a same-body retry replays, a different body under
- * the same key is refused with 422 and creates nothing, and a retry whose JSON differs only in key
- * order and whitespace still replays (the fingerprint is taken over the canonicalised DTO).
+ * the same key is refused with 409 IDEMPOTENCY_KEY_REUSED and creates nothing, a retry whose JSON
+ * differs only in key order, whitespace or the scale of an amount still replays (the fingerprint is
+ * taken over the canonicalised DTO), and a refused request releases the key.
  */
 @QuarkusTest
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
@@ -69,13 +70,13 @@ class LendingIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = OFFICER, roles = ["ROLE_LENDING_OFFICER"])
-    fun `same key and a different body is refused with 422 and creates nothing`() {
+    fun `same key and a different body is refused with 409 and creates nothing`() {
         val key = UUID.randomUUID().toString()
         val partyId = UUID.randomUUID().also(parties::add)
         assertThat(apply(key, body(partyId, "10000.00")).statusCode).isEqualTo(201)
 
         val reused = apply(key, body(partyId, "90000.00"))
-        assertThat(reused.statusCode).isEqualTo(422)
+        assertThat(reused.statusCode).isEqualTo(409)
         assertThat(reused.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_KEY_REUSED")
         assertThat(reused.header("X-Idempotency-Replayed")).isNull()
         assertThat(applicationsOf(partyId)).isEqualTo(1)
@@ -96,6 +97,36 @@ class LendingIdempotencyFingerprintIT {
         val replay = apply(key, reordered)
         assertThat(replay.statusCode).isEqualTo(201)
         assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(applicationsOf(partyId)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = OFFICER, roles = ["ROLE_LENDING_OFFICER"])
+    fun `an amount differing only in scale is the same request and replays`() {
+        val key = UUID.randomUUID().toString()
+        val partyId = UUID.randomUUID().also(parties::add)
+        assertThat(apply(key, body(partyId, "1234.50")).statusCode).isEqualTo(201)
+
+        // 1234.5 as a JSON number vs "1234.50" as a string: the same BigDecimal amount.
+        val replay = apply(key, body(partyId, "1234.50").replace("\"1234.50\"", "1234.5"))
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(applicationsOf(partyId)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = OFFICER, roles = ["ROLE_LENDING_OFFICER"])
+    fun `a refused application releases the key so the retry is not stuck in progress`() {
+        val key = UUID.randomUUID().toString()
+        val partyId = UUID.randomUUID().also(parties::add)
+        // termPeriods 0 is refused by the use case (400) AFTER the key was reserved.
+        val refused = body(partyId, "10000.00").replace("\"termPeriods\":12", "\"termPeriods\":0")
+        repeat(2) {
+            // Not 409 IDEMPOTENCY_REQUEST_IN_PROGRESS on the retry: the refusal released the marker.
+            assertThat(apply(key, refused).statusCode).isEqualTo(400)
+        }
+        // The corrected application may reuse the key — no stale marker binds it to the refused body.
+        assertThat(apply(key, body(partyId, "10000.00")).statusCode).isEqualTo(201)
         assertThat(applicationsOf(partyId)).isEqualTo(1)
     }
 

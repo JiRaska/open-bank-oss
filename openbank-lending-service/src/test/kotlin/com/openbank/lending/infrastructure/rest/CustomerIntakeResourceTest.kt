@@ -15,6 +15,7 @@ import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
@@ -258,9 +259,13 @@ class CustomerIntakeResourceTest {
         private fun <T> unsupported(): Uni<T> = throw UnsupportedOperationException("not used by intake")
     }
 
-    /** In-memory IdempotencyStore for the replay tests — records saves, serves gets. */
+    /**
+     * In-memory IdempotencyStore with the #10922 contract: `reserve` places a marker, replays a
+     * completed record with the same fingerprint and reports Mismatch for a different one.
+     */
     private class RecordingIdempotencyStore : IdempotencyStore {
         val saved = mutableMapOf<String, IdempotencyRecord>()
+        val markers = mutableMapOf<String, String>()
         override suspend fun get(key: String): IdempotencyRecord? = saved[key]
         override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) {
             saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now())
@@ -272,11 +277,25 @@ class CustomerIntakeResourceTest {
             responseBody: String,
             ttlSeconds: Long,
         ) {
+            markers.remove(key)
             saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now(), requestHash)
         }
-        override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long) =
-            saved[key]?.let { com.openbank.libs.idempotency.ReserveResult.Replay(it) }
-                ?: com.openbank.libs.idempotency.ReserveResult.Reserved
-        override suspend fun release(key: String, requestHash: String) = Unit
+        override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long): ReserveResult {
+            saved[key]?.let {
+                return if (it.requestHash ==
+                    requestHash
+                ) {
+                    ReserveResult.Replay(it)
+                } else {
+                    ReserveResult.Mismatch
+                }
+            }
+            markers[key]?.let { return if (it == requestHash) ReserveResult.InFlight else ReserveResult.Mismatch }
+            markers[key] = requestHash
+            return ReserveResult.Reserved
+        }
+        override suspend fun release(key: String, requestHash: String) {
+            if (markers[key] == requestHash) markers.remove(key)
+        }
     }
 }

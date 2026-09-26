@@ -25,6 +25,7 @@ import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -95,35 +96,20 @@ class LendingResource(
         // the pre-existing edge contract), scoped per party. A keyed retry replays the cached 201
         // and never stacks a duplicate SUBMITTED application into the origination graph.
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
-        // #10916: the key is bound to this request's fingerprint — the same key with a different
-        // application answers 422 IDEMPOTENCY_KEY_REUSED instead of replaying the first one.
-        val requestHash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/lending/applications", request)
-        requestKey?.let { key ->
-            idempotencyStore.lookup(applyIdempotencyKey(request.partyId, key), requestHash)?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
+        // #10916: the key is bound to this request's fingerprint and reserved before the use case
+        // runs — the same key with a different application answers 409 IDEMPOTENCY_KEY_REUSED.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", APPLICATIONS_PATH, request)
+        val storeKey = requestKey?.let { applyIdempotencyKey(request.partyId, it) }
+        return idempotencyStore.submitOnce(storeKey, requestHash, APPLY_KEY_TTL_SECONDS) {
+            try {
+                val created = apply.apply(request, actor()).awaitSuspending()
+                Response.status(HTTP_CREATED).entity(objectMapper.writeValueAsString(created))
+                    .type(MediaType.APPLICATION_JSON).build()
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                // Same mapping as before: any use-case refusal is a 400 with the message.
+                Response.status(400).entity(mapOf("error" to e.message)).build()
             }
         }
-        val created = try {
-            apply.apply(request, actor()).awaitSuspending()
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            // Same mapping as before: any use-case refusal is a 400 with the message.
-            return Response.status(400).entity(mapOf("error" to e.message)).build()
-        }
-        val body = objectMapper.writeValueAsString(created)
-        requestKey?.let { key ->
-            idempotencyStore.save(
-                applyIdempotencyKey(request.partyId, key),
-                requestHash,
-                HTTP_CREATED,
-                body,
-                APPLY_KEY_TTL_SECONDS,
-            )
-        }
-        return Response.status(HTTP_CREATED).entity(body).type(MediaType.APPLICATION_JSON).build()
     }
 
     // --- Termination & early exit (ADR-0215) ---------------------------------------------------------
@@ -484,6 +470,7 @@ class LendingResource(
     private companion object {
         const val HTTP_CREATED = 201
         const val APPLY_KEY_TTL_SECONDS = 300L
+        const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
     }

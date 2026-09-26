@@ -15,8 +15,8 @@ info:
   # 1.26.1 -> 1.27.0: additive — ledger-backfill request history (GET .../requests, GET
   # .../requests/{id}) and proposedAt/decidedAt/executedAt on LedgerBackfillRequestView, for the
   # admin console's finance workspace (#10618).
-  # 1.27.0 -> 1.28.0 (#10916): additive — 422 IDEMPOTENCY_KEY_REUSED on both application-submit
-  # operations when a replay key is reused with a different request body.
+  # 1.27.0 -> 1.28.0 (#10916): additive — 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS
+  # on both application-submit operations (key reused with a different body / still executing).
   version: 1.28.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
@@ -72,8 +72,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/IdempotencyKeyReused'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
     get:
       tags: [Lending]
       operationId: listApplications
@@ -136,11 +136,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
         '422':
-          description: >-
-            Refused by the origination guard (e.g. no active compliance pack), or
-            IDEMPOTENCY_KEY_REUSED — the Idempotency-Key (or X-Request-ID) was already used for a
-            different request body, so the stored response is not replayed (#10916).
+          description: Refused by the origination guard (e.g. no active compliance pack)
     get:
       tags: [Lending]
       operationId: listCustomerCreditJourneys
@@ -1207,11 +1206,12 @@ components:
       required: true
       schema: { type: string, format: uuid }
   responses:
-    IdempotencyKeyReused:
+    IdempotencyConflict:
       description: >-
         IDEMPOTENCY_KEY_REUSED — the Idempotency-Key (or X-Request-ID) was already used for a
         different request (method, path or canonical body differ), so the stored response is not
-        replayed (#10916).
+        replayed; or IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still being processed
+        under this key. No application is created in either case (#10916).
       content:
         application/json:
           schema:
