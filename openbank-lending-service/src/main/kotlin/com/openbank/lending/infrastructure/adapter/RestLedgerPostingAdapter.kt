@@ -4,12 +4,14 @@
 
 package com.openbank.lending.infrastructure.adapter
 
+import com.openbank.lending.application.port.out.LedgerPostResult
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.infrastructure.client.LedgerCallGuard
 import com.openbank.lending.infrastructure.client.LendingGlChart
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
 import com.openbank.lending.infrastructure.client.LendingLedgerConfig
+import com.openbank.lending.infrastructure.client.PostJournalRequest
 import io.quarkus.arc.properties.IfBuildProperty
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.Priority
@@ -47,19 +49,35 @@ class RestLedgerPostingAdapter(
     private val log = Logger.getLogger(RestLedgerPostingAdapter::class.java)
 
     override fun post(posting: LedgerPosting): Uni<Unit> {
-        val request = LendingJournalFactory.buildRequest(
-            posting = posting,
-            // Select the GL account set matching the loan's own currency — ledger-service 422s a line
-            // whose currency doesn't match its GL account's currency (issue #1275). Fails loud on an
-            // unseeded currency rather than mis-posting.
-            accounts = LendingGlChart.accountsFor(posting.amount.currency.code),
-            systemActorId = config.systemActorId(),
-            date = posting.accountingDate ?: LocalDate.now(clock),
-        )
+        val request = buildRequest(posting)
         return guard.postJournal(request)
             .invoke { response ->
                 log.debugf("ledger journal %s posted (%s) for %s", response.id, response.status, posting.reference)
             }
             .map { Unit }
+    }
+
+    override fun postReportingReplay(posting: LedgerPosting): Uni<LedgerPostResult> =
+        guard.postJournalWithHeaders(buildRequest(posting)).map { response ->
+            when (response.getHeaderString(IDEMPOTENT_REPLAYED_HEADER)?.lowercase()) {
+                "true" -> LedgerPostResult.REPLAYED
+                "false" -> LedgerPostResult.POSTED
+                else -> LedgerPostResult.UNCONFIRMED
+            }
+        }
+
+    private fun buildRequest(posting: LedgerPosting): PostJournalRequest = LendingJournalFactory.buildRequest(
+        posting = posting,
+        // Select the GL account set matching the loan's own currency — ledger-service 422s a line
+        // whose currency doesn't match its GL account's currency (issue #1275). Fails loud on an
+        // unseeded currency rather than mis-posting.
+        accounts = LendingGlChart.accountsFor(posting.amount.currency.code),
+        systemActorId = config.systemActorId(),
+        date = posting.accountingDate ?: LocalDate.now(clock),
+    )
+
+    private companion object {
+        /** Set by ledger-service on `POST /api/v1/journals` since API 1.20.0 (#10904). */
+        const val IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"
     }
 }
