@@ -8,6 +8,7 @@ import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
@@ -18,6 +19,7 @@ import com.openbank.risk.application.usecase.CapitalService
 import com.openbank.risk.application.usecase.CashFlowService
 import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
+import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
@@ -114,6 +116,19 @@ class SnapshotServiceProducer {
     @ApplicationScoped
     fun liquidityUseCase(snapshots: SnapshotUseCase, config: LiquidityConfig): LiquidityUseCase =
         LiquidityService(snapshots, config.toParameters())
+
+    /**
+     * Liquidity survival forecast: the cash-flow projection's model and the LCR's parameter set,
+     * never parameters of its own — so it cannot disagree with either read.
+     */
+    @Produces
+    @ApplicationScoped
+    fun liquidityForecastUseCase(
+        snapshots: SnapshotUseCase,
+        curveSets: CurveSetUseCase,
+        config: LiquidityConfig,
+    ): LiquidityForecastUseCase =
+        LiquidityForecastService(snapshots, curveSets, BehaviouralModel.NMD_PHASE0, config.toParameters())
 
     /**
      * The mapping's presence check runs at boot, but the range / unknown-key checks live in the

@@ -15,6 +15,7 @@ import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.IrrbbResult
+import com.openbank.risk.domain.liquidity.LiquidityForecastResult
 import com.openbank.risk.domain.liquidity.LiquidityParameters
 import com.openbank.risk.domain.liquidity.LiquidityResult
 import com.openbank.risk.domain.model.Instrument
@@ -96,4 +97,18 @@ data class CapitalAnalysis(val run: SnapshotRun, val parameters: CapitalParamete
 interface CapitalUseCase {
     /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
     suspend fun analyse(runId: UUID): CapitalAnalysis
+}
+
+/** A liquidity survival forecast of a run under a curve set (ADR-0313 "forecasting"). */
+data class LiquidityForecastAnalysis(
+    val run: SnapshotRun,
+    val curveSet: CurveSet,
+    val model: BehaviouralModel,
+    val parameters: LiquidityParameters,
+    val result: LiquidityForecastResult,
+)
+
+interface LiquidityForecastUseCase {
+    /** Same 404 / 409 / 400 rules as [CashFlowUseCase.project]; a horizon outside 1..365 is a 400. */
+    suspend fun forecast(runId: UUID, curveSetId: UUID, horizonDays: Int): LiquidityForecastAnalysis
 }

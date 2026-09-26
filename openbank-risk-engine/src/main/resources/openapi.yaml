@@ -15,7 +15,7 @@ info:
   #        standard factors from a versioned parameter set. Additive.
   # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
-  version: 1.6.0
+  version: 1.10.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -303,6 +303,61 @@ paths:
           description: Forbidden
         '404':
           description: No such run
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/liquidity-forecast:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotLiquidityForecast
+      summary: Liquidity survival horizon and funding-gap ladder of a TIED_OUT run under a curve set
+      description: |
+        A ladder of the SAME flows `/cash-flows` projects (loans contractual, customer deposits
+        behavioural under the named model), one row per calendar day for the first `dailyDays`
+        days and weekly after that, cut at `horizonDays`. Inflows are positive, outflows negative,
+        each split contractual / behavioural. `cumulative` is the position at the end of a row:
+        the opening liquidity — the HQLA stock after haircuts and caps exactly as `/liquidity`
+        reports it under the parameter set named here — plus every net flow so far.
+        `survivalHorizonDays` is the first day the DAILY cumulative position is negative, null when
+        it never is within the horizon. Everything the projection does not model (new business,
+        GL-level positions without contract terms, stress) is listed in `assumptions` as not
+        modelled. Per currency, no FX conversion. Derived on request, never stored.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: curveSetId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: horizonDays
+          in: query
+          required: false
+          description: Forecast horizon in calendar days after as-of.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 90
+      responses:
+        '200':
+          description: The run's liquidity forecast
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityForecast'
+        '400':
+          description: Missing or malformed `curveSetId`, `horizonDays` outside 1..365, or a curve set for another as-of date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run or curve set
         '409':
           description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
           content:
@@ -1053,6 +1108,73 @@ components:
         level2bCapBinding: {type: boolean}
         level2CapBinding: {type: boolean}
         stock: {type: number}
+
+    LiquidityForecastRow:
+      type: object
+      required: [fromDay, toDay, from, to, contractualInflows, contractualOutflows, behaviouralInflows,
+        behaviouralOutflows, inflows, outflows, net, cumulative]
+      properties:
+        fromDay: {type: integer, description: First calendar day after as-of in the row (inclusive)}
+        toDay: {type: integer, description: Last calendar day after as-of in the row (inclusive)}
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        contractualInflows: {type: number}
+        contractualOutflows: {type: number, description: Negative or zero}
+        behaviouralInflows: {type: number}
+        behaviouralOutflows: {type: number, description: Negative or zero}
+        inflows: {type: number}
+        outflows: {type: number}
+        net: {type: number}
+        cumulative: {type: number, description: Opening liquidity plus every net flow up to `toDay`}
+
+    CurrencyLiquidityForecast:
+      type: object
+      required: [currency, openingLiquidity, minimumCumulative, flowsBeyondHorizon, ladder]
+      properties:
+        currency: {type: string}
+        hqla:
+          oneOf:
+            - {$ref: '#/components/schemas/Hqla'}
+            - {type: 'null'}
+          description: The LCR's HQLA stock of this currency; null when it holds no HQLA
+        openingLiquidity: {type: number}
+        survivalHorizonDays: {type: [integer, 'null'], description: First day the cumulative position is negative}
+        survivalDate: {type: [string, 'null'], format: date}
+        minimumCumulative: {type: number}
+        flowsBeyondHorizon: {type: integer, description: Projected flows dated after the horizon, not in the ladder}
+        ladder:
+          type: array
+          items:
+            $ref: '#/components/schemas/LiquidityForecastRow'
+
+    LiquidityForecast:
+      type: object
+      required: [runId, asOf, provenance, curveSetId, curveSetProvenance, model, parameterSetId,
+        parameterSetVersion, horizonDays, dailyDays, currencies, assumptions]
+      properties:
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        provenance: {type: string}
+        curveSetId: {type: string, format: uuid}
+        curveSetProvenance: {type: string}
+        model:
+          $ref: '#/components/schemas/BehaviouralModel'
+        parameterSetId: {type: string, description: The liquidity parameter set the opening HQLA comes from}
+        parameterSetVersion: {type: string}
+        horizonDays: {type: integer}
+        dailyDays: {type: integer, description: Rows are daily up to this day, weekly after}
+        currencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyLiquidityForecast'
+        assumptions:
+          type: array
+          items:
+            type: object
+            required: [key, statement]
+            properties:
+              key: {type: string}
+              statement: {type: string}
 
     CurrencyLiquidity:
       type: object
