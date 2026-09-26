@@ -4,6 +4,7 @@
 
 package com.openbank.libs.audit
 
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import io.quarkus.arc.properties.IfBuildProperty
@@ -12,23 +13,68 @@ import jakarta.enterprise.inject.Default
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.Instant
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 class HashLinkedOutboxAuditEventPublisherTest {
 
-    private val mapper = jacksonObjectMapper()
+    private val mapper = jacksonObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
-    /** In-memory port; `yield()` between read and write so an unserialised publisher would fork. */
+    /**
+     * In-memory port honouring the AuditChainOutbox contract: its own lock (auto-commit per call)
+     * serialises read-head + insert. `yield()` between read and write so a port WITHOUT that lock
+     * would fork the chain.
+     */
     private class InMemoryOutbox : AuditChainOutbox {
         val rows = mutableListOf<AuditOutboxRecord>()
+        private val dbLock = Mutex()
         override suspend fun append(producer: String, build: (head: AuditChainLink?) -> AuditOutboxRecord) {
-            val head = rows.lastOrNull { it.link.producer == producer }?.link
-            yield()
-            rows += build(head)
+            dbLock.withLock {
+                val head = rows.lastOrNull { it.link.producer == producer }?.link
+                yield()
+                rows += build(head)
+            }
+        }
+    }
+
+    /** The current business transaction of a coroutine. */
+    private class Tx(val name: String) : AbstractCoroutineContextElement(Tx) {
+        companion object Key : CoroutineContext.Key<Tx>
+    }
+
+    /**
+     * Models Postgres: the per-producer lock is taken on first append of a transaction, is
+     * re-entrant within it, and is released only at [commit] — not when append returns.
+     */
+    private class TransactionalOutbox : AuditChainOutbox {
+        val rows = mutableListOf<AuditOutboxRecord>()
+        private val dbLock = Mutex()
+        private var owner: Tx? = null
+        override suspend fun append(producer: String, build: (head: AuditChainLink?) -> AuditOutboxRecord) {
+            val tx = checkNotNull(coroutineContext[Tx]) { "no transaction" }
+            if (owner !== tx) {
+                dbLock.lock()
+                owner = tx
+            }
+            rows += build(rows.lastOrNull()?.link)
+        }
+        fun commit(tx: Tx) {
+            if (owner === tx) {
+                owner = null
+                dbLock.unlock()
+            }
         }
     }
 
@@ -43,7 +89,11 @@ class HashLinkedOutboxAuditEventPublisherTest {
         channel = AuditChannel.API,
         actChain = listOf("agent-1"),
         sessionId = "s-1",
-        payload = mapOf("amount" to 12.50, "note" to "line\n\"quoted\"", "nested" to mapOf("b" to 1, "a" to null)),
+        payload = mapOf(
+            "amount" to BigDecimal("12.50"),
+            "note" to "line\n\"quoted\"",
+            "nested" to mapOf("b" to 1, "a" to null),
+        ),
     )
 
     private fun decoded(rows: List<AuditOutboxRecord>): List<Map<String, Any?>> =
@@ -79,7 +129,8 @@ class HashLinkedOutboxAuditEventPublisherTest {
     @Test
     fun `tampering inside the nested payload is detected`(): Unit = runBlocking {
         val envs = decoded(publishN(2).rows).map { it.toMutableMap() }
-        envs[0]["payload"] = mapOf("amount" to 99.0, "note" to "x", "nested" to mapOf("b" to 1, "a" to null))
+        envs[0]["payload"] =
+            mapOf("amount" to BigDecimal("99.00"), "note" to "x", "nested" to mapOf("b" to 1, "a" to null))
         assertThat(AuditChain.verify(envs).firstBrokenIndex).isEqualTo(0)
     }
 
@@ -133,8 +184,36 @@ class HashLinkedOutboxAuditEventPublisherTest {
 
     @Test
     fun `canonical json sorts keys and has no whitespace`() {
-        assertThat(CanonicalJson.write(mapOf("b" to 1, "a" to listOf(true, null), "c" to 1.50)))
-            .isEqualTo("""{"a":[true,null],"b":1,"c":1.5}""")
+        assertThat(CanonicalJson.write(mapOf("b" to 1, "a" to listOf(true, null), "c" to BigDecimal("1.50"))))
+            .isEqualTo("""{"a":[true,null],"b":1,"c":1.50}""")
+    }
+
+    @Test
+    fun `a decimal amount keeps its scale on the wire and still verifies`(): Unit = runBlocking {
+        val rows = publishN(1).rows
+        assertThat(rows.single().payload).contains(""""amount":12.50""")
+        assertThat(AuditChain.verify(decoded(rows)).intact).isTrue()
+    }
+
+    @Test
+    fun `two events in one transaction while another publisher waits do not deadlock`(): Unit = runBlocking {
+        val outbox = TransactionalOutbox()
+        val publisher = HashLinkedOutboxAuditEventPublisher(outbox, "party-service")
+        val txA = Tx("A")
+        val txB = Tx("B")
+        withTimeout(2_000) {
+            withContext(txA) { publisher.publish(event(1)) } // A now holds the DB lock until commit
+            val b = launch(txB) {
+                publisher.publish(event(2)) // blocks on A's DB lock
+                outbox.commit(txB)
+            }
+            yield() // let B run up to the DB lock
+            withContext(txA) { publisher.publish(event(3)) } // second event of the SAME transaction
+            outbox.commit(txA)
+            b.join()
+        }
+        assertThat(outbox.rows.map { it.link.seq }).containsExactly(1L, 2L, 3L)
+        assertThat(AuditChain.verify(decoded(outbox.rows)).intact).isTrue()
     }
 
     @Test

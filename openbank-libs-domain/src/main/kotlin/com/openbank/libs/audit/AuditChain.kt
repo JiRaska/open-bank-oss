@@ -114,10 +114,29 @@ data class AuditChainVerification(
 )
 
 /**
- * Minimal canonical JSON writer: object keys sorted by code point, no whitespace, nulls kept.
+ * Minimal canonical JSON writer: object keys sorted by Unicode CODE POINT (not UTF-16 code unit,
+ * which misorders supplementary characters against U+E000..U+FFFF), no whitespace, nulls kept.
  * Pure Kotlin so the domain module stays framework-free (ADR-0122).
+ *
+ * Numbers are written deterministically WITHOUT changing their value or scale:
+ * - integral types (`Byte`/`Short`/`Int`/`Long`/`BigInteger`) as decimal digits, but only within
+ *   +/-2^53 — beyond that a JavaScript/double-based verifier would round them, so they are
+ *   REFUSED and must be passed as strings;
+ * - `BigDecimal` as [java.math.BigDecimal.toPlainString] as-is, so `12.50` stays `12.50` (the
+ *   stored amount is never normalised); a verifier must decode floats as `BigDecimal`
+ *   (Jackson `USE_BIG_DECIMAL_FOR_FLOATS`) to recompute the same bytes;
+ * - `Double`/`Float` only when integral and within +/-2^53 (written as an integer); any other
+ *   binary floating-point value is REFUSED — its decimal rendering is not canonical. Pass money
+ *   as `BigDecimal` or a string.
+ *
+ * Map keys must be `String`: a non-String key is REFUSED, because `1` and `"1"` would otherwise
+ * collide on the same JSON key.
  */
 object CanonicalJson {
+    /** 2^53 — the largest magnitude every IEEE-754 double consumer represents exactly. */
+    const val MAX_SAFE_INTEGER: Long = 9_007_199_254_740_992L
+    private val MAX_SAFE_BIG = java.math.BigInteger.valueOf(MAX_SAFE_INTEGER)
+
     fun write(value: Any?): String = StringBuilder().also { append(it, value) }.toString()
 
     private fun append(sb: StringBuilder, value: Any?) {
@@ -125,8 +144,7 @@ object CanonicalJson {
             null -> sb.append("null")
             is String -> appendString(sb, value)
             is Boolean -> sb.append(value)
-            is Int, is Long, is Short, is Byte -> sb.append(value.toString())
-            is Number -> appendDecimal(sb, value)
+            is Number -> appendNumber(sb, value)
             is Map<*, *> -> appendObject(sb, value)
             is Iterable<*> -> appendArray(sb, value)
             is Array<*> -> appendArray(sb, value.asIterable())
@@ -135,15 +153,39 @@ object CanonicalJson {
         }
     }
 
-    private fun appendDecimal(sb: StringBuilder, value: Number) {
-        val d = value.toDouble()
-        require(d.isFinite()) { "non-finite number is not valid JSON" }
-        sb.append(java.math.BigDecimal(value.toString()).stripTrailingZeros().toPlainString())
+    private fun appendNumber(sb: StringBuilder, value: Number) {
+        when (value) {
+            is Int, is Long, is Short, is Byte -> sb.append(safeInteger(java.math.BigInteger.valueOf(value.toLong())))
+            is java.math.BigInteger -> sb.append(safeInteger(value))
+            is java.math.BigDecimal -> sb.append(value.toPlainString())
+            is Double, is Float -> {
+                val d = value.toDouble()
+                require(d.isFinite()) { "non-finite number is not valid JSON" }
+                require(d == Math.rint(d)) {
+                    "non-integral $d: binary floating point has no canonical form - pass BigDecimal or a String"
+                }
+                sb.append(safeInteger(java.math.BigDecimal(d).toBigIntegerExact()))
+            }
+            else -> throw IllegalArgumentException(
+                "unsupported number type ${value::class.java.name} - pass BigDecimal or a String",
+            )
+        }
+    }
+
+    private fun safeInteger(v: java.math.BigInteger): String {
+        require(v.abs() <= MAX_SAFE_BIG) { "integer $v exceeds 2^53 - pass it as a String" }
+        return v.toString()
     }
 
     private fun appendObject(sb: StringBuilder, map: Map<*, *>) {
         sb.append('{')
-        map.entries.map { it.key.toString() to it.value }.sortedBy { it.first }
+        map.entries.map {
+            val k = it.key
+            require(k is String) {
+                "canonical JSON object keys must be String, got ${k?.let { c -> c::class.java.name }} ($k)"
+            }
+            k to it.value
+        }.sortedWith { a, b -> compareCodePoints(a.first, b.first) }
             .forEachIndexed { i, (k, v) ->
                 if (i > 0) sb.append(',')
                 appendString(sb, k)
@@ -151,6 +193,19 @@ object CanonicalJson {
                 append(sb, v)
             }
         sb.append('}')
+    }
+
+    internal fun compareCodePoints(a: String, b: String): Int {
+        var i = 0
+        var j = 0
+        while (i < a.length && j < b.length) {
+            val ca = a.codePointAt(i)
+            val cb = b.codePointAt(j)
+            if (ca != cb) return ca.compareTo(cb)
+            i += Character.charCount(ca)
+            j += Character.charCount(cb)
+        }
+        return (a.length - i).compareTo(b.length - j)
     }
 
     private fun appendArray(sb: StringBuilder, items: Iterable<*>) {

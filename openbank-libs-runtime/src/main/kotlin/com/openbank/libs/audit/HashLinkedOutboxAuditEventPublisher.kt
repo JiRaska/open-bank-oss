@@ -8,8 +8,6 @@ import io.quarkus.arc.properties.IfBuildProperty
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
@@ -29,10 +27,15 @@ data class AuditOutboxRecord(
  *
  * The implementation MUST, in ONE database transaction that also holds a per-producer lock
  * (a Postgres advisory lock or `SELECT ... FOR UPDATE` on the head row): read the current chain
- * head, call [build] with it, and insert the returned record into the outbox. Anything weaker
- * lets two replicas read the same head and fork the chain — the publisher's in-JVM mutex only
- * covers one pod. The record should join the caller's business transaction where one is active,
- * so the audit event commits atomically with the change it describes.
+ * head, call [build] with it, and insert the returned record into the outbox. That lock is the
+ * ONLY serialisation: the publisher deliberately holds no in-JVM lock of its own, because the DB
+ * lock is held until the business transaction commits — a JVM mutex taken around it deadlocks
+ * the moment one transaction emits two audit events while another coroutine is waiting (the
+ * waiter holds the mutex and blocks on the DB lock; the owner blocks on the mutex). The lock must
+ * therefore be re-entrant within one transaction (both advisory xact locks and `FOR UPDATE` are).
+ * The record should join the caller's business transaction where one is active, so the audit
+ * event commits atomically with the change it describes; acquire it as late as possible in that
+ * transaction (ADR-0323), since every other audit write of the producer waits until it commits.
  */
 interface AuditChainOutbox {
     suspend fun append(producer: String, build: (head: AuditChainLink?) -> AuditOutboxRecord)
@@ -59,21 +62,19 @@ class HashLinkedOutboxAuditEventPublisher(
     private val outbox: AuditChainOutbox,
     @ConfigProperty(name = "quarkus.application.name") private val producer: String,
 ) : AuditEventPublisher {
-    private val mutex = Mutex()
     private val aggregateId: UUID = producerAggregateId(producer)
 
     override suspend fun publish(event: AuditEvent) {
-        mutex.withLock {
-            outbox.append(producer) { head ->
-                val envelope = AuditChain.link(event, producer, head)
-                AuditOutboxRecord(
-                    eventId = event.eventId,
-                    aggregateId = aggregateId,
-                    eventType = event.operation,
-                    payload = envelope.canonicalJson,
-                    link = envelope.link,
-                )
-            }
+        // No JVM lock here: serialisation is the port's per-producer DB lock (see AuditChainOutbox).
+        outbox.append(producer) { head ->
+            val envelope = AuditChain.link(event, producer, head)
+            AuditOutboxRecord(
+                eventId = event.eventId,
+                aggregateId = aggregateId,
+                eventType = event.operation,
+                payload = envelope.canonicalJson,
+                link = envelope.link,
+            )
         }
     }
 

@@ -138,7 +138,7 @@ dependencies {
     testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // HashLinkedOutboxAuditEventPublisherTest asserts the @IfBuildProperty opt-in gate by reflection
-    // (ADR-0317), so the annotation class must be on the test classpath; compileOnly above.
+    // (ADR-0323), so the annotation class must be on the test classpath; compileOnly above.
     testImplementation("io.quarkus:quarkus-arc:3.33.2")
     testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
