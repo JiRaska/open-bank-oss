@@ -47,6 +47,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
 | **S**poofing | A person's device key enrolled to a COMPANY party approves any challenge raised for that company, unattributed (#10281 item 1) | Enrolment reads the party's register type from party-service and refuses anything but `INDIVIDUAL`/`SOLE_TRADER` (422); a register that cannot answer fails closed (503). Pre-existing entity-bound rows: inventory + reviewed purge (`openbank-sca-service/scripts/purge_entity_bound_devices.py`, dry-run default, `--expect-count` gate) |
 | **T**ampering | A co-signature on one business approval spent on another approval, or on an edited payload (#10281 item 2) | `APPROVAL` purpose: the device signs the canonical `id|decision|APPROVAL|approvalRequestId|payloadSha256[|amount|currency|creditorIban]` (amount `0.00` form, currency and IBAN upper-case and compact); initiate refuses an `APPROVAL` challenge without both (400); consume compares both, so a mismatch is 409 and does not burn the challenge |
 | **R**epudiation | A decision record that names only a credential cannot answer "who approved" once the transient decision expires (#10281 item 3) | The resolved challenge row carries `decided_by_party_id` + `decided_by_credential_id` (from the enrolled device) and `on_behalf_of_party_id` (the entity as context); both are returned by consume |
+| **T**ampering | An `Idempotency-Key` reused with a different initiate body is answered with the first challenge, so the caller acts on a challenge minted for another purpose or redirect (#10946) | The key is bound to a SHA-256 fingerprint of method, path and the sorted-key request body; a mismatch is refused 422 `IDEMPOTENCY_KEY_REUSED` and mints nothing. Records stored before the fingerprint existed replay as before until their 300 s TTL lapses |
 
 ## 5. Residual risks / assumptions
 
@@ -61,6 +62,10 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-09-26** — Challenge initiation binds its Idempotency-Key to a request fingerprint
+  (#10916, #10946). Same key + same body still replays; same key + different body is now 422
+  `IDEMPOTENCY_KEY_REUSED` instead of a replay of the first challenge. No new endpoint, caller
+  or privilege; the inbound surface gains one error response.
 - **2026-09-19** — Business approvals and attribution (#10281 items 1 and 3, plus the SCA half of
   item 2). New outbound call sca → party-service (`GET /api/v1/parties/{id}`, `partyType` only,
   service token) gates device enrolment to natural persons; fail-closed on a register outage,
