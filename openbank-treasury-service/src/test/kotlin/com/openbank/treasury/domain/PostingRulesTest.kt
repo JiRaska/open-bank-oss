@@ -159,7 +159,7 @@ class PostingRulesTest {
     fun `every posted code has a fixed ledger id in the seeded range`() {
         assertThat(TreasuryChart.postedCodes).containsExactlyInAnyOrder(
             "1001", "1002", "1500", "1501", "1510", "2300", "2301", "4200", "4201", "5200", "5201",
-            "1520", "1521", "2310", "2311", "2320",
+            "1520", "1521", "2310", "2311", "2320", "1990", "1991",
         )
         assertThat(TreasuryChart.glAccountId("1510").toString()).isEqualTo("a0000000-0000-0000-0000-000000001510")
     }

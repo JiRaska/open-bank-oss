@@ -18,6 +18,8 @@ import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.DealTransition
+import com.openbank.treasury.domain.model.FxSide
+import com.openbank.treasury.domain.model.FxTerms
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.LimitOverride
 import com.openbank.treasury.domain.model.PostingEvent
@@ -183,7 +185,13 @@ class DealRepositoryImpl(
 
     override suspend fun dueForMaturity(today: LocalDate): List<Deal> = withHistories(
         Panache.withSession {
-            find("state = ?1 and maturityDate <= ?2 order by maturityDate asc", DealState.SETTLED.name, today).list()
+            // An FX spot is final once SETTLED (maturityDate == valueDate); it never matures.
+            find(
+                "state = ?1 and maturityDate <= ?2 and product <> ?3 order by maturityDate asc",
+                DealState.SETTLED.name,
+                today,
+                ProductType.FX_SPOT.name,
+            ).list()
         }.awaitSuspending(),
     )
 
@@ -197,7 +205,18 @@ class DealRepositoryImpl(
                 LIMIT_CONSUMING_PRODUCT_NAMES,
             ).list()
         }.awaitSuspending()
-        return rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
+        val placed = rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
+        if (currency != Deal.CZK) return placed
+        // #10896: an unsettled FX spot carries settlement risk on its CZK equivalent until it settles.
+        val fx = Panache.withSession {
+            find(
+                "counterpartyId = ?1 and product = ?2 and state in ?3",
+                counterpartyId,
+                ProductType.FX_SPOT.name,
+                listOf(DealState.PENDING_APPROVAL.name, DealState.BOOKED.name),
+            ).list()
+        }.awaitSuspending()
+        return placed + fx.filter { it.dealId != excludeDealId }.sumOf { it.fxCounterAmount ?: BigDecimal.ZERO }
     }
 
     /**
@@ -284,6 +303,10 @@ class DealRepositoryImpl(
         limitOverrideAt = deal.limitOverride?.at
         limitOverrideExposure = deal.limitOverride?.coversExposureUpTo
         limitOverrideLimit = deal.limitOverride?.limitAtOverride
+        fxSide = deal.fx?.side?.name
+        fxCounterAmount = deal.fx?.counterAmount
+        fxMidRate = deal.fx?.midRate
+        fxRateFlag = deal.fx?.rateFlag
         updatedAt = deal.updatedAt
     }
 
@@ -303,9 +326,19 @@ class DealRepositoryImpl(
         val limit = limitAmount
         val before = limitExposureBefore
         val amount = limitDealAmount
+        val productType = ProductType.valueOf(product)
+        val fx = fxSide?.let {
+            FxTerms(
+                side = FxSide.valueOf(it),
+                counterAmount = checkNotNull(fxCounterAmount) { "deal $dealId: FX side without a counter amount" },
+                midRate = fxMidRate,
+                rateFlag = fxRateFlag,
+            )
+        }
+        val limitCurrency = if (productType == ProductType.FX_SPOT) Deal.CZK else currency
         return Deal(
             id = dealId,
-            product = ProductType.valueOf(product),
+            product = productType,
             counterpartyId = counterpartyId,
             currency = currency,
             principal = principal,
@@ -320,12 +353,13 @@ class DealRepositoryImpl(
             submittedBy = submittedBy?.let { Actor(it, ActorType.valueOf(submittedByType ?: ActorType.HUMAN.name)) },
             approvedBy = approvedBy?.let { Actor(it, ActorType.valueOf(approvedByType ?: ActorType.HUMAN.name)) },
             limitCheck = if (limit != null && before != null && amount != null) {
-                LimitCheck(counterpartyId, currency, limit, before, amount)
+                LimitCheck(counterpartyId, limitCurrency, limit, before, amount)
             } else {
                 null
             },
             rationale = rationale,
             limitOverride = overrideOrNull(),
+            fx = fx,
             history = history,
         )
     }
