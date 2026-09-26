@@ -142,6 +142,20 @@ def self_test() -> int:
                 print(f"  {d}", file=sys.stderr)
             return 1
 
+        # A local build must not alter either score or evidence. Comparing only the two
+        # implementations misses the case where both count the same generated copies.
+        before_py = run_python(work, Path(tmp) / "before-py.json")
+        before_node = run_node(work, Path(tmp) / "before-node.json")
+        migration = next(work.glob("openbank-*-service/src/main/resources/db/migration/V*.sql"))
+        service = migration.relative_to(work).parts[0]
+        generated = work / service / "build/resources/main/db/migration" / migration.name
+        generated.parent.mkdir(parents=True)
+        shutil.copyfile(migration, generated)
+        if (run_python(work, Path(tmp) / "after-py.json") != before_py
+                or run_node(work, Path(tmp) / "after-node.json") != before_node):
+            print("SELF-TEST FAILED: build outputs changed readiness scores or evidence", file=sys.stderr)
+            return 1
+
         node = work / "openbank-admin-ui" / "scripts" / "collect-prod-readiness.mjs"
         text = node.read_text()
         marker = "function scoreC6Dr(short) {"
