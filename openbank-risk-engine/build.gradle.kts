@@ -49,6 +49,8 @@ dependencies {
     // Consumer-driven contract for lending's loan-book read (ADR-0314 D4); the pact is replayed by
     // lending's @PactFolder provider test.
     testImplementation(libs.pact.consumer)
+    // Provider replay of finrep's snapshot-list + capital pact (ADR-0313 D6) from the git-pact folder.
+    testImplementation(libs.pact.provider)
 }
 
 kover {
