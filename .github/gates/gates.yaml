@@ -5518,3 +5518,23 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-agent-admission.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
+
+  # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector
+  # (OpenBao Transit adapter + local AES-GCM adapter). A service's src/main that uses
+  # javax.crypto.Cipher or calls a Transit encrypt/decrypt/rewrap path is a second copy of
+  # key handling the libs port exists to replace. Today's two card-issuance files are
+  # baselined (shrink-only); a NEW file and a STALE baseline entry each exit 1. ADVISORY per
+  # ADR-0320 until card-issuance, the first consumer, has migrated — then enforced.
+  - id: field-crypto-in-libs
+    name: "service-local field crypto / Transit calls go through libs FieldProtector (ADR-0320 P3, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Per-service Cipher/Transit code duplicates key handling, AAD binding and fail-closed error handling that ADR-0320 P3 centralises in libs; a ratchet stops new copies while card-issuance migrates."
+    review_after: "2027-03-26"
+    budget_seconds: 10
+    min_subjects: 1000   # 2319 service src/main .kt files scanned 2026-09-26
+    selftest: python3 .github/scripts/check-field-crypto-in-libs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
+    run: |
+      python3 .github/scripts/check-field-crypto-in-libs.py --root .

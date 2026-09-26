@@ -1,0 +1,5 @@
+# check-field-crypto-in-libs.py baseline (ADR-0320 P3). One repo-relative path per line.
+# Shrink-only: a file listed here that no longer matches is reported as stale.
+# card-issuance migrates to com.openbank.libs.security.FieldProtector first (ADR-0320 P3, ADR-0262).
+openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/crypto/AesGcmCardSecretCipher.kt
+openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/crypto/OpenBaoTransitDekUnwrapper.kt
