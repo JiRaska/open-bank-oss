@@ -38,12 +38,16 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.net.URI
 import java.util.UUID
 
 private const val CREATE_PATH = "/api/v1/sepa-payments"
+private val log = Logger.getLogger(SepaPaymentResource::class.java)
 
 @Path("/api/v1/sepa-payments")
 @Produces(MediaType.APPLICATION_JSON)
@@ -92,7 +96,16 @@ class SepaPaymentResource(
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
-            if (!created) idempotencyStore.release(idempotencyKey, requestHash)
+            // The release itself runs shielded from cancellation and never rethrows — a failure to
+            // release must not mask the original exception that made release necessary, and a
+            // cancelled caller must not abandon the release mid-flight and leave the key stuck
+            // IN_PROGRESS for its full TTL.
+            if (!created) {
+                withContext(NonCancellable) {
+                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                        .onFailure { log.warn("Failed to release idempotency key after create failure", it) }
+                }
+            }
         }
         val responseBody = payment.toResponse()
         idempotencyStore.save(idempotencyKey, requestHash, 201, objectMapper.writeValueAsString(responseBody))

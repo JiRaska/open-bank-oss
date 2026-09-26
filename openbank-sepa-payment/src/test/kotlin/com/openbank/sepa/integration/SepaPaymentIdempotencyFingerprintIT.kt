@@ -4,6 +4,9 @@
 
 package com.openbank.sepa.integration
 
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
+import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
 import com.openbank.sepa.application.port.`in`.SepaPaymentUseCase
 import com.openbank.sepa.application.usecase.SepaPaymentService
 import io.mockk.coEvery
@@ -43,6 +46,31 @@ class SepaPaymentIdempotencyFingerprintIT {
 
     @Inject
     lateinit var useCase: SepaPaymentUseCase
+
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    fun `a release failure does not mask the original create failure`() {
+        // Without withContext(NonCancellable) { runCatching { ... } } around the release call, an
+        // exception thrown by release() would propagate from the `finally` block and REPLACE the
+        // original create failure the caller actually needs to see (and act on).
+        val key = UUID.randomUUID().toString()
+        val debtor = UUID.randomUUID()
+        val failingUseCase = mockk<SepaPaymentService>()
+        coEvery { failingUseCase.createPayment(any()) } coAnswers {
+            error("transient failure on create")
+        }
+        QuarkusMock.installMockForType(failingUseCase, SepaPaymentUseCase::class.java)
+
+        val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
+        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
+
+        // The create failure (422, from the use case's IllegalStateException) must surface — not the
+        // IllegalStateException thrown by release().
+        assertThat(post(key, body(debtor, "1234.56")).statusCode).isEqualTo(422)
+        assertThat(paymentsFor(debtor)).isEqualTo(0)
+    }
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
