@@ -24,6 +24,8 @@ data class CreateStandingOrderCommand(
     val remittanceInfo: String?,
     val startDate: LocalDate,
     val endDate: LocalDate?,
+    /** Atomic replace (#10281): cancel this order in the same transaction that creates the new one. */
+    val replacesStandingOrderId: UUID? = null,
 )
 
 interface StandingOrderUseCase {

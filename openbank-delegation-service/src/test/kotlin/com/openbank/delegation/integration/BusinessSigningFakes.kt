@@ -103,6 +103,7 @@ class FakeApprovalSca : ApprovalScaVerifier {
     val approvalChallenges = ConcurrentHashMap<UUID, Bound>()
     val consumed: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
     val consumeCalls: MutableList<UUID> = java.util.Collections.synchronizedList(mutableListOf())
+    val links: MutableList<ApprovalLink> = java.util.Collections.synchronizedList(mutableListOf())
 
     fun initiator(party: UUID): UUID = UUID.randomUUID().also { initiatorChallenges[it] = party }
 
@@ -114,6 +115,7 @@ class FakeApprovalSca : ApprovalScaVerifier {
 
     override suspend fun consumeApprovalChallenge(challengeId: UUID, partyId: UUID, link: ApprovalLink): ScaVerdict {
         consumeCalls += challengeId
+        links += link
         val bound = approvalChallenges[challengeId] ?: return ScaVerdict.REFUSED
         val matches = bound.partyId == partyId &&
             bound.approvalRequestId == link.approvalRequestId &&
