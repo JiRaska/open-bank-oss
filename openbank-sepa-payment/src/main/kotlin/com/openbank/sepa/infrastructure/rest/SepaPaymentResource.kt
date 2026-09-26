@@ -4,9 +4,12 @@
 
 package com.openbank.sepa.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.security.actorName
 import com.openbank.libs.security.actorType
 import com.openbank.libs.web.ApiVersionResponseFilter
@@ -39,6 +42,8 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
 import java.util.UUID
 
+private const val CREATE_PATH = "/api/v1/sepa-payments"
+
 @Path("/api/v1/sepa-payments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -65,7 +70,10 @@ class SepaPaymentResource(
         // answered 500 in exactly the case it was written for. A blank header was always a 400.
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
+        // #10916: the key is bound to this request's fingerprint — the same key with a different
+        // payment answers 422 IDEMPOTENCY_KEY_REUSED instead of replaying the first payment.
+        val requestHash = requestFingerprint("POST", CREATE_PATH, request)
+        idempotencyStore.lookup(idempotencyKey, requestHash)?.let { cached ->
             return Response.status(cached.statusCode)
                 .entity(cached.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -75,11 +83,25 @@ class SepaPaymentResource(
 
         val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey))
         val responseBody = payment.toResponse()
-        idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
+        idempotencyStore.save(idempotencyKey, requestHash, 201, objectMapper.writeValueAsString(responseBody))
 
         return Response.created(URI.create("/api/v1/sepa-payments/${payment.id}"))
             .entity(responseBody)
             .build()
+    }
+
+    /**
+     * The canonical request fingerprint (#10916): the DESERIALISED DTO re-serialised with sorted
+     * keys, so whitespace and JSON key order in the raw body do not change the hash, while any
+     * change in a field value does.
+     */
+    private fun requestFingerprint(method: String, path: String, body: Any): String =
+        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
+
+    private val canonicalMapper: ObjectMapper by lazy {
+        objectMapper.copy()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
     }
 
     @GET
