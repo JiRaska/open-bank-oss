@@ -228,3 +228,10 @@ a supplementary card. Revisionless opens are ignored and revisionless closes ins
 legacy tombstones. A delayed lower revision cannot reopen a closed grant or trigger irreversible
 card blocking after a newer lifecycle decision. Consumers must be deployed and verified before the
 revisioned delegation producer.
+
+- **2026-09-26** — **`sanitizeForLog` de-duplication (#10937), no behavior change.**
+  `CardOutboxAdminResource.kt` (inbound REST surface) drops its locally-copied
+  `String?.sanitizeForLog()` helper for the single shared implementation in
+  `openbank-libs-domain`, identical in behavior to the copy it replaces. **Risk class:** none — the
+  admin resource's authorization checks and outbox-replay logic are unchanged; only the log-sanitizer
+  helper's defining class moves. Rollback: restore the service-local `sanitizeForLog` copy.
