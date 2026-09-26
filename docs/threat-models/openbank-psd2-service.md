@@ -122,3 +122,15 @@ requests, but the irreversible action lives downstream.
 - **2026-06-15 (ADR-0090 P1)** — Berlin **AIS + consent** surface (`/v1/consents`, `/v1/accounts`).
   Read-only + consent reuse, no money path. Extended `EidasMtlsFilter` to gate `v1/`. Risk class =
   **confidentiality**, mitigated by per-consent scoping.
+
+- **2026-09-26** — **`sanitizeForLog` de-duplication (#10937), no behavior change.** `StubClients.kt`
+  (outbound client edge), `EidasMtlsFilter.kt` and `QsealSignatureFilter.kt` (inbound REST surface)
+  drop their locally-copied `String?.sanitizeForLog()` helper for the single shared implementation in
+  `openbank-libs-domain`. The function only replaces CR/LF with `_` (log-forging / CWE-117
+  mitigation) — there is no length cap in either the shared function or the copies it replaces; an
+  earlier version of this entry claimed one that does not exist. Behavior is otherwise
+  byte-for-byte identical to the 14 copies it replaces fleet-wide — verified by the shared helper's
+  own unit tests plus this service's existing filter tests. **Risk class:** none — this
+  changes which class DEFINES the log-sanitization function, not what it does; the eIDAS mTLS
+  certificate check and QSeal signature verification logic in both filters are untouched. Rollback:
+  restore the service-local `sanitizeForLog` copy.

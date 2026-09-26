@@ -9,6 +9,7 @@ import com.openbank.analytics.application.port.out.ProposalStore
 import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.MakerCheckerViolation
 import com.openbank.libs.analytics.Proposal
+import com.openbank.libs.security.sanitizeForLog
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
@@ -39,10 +40,7 @@ class SensitiveReloadService {
 
     private val log = Logger.getLogger(SensitiveReloadService::class.java)
 
-    // CodeQL java/log-injection: source/requestedBy/reason/checker are operator-supplied
-    // strings that flow straight into log lines below. Strip CR/LF so an attacker (or a
-    // careless operator) can't forge additional audit-trail log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     suspend fun propose(request: BackfillRequest): Proposal<BackfillRequest> {
         val proposal = Proposal(
