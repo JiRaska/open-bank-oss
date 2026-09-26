@@ -33,7 +33,7 @@ export function ComplaintContextInvestigation({ ref }: { ref?: Ref<ComplaintCont
     ].includes(node.type))
     .map(node => ({
       ...node,
-      relation: graph?.edges.find(edge => edge.to === node.key)?.relation ?? node.type,
+      relation: graph?.edges.find(edge => edge.to === node.key && edge.relation !== 'CONCERNS_TRANSACTION')?.relation ?? node.type,
     }))
     .sort((left, right) => Date.parse(left.validFrom) - Date.parse(right.validFrom)
       || left.sourceSystem.localeCompare(right.sourceSystem)

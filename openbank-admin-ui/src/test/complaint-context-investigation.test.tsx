@@ -11,8 +11,8 @@ const graph = {
   root: 'complaint:CMP-42',
   truncated: false,
   nodes: [
-    node('complaint:CMP-42', 'COMPLAINT', 1),
-    node(payment, 'TRANSACTION', 1),
+    node('complaint:CMP-42', 'COMPLAINT', 1, '2026-09-13T09:59:00Z', 'dispute-service'),
+    node(payment, 'PAYMENT', 1),
     node('payment-stage:domestic:payment:1', 'PAYMENT_STAGE', 1, '2026-09-13T10:00:00Z'),
     node('payment-stage:domestic:payment:2', 'RAIL_EVIDENCE', 2, '2026-09-13T10:01:00Z'),
     node('booking-transaction:tx-1', 'TRANSACTION_BOOKING', 0, '2026-09-13T10:02:00Z', 'transaction-service'),
@@ -23,7 +23,7 @@ const graph = {
     node('reversal-transaction:reversal-1', 'REVERSAL_TRANSACTION', 4, '2026-09-13T10:07:00Z', 'sepa-payment'),
   ],
   edges: [
-    edge('complaint-payment', graphRoot(), payment, 'CONCERNS_TRANSACTION', 1),
+    edge('complaint-booking', graphRoot(), 'booking-transaction:tx-1', 'CONCERNS_TRANSACTION', 1),
     edge('created', payment, 'payment-stage:domestic:payment:1', 'CREATED', 1),
     edge('submitted', payment, 'payment-stage:domestic:payment:2', 'SUBMITTED_TO', 2),
     edge('booking', payment, 'booking-transaction:tx-1', 'BOOKING_REQUESTED', 0),
