@@ -48,6 +48,7 @@ that is balance-service).
 | **S**poofing | Caller impersonates operator | OIDC bearer + mTLS; no anonymous mutation |
 | **T**ampering | Forced freeze/close, IBAN reassignment | RBAC on all mutations; state-machine guards; DB constraints; audit trail |
 | **T**ampering | Open an account in a currency incompatible with its selected product | Confirmed catalog product responses are checked server-side for product identity and currency. A missing product rejects the request; an unavailable catalog stays explicitly fail-open as reference-data unavailability, with skipped validation logged. |
+| **T**ampering | Reuse an `Idempotency-Key` with a different opening request so the first account is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body); mismatch refused 422 `IDEMPOTENCY_KEY_REUSED`, nothing opened |
 | **R**epudiation | Operator denies freezing an account | AuditEvent per lifecycle transition (immutable, ADR audit) |
 | **I**nfo disclosure | IBAN / account enumeration via `/iban/{iban}` | AuthZ on lookup; rate limiting at gateway; no PII in IBAN response beyond need |
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
@@ -98,6 +99,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/accounts` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different account opening was answered as the first and silently never happened. Now the key is bound to a SHA-256 fingerprint of method + path + the canonicalised request DTO (#10916, libs #10922) and a mismatch is refused **422 `IDEMPOTENCY_KEY_REUSED`** before any use case runs. Records stored before this deploy carry no fingerprint and are treated as a match for one TTL window. No new endpoint, caller, privilege, event or migration. Rollback: revert. The DB-level `account_idempotency` guard (V14) is unchanged and still keyed by the key alone.
 - **2026-09-06** — **New INBOUND reader on the fleet sweep**, no new route and no new privilege.
   `openbank-analytics-sink` now calls the existing `GET /api/v1/accounts/active` (ADR-0143's
   staff/service sweep, already used by billing-service's cycle scheduler) with an OIDC
