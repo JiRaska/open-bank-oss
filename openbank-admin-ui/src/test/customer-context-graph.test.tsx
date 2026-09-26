@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { buildCustomerGraph } from '@/lib/context/customerGraph'
@@ -66,6 +66,17 @@ function graph(data = evidence) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Customer context graph', () => {
+  it('keeps authorised source-backed relationships visible when analytics is unavailable', async () => {
+    installSources()
+    graph({ ...evidence, available: false, asOf: null, domains: [], accountIds: [], consents: [], error: 'clickhouse unavailable' })
+
+    expect(await screen.findByRole('button', { name: 'Account: CZ12…3456' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Card: 411111******1111' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Interaction: SCA_APPROVAL' })).toBeInTheDocument()
+    expect(screen.getByText(/The analytics projection is unavailable/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+  })
+
   it('connects live accounts, products, cards and interactions to the customer', async () => {
     const fetchMock = installSources()
     graph()
@@ -195,10 +206,4 @@ describe('Customer context graph', () => {
     expect(result.truncated).toBe(true)
   })
 
-  it('does not render any customer surface when the authorized projection is unavailable', async () => {
-    installSources()
-    graph({ ...evidence, available: false })
-    expect(screen.queryByText('Context graph')).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Card:/ })).not.toBeInTheDocument())
-  })
 })

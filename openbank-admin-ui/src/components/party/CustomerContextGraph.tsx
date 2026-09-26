@@ -50,7 +50,6 @@ export function CustomerContextGraph({ evidence, partyName }: {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!evidence.available) return
     let current = true
     void loadCustomerGraphFacts(evidence.partyId)
       .then(facts => {
@@ -97,8 +96,6 @@ export function CustomerContextGraph({ evidence, partyName }: {
     device: t('Zařízení', 'Device'), document: t('Dokument', 'Document'),
   }
 
-  if (!evidence.available) return null
-
   const focusId = selectedId ?? hoveredId
 
   return <section aria-labelledby={headingId} className={styles.shell}>
@@ -119,6 +116,12 @@ export function CustomerContextGraph({ evidence, partyName }: {
         ? t('Načítám živé zdroje…', 'Loading live sources…')
         : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} doménových vstupů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} domain feeds`)}</span>
     </div>
+    {!evidence.available && <p role="status" className={styles.warning}>
+      {t(
+        'Analytická projekce není dostupná. Vztahy ze zdrojových služeb se načítají nezávisle.',
+        'The analytics projection is unavailable. Source-backed relationships load independently.',
+      )}
+    </p>}
     {live.unavailable.length > 0 && <p role="status" className={styles.warning}>
       {t('Nedostupné zdroje', 'Unavailable sources')}: {live.unavailable.join(', ')}. {t('Graf je částečný.', 'The graph is partial.')}
     </p>}
