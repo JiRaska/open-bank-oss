@@ -47,8 +47,11 @@ quarkus:
       url: ${LEDGER_SERVICE_URL:http://ledger-service.ledger.svc:8101}
     # ADR-0313 D6: the risk engine's Pillar 1 result for COREP C 02.00 (read-only). Used only while
     # openbank.finrep.risk-engine.enabled is on; until then C 02.00 renders as a flagged data gap.
+    # Local default only: the deployed URL (https, 8443 mTLS) comes from RISK_ENGINE_URL in the
+    # gitops Deployment, so the cluster edge is declared exactly once, where the NetworkPolicy
+    # generator reads it.
     risk-engine:
-      url: ${RISK_ENGINE_URL:http://risk-engine.risk.svc:8159}
+      url: ${RISK_ENGINE_URL:http://localhost:8159}
 
   log:
     level: INFO
@@ -88,6 +91,26 @@ openbank:
   # moot anyway, since finrep had no openapi.yaml to assert anything against (#2255).
   api:
     version: "1"
+
+"%prod":
+  quarkus:
+    # risk-engine terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so the
+    # risk-engine rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
+    # this stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      risk-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/internal-tls/tls.crt
+              key: /mnt/internal-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/internal-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      risk-engine:
+        tls-configuration-name: risk-authority
 
 "%test":
   quarkus:
