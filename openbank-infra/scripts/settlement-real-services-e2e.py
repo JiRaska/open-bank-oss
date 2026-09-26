@@ -731,7 +731,7 @@ def main() -> None:
         journals = request(f"{ledger_endpoint}/transaction/{settlement_id}", token=token)
         assert journals == [], journals
         balances = [request(f"{balance}/{account}/CZK", token=token) for account in (payer, payee)]
-        for observed, expected in zip(balances, [(100, 40, 60), (0, 0, 0)]):
+        for observed, expected in zip(balances, [(100, 40, 60), (0, 0, 0)], strict=True):
             assert tuple(Decimal(str(observed[k])) for k in ("bookedAmount", "reservedAmount", "availableAmount")) == expected
         assert request(settlement_endpoint, settlement_body, token)["id"] == settlement_id
         replayed = [request(f"{balance}/{account}/CZK", token=token) for account in (payer, payee)]
