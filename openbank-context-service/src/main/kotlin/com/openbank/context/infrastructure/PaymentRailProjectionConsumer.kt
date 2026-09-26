@@ -117,6 +117,18 @@ class PaymentRailProjectionConsumer(
         event.nodes.map { it.observation() },
         clock.instant(),
     ).flatMap {
+        GraphEdgeHistoryWriter.append(
+            session,
+            bankScope,
+            projectionGeneration,
+            event.eventKey,
+            event.aggregateRef,
+            event.edges.map {
+                GraphEdgeObservation(it.from, it.to, it.relation, event.source, event.occurredAt, event.version)
+            },
+            clock.instant(),
+        )
+    }.flatMap {
         mutation(
             session,
             """INSERT INTO context_projection_events

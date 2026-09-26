@@ -117,6 +117,25 @@ class PaymentBookingProjectionConsumer(
             listOf(event.fromNode.observation(false), event.toNode.observation(true)),
             clock.instant(),
         ).flatMap {
+            GraphEdgeHistoryWriter.append(
+                session,
+                bankScope,
+                projectionGeneration,
+                event.eventKey,
+                event.aggregateRef,
+                listOf(
+                    GraphEdgeObservation(
+                        event.fromNode.key,
+                        event.toNode.key,
+                        event.relation,
+                        event.source,
+                        event.occurredAt,
+                        event.version,
+                    ),
+                ),
+                clock.instant(),
+            )
+        }.flatMap {
             mutation(
                 session,
                 """INSERT INTO context_projection_events

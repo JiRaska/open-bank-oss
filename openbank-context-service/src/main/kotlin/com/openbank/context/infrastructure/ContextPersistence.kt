@@ -441,43 +441,19 @@ class ContextGraphRepository(
         transactionKeys: List<String>,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> {
-        if (transactionKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and fromKey in (:keys) and " +
-                    "((sourceSystem = :domesticSource and toKey like :stagePrefix and " +
-                    "relationType in (:lifecycleRelations)) or " +
-                    "(sourceSystem = :transactionSource and toKey like :transactionPrefix and " +
-                    "relationType = :bookingRequested) or " +
-                    "(sourceSystem = :clearingSource and toKey like :clearingItemPrefix and " +
-                    "relationType = :submittedTo) or " +
-                    "(sourceSystem = :sepaSource and toKey like :returnPrefix and " +
-                    "relationType = :returnedBy) or " +
-                    "(sourceSystem = :sepaSource and toKey like :reversalPrefix and " +
-                    "relationType = :reversedBy)) and " +
-                    "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
-                ContextEdgeEntity::class.java,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("domesticSource", DOMESTIC_PAYMENT_SOURCE)
-                .setParameter("transactionSource", TRANSACTION_SOURCE)
-                .setParameter("clearingSource", CLEARING_SOURCE)
-                .setParameter("sepaSource", SEPA_SOURCE)
-                .setParameter("stagePrefix", PAYMENT_STAGE_PREFIX)
-                .setParameter("transactionPrefix", BOOKING_TRANSACTION_PREFIX)
-                .setParameter("bookingRequested", BOOKING_REQUESTED)
-                .setParameter("clearingItemPrefix", CLEARING_ITEM_PREFIX)
-                .setParameter("submittedTo", SUBMITTED_TO)
-                .setParameter("returnPrefix", RETURN_EVIDENCE_PREFIX)
-                .setParameter("returnedBy", RETURNED_BY)
-                .setParameter("reversalPrefix", REVERSAL_TRANSACTION_PREFIX)
-                .setParameter("reversedBy", REVERSED_BY)
-                .setParameter("keys", transactionKeys)
-                .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
-                .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.awaitSuspending()
-    }
+    ): List<ContextEdgeEntity> =
+        GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
+            transactionKeys,
+            listOf(
+                GraphEdgeRule(DOMESTIC_PAYMENT_SOURCE, PAYMENT_STAGE_PREFIX, COMPLAINT_LIFECYCLE_RELATIONS.toSet()),
+                GraphEdgeRule(TRANSACTION_SOURCE, BOOKING_TRANSACTION_PREFIX, setOf(BOOKING_REQUESTED)),
+                GraphEdgeRule(CLEARING_SOURCE, CLEARING_ITEM_PREFIX, setOf(SUBMITTED_TO)),
+                GraphEdgeRule(SEPA_SOURCE, RETURN_EVIDENCE_PREFIX, setOf(RETURNED_BY)),
+                GraphEdgeRule(SEPA_SOURCE, REVERSAL_TRANSACTION_PREFIX, setOf(REVERSED_BY)),
+            ),
+            asOf,
+            limit,
+        )
 
     private suspend fun findComplaintBookingEvidenceEdges(
         bookingTransactionKeys: List<String>,
@@ -486,41 +462,25 @@ class ContextGraphRepository(
         relation: String,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> {
-        if (bookingTransactionKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
-                    "toKey like :bookingPrefix and relationType = :relation and validFrom <= :asOf and " +
-                    "(validTo is null or validTo > :asOf) order by validFrom asc",
-                ContextEdgeEntity::class.java,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("source", source).setParameter("keys", bookingTransactionKeys)
-                .setParameter("bookingPrefix", toPrefix).setParameter("relation", relation)
-                .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.awaitSuspending()
-    }
+    ): List<ContextEdgeEntity> =
+        GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
+            bookingTransactionKeys,
+            listOf(GraphEdgeRule(source, toPrefix, setOf(relation))),
+            asOf,
+            limit,
+        )
 
     private suspend fun findComplaintClearingEvidenceEdges(
         clearingItemKeys: List<String>,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> {
-        if (clearingItemKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
-                    "toKey like :evidencePrefix and relationType = :relation and validFrom <= :asOf and " +
-                    "(validTo is null or validTo > :asOf) order by validFrom asc",
-                ContextEdgeEntity::class.java,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("source", CLEARING_SOURCE).setParameter("keys", clearingItemKeys)
-                .setParameter("evidencePrefix", CLEARING_EVIDENCE_PREFIX).setParameter("relation", SETTLED)
-                .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.awaitSuspending()
-    }
+    ): List<ContextEdgeEntity> =
+        GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
+            clearingItemKeys,
+            listOf(GraphEdgeRule(CLEARING_SOURCE, CLEARING_EVIDENCE_PREFIX, setOf(SETTLED))),
+            asOf,
+            limit,
+        )
 
     private suspend fun findNodes(
         namespace: ContextNamespace,

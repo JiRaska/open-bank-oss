@@ -222,3 +222,11 @@ identities include bank and generation. V19 requires a drained, coordinated writ
 old binaries must not run against the new conflict targets. Replay still requires controlled
 source retention and generation configuration and does not independently grant access to any
 graph. Existing authorization and bank-scoped readers continue to apply.
+
+
+Relationship observations use the same bank/generation boundaries as node history, with forced
+RLS and append-only event/edge tables. Event-level edge-set hashes reject changed or omitted
+relationships on replay. Historical selection applies source/prefix/relation allowlists before
+result limits and returns evidence/time/version from one eligible observation. Missing producer
+withdrawal semantics must never be interpreted as proof that a relationship is currently valid
+or revoked; these are historical source observations.

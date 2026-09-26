@@ -41,18 +41,21 @@ class GraphNodeHistoryPrivacyIT {
         connection().use { connection ->
             withRestrictedRole(connection, role) {
                 assertRestrictedRole(connection)
-                assertThat(visibleCount(connection, "context_graph_event_revisions", evidenceRef)).isZero()
-                assertThat(visibleCount(connection, "context_graph_node_revisions", evidenceRef)).isZero()
+                HISTORY_ROWS.keys.forEach { table ->
+                    assertThat(visibleCount(connection, table, evidenceRef)).isZero()
+                }
 
                 scope(connection, "another-bank")
-                assertThat(visibleCount(connection, "context_graph_event_revisions", evidenceRef)).isZero()
-                assertThat(visibleCount(connection, "context_graph_node_revisions", evidenceRef)).isZero()
+                HISTORY_ROWS.keys.forEach { table ->
+                    assertThat(visibleCount(connection, table, evidenceRef)).isZero()
+                }
 
                 scope(connection, BANK)
-                assertThat(visibleCount(connection, "context_graph_event_revisions", evidenceRef)).isEqualTo(1)
-                assertThat(visibleCount(connection, "context_graph_node_revisions", evidenceRef)).isEqualTo(2)
+                HISTORY_ROWS.forEach { (table, count) ->
+                    assertThat(visibleCount(connection, table, evidenceRef)).isEqualTo(count)
+                }
 
-                listOf("context_graph_event_revisions", "context_graph_node_revisions").forEach { table ->
+                HISTORY_ROWS.keys.forEach { table ->
                     assertMutationRejected(connection, table, evidenceRef, delete = false)
                     assertMutationRejected(connection, table, evidenceRef, delete = true)
                 }
@@ -65,21 +68,18 @@ class GraphNodeHistoryPrivacyIT {
             statement.execute("CREATE ROLE $role NOLOGIN NOSUPERUSER NOBYPASSRLS")
             try {
                 statement.execute("GRANT USAGE ON SCHEMA public TO $role")
-                statement.execute(
-                    "GRANT SELECT ON context_graph_event_revisions, context_graph_node_revisions TO $role",
-                )
-                statement.execute(
-                    "GRANT UPDATE, DELETE ON context_graph_event_revisions, context_graph_node_revisions TO $role",
-                )
+                HISTORY_ROWS.keys.forEach { table ->
+                    statement.execute("GRANT SELECT, UPDATE, DELETE ON $table TO $role")
+                }
                 statement.execute("SET ROLE $role")
                 assertions()
             } finally {
                 if (!connection.autoCommit) connection.rollback()
                 connection.autoCommit = true
                 statement.execute("RESET ROLE")
-                statement.execute(
-                    "REVOKE SELECT, UPDATE, DELETE ON context_graph_event_revisions, context_graph_node_revisions FROM $role",
-                )
+                HISTORY_ROWS.keys.forEach { table ->
+                    statement.execute("REVOKE SELECT, UPDATE, DELETE ON $table FROM $role")
+                }
                 statement.execute("REVOKE USAGE ON SCHEMA public FROM $role")
                 statement.execute("DROP ROLE $role")
             }
@@ -93,7 +93,7 @@ class GraphNodeHistoryPrivacyIT {
                 assertThat(it.getBoolean(1)).isFalse()
                 assertThat(it.getBoolean(2)).isFalse()
             }
-            listOf("context_graph_event_revisions", "context_graph_node_revisions").forEach { table ->
+            HISTORY_ROWS.keys.forEach { table ->
                 statement.executeQuery(
                     "SELECT pg_get_userbyid(relowner) = current_user FROM pg_class WHERE oid = '$table'::regclass",
                 ).use {
@@ -154,6 +154,12 @@ class GraphNodeHistoryPrivacyIT {
     )
 
     private companion object {
+        val HISTORY_ROWS = mapOf(
+            "context_graph_event_revisions" to 1,
+            "context_graph_node_revisions" to 2,
+            "context_graph_edge_events" to 1,
+            "context_graph_edge_revisions" to 1,
+        )
         const val BANK = "openbank-cz"
         val OCCURRED_AT: Instant = Instant.parse("2026-09-01T12:00:00Z")
     }

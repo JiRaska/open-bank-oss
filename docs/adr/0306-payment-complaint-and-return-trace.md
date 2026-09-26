@@ -98,9 +98,17 @@ The reader obtains at most two indexed candidates for each of at most 100 select
 does not sort the entire graph history. Missing retained nodes suppress dangling links and mark
 the result truncated. Eligible current rows remain readable as limited baseline facts only at
 or after their stored source event time; they cannot reconstruct overwritten earlier revisions.
-Replay remains required for pre-migration history. Stable payment/booking/clearing edge revisions and correction/withdrawal
-semantics still need historical storage; current first-write links cannot prove a complete
-historical trace after reverse delivery or source correction. The return's reversal transaction
+Replay remains required for pre-migration history. The three lifecycle projectors also append
+normalized relationship observations and a digest of the complete edge set before event deduplication.
+The reader chooses a complete eligible observation for each source-owned logical relationship
+before applying its result bound. It does not combine an earlier timestamp with a later event's
+version or evidence reference. Current edge rows are eligible baselines only when no historical
+observation exists at that time. The source, target-prefix and relation allowlists remain enforced.
+
+The consumed source contracts describe observations and contain no general relationship tombstone
+or supersession identity. A changed endpoint or an omitted edge therefore does not withdraw a
+previous observation. Correction/removal requires producer-owned relationship identity, effective
+time, revision ordering and explicit withdrawal/supersession semantics; that acceptance remains open. The return's reversal transaction
 ID is labelled a reference, not a booked reversal; ledger evidence remains the booking proof.
 The fixed complaint query follows only `CONCERNS_TRANSACTION` and an allow-listed directed lifecycle
 second hop, plus source/prefix/relation allow-listed booking-transaction and ledger-journal hops, so

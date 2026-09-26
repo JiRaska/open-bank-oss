@@ -204,6 +204,47 @@ class ComplaintRevisionSnapshotIT {
         }.hasStackTraceContaining("conflicting graph node revision")
     }
 
+    @Test
+    fun `reverse booking delivery retains the earlier relationship evidence`() {
+        val reference = "CMP-BOOKING-HISTORY-${UUID.randomUUID()}"
+        val payment = UUID.randomUUID()
+        val booking = UUID.randomUUID()
+        fun bookingEvent(version: Long): String =
+            """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+                """"aggregateId":"$booking","version":$version,"originatingPaymentId":"$payment",""" +
+                """"occurredAt":"${TIME.plusSeconds(version)}"}"""
+        onVertx {
+            consumer.consume(
+                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), payment),
+            )
+            payments.consume(paymentEvent(payment, 1, "RECEIVED"))
+            bookings.consumeTransaction(bookingEvent(2))
+            bookings.consumeTransaction(bookingEvent(1))
+        }
+        val prior = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(1), 50, 50)
+            },
+        )
+        assertThat(prior.edges).anySatisfy { edge ->
+            assertThat(edge.from).isEqualTo("transaction:$payment")
+            assertThat(edge.to).isEqualTo("booking-transaction:$booking")
+            assertThat(edge.relation).isEqualTo("BOOKING_REQUESTED")
+            assertThat(edge.sourceVersion).isEqualTo(1)
+            assertThat(edge.evidenceRef).isEqualTo("transaction:$booking:1")
+            assertThat(edge.validFrom).isEqualTo(TIME.plusSeconds(1))
+        }
+        val latest = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(2), 50, 50)
+            },
+        )
+        val relationship = latest.edges.single { it.relation == "BOOKING_REQUESTED" }
+        assertThat(relationship.sourceVersion).isEqualTo(2)
+        assertThat(relationship.evidenceRef).isEqualTo("transaction:$booking:2")
+        assertThat(relationship.validFrom).isEqualTo(TIME.plusSeconds(2))
+    }
+
     private fun paymentEvent(id: UUID, revision: Long, status: String): String {
         val type = if (revision == 1L) "DOMESTIC_PAYMENT_CREATED" else "DOMESTIC_PAYMENT_STATUS_CHANGED"
         val statusField = if (revision == 1L) "status" else "newStatus"

@@ -77,6 +77,25 @@ class DomesticPaymentProjectionConsumer(
             listOf(event.paymentNode.observation(), event.stageNode.observation()),
             clock.instant(),
         ).flatMap {
+            GraphEdgeHistoryWriter.append(
+                session,
+                bankScope,
+                projectionGeneration,
+                event.eventKey,
+                event.paymentKey,
+                listOf(
+                    GraphEdgeObservation(
+                        event.stageEdge.from,
+                        event.stageEdge.to,
+                        event.stageEdge.relation,
+                        SOURCE_SERVICE,
+                        event.stageEdge.validFrom,
+                        event.stageEdge.sourceVersion,
+                    ),
+                ),
+                clock.instant(),
+            )
+        }.flatMap {
             mutation(
                 session,
                 """INSERT INTO context_projection_events

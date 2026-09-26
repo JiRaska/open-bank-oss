@@ -345,7 +345,9 @@ paths:
         Payment, booking and rail nodes use retained source facts with explicit reference
         precedence; a current node may serve only as an eligible baseline at or after its
         source event time. Missing node evidence suppresses dangling links and marks the
-        neighborhood truncated. Stable edge history remains incomplete.
+        neighborhood truncated. Retained relationship observations preserve the eligible source event's
+        evidence and version. Source contracts do not yet express general relationship withdrawal
+        or supersession; an omitted relationship does not establish that it was revoked.
       parameters:
         - $ref: '#/components/parameters/reference'
         - $ref: '#/components/parameters/caseId'
