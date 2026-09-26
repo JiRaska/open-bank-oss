@@ -1,0 +1,16 @@
+-- #10916: bind the durable Idempotency-Key dedupe to the request it was first used for.
+--
+-- aml_cases.idempotency_key is UNIQUE and outlives the Redis idempotency record, so after that
+-- record expires or is evicted a key reused for a DIFFERENT case used to be answered with the
+-- first case. request_hash stores the SHA-256 request fingerprint (RequestFingerprints.of:
+-- method + path + canonical body, 64 lowercase hex chars) the case was created under;
+-- AmlCaseService refuses a key whose stored hash differs (409 IDEMPOTENCY_KEY_REUSED). Rows
+-- created before this migration, and cases opened without an HTTP request (onboarding
+-- screening), keep NULL and keep the replay-by-key behaviour.
+--
+-- Nullable, no default, no backfill: a metadata-only change on Postgres, no table rewrite.
+--
+-- Rollback: `ALTER TABLE aml_cases DROP COLUMN request_hash;` and delete this file's row from
+-- flyway_schema_history — only after rolling back the code, since the entity maps the column.
+-- Data lost on rollback: only the fingerprints (the service returns to key-only dedupe).
+ALTER TABLE aml_cases ADD COLUMN request_hash VARCHAR(64);
