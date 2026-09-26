@@ -68,6 +68,12 @@ KNOWN_UNWIRED = {
     # source, so local dev and tests get the same wiring as the pod. The gate reads both sources
     # and sees all three.
     ("openbank-tax-reporting-service", "withholding-remitted-in"): "no KafkaUser in gitops — a Write ACL cannot be granted, so a DLQ would wedge on the send (#5745)",
+    # ADR-0310 D3. The channel names its DLQ (nested form) and the KafkaTopic CR exists; only the
+    # Write ACL is missing, because loyalty-service has no KafkaUser and no gitops workload at all
+    # (#8793) — nothing syncs components/loyalty, so a KafkaUser written there would green this gate
+    # while applying nothing. The consumer cannot wedge because it is not deployed. This entry goes
+    # stale (and fails the gate) the moment the loyalty KafkaUser grants that Write.
+    ("openbank-loyalty-service", "referral-qualified-in"): "no KafkaUser in gitops — loyalty-service has no workload yet (#8793); the Write ACL on openbank.dlq.loyalty.referral-qualified-in lands with its KafkaUser",
     # The channels that had a DLQ BEFORE #5745, on SmallRye's implicit `dead-letter-topic-<channel>`
     # name. Naming one explicitly is a RENAME of a live topic: it strands whatever is already parked
     # in the old one and moves what the AccountPartyEventDeadLettered alert must read. That is an
