@@ -4,9 +4,9 @@ admin-ui-deploy.yml|job:build-push|contents
 admin-ui-deploy.yml|job:build-push|id-token
 admin-ui-deploy.yml|job:build-push|pull-requests
 agent-review.yml|top|pull-requests
-alert-rca-weekly.yml|top|contents
-alert-rca-weekly.yml|top|issues
-alert-rca-weekly.yml|top|pull-requests
+alert-rca-weekly.yml|job:review|contents
+alert-rca-weekly.yml|job:review|issues
+alert-rca-weekly.yml|job:review|pull-requests
 api-contract-post-merge.yml|job:raise-issue|issues
 auto-deploy-red-watch.yml|top|issues
 auto-deploy.yml|job:build-push|contents
@@ -69,8 +69,8 @@ scorecard.yml|job:analysis|id-token
 scorecard.yml|job:analysis|security-events
 security.yml|job:codeql|security-events
 security.yml|job:trivy|security-events
-service-build-stall-watch.yml|top|actions
-service-build-stall-watch.yml|top|issues
+service-build-stall-watch.yml|job:watch|actions
+service-build-stall-watch.yml|job:watch|issues
 services-ci.yml|job:build|id-token
 services-ci.yml|job:nightly-health-alert|issues
 standing-critical-digest.yml|top|issues
