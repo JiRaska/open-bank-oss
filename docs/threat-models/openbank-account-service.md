@@ -783,3 +783,17 @@ decision use first; the additive projection table may remain until its consumer 
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+
+- **2026-09-26** — **Exception-mapper consolidation (#10923), no behavior change.** The 401/403
+  `AuthenticationFailedException` / `ForbiddenException` mappers and the 404/409 not-found/conflict
+  mapper bases move to shared `openbank-libs` classes
+  (`com.openbank.libs.api.error.CommonExceptionMappers`,
+  `com.openbank.libs.domain.error.ResourceExceptions`); this service's own
+  `ExceptionMappers.kt` keeps only the domain-specific mappers with no library equivalent yet. The
+  wire contract is unchanged: same status codes, same `ApiError` envelope shape, same JSON
+  content-type on every 401/403/404/409 response — verified by the existing
+  `SecurityAbortExceptionMapperTest` and the new shared-library `ResourceExceptionMappersTest`.
+  **Risk class:** none — this is a response-plumbing refactor, not a change to authentication or
+  authorization decision logic (`AuthorizeInterceptor`, OPA policy evaluation, and the Keycloak
+  token validation path are all untouched). Rollback: revert to the service-local mapper classes;
+  no data or config migration involved.
