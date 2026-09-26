@@ -151,7 +151,9 @@ object Liquidity {
                 when (p.kind) {
                     PositionKind.SUB_LEDGER -> acc.customerAccount(p)
                     PositionKind.LOAN -> acc.loan(p, p.instrumentId?.let(byId::get), asOf)
-                    PositionKind.GL_ACCOUNT -> {
+                    // A money-market deal is classified by its principal account (1510 = HQLA L1),
+                    // exactly as its GL-level balance was before deals were modelled (ADR-0315 D6).
+                    PositionKind.GL_ACCOUNT, PositionKind.TREASURY_DEAL -> {
                         val cls = params.classification.classOf(p.glAccountCode, p.glAccountType)
                         if (cls == null) {
                             if (p.amount.signum() != 0) {
