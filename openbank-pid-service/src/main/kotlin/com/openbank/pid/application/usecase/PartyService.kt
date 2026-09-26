@@ -538,7 +538,13 @@ class PartyService(
     }
 }
 
-class PartyNotFoundException(message: String) : RuntimeException(message)
-class PartyAlreadyExistsException(message: String) : RuntimeException(message)
-class RelationshipAlreadyExistsException(message: String) : RuntimeException(message)
+// #10911 phase 2: extends the libs-domain base so libs-runtime's Resource{NotFound,Conflict}
+// ExceptionMapper handles the response; default codes NOT_FOUND/CONFLICT match the deleted local
+// mappers' ErrorCode.NOT_FOUND.code / ErrorCode.CONFLICT.code byte for byte (see
+// PidResourceExceptionMapperEquivalenceTest). InvalidPartyCaseTransitionException is left alone --
+// it maps to 400 VALIDATION_ERROR, which has no equivalent lib base.
+class PartyNotFoundException(message: String) : com.openbank.libs.domain.error.ResourceNotFoundException(message)
+class PartyAlreadyExistsException(message: String) : com.openbank.libs.domain.error.ResourceConflictException(message)
+class RelationshipAlreadyExistsException(message: String) :
+    com.openbank.libs.domain.error.ResourceConflictException(message)
 class InvalidPartyCaseTransitionException(message: String) : RuntimeException(message)
