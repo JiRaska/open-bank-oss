@@ -5,13 +5,13 @@
 package com.openbank.lending.application.usecase
 
 import com.openbank.lending.application.port.out.CompliancePackActivationRepository
+import com.openbank.lending.infrastructure.compliance.CompliancePackJson
 import com.openbank.lending.infrastructure.persistence.entity.CompliancePackActivationEntity
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped

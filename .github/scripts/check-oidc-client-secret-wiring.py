@@ -55,7 +55,7 @@ ENV_NAME = "OIDC_CLIENT_SECRET"
 # KDoc does) is therefore an unfixable-by-design false positive, never a real gap. This is a small,
 # stable set of directory names — not a growing debt list — so a hand-kept exclusion is the
 # `rules.yaml: agpl_modules` shape, not the kind this repo distrusts.
-NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-runtime"})
+NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-lending", "openbank-libs-runtime"})
 
 # Workloads still carrying `optional: true` on a secret that IS provisioned by an ExternalSecret.
 # Not flipped here on purpose: `optional: false` makes the pod refuse to start if the Secret is

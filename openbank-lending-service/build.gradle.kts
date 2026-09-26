@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-lending"))
     implementation(project(":openbank-libs-runtime"))
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")

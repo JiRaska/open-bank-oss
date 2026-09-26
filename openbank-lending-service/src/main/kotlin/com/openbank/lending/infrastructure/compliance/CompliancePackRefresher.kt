@@ -10,7 +10,6 @@ import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder

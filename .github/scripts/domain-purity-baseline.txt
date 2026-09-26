@@ -15,7 +15,7 @@
 #     implement, which stay in the domain module. Package unchanged, so no consumer import moved.
 #   - CompliancePackParser: split rather than moved. The decoder was already format-agnostic
 #     (`fromMap` takes an already-parsed Map), so all of it stays in libs-domain and only the
-#     three-line JSON front-end became `CompliancePackJson` in libs-runtime.
+#     three-line JSON front-end became `CompliancePackJson` (libs-runtime, since ADR-0317 lending-service).
 # What is left below is older debt from the pre-#3670 scope, tracked separately.
 # Do not add further entries.
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.annotation.JsonInclude

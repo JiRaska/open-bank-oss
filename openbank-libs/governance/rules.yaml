@@ -1755,12 +1755,21 @@ architecture:
   # ENFORCED by .github/scripts/check-domain-purity.py (Validate manifests job):
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
-  # the whole openbank-libs-domain module; openbank-libs-runtime is module-exempt
+  # the whole openbank-libs-domain module and its ADR-0317 context modules
+  # (openbank-libs-lending); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
   # in a libs-domain package the old `*/domain/*` scope never opened.
   ci_producer: ".github/scripts/check-domain-purity.py"
+  # ADR-0317: bounded-context packages (lending, decision, iso20022, ...) live in
+  # openbank-libs-<context> modules, never back in openbank-libs-domain; core never depends on
+  # a context module; every runtime libs module is listed in libs-change-dependents.sh
+  # LIBS_MODULES. Advisory through phases 1-3, enforced once phase 4 lands.
+  libs_core_purity:
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0317 phase 4
+    ci_producer: ".github/scripts/check-libs-core-purity.py"
 
 # ---------------------------------------------------------------------------------------
 # OPA bundle sync (issue #1184). Keep terse: this file is embedded verbatim into every

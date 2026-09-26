@@ -34,6 +34,7 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
 
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-lending"))
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)

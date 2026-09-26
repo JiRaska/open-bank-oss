@@ -45,7 +45,7 @@
 set -euo pipefail
 
 # Runtime-affecting shared modules → their declaration token in a consumer's build file.
-LIBS_MODULES=(openbank-libs-domain openbank-libs-runtime openbank-libs-temporal)
+LIBS_MODULES=(openbank-libs-domain openbank-libs-runtime openbank-libs-temporal openbank-libs-lending)
 # Paths that change how EVERYTHING is built; no declaration can express these.
 GLOBAL_RE='^(build-logic/|gradle/|gradlew|settings\.gradle\.kts|build\.gradle\.kts|openbank-libs/(src/main|build\.gradle\.kts|gradle/))'
 # A libs module matters when its compiled sources or its own build file move. Its docs do not

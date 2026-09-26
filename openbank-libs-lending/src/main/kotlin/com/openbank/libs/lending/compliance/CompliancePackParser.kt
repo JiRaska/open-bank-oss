@@ -20,9 +20,10 @@ class CompliancePackParseException(message: String) : IllegalArgumentException(m
  * whole pack — the bank never originates under a rule set it could not fully read.
  * Format-agnostic BY CONSTRUCTION: [fromMap] is the whole decoder and it takes an already
  * parsed `Map`, so no serialization library is reachable from here. The JSON front-end is
- * `com.openbank.libs.lending.compliance.CompliancePackJson` in **openbank-libs-runtime** —
- * Jackson is framework, and ADR-0122 puts framework-touching code on the runtime side
- * (#3670). A YAML front-end would be a second adapter there and need no change in this file.
+ * `com.openbank.lending.infrastructure.compliance.CompliancePackJson` in
+ * **openbank-lending-service**, its only consumer — Jackson is framework, and ADR-0122 keeps
+ * framework-touching code out of this module (#3670, ADR-0317). A YAML front-end would be a
+ * second adapter there and need no change in this file.
  */
 object CompliancePackParser {
 
