@@ -1,0 +1,5 @@
+# Reviewed exceptions for check-no-allow-all-pdp-in-main.py, one `path:line` per line.
+# Expected to stay EMPTY: an entry here means a specific, reviewed AuthzDecision(allow = true, ...)
+# construction (or openbank-libs-testing dependency) under src/main was judged safe despite the
+# gate's default rule. Add a reason as a comment above the entry and get it reviewed in the PR
+# that adds it — same convention as the fleet's other gate baseline files.
