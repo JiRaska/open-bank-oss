@@ -7,7 +7,7 @@
 import type { Tone } from '@/components/ui/tone'
 import { hasPermission } from '@/lib/auth/roles'
 import { isIsoDate } from '@/components/balance-sheet/model'
-import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealState, type Product } from './contracts'
+import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealProduct, type DealState, type Product } from './contracts'
 import type { WriteResult } from './api'
 
 type T = (cs: string, en: string) => string
@@ -17,14 +17,51 @@ export const STATE_TONE: Record<DealState, Tone> = {
   MATURED: 'success', CANCELLED: 'neutral', REVERSED: 'danger',
 }
 
-export function productLabel(p: string, t: T): string {
+/** A response product is extensible; unknown future products render as their raw name. */
+export function productLabel(p: DealProduct, t: T): string {
   switch (p) {
     case 'MM_PLACEMENT': return t('Umístění na peněžním trhu', 'MM placement')
     case 'MM_BORROWING': return t('Přijetí na peněžním trhu', 'MM borrowing')
     case 'CNB_DEPOSIT_FACILITY': return t('Depozitní facilita ČNB', 'ČNB deposit facility')
     case 'CNB_LOMBARD': return t('ČNB lombardní úvěr', 'ČNB lombard borrowing')
+    case 'FX_SPOT': return t('FX spot', 'FX spot')
     default: return p
   }
+}
+
+// ── FX spot (#10896) ─────────────────────────────────────────────────────────────────────────────
+
+/** Mirrors the domain's `DayCount.spotDate`: T+2 business days, weekends skipped, no holiday
+ * calendar. Client-side preview only — the server (Deal.kt) is the actual control. */
+export function fxSpotDate(tradeDateIso: string): string {
+  const nextBusinessDay = (d: Date): Date => {
+    const next = new Date(d)
+    next.setUTCDate(next.getUTCDate() + 1)
+    while (next.getUTCDay() === 0 || next.getUTCDay() === 6) next.setUTCDate(next.getUTCDate() + 1)
+    return next
+  }
+  let d = new Date(`${tradeDateIso}T00:00:00Z`)
+  for (let i = 0; i < 2; i += 1) d = nextBusinessDay(d)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Mirrors `Deal.counterAmountOf`: foreign amount x rate, half-up to 2 dp. A PREVIEW only — the
+ * server recomputes and stores the authoritative value (`Deal.fx.counterAmount`). */
+export function fxCounterAmount(foreignAmount: number, rate: number): number | null {
+  if (!Number.isFinite(foreignAmount) || !Number.isFinite(rate)) return null
+  return Math.round((foreignAmount * rate + Number.EPSILON) * 100) / 100
+}
+
+/** Exactly one leg must be CZK (openapi.yaml DraftDealRequest: "exactly one of buy/sell is CZK").
+ * Both CZK or neither CZK is refused — client-side courtesy; the server 400s regardless. */
+export function isValidFxPair(buyCurrency: string, sellCurrency: string): boolean {
+  return buyCurrency !== sellCurrency && (buyCurrency === 'CZK') !== (sellCurrency === 'CZK')
+}
+
+/** The foreign currency is whichever leg is not CZK. */
+export function fxForeignCurrency(buyCurrency: string, sellCurrency: string): string | null {
+  if (!isValidFxPair(buyCurrency, sellCurrency)) return null
+  return buyCurrency === 'CZK' ? sellCurrency : buyCurrency
 }
 
 export function stateLabel(s: DealState, t: T): string {

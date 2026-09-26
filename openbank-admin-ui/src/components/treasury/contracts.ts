@@ -10,17 +10,29 @@ import { z } from 'zod'
 const decimal = z.union([z.number(), z.string()]).transform(Number).pipe(z.number().finite())
 const timestamp = z.string().min(1)
 
-export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD'] as const
+export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD', 'FX_SPOT'] as const
 export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
 export const CURRENCIES = ['CZK', 'EUR'] as const
+export const FX_SIDES = ['BUY', 'SELL'] as const
 /** The central bank's counterparty id (Deal.CNB_COUNTERPARTY_ID). */
 export const CNB_COUNTERPARTY_ID = 'CNB'
 
+/** Closed set: what the FORM may submit as `product` (openapi.yaml DraftDealRequest.product, a
+ * closed enum on the request even though the response's ProductType is x-extensible). */
 export const productSchema = z.enum(PRODUCTS)
 // Draft creation offers only products this UI knows how to book. The response contract is
 // extensible: a newer backend product must not make the entire deal list unavailable.
 export const responseProductSchema = z.string().min(1)
 export const dealStateSchema = z.enum(DEAL_STATES)
+export const fxSideSchema = z.enum(FX_SIDES)
+
+/**
+ * `Deal.product` (openapi.yaml `ProductType`) is declared `x-extensible-enum` (1.2.0, #10896): the
+ * product set grows server-side, and a client MUST tolerate a value it does not recognise — a
+ * closed zod enum here would make an unrelated server release fail every deal list/detail render.
+ * Rendering falls back to the raw string (`productLabel`'s `default` branch).
+ */
+export const dealProductSchema = z.string().min(1)
 
 export const limitCheckSchema = z.object({
   currency: z.string(), limit: decimal, exposureBefore: decimal, exposureAfter: decimal,
@@ -41,9 +53,22 @@ export const limitOverrideSchema = z.object({
   by: z.string(), reason: z.string(), at: timestamp, coversExposureUpTo: decimal, limitAtOverride: decimal,
 })
 
+/** `Deal.fx` (openapi.yaml `FxTerms`) — FX_SPOT only; null for money-market deals (#10896). */
+export const fxTermsSchema = z.object({
+  side: fxSideSchema,
+  buyCurrency: z.string(),
+  buyAmount: decimal,
+  sellCurrency: z.string(),
+  sellAmount: decimal,
+  dealRate: decimal,
+  midRate: decimal.nullable(),
+  rateFlag: z.string().nullable(),
+})
+
 export const dealSchema = z.object({
   dealId: z.string(),
-  product: responseProductSchema,
+  // ProductType is extensible on responses; unknown future products remain renderable.
+  product: dealProductSchema,
   counterpartyId: z.string(),
   currency: z.string(),
   principal: decimal,
@@ -54,6 +79,7 @@ export const dealSchema = z.object({
   tradeDate: z.iso.date(),
   valueDate: z.iso.date(),
   maturityDate: z.iso.date(),
+  fx: fxTermsSchema.nullable().default(null),
   state: dealStateSchema,
   createdBy: z.string(),
   createdByType: z.string(),
@@ -92,6 +118,10 @@ export const positionsSchema = z.object({
 })
 
 export type Product = z.infer<typeof productSchema>
+/** The deal's product as rendered: any non-empty string, since ProductType is x-extensible. */
+export type DealProduct = z.infer<typeof dealProductSchema>
+export type FxSide = z.infer<typeof fxSideSchema>
+export type FxTerms = z.infer<typeof fxTermsSchema>
 export type DealState = z.infer<typeof dealStateSchema>
 export type Deal = z.infer<typeof dealSchema>
 export type Counterparty = z.infer<typeof counterpartySchema>
