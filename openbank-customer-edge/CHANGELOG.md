@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.83.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.82.0...customer-edge-v0.83.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
 ## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.81.0...customer-edge-v0.82.0) (2026-09-19)
 
 

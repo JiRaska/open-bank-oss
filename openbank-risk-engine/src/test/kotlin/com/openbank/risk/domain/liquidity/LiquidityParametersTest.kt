@@ -39,16 +39,16 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 
 /**
- * The SHIPPED parameter set, read from application.yaml through the same config mapping the
+ * The SHIPPED BCBS parameter set (still declared and selectable), read from application.yaml through the same config mapping the
  * service uses ([LiquidityTestParameters.shipped]), holds the value its citation names. One test per
  * factor family; a changed value without a changed citation (and a version bump) goes red here.
  */
 class LiquidityParametersTest {
 
-    private val p = LiquidityTestParameters.shipped()
+    private val p = LiquidityTestParameters.shipped(LiquidityTestParameters.BCBS_SET)
 
     private fun assertFactors(vararg expected: Pair<LiquidityFactor, String>) = expected.forEach { (f, v) ->
-        assertThat(p[f]).describedAs("${f.key} (${f.citation})").isEqualByComparingTo(v)
+        assertThat(p[f]).describedAs("${f.key} (${p.citation(f)})").isEqualByComparingTo(v)
     }
 
     @Test
@@ -56,6 +56,8 @@ class LiquidityParametersTest {
         assertThat(p.id).isEqualTo("bcbs-d238-d295")
         assertThat(p.version).isEqualTo("2")
         assertThat(p.source).contains("d238").contains("d295").contains("2015/61 deviations not applied")
+        assertThat(p.regime).isEqualTo(LiquidityRegime.BCBS)
+        assertThat(LiquidityFactor.entries.map { p.citation(it) }).allMatch { it.startsWith("BCBS d2") }
     }
 
     @Test
@@ -128,10 +130,17 @@ class LiquidityParametersTest {
     fun `a missing, unknown or out-of-range factor is refused, never defaulted`() {
         val keys = p.factors.mapKeys { it.key.key }
         assertThatThrownBy {
-            LiquidityParameters.fromKeys("x", "1", "s", keys - LCR_INFLOW_CAP.key, p.classification)
+            LiquidityParameters.fromKeys("x", "1", "s", keys - LCR_INFLOW_CAP.key, p.classification, p.regime)
         }.hasMessageContaining("missing factors").hasMessageContaining("lcr-inflow-cap")
         assertThatThrownBy {
-            LiquidityParameters.fromKeys("x", "1", "s", keys + ("lcr-made-up" to BigDecimal.ONE), p.classification)
+            LiquidityParameters.fromKeys(
+                "x",
+                "1",
+                "s",
+                keys + ("lcr-made-up" to BigDecimal.ONE),
+                p.classification,
+                p.regime,
+            )
         }.hasMessageContaining("unknown liquidity factor keys")
         assertThatThrownBy {
             LiquidityParameters.fromKeys(
@@ -140,6 +149,7 @@ class LiquidityParametersTest {
                 "s",
                 keys + (LCR_INFLOW_CAP.key to BigDecimal("1.5")),
                 p.classification,
+                p.regime,
             )
         }.hasMessageContaining("[0, 1]")
     }

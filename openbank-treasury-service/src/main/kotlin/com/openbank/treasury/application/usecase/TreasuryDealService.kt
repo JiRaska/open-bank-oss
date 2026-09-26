@@ -109,6 +109,14 @@ class TreasuryDealService(
         return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
     }
 
+    override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, OVERRIDE, dealId)?.let { return it } }
+        val deal = load(dealId)
+        // Measured now; approval re-checks, and refuses if exposure has grown past what was overridden.
+        val overridden = deal.overrideLimit(actor, reason, limitCheck(deal), clock.instant())
+        return deals.save(overridden, command = cmd(key, OVERRIDE, dealId))
+    }
+
     override suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, REJECT, dealId)?.let { return it } }
         return deals.save(load(dealId).reject(actor, reason, clock.instant()), command = cmd(key, REJECT, dealId))
@@ -318,6 +326,7 @@ class TreasuryDealService(
         const val DRAFT = "DRAFT"
         const val SUBMIT = "SUBMIT"
         const val APPROVE = "APPROVE"
+        const val OVERRIDE = "OVERRIDE_LIMIT"
         const val REJECT = "REJECT"
         const val CANCEL = "CANCEL"
         const val SETTLE = "SETTLE"

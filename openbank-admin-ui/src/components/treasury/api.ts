@@ -66,8 +66,8 @@ export async function postJson<T>(url: string, body: unknown, schema: z.ZodType<
   }
 }
 
-export type DealAction = 'submit' | 'approve' | 'reject' | 'cancel' | 'settle' | 'mature' | 'reverse'
+export type DealAction = 'submit' | 'approve' | 'reject' | 'cancel' | 'settle' | 'mature' | 'reverse' | 'override-limit'
 
-/** POST /deals/{id}/{action}; reject and reverse carry `{reason}`. */
+/** POST /deals/{id}/{action}; reject, reverse and override-limit carry `{reason}`. */
 export const dealActionUrl = (dealId: string, action: DealAction) =>
   treasuryUrl(`/deals/${encodeURIComponent(dealId)}/${action}`)
