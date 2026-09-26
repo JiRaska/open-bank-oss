@@ -76,6 +76,7 @@ jobs:
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
       verification-modules: ${{ steps.detect.outputs.verification-modules }}
+      verification-modules-json: ${{ steps.detect.outputs.verification-modules-json }}
     steps:
       # harden-runner omitted on the self-hosted sandbox runner — egress is enforced
       # at the infra layer (egress-only SG, isolated VPC, ADR-0027), so the eBPF shim
@@ -374,6 +375,9 @@ jobs:
           VERIFY_MODULES=$(grep -E '^openbank-[^/]+/build\.gradle\.kts$' <<< "${FILES:-}" \
             | cut -d/ -f1 | sort -u | paste -sd, - || true)
           echo "verification-modules=${VERIFY_MODULES}" >> "$GITHUB_OUTPUT"
+          VERIFY_JSON=$(jq -cn --arg modules "$VERIFY_MODULES" \
+            '$modules | if . == "" then [] else split(",") end')
+          echo "verification-modules-json=${VERIFY_JSON}" >> "$GITHUB_OUTPUT"
           echo "Modules to build: ${CHANGED:-<none>}"
           if [ -z "${CHANGED// /}" ]; then
             echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -436,19 +440,24 @@ jobs:
   # against a throwaway copy and the committed file is restored, which keeps that
   # trust boundary intact while still catching an unpinned artifact. See #3218.
   #
-  # Scoped to the modules whose build files changed, not the fleet: a full-fleet
-  # regeneration is ~20 min and a `quarkusBuild` variant OOM'd after 3h40m.
+  # Scoped to modules whose build files changed, with one process and timeout per
+  # module. A real 11-module PR exceeded the old single-job 30-minute budget twice;
+  # the verifier already regenerates each module independently to bound heap use.
   verification-metadata:
-    name: verification-metadata
+    name: verification-metadata (${{ matrix.module }})
     needs: [changes]
     if: needs.changes.result == 'success' && needs.changes.outputs.verification-modules != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.verification-modules-json) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        if: steps.mods.outputs.modules != ''
         with:
           distribution: temurin
           java-version: "25"
@@ -467,7 +476,7 @@ jobs:
       - name: Check verification metadata covers the changed modules
         run: |
           python3 .github/scripts/check-verification-metadata-complete.py \
-            --modules "${{ needs.changes.outputs.verification-modules }}" --enforce
+            --modules "${{ matrix.module }}" --enforce
 
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
   #
@@ -501,8 +510,9 @@ jobs:
           if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
             echo "One or more service builds failed."; exit 1
           fi
-          if [ "${{ needs.verification-metadata.result }}" = "failure" ] || [ "${{ needs.verification-metadata.result }}" = "cancelled" ]; then
-            echo "verification-metadata check failed (#3218)."; exit 1
+          if [ -n "${{ needs.changes.outputs.verification-modules }}" ] \
+             && [ "${{ needs.verification-metadata.result }}" != "success" ]; then
+            echo "verification-metadata has no successful verdict for changed build files (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
 

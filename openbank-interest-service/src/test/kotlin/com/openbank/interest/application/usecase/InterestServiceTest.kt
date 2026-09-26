@@ -279,19 +279,27 @@ class InterestServiceTest {
 
     @Test
     fun `createConfig persists a genuinely new config`() {
-        val config = sampleConfig(annualRate = BigDecimal("0.04"))
+        val config = sampleConfig(annualRate = BigDecimal("0.04")).copy(
+            effectiveTo = LocalDate.of(2026, 12, 31),
+        )
+        val saved = slot<InterestRateConfig>()
 
         every {
-            configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+            configRepo.findActiveTwin("SAVINGS", null, "EUR", LocalDate.of(2026, 1, 1))
         } returns Uni.createFrom().nullItem()
         val event = slot<OutboxMessage>()
-        every { configRepo.saveWithOutbox(any(), capture(event)) } answers {
+        every { configRepo.saveWithOutbox(capture(saved), capture(event)) } answers {
             Uni.createFrom().item(firstArg<InterestRateConfig>())
         }
 
         val result = service.createConfig(config).await().indefinitely()
 
         assertThat(result).isEqualTo(config)
+        assertThat(saved.captured.productId).isEqualTo("SAVINGS")
+        assertThat(saved.captured.currency).isEqualTo("EUR")
+        assertThat(saved.captured.maxBalance).isEqualByComparingTo(BigDecimal("1000000.00"))
+        assertThat(saved.captured.effectiveTo).isEqualTo(LocalDate.of(2026, 12, 31))
+        assertThat(saved.captured.active).isTrue()
         // ADR-0314 D5: the config and its rate.changed event are one repository call — one transaction.
         verify(exactly = 1) { configRepo.saveWithOutbox(config, any()) }
         verify(exactly = 0) { configRepo.save(any()) }

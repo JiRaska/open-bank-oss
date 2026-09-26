@@ -54,6 +54,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract test (ADR-0063, issue #2255 dimension C3): psd2 is a real consumer of
     // tpp-registry's eIDAS licence gate, GET /api/v1/tpp-registry/check.
     testImplementation(libs.pact.consumer)

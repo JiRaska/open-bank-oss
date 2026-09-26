@@ -4,6 +4,7 @@
 
 package com.openbank.vop
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
@@ -32,14 +33,16 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     private lateinit var valkey: GenericContainer<*>
 
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        postgres = PostgreSQLContainer(POSTGRES_IMAGE)
             .withDatabaseName("openbank_vop")
             .withUsername("openbank")
             .withPassword("openbank")
         postgres.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
-        valkey = GenericContainer("docker.io/valkey/valkey:8-alpine").withExposedPorts(VALKEY_PORT)
+        valkey = GenericContainer(VALKEY_IMAGE).withExposedPorts(VALKEY_PORT)
         valkey.start()
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
 
         // reactive URL for Panache (vertx-pg-client) + JDBC URL for Flyway.
         val reactiveUrl = "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}"
@@ -53,11 +56,19 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
-        if (::valkey.isInitialized) valkey.stop()
+        if (::postgres.isInitialized) {
+            postgres.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+        if (::valkey.isInitialized) {
+            valkey.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        }
     }
 
     private companion object {
         const val VALKEY_PORT = 6379
+        const val POSTGRES_IMAGE = "postgres:18-alpine"
+        const val VALKEY_IMAGE = "docker.io/valkey/valkey:8-alpine"
     }
 }

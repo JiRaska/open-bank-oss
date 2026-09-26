@@ -51,6 +51,7 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.pact.consumer)
     // fraud-service is now also a pact PROVIDER (FraudPactProviderVerificationTest, #468) —

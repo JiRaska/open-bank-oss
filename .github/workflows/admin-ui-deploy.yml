@@ -402,12 +402,14 @@ jobs:
         # so unrelated frequent main runs cannot evict an unchanged service's proof.
         #
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: expired or absent → shows tests:0 (accurate "not run recently").
+        # A successful inventory lookup with no artifact is legitimately not-run.
+        # An API failure is not: fail the image build instead of replacing a
+        # complete sandbox snapshot with a partially empty one.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
           # Released components come from version.txt. The deterministic-simulation
@@ -427,15 +429,18 @@ jobs:
             # cap this best-effort collector at 295 read calls for 59 components;
             # a hit normally arrives on page one.
             for page in 1 2 3 4 5; do
-              artifact="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}" \
-                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" \
-                2>/dev/null || true)"
+              local inventory
+              inventory="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}")" || {
+                echo "Artifact inventory API failed for ${artifact_name} page ${page}" >&2
+                return 2
+              }
+              artifact="$(python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" <<< "${inventory}")" || return 2
               if [ -n "${artifact}" ]; then
                 printf '%s\n' "${artifact}"
                 return 0
               fi
             done
-            return 1
+            return 0
           }
 
           DOWNLOADED=0
@@ -444,26 +449,42 @@ jobs:
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            art_id="$(latest_main_artifact "${art_name}" || true)"
+            art_id="$(latest_main_artifact "${art_name}")" || exit 1
             if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue
             fi
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
-                -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
+                -L -o "/tmp/${art_name}.zip"; then
               TMPDIR_ART="/tmp/${art_name}-extracted"
               rm -rf "${TMPDIR_ART}" && mkdir -p "${TMPDIR_ART}"
-              unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}" 2>/dev/null || true
+              if ! unzip -tq "/tmp/${art_name}.zip" >/dev/null 2>&1; then
+                echo "  ${svc}: artifact archive is invalid; refusing incomplete Test Intelligence image" >&2
+                exit 1
+              fi
+              unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}"
               # actions/upload-artifact strips the uploaded directory prefix: the
               # service envelope is therefore normally `run.json` at the archive
               # root.  Keep accepting the previous nested layout too, so the UI
               # retains the latest per-service execution evidence across action
               # layout changes rather than silently falling back to stale JUnit.
               RUN_JSON="$(find "${TMPDIR_ART}" -type f \( -name 'run.json' -o -path '*/test-intelligence/run.json' \) -print -quit)"
-              if [ -n "${RUN_JSON}" ]; then
-                mkdir -p "${svc}/build/test-intelligence"
-                cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"
+              if [ -z "${RUN_JSON}" ] || ! python3 -c '
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as source:
+              envelope = json.load(source)
+          valid = (envelope.get("schemaVersion") == 1
+                   and envelope.get("component") == sys.argv[2]
+                   and isinstance(envelope.get("suites"), list)
+                   and isinstance(envelope.get("run"), dict)
+                   and envelope["run"].get("branch") == "main")
+          sys.exit(0 if valid else 1)
+          ' "${RUN_JSON}" "${svc}"; then
+                echo "  ${svc}: run envelope is missing or invalid; refusing incomplete Test Intelligence image" >&2
+                exit 1
               fi
+              mkdir -p "${svc}/build/test-intelligence"
+              cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"
               # Inside the zip: test-results/*/TEST-*.xml (actions/upload-artifact@v7 strips
               # the leading service/build/ prefix). Reconstruct the full target path.
               find "${TMPDIR_ART}" -path "*/test-results/*/TEST-*.xml" | while read -r xml; do
@@ -479,7 +500,8 @@ jobs:
               DOWNLOADED=$((DOWNLOADED + 1))
               echo "  ${svc}: staged"
             else
-              echo "  ${svc}: download failed (skip)"
+              echo "  ${svc}: artifact download failed; refusing incomplete Test Intelligence image" >&2
+              exit 1
             fi
           done
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
@@ -535,17 +557,17 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -u
+          python3 .github/scripts/extract-test-intelligence-envelope.py --self-test
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           touch openbank-admin-ui/test-run-history/.staged-ids
-          # Measured 2026-09-04: only 54 non-expired main-branch `test-intelligence-run-*`
-          # artifacts exist repo-wide, so this cap does not bind and lowering it saves ~4
-          # requests, not ~50. Left at 100 deliberately. What those 54 buy is the number
-          # that matters and it is not this one: 21 components across 10 CI runs spanning
-          # 0.6 HOURS, median 2 envelopes per component — a snapshot, not the per-test-case
-          # history it feeds. Artifact retention no longer binds the HISTORY (the cache
-          # above keeps envelopes past expiry); the cap now bounds only what one build
-          # downloads, not what it knows.
+          # The restored cache can predate ZIP validation. Remove non-main or malformed
+          # envelopes before the collector reads them; a missing file overrides its old
+          # .staged-ids entry so an available artifact is re-fetched, not suppressed.
+          python3 .github/scripts/extract-test-intelligence-envelope.py \
+            --prune-cache openbank-admin-ui/test-run-history || exit 1
+          # The cache preserves history past artifact expiry. Bound only the number of
+          # candidates downloaded by this build, not the retained history.
           MAX_ENVELOPES=100
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero
@@ -554,31 +576,49 @@ jobs:
           # newest-first across the entire repository; one 100-item page is readily filled
           # by per-service evidence, so page it before applying the bounded 100-envelope cap.
           # GitHub's `name` filter is exact-match and cannot select run-id-suffixed artifacts.
+          # High-volume PR CI can push the latest main browser run beyond five
+          # repository-wide artifact pages (observed 2026-09-18). Fetch that producer's
+          # latest completed main run directly so a valid browser verdict cannot vanish
+          # merely because unrelated branches uploaded many artifacts.
           KNOWN_BEFORE=$(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ')
-          for page in 1 2 3 4 5; do
-            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-              | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
-          done \
+          {
+            browser_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-browser-synthetic.yml/runs?branch=main&status=completed&per_page=1" \
+              | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
+            if [ -n "${browser_run_id}" ]; then
+              api "https://api.github.com/repos/${REPO}/actions/runs/${browser_run_id}/artifacts?per_page=100" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            fi
+            for page in 1 2 3 4 5; do
+              api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            done
+          } \
+            | awk '!seen[$1]++' \
             | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
                 [ -n "${artifact_id}" ] || continue
-                # Diff-forward: skip any artifact id the cache already staged, whatever its
-                # current expiry state — the staged envelope outlives the artifact. The
-                # candidate list above is still bounded at MAX_ENVELOPES BEFORE any download;
-                # this skip is why steady state downloads a handful, not the bound.
-                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids && continue
+                # Diff-forward: a validated cached file is authoritative, even if its ID
+                # ledger entry is missing. A stale ID without a file must not suppress repair.
+                # The candidate list is bounded before any download.
+                cached="openbank-admin-ui/test-run-history/${artifact_name}.json"
+                if [ -f "${cached}" ]; then
+                  grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
+                    || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                  continue
+                fi
                 archive="/tmp/${artifact_name}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
-                # actions/upload-artifact strips the uploaded directory prefix, so the
-                # immutable service envelope is normally `run.json` at the zip root.
-                # Keep accepting a nested path for compatibility with an artifact action
-                # layout change, but never require a source-tree path that is not retained.
-                envelope="$(unzip -Z1 "${archive}" | awk '$0 == "run.json" || /\/run\.json$/ { print; exit }' || true)"
-                [ -n "${envelope}" ] || continue
-                unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
-                echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                # Browser variants retain run-chromium.json / run-firefox.json,
+                # unlike service envelopes named run.json. Require exactly one
+                # schema-valid main envelope; never guess among ZIP members.
+                if ! python3 .github/scripts/extract-test-intelligence-envelope.py \
+                  "${archive}" "${cached}"; then
+                  continue
+                fi
+                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
+                  || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
               done
-          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) downloaded this build."
+          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
 
       - name: Save staged test-run history
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -591,26 +631,28 @@ jobs:
         # collect-test-intelligence.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
         # Do not filter to success: a failed/latest attempt must not disappear behind an
-        # older green run. Best-effort absence stays visible as missing evidence.
+        # older green run. Confirmed absence stays visible as missing evidence;
+        # an API failure must stop the deploy instead of erasing PIT results.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
-          RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
-            2>/dev/null || true)
+          # A one-item response has selected an older completed run while a newer
+          # main run and its artifacts existed. Compare attempt timestamps explicitly
+          # rather than trusting the API's first item (reruns can change recency).
+          RUN_INVENTORY=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=100") || exit 1
+          RUN_ID=$(python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True); print(r[0]['id'] if r else '')" <<< "${RUN_INVENTORY}") || exit 1
           if [ -z "${RUN_ID}" ]; then
             echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."
-          ARTIFACTS=$(api \
-            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
-            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" \
-            2>/dev/null || true)
+          ARTIFACT_INVENTORY=$(api \
+            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100") || exit 1
+          ARTIFACTS=$(python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" <<< "${ARTIFACT_INVENTORY}") || exit 1
           if [ -z "${ARTIFACTS}" ]; then
             echo "No pitest artifacts found in run ${RUN_ID} — skipping."
             exit 0
@@ -619,7 +661,7 @@ jobs:
           while IFS=' ' read -r art_id art_name; do
             [ -n "${art_id}" ] || continue
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
-                -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
+                -L -o "/tmp/${art_name}.zip"; then
               # Each artifact zip's top-level is the pitest
               # report contents (mutations.xml, index.html, com.openbank.*/ …) because
               # actions/upload-artifact@v7 strips the <component>/build/reports/pitest/
@@ -635,8 +677,11 @@ jobs:
               esac
               dest="${svc}/build/reports/pitest"
               mkdir -p "${dest}"
-              unzip -q "/tmp/${art_name}.zip" -d "${dest}" 2>/dev/null || true
+              unzip -q "/tmp/${art_name}.zip" -d "${dest}" || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
+            else
+              echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
+              exit 1
             fi
           done <<< "${ARTIFACTS}"
           COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
