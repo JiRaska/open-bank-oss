@@ -77,6 +77,14 @@ the modules measured above. Decision, instead of a new module:
    libs-runtime on any class whose signature, fields or supertypes name a JOSE or Redis type.**
    libs-runtime ships the logic as a plain `abstract class` (`DpopProofVerifier`,
    `ValkeyClientRateLimiter`) that Jandex never registers.
+   **Sanctioned exception: an `Instance<T>` lazy lookup.** A CDI bean may name an optional type
+   only as the type argument of `jakarta.enterprise.inject.Instance<T>`, resolved at call time —
+   the shape of the already-merged `DefaultIdempotencyStoreProducer` (#10927), which takes
+   `Instance<ReactiveRedisDataSource>`. That PR measured it: a *direct* `ReactiveRedisDataSource`
+   parameter fails ArC build validation on a service without Redis, while the `Instance<>` form
+   keeps `:openbank-audit-service:quarkusBuild` (no `quarkus-redis-client`) green. What rule 1
+   forbids is **direct** injection — a constructor/field/producer parameter, supertype or field of
+   the optional type itself.
 2. **Activation is an explicit opt-in in the consuming service:** a thin `@Provider` /
    `@Interceptor` subclass in that service's own `src/main`, exactly the #6240 remedy already used
    for the Hibernate mappers. A service that does not opt in never loads the class, so a missing
@@ -84,7 +92,9 @@ the modules measured above. Decision, instead of a new module:
 3. **The one annotation libs-runtime does export, `@SenderConstrained` (#10928), is a pure
    `@InterceptorBinding`** that names no optional type; binding it without the opt-in subclass is
    inert, which `check-sender-constrained-endpoints.py` catches by requiring the subclass wherever
-   the annotation is used.
+   the annotation is used. That check must be **`enforced`, not `advisory`, before
+   `@SenderConstrained` ships** — an exception to the advisory-first convention below, because an
+   advisory miss here is an XS2A endpoint that looks sender-constrained and accepts bearer tokens.
 4. **Guard test.** A libs-runtime test boots a Quarkus app with neither `quarkus-oidc` nor
    `quarkus-redis-client` on the test classpath and asserts it starts — the negative case for
    #6240, which today has no test.
@@ -105,7 +115,8 @@ Service-to-service **mTLS** as network transport is *not* decided here: it belon
 north star (SPIFFE/mesh) and issue #1914. P2's mTLS branch only validates a certificate-bound
 token where a TLS client certificate already reaches the service.
 
-Each gate starts `advisory` with a baseline and flips to `enforced` once its primitive has one
+Each gate except `check-sender-constrained-endpoints.py` (enforced from the first release of
+`@SenderConstrained`, rule 3 above) starts `advisory` with a baseline and flips to `enforced` once its primitive has one
 migrated consumer, per the repo's ratchet convention.
 
 ## Alternatives considered
