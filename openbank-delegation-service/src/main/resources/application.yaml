@@ -61,8 +61,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # OUTBOUND M2M. `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
   # Every REST client here (sca, pid, party, account, card-issuance) targets an @RolesAllowed endpoint,
@@ -193,6 +191,8 @@ mp:
         json: false
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%prod":
