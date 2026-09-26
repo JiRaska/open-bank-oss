@@ -2916,6 +2916,7 @@ gates:
       differently depending on which service touched it. ADR-0318 moves the rule into a named
       RoundingPolicy registry; this ratchet keeps new inline sites from appearing meanwhile.
     review_after: "2027-03-26"
+    verified: "2026-09-26 — advisory per ADR-0318 until the money-path baseline is empty; self-test flags a new site, a stale baseline and an unknown service, and an injected unknown baseline entry made the real run exit 1"
     budget_seconds: 30
     min_subjects: 12   # 25 money-path services measured 2026-09-26; half
     selftest: python3 .github/scripts/check-money-rounding-inline.py --self-test
