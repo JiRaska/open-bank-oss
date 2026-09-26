@@ -15,7 +15,7 @@ info:
   #        standard factors from a versioned parameter set. Additive.
   # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
-  version: 1.6.0
+  version: 1.6.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -283,9 +283,11 @@ paths:
       description: |
         Liquidity Coverage Ratio (BCBS d238) and Net Stable Funding Ratio (BCBS d295) per currency,
         with a total only for a single-currency book. Every component line carries its factor, the
-        configuration key it came from and the BCBS paragraph. Factors and classification choices
-        come from the versioned parameter set `openbank.risk.liquidity.*`, named on the result.
-        BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.
+        configuration key it came from and the article / paragraph it cites. Factors and
+        classification choices come from the versioned parameter set `openbank.risk.liquidity.*`,
+        named on the result. The default set is `eu-2015-61-crr2` (Delegated Regulation (EU) 2015/61
+        for the LCR, Regulation (EU) 575/2013 Part Six Title IV for the NSFR); the BCBS d238 / d295
+        set `bcbs-d238-d295` stays selectable.
         A GL balance the configured classification does not name is listed in `unclassified` and
         counted nowhere. Derived on request, never stored.
       parameters:
