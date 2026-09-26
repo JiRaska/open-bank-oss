@@ -9,7 +9,7 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The producer-side link of an audit event (ADR-0317): which service emitted it, its position
+ * The producer-side link of an audit event (ADR-0318): which service emitted it, its position
  * in that service's chain, the previous link's hash and its own.
  */
 data class AuditChainLink(val producer: String, val seq: Long, val prevHash: String, val hash: String)
@@ -18,7 +18,7 @@ data class AuditChainLink(val producer: String, val seq: Long, val prevHash: Str
 data class HashLinkedAuditEnvelope(val event: AuditEvent, val link: AuditChainLink, val canonicalJson: String)
 
 /**
- * Builds and verifies ADR-0317 envelopes.
+ * Builds and verifies ADR-0318 envelopes.
  *
  * The wire payload IS the canonical JSON (sorted keys, no whitespace), so a verifier recomputes
  * the hash from the exact bytes it received — there is no second serialisation that could
@@ -96,7 +96,7 @@ object AuditChain {
         "ipAddress" to event.ipAddress,
         "userAgent" to event.userAgent,
         "payload" to event.payload,
-        // ADR-0317 additive integrity fields.
+        // ADR-0318 additive integrity fields.
         "producer" to producer,
         "seq" to seq,
         "prevHash" to prevHash,
