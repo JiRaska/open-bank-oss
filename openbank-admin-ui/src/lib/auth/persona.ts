@@ -88,7 +88,7 @@ export function personaForRoles(roles: string[]): Persona {
   }
   if (has(roles, ROLES.PAYMENTS)) return 'payments'
   if (has(roles, ROLES.RISK) || has(roles, ROLES.FINANCE)) return 'balance-sheet'
-  if (has(roles, ROLES.TREASURY_DEALER) || has(roles, ROLES.TREASURY_APPROVER)) return 'treasury'
+  if (has(roles, ROLES.TREASURY_DEALER) || has(roles, ROLES.TREASURY_APPROVER) || has(roles, ROLES.TREASURY_SENIOR_APPROVER)) return 'treasury'
   return 'backoffice'
 }
 
