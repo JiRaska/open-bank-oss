@@ -68,10 +68,30 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 
 The `money-sync` rule "retry only when the call carries an idempotency key" is a *runtime*
 property of the call, which static annotation constants cannot express. It is implemented with
-`@Retry(retryOn = [RetryableKeyedCallException::class], abortOn = [...])`: a libs-runtime REST
-client response/exception mapper translates connect, timeout and 5xx failures into
-`RetryableKeyedCallException` **only** when the outgoing request carries an `Idempotency-Key`
-header, and into a non-retryable `UpstreamCallException` otherwise. So the annotation stays
+`@Retry(retryOn = [RetryableKeyedCallException::class], abortOn = [UpstreamCallException::class])`
+on the adapter method, and the keyed/unkeyed classification happens in three places, because no
+single JAX-RS/MicroProfile hook sees both the request headers and every failure mode:
+
+1. **Mark.** A libs-runtime `jakarta.ws.rs.client.ClientRequestFilter`, registered on money-sync
+   REST clients (`@RegisterProvider`), reads the outgoing `Idempotency-Key` header and records the
+   result with `ClientRequestContext.setProperty("openbank.keyed", true|false)`.
+2. **5xx.** A libs-runtime `jakarta.ws.rs.client.ClientResponseFilter` receives *both* the
+   `ClientRequestContext` (so it reads that property) and the `ClientResponseContext`; on a 5xx it
+   throws `RetryableKeyedCallException` for a keyed call and `UpstreamCallException` otherwise.
+   A MicroProfile `ResponseExceptionMapper` was the first draft and **cannot do this**:
+   `toThrowable(Response)` receives only the response and never sees the request headers.
+3. **Connect / timeout.** These produce no response at all, so no response filter or mapper ever
+   runs; the client throws `jakarta.ws.rs.ProcessingException` (cause `ConnectException`,
+   `SocketTimeoutException` or the Vert.x timeout). A thin libs-runtime call helper,
+   `KeyedCall.invoke(keyed: Boolean) { client.post(...) }`, wraps the client call inside the
+   `@Retry` method: the caller passes whether it sent a key (it built the header, so it knows),
+   and the helper rethrows a `ProcessingException` as `RetryableKeyedCallException` when keyed
+   and `UpstreamCallException` when not. A client-side `@Timeout` on the same method surfaces as
+   `TimeoutException`, which is not in `retryOn` and so is never retried — the per-attempt timeout
+   is the client's read timeout, not the FT one.
+
+A 4xx is left to the client's default mapping (`WebApplicationException`), which is in neither
+list and so is never retried. So the annotation stays
 static, and the keyed/unkeyed decision is made per call by which exception type is thrown. A
 custom interceptor or SmallRye FT's programmatic `TypedGuard` API were rejected for this: both
 move the policy out of the annotation the `resilience-profile` gate reads. Per-environment tuning uses

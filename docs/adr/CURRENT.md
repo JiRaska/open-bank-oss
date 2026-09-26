@@ -330,7 +330,7 @@ _Also tagged `regulatory-reporting`: 0022 0023 0038 0085 0096 0180 0286 0313 031
 
 - **[0133](0133-tamper-evident-audit-chain.md)** · Tamper-evident audit chain · `shipped` · audit-service keeps a SHA-256 hash chain over every audit entry (prev_hash plus record_hash) with a verify endpoint reporting the first broken link, giving tamper-evidence without an external WORM store.
 - **[0226](0226-cross-channel-audit-correlation.md)** · Cross-channel audit correlation: one identity, one trail · `partial` · One identity, one trail: every audit event carries channel (ui|mcp|api), act-chain and session id; the audit surface answers 'what did person X do' across all channels in one query.
-- **[0322](0322-structured-decision-log-envelope-for-automated-decisions.md)** · Structured decision-log envelope for automated decisions _(proposed)_ · `planned` · Automated decisions emit one core DecisionRecord (libs.audit.decision); state-changing ALLOWs go via the ADR-0323 outbox with the business tx, AUTHZ denies via a non-transactional rate-bounded aggregated path.
+- **[0322](0322-structured-decision-log-envelope-for-automated-decisions.md)** · Structured decision-log envelope for automated decisions _(proposed)_ · `planned` · Automated decisions emit one core DecisionRecord (libs.audit.decision); state-changing ALLOWs go via the outbox transport proposed as ADR-0323 (#10926) with the business tx, AUTHZ denies via a non-transactional rate-bounded aggregated path.
 
 _Also tagged `audit`: 0023 0031 0047 0068 0086 0117 0118 0164 0214 0223 0306 0308_
 

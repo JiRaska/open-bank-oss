@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [audit, ai-agents, authz, compliance]
-summary: "Automated decisions emit one core DecisionRecord (libs.audit.decision); state-changing ALLOWs go via the ADR-0323 outbox with the business tx, AUTHZ denies via a non-transactional rate-bounded aggregated path."
+summary: "Automated decisions emit one core DecisionRecord (libs.audit.decision); state-changing ALLOWs go via the outbox transport proposed as ADR-0323 (#10926) with the business tx, AUTHZ denies via a non-transactional rate-bounded aggregated path."
 followup: "none — decision-only until DecisionRecord lands in the libs platform core and the first producers adopt it; delivery tracked by the linked issue"
 ---
 
@@ -64,6 +64,7 @@ reverse).
 | `subjectRef` | opaque identifier of the affected party or resource, never a name |
 | `correlation` | `traceId`, `correlationId`, `channel`, `actChain` (ADR-0226) |
 | `humanReview` | `none`, `pending` or `completed(by, at)` — the oversight state |
+| `atomic` | `true` when the record committed in the same transaction as the change it explains; `false` on the non-transactional path (D2) |
 | `retentionClass` | closed enum mapped to ADR-0118 periods; credit follows ADR-0214 D4 |
 
 `PolicyEvaluation` becomes a producer of this envelope (a mapping, not a rename), and
@@ -75,9 +76,26 @@ reverse).
   `AGENT` decisions, and `AUTHZ` `ALLOW`s of state-changing actions (non-GET, or an action the
   `role_action_matrix` marks as a write), are written through the service's transactional outbox
   in the *same* business transaction, so the record commits or rolls back with the change it
-  explains. This is the ADR-0323 producer-side hash-linked outbox transport (PR #10926); this ADR
-  adds no second audit transport. Read-only `ALLOW`s are recorded on money-path services and for
+  explains. This is the producer-side hash-linked outbox transport proposed as ADR-0323 in #10926 (still
+  open; this path depends on it landing); this ADR adds no second audit transport. Read-only `ALLOW`s are recorded on money-path services and for
   `AI_AGENT` principals, sampled elsewhere, with the sampling rate carried on the record.
+
+  **Carrier for `AUTHZ` `ALLOW`s.** The allow is decided in `AuthorizeInterceptor` *before* the
+  business transaction opens, so the interceptor cannot write it transactionally itself. It
+  builds the `DecisionRecord` and stores it as a **pending record** in a `@RequestScoped`
+  `PendingDecisionRecords` holder (libs-runtime), then proceeds. The service's outbox writer —
+  the same call that writes the business event inside the use case's transaction — drains the
+  holder and appends each pending record to the outbox in that transaction, so it commits or
+  rolls back with the change. If the request ends with records still pending (the use case wrote
+  no outbox row: a validation 4xx, an idempotent replay, a path with no event), a request-end hook
+  emits them on the non-transactional path below with `atomic = false`, so an allow is never
+  silently dropped and never claimed to be atomic when it was not. The reactive (Panache
+  `withTransaction`) services have no JTA `TransactionSynchronization` to hang this on, which is
+  why the drain is explicit in the outbox writer rather than a transaction callback.
+  **Services with no datasource or outbox** have no transaction to join: their state-changing
+  allows go straight to the non-transactional path with `atomic = false` on the record. The
+  `atomic` flag is part of the envelope, so a reader of the chain can tell which allows were
+  committed with their change.
 - **Non-transactional, rate-bounded path — every `AUTHZ` `DENY`.** A deny happens in
   `AuthorizeInterceptor` *before* any business transaction exists; there is no state change to
   commit with; some services have no datasource at all; and routing an unauthenticated deny into
@@ -96,8 +114,12 @@ reverse).
     therefore bounded and *visible*: the dropped count is on the next record and on a
     `openbank_authz_deny_records_dropped_total` counter.
   - **Always recorded individually:** a deny for an `AI_AGENT` principal and a deny on a
-    money-path service's write action — still on this non-transactional path, still subject to
-    the global bound.
+    money-path service's write action — still on this non-transactional path. These exempt classes
+    are not aggregated, so they get **their own buffer cap** (default 1 000 records per pod,
+    separate from the 10 000-key aggregate buffer, so a flood of anonymous denies cannot evict
+    them) and, on overflow, **count toward the same drop counter**, labelled
+    `class="exempt"` vs `class="aggregated"` on `openbank_authz_deny_records_dropped_total`. An
+    exempt record is never dropped invisibly.
 
   Today the only `AuditEventPublisher` implementation is the logging fallback, and no asynchronous
   publisher exists; delivering this path includes that publisher (a bounded queue feeding the
@@ -171,7 +193,7 @@ decisions, delivered through ADR-0214.
 ## References
 
 - ADR-0031, ADR-0034, ADR-0118, ADR-0133, ADR-0139, ADR-0141, ADR-0148, ADR-0213, ADR-0214,
-  ADR-0216, ADR-0226, ADR-0317 (libs split, `libs-core-purity`), ADR-0323 (hash-linked audit via
+  ADR-0216, ADR-0226, ADR-0317 (libs split, `libs-core-purity`), ADR-0323 (proposed in #10926; hash-linked audit via
   outbox, PR #10926)
 - `com/openbank/libs/decision/PolicyDecision.kt` — in openbank-libs-domain on `main` today,
   moving to `openbank-libs-lending` under ADR-0317 / PR #10971
