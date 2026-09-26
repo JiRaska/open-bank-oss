@@ -67,7 +67,8 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 `@ResilienceProfile("money-sync")` on the adapter method. Per-environment tuning uses
 MicroProfile FT's own config override (`<class>/<method>/Timeout/value`) — never a new literal.
 A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")`, visible beside the
-call — the same review shape as `SyntheticTaintExternalBoundary`.
+call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation does not exist yet; it lands
+with the profile catalogue (#10930).
 
 **D3 — Metrics.** Every profiled adapter records through `ResilientCallMetrics`, which gains a
 closed `profile` tag next to `adapter` and `outcome`. Breaker state and bulkhead rejections come
@@ -108,7 +109,7 @@ against a running service, and complements ADR-0151, which injects at the infras
 - Enforcement: a new checker `check-resilience-profile.py` (gate `resilience-profile`, advisory
   first, then enforced with a baseline ratchet) requires every `@Timeout`/`@Retry`/`@CircuitBreaker`
   method in `src/main` to carry `@ResilienceProfile`, and rejects `retryOn = [Exception::class]`
-  under `money-sync`.
+  under `money-sync`. Until the annotation exists the gate cannot run (#10930).
 
 ### Delivery check
 
