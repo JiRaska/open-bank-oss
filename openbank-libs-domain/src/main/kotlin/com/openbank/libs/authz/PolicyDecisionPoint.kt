@@ -10,8 +10,12 @@ package com.openbank.libs.authz
  * (ADR-0034). Implementations:
  *
  *   - `OpaSidecarPolicyDecisionPoint`  (prod)  → HTTP to `localhost:8181`
- *   - `AllowAllPolicyDecisionPoint`    (tests) → unconditional allow
- *   - `DenyAllPolicyDecisionPoint`     (kill-switch) → unconditional deny
+ *   - `com.openbank.libs.testing.authz.AllowAllPolicyDecisionPoint` (tests,
+ *     `openbank-libs-testing`) → unconditional allow. Deliberately NOT in
+ *     this module — a class that unconditionally allows must never be
+ *     reachable from a service's `src/main` classpath (see
+ *     `check-no-allow-all-pdp-in-main.py`).
+ *   - `DenyAllPolicyDecisionPoint`     (kill-switch, this module) → unconditional deny
  *
  * Lives in libs so that every Quarkus service inherits the same call shape,
  * the same audit fields on the resulting [AuthzDecision], and the same OPA

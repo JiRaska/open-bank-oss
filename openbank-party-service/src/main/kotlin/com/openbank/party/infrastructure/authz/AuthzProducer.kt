@@ -18,8 +18,8 @@ import java.time.Duration
  * advisory-mode logs) and in cluster (real sidecar at `localhost:8181`).
  *
  * Test profiles override `quarkus.arc.alternative-priority` to swap in
- * [com.openbank.libs.authz.AllowAllPolicyDecisionPoint] without touching
- * this class.
+ * [com.openbank.libs.testing.authz.AllowAllPolicyDecisionPoint] (from
+ * `openbank-libs-testing`, test scope only) without touching this class.
  */
 @ApplicationScoped
 class AuthzProducer {
