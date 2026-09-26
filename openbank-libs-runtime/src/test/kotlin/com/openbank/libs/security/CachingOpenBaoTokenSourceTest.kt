@@ -139,4 +139,12 @@ class CachingOpenBaoTokenSourceTest {
         assertThatThrownBy { OpenBaoKubernetesLogin(t, "r", dir, authMount = "../sys") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test fun `the OpenBao IT fails rather than skips without Docker in CI`() {
+        assertThatThrownBy { OpenBaoTransitFieldProtectorIT.requireDocker(false, "true") }
+            .isInstanceOf(org.opentest4j.AssertionFailedError::class.java)
+        assertThatThrownBy { OpenBaoTransitFieldProtectorIT.requireDocker(false, null) }
+            .isInstanceOf(org.opentest4j.TestAbortedException::class.java)
+        OpenBaoTransitFieldProtectorIT.requireDocker(true, "true")
+    }
 }

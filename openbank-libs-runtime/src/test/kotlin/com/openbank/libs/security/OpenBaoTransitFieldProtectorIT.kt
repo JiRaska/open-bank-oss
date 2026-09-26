@@ -40,10 +40,7 @@ class OpenBaoTransitFieldProtectorIT {
     private val mapper = ObjectMapper()
 
     @BeforeAll fun start() {
-        if (!DockerClientFactory.instance().isDockerAvailable) {
-            if (System.getenv("CI") == "true") fail<Unit>("Docker is required for OpenBaoTransitFieldProtectorIT in CI")
-            abort<Unit>("Docker not available — skipping OpenBao IT")
-        }
+        requireDocker(DockerClientFactory.instance().isDockerAvailable, System.getenv("CI"))
         bao = GenericContainer(DockerImageName.parse(IMAGE))
             .withEnv("BAO_DEV_ROOT_TOKEN_ID", ROOT)
             .withCommand("server", "-dev", "-dev-listen-address=0.0.0.0:8200")
@@ -157,10 +154,17 @@ class OpenBaoTransitFieldProtectorIT {
             .isInstanceOf(FieldProtectionException::class.java)
     }
 
-    private companion object {
-        const val IMAGE = "openbao/openbao:2.5.4"
-        const val PORT = 8200
-        const val ROOT = "it-root-token"
-        val SECRET = "4111111111111111".toByteArray()
+    companion object {
+        /** No Docker: FAIL when [ci] is `true` (a skipped IT in CI is no evidence), else skip. */
+        fun requireDocker(available: Boolean, ci: String?) {
+            if (available) return
+            if (ci == "true") fail<Unit>("Docker is required for OpenBaoTransitFieldProtectorIT in CI")
+            abort<Unit>("Docker not available — skipping OpenBao IT")
+        }
+
+        private const val IMAGE = "openbao/openbao:2.5.4"
+        private const val PORT = 8200
+        private const val ROOT = "it-root-token"
+        private val SECRET = "4111111111111111".toByteArray()
     }
 }

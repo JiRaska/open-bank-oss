@@ -81,15 +81,20 @@ data class TransitCiphertext(val keyVersion: Int, val payload: String) {
 
         /** Parses [value]; throws [FieldProtectionException] (never echoing [value]) when malformed. */
         fun parse(value: String): TransitCiphertext {
-            if (value.length > PREFIX.length + MAX_VERSION_DIGITS + 1 + MAX_PAYLOAD_CHARS) {
-                throw FieldProtectionException("ciphertext exceeds $MAX_PAYLOAD_CHARS payload characters")
+            val bounded = value.length <= PREFIX.length + MAX_VERSION_DIGITS + 1 + MAX_PAYLOAD_CHARS
+            val match = if (bounded) FORMAT.matchEntire(value) else null
+            val payload = match?.groupValues?.get(2)
+            if (payload == null || payload.length > MAX_PAYLOAD_CHARS) {
+                val oversized = !bounded || payload != null
+                throw FieldProtectionException(
+                    if (oversized) {
+                        "ciphertext exceeds $MAX_PAYLOAD_CHARS payload characters"
+                    } else {
+                        "ciphertext is not in vault:v<N>:<base64> format"
+                    },
+                )
             }
-            val match = FORMAT.matchEntire(value)
-                ?: throw FieldProtectionException("ciphertext is not in vault:v<N>:<base64> format")
-            if (match.groupValues[2].length > MAX_PAYLOAD_CHARS) {
-                throw FieldProtectionException("ciphertext exceeds $MAX_PAYLOAD_CHARS payload characters")
-            }
-            return TransitCiphertext(match.groupValues[1].toInt(), match.groupValues[2])
+            return TransitCiphertext(match.groupValues[1].toInt(), payload)
         }
 
         private const val MAX_VERSION_DIGITS = 9
