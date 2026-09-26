@@ -33,3 +33,13 @@ The disposable schema was recreated rather than repairing migration checksums. T
 A separate real Kafka consumer inspected 500 commitment messages and verified the exact eight-field allowlist, SHA-256-shaped commitments and presence of both CONTEXT_READ_AUDIT_COMMITTED and CONTEXT_DISCLOSURE_COMMITTED. This proves publication into the isolated Kafka topic, not ingestion by Audit service.
 
 The repeat exposed a capacity limitation: each relay claims at most 100 rows per five-second invocation (at most 20 commitments/s before processing overhead). Both outbox queues grow under the smoke workload. The next implementation must provide bounded dispatch throughput and drain verification sufficient for the planned 100 RPS, rather than claiming the read-latency success proves sustainable end-to-end audit capacity.
+
+## Fixed-arrival 100 RPS failure — not accepted
+
+After introducing a bounded shared claim size of 200 and one-second relay polls (source head `29ba1d4d5f`), the existing k6 capacity profile was run against the same small synthetic complaint fixture with both exports enabled. Both prior outbox queues were observed fully SENT before load. A fresh synthetic signed token had a 15-minute lifetime, longer than the run; runtime authentication, OPA and mandatory local audit stayed enabled.
+
+The five-minute run failed: 29,897 attempted requests, zero successful graph checks, 100% failed requests, 104 dropped iterations, k6 exit 99. Failed response latency p95 was 507.08 ms; it is **not** a successful graph latency statistic. No 1x/10x annual-volume capacity claim follows from this run.
+
+At the initial failure, 72 additional ALLOWED audit decisions accumulated without completed disclosures; commitment dispatch also stopped progressing. PostgreSQL inspection showed 22 idle connections and no application query executing or waiting on a database lock. JVM event-loop threads were idle rather than blocked on application work. The logs showed caller timeouts followed by Mutiny-dropped HR000090 live-transaction-on-close errors. The reactive SQL metrics had a duplicate gauge registration warning, so their apparent zero pending count cannot certify availability of every pool.
+
+These observations prioritize managed transaction/session cancellation and connection lifecycle for investigation; they do not yet prove the exact defect. The current query and audit timeouts wrap the managed lifecycle externally. A pool-size-two recovery regression is being validated before changing that lifecycle. Enlarging pool size or loosening thresholds would not establish recovery correctness. Sustainable 100 RPS, complete drain and Audit-service ingestion remain unproven.
