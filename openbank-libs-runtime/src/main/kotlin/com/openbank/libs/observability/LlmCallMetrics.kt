@@ -88,8 +88,7 @@ class LlmCallMetrics : LlmCallMetricsPort {
         }
         Timer.builder("openbank.llm.call.duration")
             .tags("model", model, "outcome", outcome, "provider", provider)
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .register(registry)
             .record(Duration.ofNanos(durationNanos))
     }
@@ -101,14 +100,5 @@ class LlmCallMetrics : LlmCallMetricsPort {
             .tags("model", model, "kind", kind, "provider", provider)
             .register(registry)
             .increment(tokens.toDouble())
-    }
-
-    private companion object {
-        // Declared as constants, not inline: detekt's MagicNumber fires on the fleet-standard
-        // percentile triple at every call site, and only DomainMetrics escapes it via the
-        // libs-runtime baseline.
-        const val P50 = 0.5
-        const val P95 = 0.95
-        const val P99 = 0.99
     }
 }

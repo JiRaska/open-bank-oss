@@ -727,16 +727,14 @@ class DomainMetrics {
     private fun timer(name: String, vararg tags: String): Timer? = reg()?.let {
         Timer.builder(name)
             .tags(*tags)
-            .publishPercentiles(0.5, 0.95, 0.99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .register(it)
     }
 
     private fun summary(name: String, vararg tags: String): DistributionSummary? = reg()?.let {
         DistributionSummary.builder(name)
             .tags(*tags)
-            .publishPercentiles(0.5, 0.95, 0.99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .register(it)
     }
 }

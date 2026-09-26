@@ -4,6 +4,7 @@
 package com.openbank.audit.infrastructure.observability
 
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
@@ -177,13 +178,8 @@ class AuditChainIntegrityGauge {
     }
 
     private companion object {
-        const val P50 = 0.5
-        const val P95 = 0.95
-        const val P99 = 0.99
-
         val DURATION_TIMER: Timer.Builder = Timer.builder("openbank.audit.chain.verify.duration")
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .description("Wall time of one audit hash-chain verification sweep")
     }
 }
