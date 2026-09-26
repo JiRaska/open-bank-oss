@@ -6,8 +6,6 @@ package com.openbank.libs.security
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.CsvSource
 
 class LogSanitizationTest {
 
@@ -28,16 +26,21 @@ class LogSanitizationTest {
         assertThat("perfectly-ordinary-value_123".sanitizeForLog()).isEqualTo("perfectly-ordinary-value_123")
     }
 
-    @ParameterizedTest
-    @CsvSource(
-        value = [
-            "line1\nline2, line1_line2",
-            "line1\r\nline2, line1_line2",
-            "line1\rline2, line1_line2",
-        ],
-    )
-    fun `CR and LF are each replaced with an underscore`(input: String, expected: String) {
-        assertThat(input.sanitizeForLog()).isEqualTo(expected)
+    @Test
+    fun `a lone LF is replaced with an underscore`() {
+        assertThat("line1\nline2".sanitizeForLog()).isEqualTo("line1_line2")
+    }
+
+    @Test
+    fun `a CR LF pair becomes two underscores, one per character`() {
+        // Matches the original per-file idiom's behavior exactly: .replace('\n','_').replace('\r','_')
+        // replaces each control character independently, so CRLF is not collapsed to one underscore.
+        assertThat("line1\r\nline2".sanitizeForLog()).isEqualTo("line1__line2")
+    }
+
+    @Test
+    fun `a lone CR is replaced with an underscore`() {
+        assertThat("line1\rline2".sanitizeForLog()).isEqualTo("line1_line2")
     }
 
     @Test
