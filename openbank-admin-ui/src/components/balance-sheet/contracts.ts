@@ -15,6 +15,9 @@ const timestamp = z.string().min(1)
 export const snapshotSummarySchema = z.object({
   id: z.string(), asOf: z.iso.date(), recordedAt: timestamp, provenance, status: tieOutStatus,
   positionCount: z.number().int(), mismatchCount: z.number().int(),
+  // Added in risk-engine openapi 1.9.0 (#11016); optional+nullable so an older backend that omits
+  // the field entirely, or a historic run recorded before it existed, both parse. Never guessed.
+  requestedBy: z.string().nullable().optional(),
 })
 export const snapshotListSchema = z.object({ runs: z.array(snapshotSummarySchema) })
 

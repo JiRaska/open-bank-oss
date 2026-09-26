@@ -129,6 +129,22 @@ describe('snapshots', () => {
     expect(await screen.findByRole('button', { name: /Build snapshot|Sestavit snímek/ })).toBeTruthy()
   })
 
+  it('shows a human requester as-is, a system: one as a scheduled-run badge, and — for a null/missing one', async () => {
+    router = () => json({
+      runs: [
+        { id: 'run-human', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0, requestedBy: 'jana.finance' },
+        { id: 'run-system', asOf: '2026-09-29', recordedAt: '2026-09-29T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0, requestedBy: 'system:risk-engine-eod-snapshot' },
+        { id: 'run-null', asOf: '2026-09-28', recordedAt: '2026-09-28T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0, requestedBy: null },
+        { id: 'run-missing', asOf: '2026-09-27', recordedAt: '2026-09-27T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0 },
+      ],
+    })
+    await renderPage(<SnapshotsPage />)
+    await screen.findByText('jana.finance')
+    expect(screen.getByText(/Scheduled run \(risk-engine-eod-snapshot\)|Plánovaný běh \(risk-engine-eod-snapshot\)/)).toBeTruthy()
+    const dashes = screen.getAllByTitle(/nezaznamenáno|not recorded/)
+    expect(dashes).toHaveLength(2)
+  })
+
   it('an UNTIED run shows its mismatches and fetches nothing derived from it', async () => {
     router = () => json({
       id: 'run-1', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'production', status: 'UNTIED',
