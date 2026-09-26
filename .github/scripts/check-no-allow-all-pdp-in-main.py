@@ -327,7 +327,7 @@ def scan(root: pathlib.Path) -> int:
             continue
         all_findings.extend(find_build_file_violations(path, raw))
 
-    print(f"SUBJECTS={subjects} BUILD_FILES={build_subjects}")
+    print(f"SUBJECTS={subjects}  # build_files={build_subjects}")
     if all_findings:
         for f in all_findings:
             print(f)
