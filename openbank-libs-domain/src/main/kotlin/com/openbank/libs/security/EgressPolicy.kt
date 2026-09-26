@@ -167,7 +167,7 @@ class EgressPolicy(rules: Map<String, EgressHostRule>) {
 
         /**
          * True for anything an IPv4 parser (inet_aton, which libc and many resolvers accept)
-         * could read as an address: dotted, dotless decimal (`2130706433`), octal (`0177.0.0.1`),
+         * could read as an address: dotted, dotless decimal (127.0.0.1 written as one 32-bit integer), octal (`0177.0.0.1`),
          * hex (`0x7f.1`), short forms (`127.1`); and anything containing ':' (IPv6).
          * A real DNS name's last label is never all-numeric, so this does not over-match.
          */
