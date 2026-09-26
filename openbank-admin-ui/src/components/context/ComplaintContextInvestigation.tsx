@@ -2,12 +2,14 @@
 
 'use client'
 
-import { FormEvent, useMemo, useRef, useState } from 'react'
+import { FormEvent, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { Network, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { parseContextNeighborhood, type ContextNeighborhood } from '@/lib/context/graph'
 
-export function ComplaintContextInvestigation() {
+export type ComplaintContextInvestigationHandle = { selectReference: (reference: string) => void }
+
+export function ComplaintContextInvestigation({ ref }: { ref?: Ref<ComplaintContextInvestigationHandle> }) {
   const { t } = useLanguage()
   const [reference, setReference] = useState('')
   const [caseId, setCaseId] = useState('')
@@ -38,6 +40,21 @@ export function ComplaintContextInvestigation() {
       || left.sourceVersion - right.sourceVersion), [graph])
 
   const requestVersion = useRef(0)
+  const panelRef = useRef<HTMLElement>(null)
+  useImperativeHandle(ref, () => ({
+    selectReference(selectedReference) {
+      requestVersion.current++
+      setReference(selectedReference)
+      setGraph(null)
+      setSelected(null)
+      setState('idle')
+      if (typeof panelRef.current?.scrollIntoView === 'function') {
+        panelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      panelRef.current?.focus({ preventScroll: true })
+    },
+  }), [])
+
   function clearResult() {
     requestVersion.current++; setGraph(null); setSelected(null); setState('idle')
   }
@@ -57,7 +74,7 @@ export function ComplaintContextInvestigation() {
     } catch { if (version === requestVersion.current) setState('error') }
   }
 
-  return <section className="card" style={{ padding: 20, marginBottom: 24 }} aria-labelledby="complaint-context-title">
+  return <section ref={panelRef} tabIndex={-1} className="card" style={{ padding: 20, marginBottom: 24 }} aria-labelledby="complaint-context-title">
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <Network size={20} aria-hidden="true" />
       <h2 id="complaint-context-title" style={{ margin: 0, fontSize: 18 }}>{t('Vyšetřovací kontext', 'Investigation context')}</h2>

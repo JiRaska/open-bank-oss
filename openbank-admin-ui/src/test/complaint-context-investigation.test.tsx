@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { createRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ComplaintContextInvestigation } from '@/components/context/ComplaintContextInvestigation'
+import { ComplaintContextInvestigation, type ComplaintContextInvestigationHandle } from '@/components/context/ComplaintContextInvestigation'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 const payment = 'transaction:10000000-0000-0000-0000-000000000001'
@@ -94,6 +95,35 @@ describe('complaint context investigation', () => {
     await act(async () => { resolve(new Response(JSON.stringify(graph))) })
     expect(screen.queryByRole('heading', { name: 'Payment timeline' })).not.toBeInTheDocument()
     expect(screen.queryByRole('group', { name: 'Complaint relationship graph' })).not.toBeInTheDocument()
+  })
+
+  it('prefills a selected dispute, clears stale evidence, and keeps case and purpose required', async () => {
+    let resolve!: (value: Response) => void
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(graph), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>(done => { resolve = done }))
+    vi.stubGlobal('fetch', fetchMock)
+    const investigationRef = createRef<ComplaintContextInvestigationHandle>()
+    render(<LanguageProvider initialLanguage="en"><ComplaintContextInvestigation ref={investigationRef} /></LanguageProvider>)
+    act(() => investigationRef.current?.selectReference('CMP-42'))
+    expect(fetchMock).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'assigned-case-7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Show graph' }))
+    await screen.findByRole('heading', { name: 'Payment timeline' })
+    fireEvent.click(screen.getByRole('button', { name: 'Show graph' }))
+
+    act(() => investigationRef.current?.selectReference('CMP-42'))
+    expect(screen.getByLabelText('Complaint reference')).toHaveValue('CMP-42')
+    expect(screen.queryByRole('heading', { name: 'Payment timeline' })).not.toBeInTheDocument()
+    await act(async () => { resolve(new Response(JSON.stringify(graph), { status: 200 })) })
+
+    expect(screen.getByLabelText('Complaint reference')).toHaveValue('CMP-42')
+    expect(screen.getByLabelText('Case ID')).toHaveValue('assigned-case-7')
+    expect(screen.getByLabelText('Case ID')).toBeRequired()
+    expect(screen.getByLabelText('Investigation purpose')).toHaveValue('PAYMENT_COMPLAINT')
+    expect(screen.getByLabelText('Investigation purpose')).toBeRequired()
+    expect(screen.queryByRole('heading', { name: 'Payment timeline' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
 })
