@@ -55,3 +55,12 @@ already own both balance movements.
 The legacy uncertainty guard uses a Temporal version marker. Existing histories replay their
 previous command sequence; the guard cannot repair already completed settlements. Keep compatible
 workers while old executions remain and reconcile pre-existing ambiguous cases separately.
+
+## Worker process loss
+
+New ledger-projection activity schedules use a one-minute Start-To-Close timeout within the
+existing two-hour Schedule-To-Close budget and five-attempt limit. This permits retry when a
+worker dies without reporting completion; the total deadline alone previously gave an individual
+attempt the full two hours, leaving no budget for recovery after it timed out. Retry retains the
+same settlement identity and relies on the original hold/journal idempotency keys. A timeout
+never establishes whether a remote write committed.

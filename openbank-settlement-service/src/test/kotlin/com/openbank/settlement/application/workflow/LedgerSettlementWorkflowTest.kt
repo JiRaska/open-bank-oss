@@ -8,12 +8,16 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
+import io.temporal.activity.Activity
 import io.temporal.client.WorkflowOptions
+import io.temporal.client.WorkflowStub
 import io.temporal.failure.ApplicationFailure
 import io.temporal.testing.TestWorkflowEnvironment
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class LedgerSettlementWorkflowTest {
     @Test
@@ -26,6 +30,28 @@ class LedgerSettlementWorkflowTest {
                 ledger.bookToLedger(id)
             }
             verify(exactly = 1) { ledger.bookToLedger(id) }
+            assertNoDirectMovements(ledger)
+        }
+    }
+
+    @Test
+    fun `worker loss before activity completion retries the original journal`() {
+        run { workflow, cover, ledger ->
+            val attempts = AtomicInteger()
+            every { ledger.bookToLedger(any()) } answers {
+                if (attempts.incrementAndGet() == 1) {
+                    // Model a dead worker: no completion or failure reaches Temporal.
+                    Activity.getExecutionContext().doNotCompleteOnReturn()
+                }
+            }
+            every { cover.recordProjectionOutcomeUnknown(any(), true) } returns SettlementStatus.LEDGER_STATE_UNKNOWN
+            val id = UUID.randomUUID()
+            val stub = WorkflowStub.fromTyped(workflow)
+            stub.start(id)
+            val result = stub.getResult(90, TimeUnit.SECONDS, SettlementStatus::class.java)
+            assertThat(result).isEqualTo(SettlementStatus.BOOKED)
+            verify(exactly = 2) { ledger.bookToLedger(id) }
+            verify(exactly = 1) { cover.reserveSettlementCover(id) }
             assertNoDirectMovements(ledger)
         }
     }

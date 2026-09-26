@@ -455,3 +455,13 @@ be reconstructed as contemporaneous evidence. Initiating-person attribution and 
 origin are not supplied by this state event; actorType SERVICE must not be interpreted as either.
 Tests use isolated infrastructure and test security, and do not prove production OPA decisions,
 certificate issuance, broker high availability or retention capacity.
+
+## Ledger-projection worker loss and retry timing
+
+Each newly scheduled ledger-projection activity has a one-minute attempt deadline within the
+existing two-hour total deadline and five-attempt cap. A crashed worker no longer consumes the
+entire total budget before Temporal can retry. This changes liveness, not authorization or the
+meaning of a successful posting. A timeout may overlap a slow original request, so retries must
+retain the same settlement, hold reference and journal idempotency key. Never compensate or
+release cover based only on timeout. Already scheduled activities keep their recorded deadlines;
+legacy saga timing is unchanged.
