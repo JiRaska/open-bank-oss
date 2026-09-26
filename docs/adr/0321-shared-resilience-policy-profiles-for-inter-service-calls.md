@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [resilience, libs, testing, compliance]
-summary: "Inter-service calls pick one of four named resilience profiles (money-sync, read, external-scheme, batch) from openbank-libs instead of per-site literals; every profile emits ResilientCallMetrics and honours a synthetic-only fault hook."
+summary: "Inter-service calls pick one of four named resilience profiles (money-sync, read, external-scheme, batch) from openbank-libs instead of per-site literals; every profile emits ResilientCallMetrics and honours a synthetic-only fault hook gated by the ADR-0252 trusted-principals taint (empty by default); money-sync retries only idempotency-keyed calls via a keyed-only retryOn exception type."
 followup: "none — decision-only until the profile catalogue and the resilience-profile gate land; delivery tracked by the linked issue"
 ---
 
@@ -64,7 +64,17 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 
 **D2 — Declaration.** A profile is a set of Kotlin constants in openbank-libs-runtime
 (`com.openbank.libs.resilience`) used as the annotation arguments, plus a marker annotation
-`@ResilienceProfile("money-sync")` on the adapter method. Per-environment tuning uses
+`@ResilienceProfile("money-sync")` on the adapter method.
+
+The `money-sync` rule "retry only when the call carries an idempotency key" is a *runtime*
+property of the call, which static annotation constants cannot express. It is implemented with
+`@Retry(retryOn = [RetryableKeyedCallException::class], abortOn = [...])`: a libs-runtime REST
+client response/exception mapper translates connect, timeout and 5xx failures into
+`RetryableKeyedCallException` **only** when the outgoing request carries an `Idempotency-Key`
+header, and into a non-retryable `UpstreamCallException` otherwise. So the annotation stays
+static, and the keyed/unkeyed decision is made per call by which exception type is thrown. A
+custom interceptor or SmallRye FT's programmatic `TypedGuard` API were rejected for this: both
+move the policy out of the annotation the `resilience-profile` gate reads. Per-environment tuning uses
 MicroProfile FT's own config override (`<class>/<method>/Timeout/value`) — never a new literal.
 A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")`, visible beside the
 call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation does not exist yet; it lands
@@ -79,7 +89,11 @@ present.
 inbound request is synthetic-tainted (ADR-0252) *and* carries a fault header naming a fault
 (`delay`, `error-5xx`, `reset`), injects that fault before the real call. A request without the
 taint is never affected, so the hook is inert for real customers by construction; it is also off
-unless `openbank.resilience.fault-injection.enabled=true`. This makes the D1 claims testable
+unless `openbank.resilience.fault-injection.enabled=true`. The fault header is honoured only when
+the synthetic taint was set by a principal on the ADR-0252 trusted-principals list
+(`openbank.synthetic.trusted-principals`, enforced by `SyntheticTaintFilter`), which is
+**empty by default** — so with the default configuration no caller, synthetic or not, can inject
+a fault; a header from any other principal is stripped and ignored. This makes the D1 claims testable
 against a running service, and complements ADR-0151, which injects at the infrastructure layer.
 
 ## Alternatives considered
