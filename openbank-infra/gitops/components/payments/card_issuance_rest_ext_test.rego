@@ -142,3 +142,59 @@ test_card_outbox_requeue_denied_for_ai_agent if {
 		"action": "card.outbox.requeue",
 	}
 }
+
+# --- #10486 batch 6: per-service card READ identities (ROLE_API only) ---
+
+b6_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+
+b6_rules := {
+	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["card.create", "card.block"]}}},
+	"money_path_services": [],
+	"money_path_action_prefixes": {},
+	"four_eyes": {"verbs": [], "actions": []},
+	"feature_flags": {"prohibited_flag_combinations": [], "money_path_flags": []},
+	"shared_m2m_write_prohibition": {"reasons": []},
+}
+
+b6_grants := {
+	"delegation": {"reason": "service-delegation-card-read", "actions": {"card.read"}},
+	"party": {"reason": "service-party-card-list", "actions": {"card.list"}},
+}
+
+b6_all_card_actions := {
+	"card.create", "card.read", "card.list", "card.details.read", "card.activate", "card.block",
+	"card.cancel", "card.suspend", "card.resume", "card.limits.update", "card.controls.update",
+	"card.outbox.requeue",
+}
+
+test_b6_each_identity_may_perform_its_granted_read if {
+	every name, g in b6_grants {
+		every action in g.actions {
+			d := rest.allow with input as {"principal": b6_sa(name), "action": action}
+				with data.rules as b6_rules
+			d.allow == true
+			g.reason in rest.allowed_reasons with input as {"principal": b6_sa(name), "action": action}
+				with data.rules as b6_rules
+		}
+	}
+}
+
+test_b6_each_identity_denied_every_other_card_action if {
+	every name, g in b6_grants {
+		every action in b6_all_card_actions - g.actions {
+			rest.allow == false with input as {"principal": b6_sa(name), "action": action}
+				with data.rules as b6_rules
+		}
+	}
+}
+
+# Another ROLE_API service account, and the shared client once it holds ROLE_API only, are denied
+# both card reads. Widen a rule's principal set to a prefix and this goes red.
+test_b6_other_role_api_sa_denied_card_reads if {
+	every p in ["mcp", "services", "kyb"] {
+		every action in {"card.read", "card.list", "card.details.read"} {
+			rest.allow == false with input as {"principal": b6_sa(p), "action": action}
+				with data.rules as b6_rules
+		}
+	}
+}

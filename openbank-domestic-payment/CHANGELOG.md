@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.2...domestic-payment-v0.21.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.1...domestic-payment-v0.21.2) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.0...domestic-payment-v0.21.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.1...domestic-payment-v0.21.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.0...domestic-payment-v0.20.1) (2026-09-13)
 
 

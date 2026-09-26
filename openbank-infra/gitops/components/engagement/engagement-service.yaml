@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-engagement-opa-bundle.sh.
-        openbank.tech/policy-checksum: "d915010f9dd809d4"
+        openbank.tech/policy-checksum: "8d6fca40a84c3a9f"
       labels:
         app.kubernetes.io/name: engagement-service
         app.kubernetes.io/part-of: engagement
@@ -67,7 +67,7 @@ spec:
           # src/main (this merge itself, first) triggers auto-deploy to build a real image and
           # open a gitops PR replacing this with the actual sha. Until then, Kyverno's
           # cosign-signature/SBOM-attestation admission policies reject a tag nothing ever pushed.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-2dbf9f7d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-dad4c4b2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -75,6 +75,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://engagement-db-rw.engagement.svc:5432/openbank_engagement
             - name: QUARKUS_DATASOURCE_REACTIVE_URL

@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.logging.Log
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -62,7 +63,9 @@ interface AccountServiceRestClient {
  * "ownership could not be established" while the underlying cause was `Unauthorized, status
  * code 401` in the pod log.
  */
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 6: card.read is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-delegation` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "card-issuance-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface CardIssuanceRestClient {

@@ -53,6 +53,9 @@ spec:
               kubernetes.io/metadata.name: engagement
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: lending
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: notifications
         - namespaceSelector:
             matchLabels:
@@ -69,6 +72,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8106
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

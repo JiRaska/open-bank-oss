@@ -65,6 +65,17 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486 batch 3: the AML case open (amlCase.create) no longer rides the shared openbank-services principal. The
+    # rest-client selects this NAMED client (@OidcClientFilter("m2m")), so its token's principal is
+    # service-account-openbank-fx (ROLE_API only), granted by identity upstream. Every other
+    # rest-client stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-fx
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   redis:
     hosts: redis://localhost:6379
   rest-client:
@@ -149,6 +160,14 @@ mp:
         connector: smallrye-kafka
         client.id: fx-service-${quarkus.uuid}
         topic: openbank.fx.conversion.completed
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ČNB/ECB fixings (ADR-0314 D5): one event per ingested fixing, consumed by the risk engine
+      # so a snapshot can take its reference rates from the stream rather than a pull.
+      fx-fixing-out:
+        connector: smallrye-kafka
+        client.id: fx-service-fixing-${quarkus.uuid}
+        topic: openbank.fx.fixing.published
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
 

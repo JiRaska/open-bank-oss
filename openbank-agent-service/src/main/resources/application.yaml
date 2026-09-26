@@ -58,6 +58,17 @@ quarkus:
       type: client
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
+    # #10486 batch 7: the agent read tools whose upstream grant depended on the shared client's
+    # ROLE_OPERATOR (transactions, SCT Inst payments, interest accruals) mint from this NAMED client
+    # instead, so the upstream sees service-account-openbank-agent (ROLE_API only) and grants it only
+    # what an agents.yaml charter can reach (see the rego rules that name this principal).
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-agent
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   smallrye-openapi:
     path: /q/openapi
@@ -113,13 +124,6 @@ quarkus:
       url: http://localhost:8135
     sepa-instant-service:
       url: http://localhost:8127
-    # ADR-0285 D5 — PublishedStyleProvider's client-credentials read of the published style for
-    # the ui-assistant persona. Not wired into AgentChatService.systemPrompt() yet (see
-    # PublishedStyleProvider's KDoc).
-    communication-service:
-      url: ${COMMUNICATION_SERVICE_URL:http://localhost:8158}
-      connect-timeout: 2000
-      read-timeout: 3000
     # Observability stack (anonymous in-cluster read; no OIDC filter on these clients).
     prometheus:
       url: http://localhost:9090
@@ -425,5 +429,12 @@ mp:
         connector: smallrye-kafka
         topic: ${AGENT_AUDIT_KAFKA_TOPIC:openbank.agent.audit.events}
         enabled: ${AGENT_AUDIT_KAFKA_ENABLED:false}
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      agent-kill-switch-events-out:
+        connector: smallrye-kafka
+        # ADR-0244 D7: case-coordinator-agent listens on this topic for runtime halt/resume.
+        topic: ${AGENT_KILL_SWITCH_TOPIC:agent-kill-switch-events-in}
+        enabled: ${AGENT_KILL_SWITCH_KAFKA_ENABLED:false}
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer

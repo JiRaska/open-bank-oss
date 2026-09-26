@@ -50,10 +50,14 @@ test('KYC resolves a customer name before loading that customer’s cases', asyn
 test('Customer 360 joins authoritative portfolio and documents to the name-selected party', async ({ page }) => {
   await json(page, '**/api/svc/party-service/api/v1/parties/search**', { data: [{ id: PARTY_ID, legalName: 'Anna Nováková', status: 'ACTIVE', kycStatus: 'VERIFIED' }] })
   await json(page, `**/api/customer-360/${PARTY_ID}`, { available: true, partyId: PARTY_ID, asOf: '2026-08-22 08:00:00', accountIds: ['account-1'], domains: [{ aggregateType: 'party', events: 2, lastEventType: 'PARTY_UPDATED', lastOccurredAt: '2026-08-22 08:00:00' }], consents: [], excludedCount: 0 })
-  await json(page, '**/api/svc/account-service/api/v1/accounts**', [{ id: 'account-1', status: 'ACTIVE' }])
-  await json(page, '**/api/svc/lending-service/api/v1/lending/applications**', [{ id: 'loan-1', status: 'APPROVED' }])
-  await json(page, '**/api/svc/aml-service/api/v1/aml/cases**', [{ id: 'aml-1', status: 'OPEN' }])
-  await json(page, '**/api/svc/document-service/api/v1/documents?**', [{ id: 'doc-1', templateCode: 'KYC_CONTRACT', templateVersion: '1', contentType: 'application/pdf', sizeBytes: 1024, status: 'READY', caseRef: 'case-anna-1', productRef: null, retainUntil: '2031-01-01', createdAt: '2026-08-22T08:00:00Z' }])
+  await json(page, `**/api/customer-360/${PARTY_ID}/graph`, {
+    accounts: [{ id: 'account-1', status: 'ACTIVE' }],
+    cards: [], notifications: [], devices: [],
+    lendingApplications: [{ id: 'loan-1', status: 'APPROVED' }],
+    amlCases: [{ id: 'aml-1', status: 'OPEN' }],
+    documents: [{ id: 'doc-1', templateCode: 'KYC_CONTRACT', templateVersion: '1', contentType: 'application/pdf', sizeBytes: 1024, status: 'READY', caseRef: 'case-anna-1', productRef: null, retainUntil: '2031-01-01', createdAt: '2026-08-22T08:00:00Z' }],
+    unavailable: [], truncated: [],
+  })
 
   await page.goto('/customer-360')
   await page.getByRole('textbox', { name: /Vyhledat stranu|Search parties/ }).fill('Anna Nováková')
@@ -61,7 +65,7 @@ test('Customer 360 joins authoritative portfolio and documents to the name-selec
   await page.getByRole('button', { name: /Vybrat|Select/ }).click()
   await expect(page.getByText(/Autoritativní portfolio a riziko|Authoritative portfolio and risk/)).toBeVisible()
   await expect(page.getByText(/Dokumenty klienta|Customer documents/)).toBeVisible()
-  await expect(page.getByText('KYC_CONTRACT')).toBeVisible()
+  await expect(page.getByRole('cell', { name: /KYC_CONTRACT/ })).toBeVisible()
 })
 
 test('Test Coverage is backed by a dated CI evidence snapshot, not a static score', async ({ page }) => {
@@ -124,14 +128,19 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
   })
 
   await page.goto('/regulatory')
-  const finrep = page.locator('.card').filter({ hasText: 'CNB — Finanční výkazy (FINREP)' })
-  const disclosure = finrep.locator('button[aria-controls="regulatory-report-cnb-finrep"]')
+  const disclosure = page.locator('#main-content:visible button[aria-controls="regulatory-report-cnb-finrep"]')
+  await expect.poll(async () => {
+    const before = await disclosure.count()
+    await page.waitForTimeout(250)
+    return [before, await disclosure.count()]
+  }).toEqual([1, 1])
   await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
   await disclosure.focus()
   await page.keyboard.press('Enter')
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
-  await expect(finrep.getByText(/Datový zdroj:|Data source:/)).toBeVisible()
-  await finrep.getByRole('button', { name: /Náhled exportu|Preview export/ }).click()
+  const detail = page.locator('#regulatory-report-cnb-finrep')
+  await expect(detail.getByText(/Datový zdroj:|Data source:/)).toBeVisible()
+  await disclosure.locator('..').getByRole('button', { name: /Náhled exportu|Preview export/ }).click()
   await expect(page.getByText('Celková aktiva')).toBeVisible()
   await expect(page.getByTestId('export-readiness')).toContainText(/Připraveno pro interní export|Ready for internal export/)
   await expect(page.getByText(/ČNB XBRL\/SDAT přenos nejsou součástí tohoto náhledu|ČNB XBRL\/SDAT transmission are not part of this preview/)).toBeVisible()

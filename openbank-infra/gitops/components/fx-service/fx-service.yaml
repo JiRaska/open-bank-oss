@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fx-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ac71439de3c57ab3"
+        openbank.tech/policy-checksum: "71785b97f4a611f6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -32,12 +32,29 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fx-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-89a08a7a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-dad4c4b2
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8119}
+            - {name: https, containerPort: 8443}
             - {name: management, containerPort: 8085}
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: transaction-service's
+            # FX rate lookup). HTTP/8119 stays for existing callers (customer-edge, ledger, agent)
+            # until their own reviewed migrations; same shape as account-service's, ledger-service's
+            # and transaction-service's 8443 listeners.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://fx-db-rw.fx.svc:5432/openbank_fx
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -99,6 +116,17 @@ spec:
                   name: fx-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: false
+            # #10486 batch 3: fx-service's OWN Keycloak client (openbank-fx, ROLE_API only) for
+            # the AML case open (amlCase.create) - the named oidc-client `m2m`. optional: false
+            # so an unseeded Vault entry is a loud CreateContainerConfigError, never a silently
+            # empty credential. Run
+            # provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: fx-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -122,6 +150,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           volumeMounts:
+            - {name: internal-tls, mountPath: /mnt/internal-tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
             - {name: kafka-keystore, mountPath: /mnt/kafka-keystore, readOnly: true}
             - {name: kafka-truststore, mountPath: /mnt/kafka-truststore, readOnly: true}
@@ -203,6 +232,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: fx-service-internal-tls
+            optional: false
         - {name: tmp, emptyDir: {}}
         - name: opa-tmp
           emptyDir: {}
@@ -249,7 +282,7 @@ metadata:
   labels: {app.kubernetes.io/name: fx-service}
 spec:
   selector: {app.kubernetes.io/name: fx-service}
-  ports: [{name: http, port: 8119, targetPort: http}]
+  ports: [{name: http, port: 8119, targetPort: http}, {name: https, port: 8443, targetPort: https}]
 ---
 apiVersion: v1
 kind: Service
@@ -259,4 +292,4 @@ metadata:
   labels: {app.kubernetes.io/name: fx-service}
 spec:
   selector: {app.kubernetes.io/name: fx-service}
-  ports: [{name: http, port: 8119, targetPort: http}]
+  ports: [{name: http, port: 8119, targetPort: http}, {name: https, port: 8443, targetPort: https}]

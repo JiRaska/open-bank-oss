@@ -51,7 +51,10 @@ class SepaPaymentResource(
 ) {
 
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    // #10486: ROLE_API admitted so standing-order-service's own identity (ROLE_API only) reaches
+    // OPA; sepa_payment_rest_ext.rego grants it sepaPayment.create by principal.id and denies every
+    // other ROLE_API holder.
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "sepaPayment.create")
     @Operation(summary = "Create a SEPA payment")
     suspend fun createPayment(

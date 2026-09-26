@@ -145,6 +145,14 @@ tasks.named("check") {
 // ktlint (formatting; .editorconfig-driven)
 // ---------------------------------------------------------------------------------
 
+// ktlint-cli 1.5.0 requests logback-classic/core 1.3.14. Resolve its isolated
+// tool classpath on one patched line; a project-level core floor alone would
+// pair classic 1.3.14 with core 1.5.38.
+configurations.named("ktlint") {
+    resolutionStrategy.force("ch.qos.logback:logback-classic:1.5.38")
+    resolutionStrategy.force("ch.qos.logback:logback-core:1.5.38")
+}
+
 ktlint {
     // The baseline freezes pre-existing violations per module; regenerate with
     // ./gradlew ktlintGenerateBaseline.

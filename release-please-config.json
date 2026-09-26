@@ -439,6 +439,24 @@
       "exclude-paths": [
         "openbank-wealth-service/src/test"
       ]
+    },
+    "openbank-context-service": {
+      "component": "context-service",
+      "exclude-paths": [
+        "openbank-context-service/src/test"
+      ]
+    },
+    "openbank-risk-engine": {
+      "component": "risk-engine",
+      "exclude-paths": [
+        "openbank-risk-engine/src/test"
+      ]
+    },
+    "openbank-treasury-service": {
+      "component": "treasury-service",
+      "exclude-paths": [
+        "openbank-treasury-service/src/test"
+      ]
     }
   }
 }

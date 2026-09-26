@@ -110,7 +110,7 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10 }}>{cards.map((card, index) => <button key={card.tab} type="button" onClick={() => selectTab(card.tab)} style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--surface-1)', borderRadius: 11, padding: 14, animation: `fadeIn ${180 + index * 80}ms ease-out both` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'start' }}><div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em' }}>{card.eyebrow}</div><strong style={{ display: 'block', marginTop: 3 }}>{card.title}</strong></div><StateBadge state={card.state} /></div>
       <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 10 }}>{card.detail}</div>
-      <div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
+      <div style={{ color: 'var(--accent-text)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
     </button>)}</div>
   </section>
 }
@@ -235,7 +235,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
               <tr key={component.component}>
-                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: 'var(--danger-text)', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
+                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: 'var(--danger-text)', fontSize: 10 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
                 {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
@@ -362,7 +362,7 @@ function History({ report }: { report: TestIntelligenceReport }) {
         <div style={{ height: `${Math.max(2, (point.unresolvedEvidence ?? point.unknownEvidence ?? 0) / max * 150)}px`, background: 'var(--text-tertiary)' }} />
         <div style={{ height: `${Math.max(2, point.missingEvidence / max * 150)}px`, background: 'var(--warning-text)' }} />
         <div style={{ height: `${Math.max(2, point.componentsWithExecutionEvidence / max * 150)}px`, background: 'var(--success-text)', borderRadius: '0 0 4px 4px' }} />
-        <span style={{ fontSize: 9, color: 'var(--text-tertiary)', textAlign: 'center' }}>{formatTimestamp(point.collectedAt, language, { month: 'short', day: 'numeric' })}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-tertiary)', textAlign: 'center' }}>{formatTimestamp(point.collectedAt, language, { month: 'short', day: 'numeric' })}</span>
       </div>)}
     </div>
     <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: 'var(--success-text)' }}>● evidenced</span><span style={{ color: 'var(--text-tertiary)' }}>● unresolved</span><span style={{ color: 'var(--warning-text)' }}>● missing</span><span style={{ color: 'var(--danger-text)' }}>● failing</span></div>
@@ -453,7 +453,7 @@ function PerformanceTrend({ points, t, language }: { points: TestIntelligenceRep
     <div style={{ display: 'flex', alignItems: 'end', gap: 5, minHeight: 52 }}>
       {measured.map(point => <div key={`${point.id}-${point.collectedAt}`} title={`${formatTimestamp(point.collectedAt, language)} · p95 ${Math.round(point.metrics.p95Ms ?? 0)} ms · ${point.state}`} style={{ flex: 1, minWidth: 10, display: 'grid', gap: 3 }}>
         <div className={TONE_TEXT_CLASS[evidenceTone(point.state)]} style={{ height: `${Math.max(3, (point.metrics.p95Ms ?? 0) / maximum * 42)}px`, borderRadius: '3px 3px 0 0', background: 'currentColor' }} />
-        <span style={{ color: 'var(--text-tertiary)', fontSize: 9, textAlign: 'center' }}>{Math.round(point.metrics.p95Ms ?? 0)}</span>
+        <span style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center' }}>{Math.round(point.metrics.p95Ms ?? 0)}</span>
       </div>)}
     </div>
   </div>
@@ -578,7 +578,12 @@ export default function TestIntelligencePage() {
     setLoading(true)
     try {
       const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
-      setReport(await response.json() as TestIntelligenceReport)
+      if (!response.ok) throw new Error(`Test intelligence request failed with HTTP ${response.status}`)
+      const result = await response.json() as TestIntelligenceReport
+      if (!Array.isArray(result.components) || !Array.isArray(result.warnings) || !result.totals) {
+        throw new Error('Invalid test intelligence report')
+      }
+      setReport(result)
     } catch { setReport(null) } finally { setLoading(false) }
   }, [])
   useEffect(() => {
@@ -609,7 +614,7 @@ export default function TestIntelligencePage() {
       subtitle={t('Jednotný pohled na běhy, pokrytí kódu, trace kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, trace contracts, mutation, performance, and sandbox synthetic journeys.')}
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
-    <TestIntelligenceFlow report={report} />
+    {report && <TestIntelligenceFlow report={report} />}
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
     {report && <EvidenceGapQueue report={report} selectTab={setTab} />}
     {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid var(--warning-border)', borderRadius: 8, padding: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}

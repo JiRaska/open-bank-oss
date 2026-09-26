@@ -205,3 +205,49 @@ test_only_edge_may_confirm_recertification if {
 test_edge_confirmation_final_decision_allows if {
     allow.allow == true with input as {"principal": edge, "action": "delegation.recertification.confirm"}
 }
+
+# --- ADR-0312 business signing: the edge only ---
+
+test_edge_may_sign_business_approval if {
+	"edge-service-business-signing" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "delegation.signing.approval.sign",
+	}
+}
+
+test_edge_may_claim_business_release if {
+	"edge-service-business-signing" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "delegation.signing.approval.claim",
+	}
+}
+
+test_edge_may_read_pending_for_human if {
+	"edge-service-business-signing" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "delegation.signing.pending.read",
+	}
+}
+
+test_edge_is_not_prohibited_from_signing if {
+	not prohibited with input as {"principal": edge, "action": "delegation.signing.approval.sign"}
+}
+
+test_shared_backend_is_prohibited_from_business_signing if {
+	prohibited with input as {"principal": services_m2m, "action": "delegation.signing.approval.claim"}
+}
+
+test_shared_backend_cannot_read_signing_policy if {
+	prohibited with input as {"principal": services_m2m, "action": "delegation.signing.policy.read"}
+}
+
+test_operator_gets_no_write_reason_for_signing if {
+	not "operator-delegation-write" in allowed_reasons with input as {
+		"principal": operator,
+		"action": "delegation.signing.approval.sign",
+	}
+}
+
+test_operator_is_prohibited_from_business_signing if {
+	prohibited with input as {"principal": operator, "action": "delegation.signing.approval.sign"}
+}

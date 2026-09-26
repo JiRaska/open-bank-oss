@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.0...kyb-service-v0.8.1) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.7.0...kyb-service-v0.8.0) (2026-09-19)
+
+
+### Features
+
+* **kyb:** give the sandbox demo company a second jednatel acting jointly ([#10349](https://github.com/JiRaska/open-bank-oss/issues/10349)) ([3ab9e43](https://github.com/JiRaska/open-bank-oss/commit/3ab9e43e793370c156828553f3c0b73422edfa6a)), closes [#10281](https://github.com/JiRaska/open-bank-oss/issues/10281)
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.6.0...kyb-service-v0.7.0) (2026-09-17)
+
+
+### Features
+
+* **kyb:** preserve PSC source evidence and completeness ([#10242](https://github.com/JiRaska/open-bank-oss/issues/10242)) ([ab45286](https://github.com/JiRaska/open-bank-oss/commit/ab452866569c13cc5c2facb0922cc986d570e209))
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.5.0...kyb-service-v0.6.0) (2026-09-17)
+
+
+### Features
+
+* **kyb:** collect AML answers and sign the business agreement with SCA ([#10199](https://github.com/JiRaska/open-bank-oss/issues/10199)) ([8d5a644](https://github.com/JiRaska/open-bank-oss/commit/8d5a64401ffcd80980d9b759c1d21ec9eaa97e97))
+
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.4.0...kyb-service-v0.5.0) (2026-09-17)
+
+
+### Features
+
+* **kyb:** confirm a single-member representation rule automatically ([#10169](https://github.com/JiRaska/open-bank-oss/issues/10169)) ([10ded65](https://github.com/JiRaska/open-bank-oss/commit/10ded65f3e33a5e6c4bdf914e20c2c8b6d454bc5)), closes [#9711](https://github.com/JiRaska/open-bank-oss/issues/9711)
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.3.0...kyb-service-v0.4.0) (2026-09-14)
+
+
+### Features
+
+* **kyb:** bind the initiator to their verified identity, and add a sandbox demo company ([#10059](https://github.com/JiRaska/open-bank-oss/issues/10059)) ([545c744](https://github.com/JiRaska/open-bank-oss/commit/545c744be77662f22be40a6e7c392e2f9a2529d9))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.2.0...kyb-service-v0.3.0) (2026-09-13)
 
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.2...sepa-payment-v0.14.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.1...sepa-payment-v0.14.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.0...sepa-payment-v0.14.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.3...sepa-payment-v0.14.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.2...sepa-payment-v0.13.3) (2026-09-13)
 
 

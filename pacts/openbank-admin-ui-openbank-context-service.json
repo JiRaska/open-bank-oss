@@ -1,0 +1,140 @@
+{
+  "consumer": {
+    "name": "openbank-admin-ui"
+  },
+  "interactions": [
+    {
+      "description": "read available incident impact from Customer 360 admin",
+      "providerStates": [
+        {
+          "name": "an authorized incident projection is available"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "case-1",
+          "X-Investigation-Purpose": "INCIDENT_IMPACT"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/incidents/incident-1/impact"
+      },
+      "response": {
+        "body": {
+          "affectedByType": {
+            "SERVICE": 2
+          },
+          "drilldownAvailable": false,
+          "incidentRef": "incident-1",
+          "projectionStatus": "AVAILABLE",
+          "total": 2
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "read incident impact with an unassigned investigation case",
+      "providerStates": [
+        {
+          "name": "an incident investigator is unauthorized for another case"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "unassigned-case",
+          "X-Investigation-Purpose": "INCIDENT_IMPACT"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/incidents/incident-1/impact"
+      },
+      "response": {
+        "status": 403
+      }
+    },
+    {
+      "description": "read missing incident impact from Customer 360 admin",
+      "providerStates": [
+        {
+          "name": "an authorized incident projection is missing"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "case-1",
+          "X-Investigation-Purpose": "INCIDENT_IMPACT"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/incidents/incident-1/impact"
+      },
+      "response": {
+        "body": {
+          "affectedByType": {},
+          "drilldownAvailable": false,
+          "incidentRef": "incident-1",
+          "projectionStatus": "MISSING",
+          "total": 0
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "read partial incident impact from Customer 360 admin",
+      "providerStates": [
+        {
+          "name": "an authorized incident projection is partial"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "case-1",
+          "X-Investigation-Purpose": "INCIDENT_IMPACT"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/incidents/incident-1/impact"
+      },
+      "response": {
+        "body": {
+          "affectedByType": {
+            "SERVICE": 2
+          },
+          "drilldownAvailable": false,
+          "incidentRef": "incident-1",
+          "projectionStatus": "PARTIAL",
+          "total": 2
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "17.1.4"
+    },
+    "pactRust": {
+      "ffi": "0.5.7",
+      "models": "1.3.15"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-context-service"
+  }
+}

@@ -5,6 +5,7 @@
 package com.openbank.account.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.account.application.onboarding.BusinessOnboardingAccount
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
@@ -39,13 +40,22 @@ private data class PartyEvent(
 /**
  * Onboarding account lifecycle driven by party domain events (ADR-0267).
  *
+ * - PARTY_CREATED (COMPANY / SOLE_TRADER), only when
+ *   `openbank.account.onboarding.open-business-accounts` is on (default OFF — production keeps
+ *   operator opening) → open ONE PENDING_ACTIVATION CURRENT account on the business current-account
+ *   product. No savings account, and no welcome bonus. It activates through the same party-ACTIVE
+ *   reconcile path as retail, so digital business onboarding (kyb-service) ends with a usable account.
+ *   Any other party type (TRUST, unknown) is ignored.
  * - PARTY_CREATED (INDIVIDUAL) → open a PENDING_ACTIVATION multi-currency CURRENT account
  *   (one IBAN + primary CZK pocket) plus a SAVINGS account, so a fresh customer can try
  *   pocket moves / deposits out of the box. Both are inert until activated —
  *   `canDebit`/`canCredit` both require ACTIVE — so no money can move before KYC + AML clear.
  * - party becomes ACTIVE (KYC + AML both passed, decided by party-service's two-key gate)
- *   → activate the party's pending accounts; the welcome bonus lands on the CURRENT
- *   account only (never once per account).
+ *   → for a COMPANY / SOLE_TRADER with no CURRENT account and the business flag on, first open the
+ *   business CURRENT account exactly as PARTY_CREATED would (same product, currency and
+ *   idempotency key, so never two) — the self-heal for business parties created before
+ *   account-service opened business accounts. Then activate the party's pending accounts; the
+ *   welcome bonus lands on the retail CURRENT account only (never once per account).
  * - party SUSPENDED → freeze any active account (defence in depth).
  *
  * Idempotent: one onboarding account per party AND type; re-delivered events are no-ops.
@@ -98,6 +108,19 @@ class PartyEventConsumer(
     private val welcomeBonusCurrency: String,
     private val notificationRequestPort: NotificationRequestPort,
     private val partyMandateRepository: PartyMandateProjectionRepository,
+    // Digital business onboarding. Default OFF: production keeps operator-opened business accounts.
+    @ConfigProperty(name = "openbank.account.onboarding.open-business-accounts", defaultValue = "false")
+    private val openBusinessAccounts: Boolean,
+    // prod-004 "Business Current Account" (ProductIds.canonicalId, product-catalog). The retail
+    // default (prod-014) is NOT a valid fallback: its eligibility segments are retail-only.
+    @ConfigProperty(
+        name = "openbank.account.onboarding.business-product-id",
+        defaultValue = BUSINESS_CURRENT_PRODUCT_ID,
+    )
+    private val businessProductId: String,
+    // Must equal the business product's currency — AccountService rejects a product/currency mismatch.
+    @ConfigProperty(name = "openbank.account.onboarding.business-currency", defaultValue = "EUR")
+    private val businessCurrency: String,
 ) {
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
@@ -149,10 +172,24 @@ class PartyEventConsumer(
 
     private suspend fun dispatch(event: PartyEvent) {
         when (event.type) {
-            "PARTY_CREATED" -> openPendingAccount(event.partyId, event.partyType, event.legalName)
+            // party-service PartyType: INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST.
+            "PARTY_CREATED" -> when (event.partyType) {
+                "INDIVIDUAL" -> openRetailAccounts(event.partyId, event.legalName)
+                in BUSINESS_PARTY_TYPES ->
+                    if (openBusinessAccounts) openBusinessAccount(event.partyId, event.legalName)
+                else -> Unit // TRUST and anything unknown: operator-opened, never automatic.
+            }
             // party-service flips status to ACTIVE (two-key KYC+AML gate) and re-publishes the
             // party via PARTY_UPDATED / KYC_STATUS_CHANGED, both carrying the new `status`.
-            "PARTY_UPDATED", "KYC_STATUS_CHANGED" -> reconcileToPartyStatus(event.partyId, event.status)
+            "PARTY_UPDATED", "KYC_STATUS_CHANGED" -> {
+                // A business party that predates digital business onboarding (or whose
+                // PARTY_CREATED arrived while the flag was off) never got its current account;
+                // open it on activation, before the activation pass below picks it up.
+                if (event.status == "ACTIVE" && event.partyType in BUSINESS_PARTY_TYPES && openBusinessAccounts) {
+                    openBusinessAccount(event.partyId, event.legalName)
+                }
+                reconcileToPartyStatus(event.partyId, event.status)
+            }
             "PARTY_ERASED" -> handleErased(event.partyId)
             "PARTY_MANDATE_GRANTED" -> projectMandate(event)
             "PARTY_MANDATE_REVOKED" -> partyMandateRepository.revoke(
@@ -221,10 +258,23 @@ class PartyEventConsumer(
         }
     }
 
-    private suspend fun openPendingAccount(partyId: UUID, partyType: String, legalName: String) {
-        // Retail onboarding only; legal entities / sole traders are opened by an operator.
-        // party-service PartyType enum value for a natural person is INDIVIDUAL.
-        if (partyType != "INDIVIDUAL") return
+    private val businessAccount by lazy {
+        BusinessOnboardingAccount(
+            accountRepository,
+            accountUseCase,
+            UUID.fromString(businessProductId),
+            businessCurrency,
+            UUID.fromString(systemActorId),
+        )
+    }
+
+    private suspend fun openBusinessAccount(partyId: UUID, legalName: String) {
+        if (businessAccount.openIfMissing(partyId, legalName)) {
+            log.infof("Opened PENDING_ACTIVATION onboarding business CURRENT account for party %s", partyId)
+        }
+    }
+
+    private suspend fun openRetailAccounts(partyId: UUID, legalName: String) {
         // Idempotent per account TYPE: a re-delivered event (or a party predating the savings
         // rollout) only opens whatever is still missing.
         val existingTypes = accountRepository.findByPartyId(partyId, 50, null).map { it.accountType }.toSet()
@@ -270,7 +320,11 @@ class PartyEventConsumer(
                     log.infof("Activated onboarding account %s for party %s", it.id, partyId)
                     // The incentive is one credit per CUSTOMER, not per account — the savings
                     // account activates dry and gets funded by the customer's own transfers.
-                    if (it.accountType == AccountType.CURRENT) grantWelcomeBonus(it.id, partyId)
+                    // A business account never gets it: the incentive is retail-only and its CZK
+                    // amount does not match the business product's currency.
+                    if (it.accountType == AccountType.CURRENT && it.productId != UUID.fromString(businessProductId)) {
+                        grantWelcomeBonus(it.id, partyId)
+                    }
                 }
         }
     }
@@ -314,5 +368,7 @@ class PartyEventConsumer(
         // long. Linear backoff: RETRY_BACKOFF_MS, then 2x, then 3x (~3s total across 3 attempts).
         const val MAX_PROJECTION_ATTEMPTS = 4
         const val RETRY_BACKOFF_MS = 500L
+        const val BUSINESS_CURRENT_PRODUCT_ID = "d4275d2a-1343-3052-a6c0-8a99149b6c62"
+        val BUSINESS_PARTY_TYPES = BusinessOnboardingAccount.BUSINESS_PARTY_TYPES
     }
 }

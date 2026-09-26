@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.3...swift-service-v0.11.4) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
 ## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.2...swift-service-v0.11.3) (2026-09-13)
 
 

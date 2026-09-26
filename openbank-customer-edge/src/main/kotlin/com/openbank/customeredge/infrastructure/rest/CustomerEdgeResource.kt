@@ -187,6 +187,13 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.sca-service-url")
     lateinit var scaServiceUrl: String
 
+    /**
+     * Multi-signature hold for payments under `X-Acting-For` (#10281). Field-injected and optional:
+     * a resource built by hand in a test has none and takes the single-signature path unchanged.
+     */
+    @Inject
+    lateinit var businessApprovals: BusinessPaymentApprovals
+
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
 
@@ -2858,6 +2865,23 @@ class CustomerEdgeResource(
             creditorAcctNo,
             creditorBank,
         ) ?: return badRequest("Malformed or incomplete payment body")
+        if (customer.actingFor != null) {
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.DOMESTIC,
+                    amount,
+                    currency,
+                    creditorForSca,
+                    extractTextField(objectMapper, body, "creditorName"),
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    enriched,
+                ),
+                scaChallengeId,
+                "payments.domestic",
+            )?.let { return it }
+        }
         // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
         // delegate's monthly limit will refuse must not first cost them a biometric prompt and a
         // single-use challenge they cannot get back. Every return below this point releases.
@@ -2968,6 +2992,23 @@ class CustomerEdgeResource(
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
         val creditorIban = extractTextField(objectMapper, body, "creditorIban")
+        if (customer.actingFor != null) {
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.SEPA,
+                    amount,
+                    currency,
+                    creditorIban,
+                    extractTextField(objectMapper, body, "creditorName"),
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    enriched,
+                ),
+                scaChallengeId,
+                "payments.sepa",
+            )?.let { return it }
+        }
         scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepa")?.let { return it }
         val resp = upstream.post(
             "$sepaPaymentServiceUrl/api/v1/sepa-payments",
@@ -2989,6 +3030,8 @@ class CustomerEdgeResource(
     @Path("/sepa-instant")
     @Authorize(action = "customer.payments.initiate")
     @Blocking
+    // + the #10281 multi-signature hold branch; the rail steps stay inline and in order.
+    @Suppress("CyclomaticComplexMethod")
     fun createSepaInstant(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -3012,6 +3055,27 @@ class CustomerEdgeResource(
             ?: return badRequest("Missing creditorName")
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
+        if (customer.actingFor != null) {
+            val held = buildSctInstRequest(
+                body, idempotencyKey?.takeIf { it.isNotBlank() } ?: "scti-$debtor-$creditorIban-$amount",
+                debtor.toString(), debtorIban, debtorName, creditorIban, creditorName, amount, currency,
+            )
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.SEPA_INSTANT,
+                    amount,
+                    currency,
+                    creditorIban,
+                    creditorName,
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    held,
+                ),
+                scaChallengeId,
+                "payments.sepaInstant",
+            )?.let { return it }
+        }
         scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepaInstant")?.let { return it }
         val key = idempotencyKey?.takeIf { it.isNotBlank() } ?: "scti-$debtor-$creditorIban-$amount"
         val request = buildSctInstRequest(
@@ -3136,6 +3200,8 @@ class CustomerEdgeResource(
     @Path("/swift")
     @Authorize(action = "customer.payments.initiate")
     @Blocking
+    // + the #10281 multi-signature hold branch; the rail steps stay inline and in order.
+    @Suppress("CyclomaticComplexMethod")
     fun createSwift(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -3160,6 +3226,28 @@ class CustomerEdgeResource(
             ?: return badRequest("Missing beneficiary BIC")
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
+        if (customer.actingFor != null) {
+            val held = buildSwiftRequest(
+                idempotencyKey?.takeIf { it.isNotBlank() } ?: "swift-$debtor-$beneficiaryIban-$amount",
+                debtor.toString(), debtorIban, debtorName, beneficiaryIban, beneficiaryName,
+                receiverBic, amount, currency, extractTextField(objectMapper, body, "reference"),
+            )
+            holdForApproval(
+                customer,
+                HeldPayment(
+                    PaymentRail.SWIFT,
+                    amount,
+                    currency,
+                    beneficiaryIban,
+                    beneficiaryName,
+                    extractTextField(objectMapper, body, "reference"),
+                    debtor.toString(),
+                    held,
+                ),
+                scaChallengeId,
+                "payments.swift",
+            )?.let { return it }
+        }
         scaGate(scaChallengeId, customer, amount, currency, beneficiaryIban, "payments.swift")?.let { return it }
         val key = idempotencyKey?.takeIf { it.isNotBlank() } ?: "swift-$debtor-$beneficiaryIban-$amount"
         val request = buildSwiftRequest(
@@ -3644,17 +3732,21 @@ class CustomerEdgeResource(
     @Blocking
     fun enrollDevice(@PathParam("partyId") partyId: UUID, body: String): Response {
         val customer = customer()
-        if (customer.partyId != partyId) return forbidden("Cannot enrol device for another party")
+        // A device authenticates a PERSON: it is enrolled to the human even under X-Acting-For
+        // (whose mandate check still ran in customer(), fail-closed). Enrolling a key to a company
+        // would let any mandate holder's phone approve every company challenge, unattributably.
+        if (customer.human != partyId) return forbidden("Cannot enrol device for another party")
         val resp = upstream.post(
             "$scaServiceUrl/api/v1/sca/parties/$partyId/devices",
-            customer.partyId.toString(),
+            customer.human.toString(),
             body,
         )
         audit.emit(
             eventType = "SCA_DEVICE_ENROLLED",
-            partyId = customer.partyId.toString(),
+            partyId = customer.human.toString(),
             operation = "sca.enrollDevice",
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
+            details = scaContext(customer),
         )
         return resp
     }
@@ -3677,10 +3769,12 @@ class CustomerEdgeResource(
         // triggers a Quarkus REST body-reader resolution bug that produces an empty-body 400 before
         // the method is invoked.  JsonNode is unambiguous to Jackson and avoids the conflict.
         val node = (body as? ObjectNode) ?: return forbidden("Malformed challenge body")
-        node.put("partyId", customer.partyId.toString())
+        // SCA binds to the HUMAN, never the acting-for entity (see CustomerIdentity.human): the
+        // challenge must be decided by the person who asked for it, on their own device.
+        node.put("partyId", customer.human.toString())
         return upstream.post(
             "$scaServiceUrl/api/v1/sca/challenges",
-            customer.partyId.toString(),
+            customer.human.toString(),
             objectMapper.writeValueAsString(node),
             idempotencyKey,
         )
@@ -3692,7 +3786,7 @@ class CustomerEdgeResource(
     @Blocking
     fun getChallenge(@PathParam("id") id: UUID): Response {
         val customer = customer()
-        return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.partyId.toString())
+        return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.human.toString())
     }
 
     /**
@@ -3706,9 +3800,11 @@ class CustomerEdgeResource(
     @Blocking
     fun listPendingSca(): Response {
         val customer = customer()
+        // The HUMAN's approvals only — under X-Acting-For too. Listing the entity's challenges
+        // would show every mandate holder the approvals raised by every other one.
         return upstream.get(
-            "$scaServiceUrl/api/v1/sca/parties/${customer.partyId}/challenges/pending",
-            customer.partyId.toString(),
+            "$scaServiceUrl/api/v1/sca/parties/${customer.human}/challenges/pending",
+            customer.human.toString(),
         )
     }
 
@@ -3718,14 +3814,15 @@ class CustomerEdgeResource(
     @Blocking
     fun recordDecision(@PathParam("id") id: UUID, body: String): Response {
         val customer = customer()
-        val resp = upstream.post("$scaServiceUrl/api/v1/sca/challenges/$id/decision", customer.partyId.toString(), body)
+        // Decided and audited as the HUMAN; the entity (if any) is recorded as context only.
+        val resp = upstream.post("$scaServiceUrl/api/v1/sca/challenges/$id/decision", customer.human.toString(), body)
         audit.emit(
             eventType = "SCA_DECISION_RECORDED",
-            partyId = customer.partyId.toString(),
+            partyId = customer.human.toString(),
             operation = "sca.decision",
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
             resourceId = id.toString(),
-            details = mapOf("decision" to extractTextField(objectMapper, body, "decision")),
+            details = mapOf("decision" to extractTextField(objectMapper, body, "decision")) + scaContext(customer),
         )
         return resp
     }
@@ -4759,7 +4856,8 @@ class CustomerEdgeResource(
                 .build()
         }
         val consumeBody = objectMapper.createObjectNode().apply {
-            put("partyId", customer.partyId.toString())
+            // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
+            put("partyId", customer.human.toString())
             put("cardId", cardId)
             put("cardAction", cardAction)
         }
@@ -5050,6 +5148,23 @@ class CustomerEdgeResource(
     )
 
     /**
+     * Business multi-signature hold (#10281). Null — continue on the unchanged single-signature path
+     * — for a personal payment, with no hold configured, or when the entity's policy needs one
+     * signature. Otherwise the 202/503/SCA-refusal response to return; the rail is not called.
+     */
+    private fun holdForApproval(
+        customer: CustomerIdentity,
+        payment: HeldPayment,
+        scaChallengeId: String?,
+        operation: String,
+    ): Response? {
+        if (customer.actingFor == null || !this::businessApprovals.isInitialized) return null
+        return businessApprovals.hold(customer, payment, scaChallengeId) {
+            scaGate(scaChallengeId, customer, payment.amount, payment.currency, payment.creditor, operation)
+        }
+    }
+
+    /**
      * The settlement gate (ADR-0021): refuse the payment unless the caller presents an SCA
      * challenge that sca-service can atomically VERIFY (approved + device-signed + dynamic
      * linking matches THIS amount/currency/creditor) and CONSUME (single-use). Returns null
@@ -5079,7 +5194,8 @@ class CustomerEdgeResource(
                 .build()
         }
         val consumeBody = objectMapper.createObjectNode().apply {
-            put("partyId", customer.partyId.toString())
+            // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
+            put("partyId", customer.human.toString())
             put("amount", amount)
             put("currency", currency)
             creditor?.let { put("creditor", it) }
@@ -5157,8 +5273,12 @@ class CustomerEdgeResource(
         } else {
             human
         }
-        return CustomerIdentity(effective)
+        return CustomerIdentity(effective, human)
     }
+
+    /** Audit context for an SCA action: the entity acted for, when there is one. */
+    private fun scaContext(customer: CustomerIdentity): Map<String, String?> =
+        customer.actingFor?.let { mapOf("actingForPartyId" to it.toString()) }.orEmpty()
 
     private sealed interface ActivePartyResult {
         data class Approved(val legalName: String) : ActivePartyResult

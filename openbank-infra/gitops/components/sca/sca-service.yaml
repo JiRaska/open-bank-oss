@@ -28,7 +28,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sca-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5d761daa6cedbf7b"
+        openbank.tech/policy-checksum: "140781c31dd5bd7c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,14 +39,38 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sca-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-bdd162d4
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-dad4c4b2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8110
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (first: account-service's
+            # SavingsProposalService SCA approval, #10383). HTTP/8110 stays for existing callers
+            # (document-service, consent-service) until their own reviewed migrations; same shape as
+            # account-service's own 8443 listener. NOTE: sca-internal-tls in this namespace is
+            # sca-service's CLIENT certificate for its read of party-service — a different object.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time value baked into this service's application.yaml
+            # (quarkus.http.ssl.client-auth). That property is BUILD TIME fixed, so this env can
+            # never set it — Quarkus ignores a differing runtime value and warns. It is kept, in
+            # the same spelling, so the manifest states the listener's posture and cannot silently
+            # disagree with the image.
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://sca-db-rw.sca.svc:5432/openbank_sca
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -85,6 +109,11 @@ spec:
                 secretKeyRef:
                   name: sca-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Device enrolment reads the party's register type (#10281 item 1: refuse non-natural
+            # persons). A new east-west edge, so it takes party-service's private-CA mTLS listener
+            # (8443, TLSv1.3, client cert from sca-internal-tls) like delegation-service, not :8111.
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.sca.svc:6379
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
@@ -126,10 +155,16 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: party-tls
+              mountPath: /mnt/party-tls
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
@@ -216,6 +251,12 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        # SERVER certificate for the 8443 listener. Distinct from `party-tls` below, which projects
+        # sca-internal-tls — this service's CLIENT certificate for its read of party-service.
+        - name: internal-tls
+          secret:
+            secretName: sca-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -223,6 +264,10 @@ spec:
         - name: opa-bundle
           configMap:
             name: sca-opa-bundle
+        - name: party-tls
+          secret:
+            secretName: sca-internal-tls
+            optional: false
         - name: kafka-keystore
           secret:
             secretName: sca-service-kafka-keystore
@@ -275,6 +320,9 @@ spec:
     - name: http
       port: 8110
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -290,3 +338,6 @@ spec:
     - name: http
       port: 8110
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
