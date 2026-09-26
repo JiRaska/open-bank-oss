@@ -66,6 +66,13 @@ export const counterpartySchema = z.object({
 })
 export const counterpartyListSchema = z.array(counterpartySchema)
 
+export const limitUtilisationEntrySchema = z.object({
+  counterpartyId: z.string(), name: z.string(), synthetic: z.boolean(), currency: z.string(),
+  limit: decimal, utilised: decimal, available: decimal, utilisationPercent: decimal,
+  breached: z.boolean(), activeOverrides: z.number().int(),
+})
+export const limitUtilisationSchema = z.object({ limits: z.array(limitUtilisationEntrySchema) })
+
 export const positionsSchema = z.object({
   asOf: z.iso.date(),
   positions: z.array(z.object({
@@ -77,6 +84,7 @@ export type Product = z.infer<typeof productSchema>
 export type DealState = z.infer<typeof dealStateSchema>
 export type Deal = z.infer<typeof dealSchema>
 export type Counterparty = z.infer<typeof counterpartySchema>
+export type LimitUtilisationEntry = z.infer<typeof limitUtilisationEntrySchema>
 export type Positions = z.infer<typeof positionsSchema>
 
 /** The service's own error codes (ExceptionMappers.kt). */

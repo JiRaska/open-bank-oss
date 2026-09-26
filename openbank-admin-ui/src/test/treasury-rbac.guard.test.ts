@@ -22,6 +22,7 @@ const PAGES: [string, string, Permission][] = [
   ['app/treasury/deals/new/page.tsx', '/treasury/deals/new', 'treasury:deal:create'],
   ['app/treasury/approvals/page.tsx', '/treasury/approvals', 'treasury:deal:approve'],
   ['app/treasury/counterparties/page.tsx', '/treasury/counterparties', 'treasury:view'],
+  ['app/treasury/limits/page.tsx', '/treasury/limits', 'treasury:view'],
   ['app/treasury/positions/page.tsx', '/treasury/positions', 'treasury:view'],
 ]
 
