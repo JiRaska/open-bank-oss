@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.31.0...ledger-service-v1.31.1) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.30.0...ledger-service-v1.31.0) (2026-09-26)
 
 
