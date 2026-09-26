@@ -49,6 +49,9 @@ data class CurrencyPosition(
 
 data class SimulatedMarketRun(val moved: Int, val failures: List<Throwable>)
 
+/** One daily-accrual pass (ADR-0315 D5): journals posted and per-deal failures, none swallowed. */
+data class AccrualRun(val journals: Int, val failures: List<Throwable>)
+
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
     /**
@@ -59,6 +62,9 @@ interface TreasuryDealUseCase {
     suspend fun draft(command: DraftDealCommand, actor: Actor, key: String? = null): Deal
     suspend fun submit(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun approve(dealId: UUID, actor: Actor, key: String? = null): Deal
+
+    /** ADR-0315 D4: a senior approver records an override of a limit breach, with a reason. */
+    suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun cancel(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun settle(dealId: UUID, actor: Actor, key: String? = null): Deal
@@ -71,4 +77,7 @@ interface TreasuryDealUseCase {
 
     /** One pass of the simulated market (ADR-0315 D9): settle and mature everything due. */
     suspend fun runSimulatedMarket(): SimulatedMarketRun
+
+    /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
+    suspend fun accrueInterest(asOf: LocalDate): AccrualRun
 }

@@ -285,9 +285,11 @@ paths:
       description: |
         Liquidity Coverage Ratio (BCBS d238) and Net Stable Funding Ratio (BCBS d295) per currency,
         with a total only for a single-currency book. Every component line carries its factor, the
-        configuration key it came from and the BCBS paragraph. Factors and classification choices
-        come from the versioned parameter set `openbank.risk.liquidity.*`, named on the result.
-        BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.
+        configuration key it came from and the article / paragraph it cites. Factors and
+        classification choices come from the versioned parameter set `openbank.risk.liquidity.*`,
+        named on the result. The default set is `eu-2015-61-crr2` (Delegated Regulation (EU) 2015/61
+        for the LCR, Regulation (EU) 575/2013 Part Six Title IV for the NSFR); the BCBS d238 / d295
+        set `bcbs-d238-d295` stays selectable.
         A GL balance the configured classification does not name is listed in `unclassified` and
         counted nowhere. Derived on request, never stored.
       parameters:

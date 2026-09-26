@@ -41,7 +41,7 @@ import java.util.UUID
 @Path("/api/v1/treasury")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.ADMIN, DEALER, APPROVER)
+@RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER)
 @Suppress("TooManyFunctions")
 class TreasuryResource {
 
@@ -127,6 +127,22 @@ class TreasuryResource {
         DealResponse.from(deals.approve(id, actor(), requireKey(key)))
 
     @POST
+    @Path("/deals/{id}/override-limit")
+    @RolesAllowed(SENIOR_APPROVER)
+    @Operation(
+        summary = "Senior override of a counterparty-limit breach, with a reason (ADR-0315 D4). " +
+            "The deal must be PENDING_APPROVAL and breached; booking still needs a different approver.",
+    )
+    @Authorize(action = "treasury.deal.override-limit", resource = "#id")
+    suspend fun overrideLimit(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ReasonRequest,
+    ): DealResponse = DealResponse.from(
+        deals.overrideLimit(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key)),
+    )
+
+    @POST
     @Path("/deals/{id}/reject")
     @RolesAllowed(APPROVER)
     @Operation(summary = "Reject a pending deal back to DRAFT with a reason")
@@ -188,3 +204,6 @@ class TreasuryResource {
 const val DEALER = "ROLE_TREASURY_DEALER"
 const val IDEMPOTENCY_KEY = "Idempotency-Key"
 const val APPROVER = "ROLE_TREASURY_APPROVER"
+
+/** ADR-0315 D4: overrides a counterparty-limit breach. Never the same person who books the deal. */
+const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"

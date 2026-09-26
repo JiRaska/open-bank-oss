@@ -205,6 +205,32 @@ class TreasuryDealApiIT {
         given().`when`().get("/api/v1/treasury/deals/${UUID.randomUUID()}").then().statusCode(404)
     }
 
+    // --- ADR-0315 D4: senior override of a limit breach ---
+
+    @Test
+    @Order(11)
+    @TestSecurity(user = "sara.senior", roles = ["ROLE_TREASURY_SENIOR_APPROVER"])
+    fun `11 - a senior records a limit override with a reason, which books nothing yet`() {
+        action(breachId, "override-limit", """{"reason":""}""").then().statusCode(400)
+        action(breachId, "override-limit", """{"reason":"ALCO-approved temporary excess"}""").then().statusCode(200)
+            .body("state", equalTo("PENDING_APPROVAL"))
+            .body("limitOverride.by", equalTo("sara.senior"))
+            .body("limitOverride.reason", equalTo("ALCO-approved temporary excess"))
+        action(breachId, "approve").then().statusCode(403) // a senior cannot book (RBAC)
+        assertThat(state(breachId)).isEqualTo("PENDING_APPROVAL")
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `12 - an ordinary approver cannot override, but books the overridden breach`() {
+        action(dealId, "override-limit", """{"reason":"x"}""").then().statusCode(403)
+        // The override is read back from the database here, so this also proves V4 and the mapping.
+        action(breachId, "approve").then().statusCode(200)
+            .body("state", equalTo("BOOKED"))
+            .body("limitOverride.by", equalTo("sara.senior"))
+    }
+
     private fun state(id: String): String = jdbc { c ->
         c.prepareStatement("select state from deals where deal_id = ?").use { ps ->
             ps.setObject(1, UUID.fromString(id))
