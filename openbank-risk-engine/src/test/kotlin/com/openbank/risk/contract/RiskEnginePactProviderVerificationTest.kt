@@ -20,6 +20,7 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hamcrest.Matchers.oneOf
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -32,7 +33,8 @@ import org.junit.jupiter.api.extension.ExtendWith
  * which the consumer's mock server cannot (#2269).
  *
  * Replays as finrep's own service-account with ROLE_API; OPA is not enforced in tests, the identity
- * grant is held by `risk_rest_ext_test.rego`.
+ * grant is held by `risk_rest_ext_test.rego`. [RiskEnginePactBrokerProviderVerificationTest] is the
+ * broker half (main-push only), which publishes the verification `can-i-deploy` reads.
  */
 @QuarkusTest
 @QuarkusTestResource(RiskSnapshotApiIT.InMemoryKafkaResource::class)
@@ -61,23 +63,30 @@ class RiskEnginePactProviderVerificationTest {
         context?.verifyInteraction()
     }
 
-    /**
-     * Builds the run through the real REST endpoint (only an HTTP request carries the Vert.x
-     * context the reactive store needs) from a book that ties out, and hands its id to the pact.
-     * A replay of the same inputs returns the same run, so a second interaction reuses it.
-     */
-    @State(STATE)
-    fun tiedOutRun(): Map<String, Any> {
+    @State(CapitalPactState.NAME)
+    fun tiedOutRun(): Map<String, Any> = CapitalPactState.seed(ledger)
+}
+
+/**
+ * The provider state both capital verification classes share ([RiskEnginePactProviderVerificationTest]
+ * and [RiskEnginePactBrokerProviderVerificationTest]), so the broker replay cannot drift from the
+ * folder replay. Builds the run through the real REST endpoint (only an HTTP request carries the
+ * Vert.x context the reactive store needs) from a book that ties out, and hands its id to the pact;
+ * a replay of the same inputs returns the same run, so the second interaction reuses it.
+ */
+object CapitalPactState {
+    const val NAME = "a TIED_OUT risk snapshot exists at the report date"
+    private const val REPORTING_DATE = "2026-06-30"
+
+    fun seed(ledger: FakeLedgerPort): Map<String, Any> {
         ledger.inputs = Fixtures.tiedOut()
         val id: String = given().contentType("application/json").body("""{"asOf":"$REPORTING_DATE"}""")
             .`when`().post("/api/v1/risk/snapshots")
-            .then().statusCode(org.hamcrest.Matchers.oneOf(200, 201))
+            .then().statusCode(oneOf(HTTP_OK, HTTP_CREATED))
             .extract().path("id")
         return mapOf("runId" to id)
     }
 
-    private companion object {
-        const val STATE = "a TIED_OUT risk snapshot exists at the report date"
-        const val REPORTING_DATE = "2026-06-30"
-    }
+    private const val HTTP_OK = 200
+    private const val HTTP_CREATED = 201
 }
