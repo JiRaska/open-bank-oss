@@ -114,7 +114,7 @@ _Also tagged `fees-billing`: 0282 0318_
 
 - **[0084](0084-fraud-detection-bounded-context.md)** · Fraud detection bounded context — real-time transaction risk scoring · `shipped` · A new openbank-fraud-service scores payments in real time, returning ALLOW/CHALLENGE/REVIEW/DECLINE verdicts, and builds behavioural aggregates from Kafka events; it fails open behind a flag during rollout.
 - **[0247](0247-fraud-hold-as-a-party-level-adverse-state.md)** · Fraud hold as a party-level adverse state _(proposed)_ · `planned` · A fraud hold is a deliberate, expiring decision about a party recorded by fraud-service, never a transaction verdict promoted into one — published as a hold/release pair so consumers can both apply and lift the exclusion.
-- **[0304](0304-fraud-and-aml-relationship-investigation.md)** · Fraud and AML relationship investigation · `planned` · Fraud and AML investigators use separate purpose-bound lenses over the shared context graph to examine explainable device, counterparty and money-flow relationships without turning similarity into evidence.
+- **[0304](0304-fraud-and-aml-relationship-investigation.md)** · Fraud and AML relationship investigation · `partial` · Fraud and AML investigators use separate purpose-bound lenses over the shared context graph to examine explainable device, counterparty and money-flow relationships without turning similarity into evidence.
 
 _Also tagged `fraud`: 0102 0139 0140 0203 0230_
 

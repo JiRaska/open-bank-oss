@@ -79,10 +79,16 @@ persists each incident transition and its event atomically, increments a databas
 revision under a row lock, and relays the event from a claim-safe transactional outbox. The projector
 accepts old timestamp tokens during migration, measures that compatibility path and can reject it
 after the topic boundary has been proven clean.
+New incident projection ledger rows retain a SHA-256 digest of the source event. Byte-identical
+redelivery is idempotent; a different payload for the same event key is rejected, as is a second
+event type for the same source revision. Older ledger rows have no digest and remain explicitly
+unverifiable rather than acquiring a reconstructed one.
 The protected admin UI returns aggregate counts by affected type and never returns service or
 customer identifiers. Production relay activation, replay-boundary evidence, workflow and
 business-case correlation remain activation prerequisites, so this ADR stays `partial` and the
-deployment stays at zero replicas.
+incident lens is not declared activated by this code. The base Context service already has a
+sandbox replica; that fact does not establish that this branch's incident consumer or source
+relay has been deployed and replayed.
 
 The aggregate API now distinguishes a missing root (`MISSING`), a bounded slice
 (`PARTIAL`) and an available projection (`AVAILABLE`). Availability describes the

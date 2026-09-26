@@ -15,7 +15,8 @@ info:
   # 1.26.1 -> 1.27.0: additive — ledger-backfill request history (GET .../requests, GET
   # .../requests/{id}) and proposedAt/decidedAt/executedAt on LedgerBackfillRequestView, for the
   # admin console's finance workspace (#10618).
-  version: 1.27.0
+  # 1.27.0 -> 1.28.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
+  version: 1.28.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -79,6 +80,11 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          description: Return at most this many newest applications; omit for the legacy full list.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Applications for the party

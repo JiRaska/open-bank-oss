@@ -97,9 +97,15 @@ class CardResource(private val cardUseCase: CardUseCase) {
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "card.list", resource = "#partyId")
     @Operation(summary = "List cards by party")
-    suspend fun listByParty(@PathParam("partyId") partyId: UUID): Response {
+    suspend fun listByParty(@PathParam("partyId") partyId: UUID, @QueryParam("limit") limit: Int?): Response {
         requireNamedCardReader(securityIdentity, CARD_PARTY_LIST_CALLERS)
-        return Response.ok(cardUseCase.listByParty(partyId).map { it.toResponse() }).build()
+        val cards = if (limit == null) {
+            cardUseCase.listByParty(partyId)
+        } else {
+            require(limit in 1..MAX_PARTY_LIST_LIMIT) { "limit must be between 1 and $MAX_PARTY_LIST_LIMIT" }
+            cardUseCase.listByParty(partyId, limit)
+        }
+        return Response.ok(cards.map { it.toResponse() }).build()
     }
 
     /**
@@ -236,6 +242,8 @@ class CardResource(private val cardUseCase: CardUseCase) {
     }
 
     private companion object {
+        const val MAX_PARTY_LIST_LIMIT = 200
+
         // #3624 — X-Operator-Id is the AUDIT attribution on every card lifecycle write, so a null
         // flowing through is worse than the 500 it actually produced. These are `suspend` handlers:
         // no Intrinsics.checkNotNullParameter is emitted, and the null was carried into
