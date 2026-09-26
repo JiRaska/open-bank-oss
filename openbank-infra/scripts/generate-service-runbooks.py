@@ -491,7 +491,7 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
 
 def runtime_sections(short: str, ns: str) -> str:
     """Render operational commands only for a workload that is intended to run."""
-    readiness, liveness = declared_probes(short)
+    readiness, liveness = declared_probes(short, GITOPS)
     if zero_replica_workload(short):
         return (
             "## Runtime operations — DEFERRED\n"
@@ -645,6 +645,8 @@ def self_test() -> int:
     nothing to lose" for a service holding credentials, or a backup-restore procedure for a
     service with no backup.
     """
+    global GITOPS
+
     fails: list[str] = []
     cases = 0
 
@@ -747,17 +749,79 @@ def self_test() -> int:
              "kubectl scale" not in t)
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
-    # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
-    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
-    # automated sync while this exact distinction is under rollout review.
-    if "incentive" in deployed:
-        incentive = render("incentive")
-        case("a manual-sync workload is explicitly live-unverified",
-             says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
-        case("a manual-sync workload does not present declared metrics as a live scrape",
-             says(incentive, "live scrape status is unverified"))
-        case("a separate management listener is used for health commands",
-             "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
+    # Desired state is not proof of a live workload when its Application is manual-sync. Exercise
+    # both modes against a hermetic fixture: the real incentive Application can be deliberately
+    # activated independently of this classifier and must not decide whether the self-test passes.
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp)
+        apps = fixture / "apps"
+        component = fixture / "components" / "incentive"
+        apps.mkdir(parents=True)
+        component.mkdir(parents=True)
+        app = apps / "incentive.yaml"
+
+        def write_application(automated: bool) -> None:
+            lines = [
+                "apiVersion: argoproj.io/v1alpha1",
+                "kind: Application",
+                "spec:",
+                "  source:",
+                "    path: openbank-infra/gitops/components/incentive",
+                "  syncPolicy:",
+            ]
+            if automated:
+                lines.extend(("    automated:", "      prune: true", "      selfHeal: true"))
+            lines.extend(("    syncOptions:", "      - ServerSideApply=true"))
+            app.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        write_application(automated=False)
+        (component / "incentive-service.yaml").write_text(
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "metadata:\n"
+            "  name: incentive-service\n"
+            "  namespace: incentive\n"
+            "spec:\n"
+            "  replicas: 1\n"
+            "  template:\n"
+            "    spec:\n"
+            "      containers:\n"
+            "        - name: incentive-service\n"
+            "          image: registry.example/openbank-incentive-service:v1\n"
+            "          ports:\n"
+            "            - name: management\n"
+            "              containerPort: 8087\n",
+            encoding="utf-8",
+        )
+
+        live_gitops = GITOPS
+        try:
+            GITOPS = fixture
+            manual_status = deployment_status("incentive")
+            manual_runtime = runtime_sections("incentive", "incentive")
+            case(
+                "a manual-sync workload is explicitly live-unverified",
+                workload_live_unverified("incentive")
+                and says(manual_status, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync")
+                and "live scrape status is unverified" in manual_runtime,
+            )
+            case(
+                "the fixture workload supplies the management health port",
+                management_port("incentive") == "8087",
+            )
+
+            write_application(automated=True)
+            automatic_status = deployment_status("incentive")
+            automatic_runtime = runtime_sections("incentive", "incentive")
+            case(
+                "an automated-sync workload is presented as live",
+                not workload_live_unverified("incentive")
+                and automatic_status == ""
+                and "scraped by the fleet PodMonitor" in automatic_runtime
+                and "live scrape status is unverified" not in automatic_runtime,
+            )
+        finally:
+            GITOPS = live_gitops
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)
