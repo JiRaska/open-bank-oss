@@ -110,6 +110,10 @@
         "description": "Treasury approver (checker for dealer trades). DECLARED ONLY: no service grants it yet; the four-eyes counterpart of ROLE_TREASURY_DEALER. #10618"
       },
       {
+        "name": "ROLE_TREASURY_SENIOR_APPROVER",
+        "description": "Treasury senior approver: records an override of a counterparty-limit breach, with a reason; never books the same deal (ADR-0315 D4)."
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
