@@ -101,7 +101,10 @@ or after their stored source event time; they cannot reconstruct overwritten ear
 Replay remains required for pre-migration history. The three lifecycle projectors also append
 normalized relationship observations and a digest of the complete edge set before event deduplication.
 The reader chooses a complete eligible observation for each source-owned logical relationship
-before applying its result bound. It does not combine an earlier timestamp with a later event's
+before applying its result bound. Each selected root is read through an indexed lateral query;
+when the neighborhood overflows, newest eligible relationship evidence is selected, then the
+bounded result is presented in event-time order. Both baseline and retained-history branches
+have per-root bounds before their final merge. It does not combine an earlier timestamp with a later event's
 version or evidence reference. Current edge rows are eligible baselines only when no historical
 observation exists at that time. The source, target-prefix and relation allowlists remain enforced.
 
@@ -202,3 +205,29 @@ expanded schema; collapsing the ledger or edge keys would lose evidence. Runtime
 controlled replay approval remain prerequisites; the migration does not activate replay or switch
 the reader generation. Reconstruction tests must cover nodes, relationships, duplicate delivery,
 legacy evidence preservation and incident conflicts, not merely event-ledger row counts.
+
+
+### Bounded recent relationship selection
+
+The reader takes at most the requested edge budget per selected root from each history/baseline
+partition, after selecting eligible logical observations, then applies the global budget. A row
+discarded within a partition already has at least that many higher-ranked rows in the same
+partition, so it cannot enter the global newest-evidence result. The bounded result is then
+presented chronologically. Scope and source/prefix/relation allowlists remain inside SQL.
+
+Current edges carry a derived `retained_history_from` timestamp. It is the minimum effective time
+of a matching retained observation, not a source fact. V21 rebuilds it under each bank's RLS scope;
+writers update it atomically and conflicting initial inserts retain the minimum. Before this time
+the current row remains an eligible baseline; at or after it the retained evidence supplies the
+relationship. Partial indexes prevent rechecking every covered current relationship against its
+history. Any governed removal of history must recompute this coverage metadata before readers
+resume. Evidence must not be removed independently while coverage still asserts its availability.
+
+Database probes and integration tests do not replace the isolated authenticated capacity gate,
+which must include policy, disclosure audit and concurrent payment regression at 1x/10x volume.
+
+V21 shares V19's coordinated Context transition: drain/stop Context readers and consumers before
+applying the migration and restart only the matching coverage-aware binary. An older reader using
+`SELECT *` is incompatible with the added metadata column, and older writers do not maintain its
+coverage. The explicit-column reader avoids that mapping defect for subsequent additive changes.
+This transition must not be performed as an overlapping old/new Context rollout.

@@ -346,7 +346,8 @@ paths:
         precedence; a current node may serve only as an eligible baseline at or after its
         source event time. Missing node evidence suppresses dangling links and marks the
         neighborhood truncated. Retained relationship observations preserve the eligible source event's
-        evidence and version. Source contracts do not yet express general relationship withdrawal
+        evidence and version. On overflow the newest eligible relationships are selected and the bounded
+        result is presented in event-time order. Source contracts do not yet express general relationship withdrawal
         or supersession; an omitted relationship does not establish that it was revoked.
       parameters:
         - $ref: '#/components/parameters/reference'

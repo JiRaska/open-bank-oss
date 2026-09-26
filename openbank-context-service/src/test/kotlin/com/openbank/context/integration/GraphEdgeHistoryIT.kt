@@ -19,8 +19,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.config.ConfigProvider
 import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
 
@@ -88,6 +90,91 @@ class GraphEdgeHistoryIT {
         assertThat(read(root).map { it.toKey }).containsExactly(observation.to)
     }
 
+    @Test
+    fun `overflow selects newest relationships and presents them chronologically`() {
+        val root = "transaction:${UUID.randomUUID()}"
+        val targets = (1..3).map { "booking-transaction:${UUID.randomUUID()}" }
+        targets.forEachIndexed { index, target ->
+            append(root, "overflow:$root:$index", listOf(observation(root, target, index.toLong() + 1)))
+        }
+        val result = read(root)
+        assertThat(result.map { it.toKey }).containsExactly(targets[1], targets[2])
+        assertThat(result.map { it.sourceVersion }).containsExactly(2L, 3L)
+    }
+
+    @Test
+    fun `legacy baseline remains eligible until retained observations cover the requested time`() {
+        val root = "transaction:${UUID.randomUUID()}"
+        val target = "booking-transaction:${UUID.randomUUID()}"
+        seedBaseline(root, target)
+        val laterEvent = "later:$root"
+        append(root, laterEvent, listOf(observation(root, target, 2)))
+        val baseline = read(root, asOf = TIME.plusSeconds(1)).single()
+        assertThat(baseline.evidenceRef).isEqualTo("legacy:$root")
+        assertThat(baseline.sourceVersion).isEqualTo(1)
+        val later = read(root, asOf = TIME.plusSeconds(2)).single()
+        assertThat(later.evidenceRef).isEqualTo(laterEvent)
+        assertThat(later.sourceVersion).isEqualTo(2)
+        val priorEvent = "prior:$root"
+        append(root, priorEvent, listOf(observation(root, target, 0)))
+        val prior = read(root, asOf = TIME).single()
+        assertThat(prior.evidenceRef).isEqualTo(priorEvent)
+        assertThat(prior.sourceVersion).isZero()
+        assertThat(prior.validFrom).isEqualTo(TIME)
+        assertThat(read(root, asOf = TIME.plusSeconds(1)).single().evidenceRef).isEqualTo(priorEvent)
+        assertThat(read(root, asOf = TIME.plusSeconds(2)).single().evidenceRef).isEqualTo(laterEvent)
+    }
+
+    private fun seedBaseline(root: String, target: String) {
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { db ->
+            db.autoCommit = false
+            db.prepareStatement("SELECT set_config('openbank.bank_scope', ?, true)").use { statement ->
+                statement.setString(1, BANK)
+                statement.executeQuery().close()
+            }
+            for (key in listOf(root, target)) {
+                db.prepareStatement(
+                    "INSERT INTO context_nodes (node_row_id, node_key, bank_scope, projection_generation, " +
+                        "namespace, node_type, source_system, source_ref, display_label, classification, " +
+                        "valid_from, recorded_at, source_version) " +
+                        "VALUES (?, ?, ?, ?, 'COMPLAINT', 'PAYMENT', 'transaction-service', ?, " +
+                        "'Synthetic reference', 'RESTRICTED', ?::timestamptz, ?::timestamptz, 1)",
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setString(2, key)
+                    statement.setString(3, BANK)
+                    statement.setLong(4, GENERATION)
+                    statement.setString(5, key)
+                    statement.setString(6, TIME.toString())
+                    statement.setString(7, TIME.toString())
+                    statement.executeUpdate()
+                }
+            }
+            db.prepareStatement(
+                "INSERT INTO context_edges (edge_id, bank_scope, projection_generation, namespace, from_key, " +
+                    "to_key, relation_type, source_system, evidence_ref, valid_from, recorded_at, source_version) " +
+                    "VALUES (?, ?, ?, 'COMPLAINT', ?, ?, 'BOOKING_REQUESTED', 'transaction-service', ?, " +
+                    "?::timestamptz, ?::timestamptz, 1)",
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, BANK)
+                statement.setLong(3, GENERATION)
+                statement.setString(4, root)
+                statement.setString(5, target)
+                statement.setString(6, "legacy:$root")
+                statement.setString(7, TIME.plusSeconds(1).toString())
+                statement.setString(8, TIME.toString())
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            db.commit()
+        }
+    }
+
     private fun observation(root: String, target: String, version: Long) = GraphEdgeObservation(
         root,
         target,
@@ -103,11 +190,16 @@ class GraphEdgeHistoryIT {
         }.awaitSuspending()
     }
 
-    private fun read(root: String, bank: String = BANK, generation: Long = GENERATION) = onVertx {
+    private fun read(
+        root: String,
+        bank: String = BANK,
+        generation: Long = GENERATION,
+        asOf: Instant = TIME.plusSeconds(30),
+    ) = onVertx {
         GraphEdgeHistoryReader(sessions, mapper, bank, generation, 5000).find(
             listOf(root),
             listOf(GraphEdgeRule("transaction-service", "booking-transaction:%", setOf("BOOKING_REQUESTED"))),
-            TIME.plusSeconds(30),
+            asOf,
             2,
         )
     }

@@ -230,3 +230,11 @@ relationships on replay. Historical selection applies source/prefix/relation all
 result limits and returns evidence/time/version from one eligible observation. Missing producer
 withdrawal semantics must never be interpreted as proof that a relationship is currently valid
 or revoked; these are historical source observations.
+
+
+Relationship history coverage on current edges is derived metadata, scoped by bank, generation,
+namespace and complete source relationship identity. Updates preserve original validity and
+evidence, retain the earliest observation time under concurrent insertion, and commit with the
+verified observation. Backfill sets/restores transaction-local bank scope for forced-RLS reads.
+Governed history removal must rebuild coverage before reading resumes; stale coverage must not
+stand in for evidence that has been deleted.

@@ -200,10 +200,11 @@ class PaymentBookingProjectionConsumer(
         session,
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
-             source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version)
+             source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version, retained_history_from)
             VALUES (:id, :bankScope, :generation, 'COMPLAINT', :fromKey, :toKey, :relation,
-                    :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (bank_scope, projection_generation, edge_id) DO NOTHING
+                    :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version, :validFrom)
+            ON CONFLICT (bank_scope, projection_generation, edge_id) DO UPDATE SET
+              retained_history_from = LEAST(context_edges.retained_history_from, EXCLUDED.retained_history_from)
         """.trimIndent(),
         mapOf(
             "id" to stableId("COMPLAINT|${event.fromNode.key}|${event.toNode.key}|${event.relation}"),

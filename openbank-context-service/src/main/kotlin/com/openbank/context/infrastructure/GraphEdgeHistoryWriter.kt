@@ -114,7 +114,18 @@ internal object GraphEdgeHistoryWriter {
                     String::class.java,
                 ).setParameter("id", observationId).singleResult.invoke { stored ->
                     check(stored == hash) { "conflicting graph edge revision" }
-                }.replaceWithVoid()
+                }.flatMap {
+                    session.createNativeMutationQuery(
+                        """UPDATE context_edges SET retained_history_from = LEAST(retained_history_from, :at)
+                           WHERE bank_scope = :bank AND projection_generation = :generation
+                             AND namespace = 'COMPLAINT' AND from_key = :fromKey AND to_key = :toKey
+                             AND relation_type = :relation AND source_system = :source
+                        """.trimIndent(),
+                    ).setParameter("at", edge.validFrom).setParameter("bank", bank)
+                        .setParameter("generation", generation).setParameter("fromKey", edge.from)
+                        .setParameter("toKey", edge.to).setParameter("relation", edge.relation)
+                        .setParameter("source", edge.source).executeUpdate().replaceWithVoid()
+                }
             }
     }
 

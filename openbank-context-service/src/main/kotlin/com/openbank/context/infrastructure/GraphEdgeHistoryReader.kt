@@ -30,10 +30,13 @@ internal class GraphEdgeHistoryReader(
         val columns = "edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type, " +
             "source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version"
         val sql = """
-            WITH eligible_history AS (
+            WITH requested AS (
+                SELECT DISTINCT jsonb_array_elements_text(CAST(CAST(:keys AS text) AS jsonb)) AS key
+            ), eligible_history AS (
+                SELECT candidate.* FROM requested CROSS JOIN LATERAL (
                 SELECT $columns FROM context_graph_edge_revisions h
                 WHERE bank_scope = :bank AND projection_generation = :generation AND namespace = 'COMPLAINT'
-                  AND from_key IN (SELECT jsonb_array_elements_text(CAST(CAST(:keys AS text) AS jsonb)))
+                  AND from_key = requested.key
                   AND valid_from <= :asOf AND ($allowlist)
                   AND NOT EXISTS (
                       SELECT 1 FROM context_graph_edge_revisions newer
@@ -42,22 +45,20 @@ internal class GraphEdgeHistoryReader(
                         AND (newer.valid_from, newer.source_version, newer.evidence_ref) >
                             (h.valid_from, h.source_version, h.evidence_ref)
                   )
+                ORDER BY valid_from DESC, edge_id DESC LIMIT :limit
+                ) candidate
             ), eligible_baseline AS (
+                SELECT candidate.* FROM requested CROSS JOIN LATERAL (
                 SELECT $columns FROM context_edges baseline
                 WHERE bank_scope = :bank AND projection_generation = :generation AND namespace = 'COMPLAINT'
-                  AND from_key IN (SELECT jsonb_array_elements_text(CAST(CAST(:keys AS text) AS jsonb)))
+                  AND from_key = requested.key
                   AND valid_from <= :asOf AND (valid_to IS NULL OR valid_to > :asOf) AND ($allowlist)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM context_graph_edge_revisions retained
-                      WHERE retained.bank_scope = baseline.bank_scope
-                        AND retained.projection_generation = baseline.projection_generation
-                        AND retained.from_key = baseline.from_key AND retained.to_key = baseline.to_key
-                        AND retained.relation_type = baseline.relation_type
-                        AND retained.source_system = baseline.source_system AND retained.valid_from <= :asOf
-                  )
+                  AND (retained_history_from IS NULL OR retained_history_from > :asOf)
+                ORDER BY valid_from DESC, edge_id DESC LIMIT :limit
+                ) candidate
             )
             SELECT * FROM (SELECT * FROM eligible_history UNION ALL SELECT * FROM eligible_baseline) selected
-            ORDER BY valid_from ASC, edge_id LIMIT :limit
+            ORDER BY valid_from DESC, edge_id DESC LIMIT :limit
         """.trimIndent()
         return sessions.boundedGraphRead(timeoutMs) { session ->
             session.createNativeQuery("SELECT set_config('openbank.bank_scope', :bank, true)", String::class.java)
@@ -73,7 +74,7 @@ internal class GraphEdgeHistoryReader(
                     }
                     query.resultList
                 }
-        }.awaitSuspending()
+        }.awaitSuspending().sortedWith(compareBy<ContextEdgeEntity> { it.validFrom }.thenBy { it.id })
     }
 
     private companion object {

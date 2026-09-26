@@ -506,15 +506,18 @@ class ContextGraphRepository(
     private companion object {
         // Keep each direction index-ordered and bounded before merging. The previous OR predicate
         // scanned and sorted every edge of a high-degree root before applying the result limit.
+        const val ROOT_EDGE_COLUMNS = "e.edge_id, e.bank_scope, e.projection_generation, e.namespace, " +
+            "e.from_key, e.to_key, e.relation_type, e.source_system, e.evidence_ref, e.valid_from, " +
+            "e.valid_to, e.recorded_at, e.source_version"
         val ROOT_EDGES_SQL = """
             SELECT * FROM (
-                (SELECT e.* FROM context_edges e
+                (SELECT $ROOT_EDGE_COLUMNS FROM context_edges e
                  WHERE e.bank_scope = :bankScope AND e.projection_generation = :generation
                    AND e.namespace = :namespace AND e.from_key = :root
                    AND e.valid_from <= :asOf AND (e.valid_to IS NULL OR e.valid_to > :asOf)
                  ORDER BY e.recorded_at DESC, e.edge_id LIMIT :limit)
                 UNION ALL
-                (SELECT e.* FROM context_edges e
+                (SELECT $ROOT_EDGE_COLUMNS FROM context_edges e
                  WHERE e.bank_scope = :bankScope AND e.projection_generation = :generation
                    AND e.namespace = :namespace AND e.to_key = :root AND e.from_key <> :root
                    AND e.valid_from <= :asOf AND (e.valid_to IS NULL OR e.valid_to > :asOf)
