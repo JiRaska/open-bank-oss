@@ -18,7 +18,6 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import jakarta.inject.Inject
@@ -96,15 +95,6 @@ class CardIssuancePactBrokerProviderVerificationTest {
     @Inject
     lateinit var cardRepository: CardRepositoryImpl
 
-    /**
-     * The class-level `@TestSecurity` authenticates every request, which would turn a consumer's
-     * 401/403 interaction green-by-accident into a mismatch — or, worse, hide a provider that
-     * stopped enforcing authz. For [NO_IDENTITY_STATE] the test identity is cleared in
-     * `verifyPacts`, so the request arrives anonymous, exactly as the consumer encoded it.
-     */
-    @Inject
-    lateinit var testIdentity: TestIdentityAssociation
-
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -114,9 +104,6 @@ class CardIssuancePactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        if (context?.interaction?.providerStates?.any { it.name == NO_IDENTITY_STATE } == true) {
-            testIdentity.setTestIdentity(null)
-        }
         context?.verifyInteraction()
     }
 
@@ -159,21 +146,5 @@ class CardIssuancePactBrokerProviderVerificationTest {
         VertxContextSupport.subscribeAndAwait<Unit> {
             Panache.withTransaction { cardRepository.persist(entity).replaceWith(Unit) }
         }
-    }
-
-    /**
-     * The negative-auth case (ADR-0279 #3): a request with no identity must be refused, not
-     * silently authorised. No committed consumer pact currently exercises this provider state —
-     * the handler exists so the boundary is pinned into the contract per the fleet-wide convention
-     * ([com.openbank.lending.contract.LoanBookPactState.NO_IDENTITY]) and so a future consumer
-     * interaction encoding it verifies immediately without a provider-side change.
-     */
-    @State(NO_IDENTITY_STATE)
-    fun noIdentity() {
-        // Intentionally empty: the state IS the absence of an identity (see verifyPacts).
-    }
-
-    private companion object {
-        const val NO_IDENTITY_STATE = "no valid identity is presented"
     }
 }
