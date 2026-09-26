@@ -5,6 +5,7 @@
 package com.openbank.account.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -27,7 +28,10 @@ import java.util.UUID
  * the JSON projection has the shape the analytics-sink parses.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class ReconciliationSummaryIT {
 

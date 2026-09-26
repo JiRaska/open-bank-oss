@@ -4,12 +4,13 @@
 package com.openbank.clearing.integration
 
 import com.openbank.clearing.infrastructure.persistence.repository.ClearingOutboxRepositoryImpl
-import com.openbank.clearing.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
@@ -33,7 +34,10 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_clearing_it")],
+)
 @TestProfile(OutboxRepositoryIsolationProfile::class)
 class ClearingOutboxClaimIT {
 

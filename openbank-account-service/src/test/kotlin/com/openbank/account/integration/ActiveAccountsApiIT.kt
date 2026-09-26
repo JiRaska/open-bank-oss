@@ -5,6 +5,7 @@ package com.openbank.account.integration
 
 import com.openbank.libs.security.Roles
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -29,7 +30,10 @@ import java.util.UUID
  *    returned row is ACTIVE — the sweep never leaks CLOSED/FROZEN accounts to a billing run.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 class ActiveAccountsApiIT {
 
     private val partyId = UUID.fromString("00000000-1111-0000-0000-000000000002")

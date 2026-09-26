@@ -5,6 +5,7 @@
 package com.openbank.sepainstant.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -14,7 +15,10 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 
 @QuarkusTest
-@QuarkusTestResource(com.openbank.sepainstant.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_sepa_instant_it")],
+)
 class SctInstAccessControlIT {
 
     @Test

@@ -4,8 +4,9 @@
 
 package com.openbank.account.infrastructure.rest
 
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -24,7 +25,10 @@ import java.util.UUID
  * the billing #179 / sca #266 pattern).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 class AccountResourceAuthzTest {
 
     @Test

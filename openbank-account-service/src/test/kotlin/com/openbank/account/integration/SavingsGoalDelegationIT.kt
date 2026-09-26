@@ -4,8 +4,9 @@
 
 package com.openbank.account.integration
 
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -28,7 +29,10 @@ import java.util.UUID
  * Savings goals are account metadata (ADR-0153), so the grant keys on the account id.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @QuarkusTestResource(SavingsGoalDelegationIT.InMemoryDelegationChannel::class)
 class SavingsGoalDelegationIT {
 
