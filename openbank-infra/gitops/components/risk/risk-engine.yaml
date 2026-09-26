@@ -110,6 +110,12 @@ spec:
             # the environment states the decision rather than inheriting the code default.
             - name: OPENBANK_RISK_LENDING_ENABLED
               value: "true"
+            # ADR-0314: once per business day, drive the same SnapshotUseCase.createSnapshot the
+            # POST /api/v1/risk/snapshots endpoint calls, replay-idempotent on (asOf, inputHash).
+            # Off by code default (openbank.risk.eod-snapshot.enabled); stated explicitly so the
+            # environment states the decision rather than inheriting the default.
+            - name: OPENBANK_RISK_EOD_SNAPSHOT_ENABLED
+              value: "true"
             - name: LENDING_SERVICE_URL
               value: https://lending-service.lending.svc:8443
             # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED); client cert
