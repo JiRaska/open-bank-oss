@@ -523,3 +523,19 @@ not change any existing request's outcome until explicitly flipped.
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 5 restamps the transaction-service policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding a transaction read rule for party-service. domestic-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 6 restamps the card-issuance policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding two card read rules. domestic-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `DomesticPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only). domestic-payment grants it nothing and its RBAC is unchanged, for the same reason as sepa-payment: no charter holds `query.payment_confirmation.readonly`. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. Nothing to roll back here.
+
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** `DomesticPaymentNotFoundMapper`/`InvalidDomesticPaymentStateTransitionMapper` are
+  deleted; `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
+  extend `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`,
+  handled by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper`
+  (added, unused, by #10923). Both already used the base's default codes
+  (`NOT_FOUND`/`CONFLICT`), so status, `code` and `message` are byte-identical to the deleted
+  mappers' output — verified by `DomesticPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s
+  source changes (`Ids.randomId()` → the correlation MDC), which #10911 phase 1 established is not
+  part of the wire contract. `DomesticPaymentIdempotencyConflictMapper` (a distinct
+  `application/problem+json` body shape) and `PaymentNotSettledMapper`/
+  `PaymentConfirmationRenderMapper` are untouched. **Risk class:** none — response-plumbing
+  de-duplication only; the payment workflow, delegated-spend binding and Temporal orchestration
+  are untouched. Rollback: restore the deleted mapper classes and revert the exception base
+  classes.

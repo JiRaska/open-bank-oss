@@ -7,8 +7,6 @@ package com.openbank.domestic.infrastructure.rest
 import com.openbank.domestic.application.port.`in`.PaymentNotSettledException
 import com.openbank.domestic.application.port.out.PaymentConfirmationRenderException
 import com.openbank.domestic.application.usecase.DomesticPaymentIdempotencyConflictException
-import com.openbank.domestic.application.usecase.DomesticPaymentNotFoundException
-import com.openbank.domestic.application.usecase.InvalidDomesticPaymentStateTransitionException
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.domain.identifiers.Ids
@@ -17,35 +15,12 @@ import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import java.time.Instant
 
-@Provider
-class DomesticPaymentNotFoundMapper : ExceptionMapper<DomesticPaymentNotFoundException> {
-    override fun toResponse(exception: DomesticPaymentNotFoundException): Response = Response.status(404)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                404,
-                ErrorCode.NOT_FOUND.code,
-                exception.message ?: "Not found",
-                timestamp = Instant.now(),
-            ),
-        )
-        .build()
-}
-
-@Provider
-class InvalidDomesticPaymentStateTransitionMapper : ExceptionMapper<InvalidDomesticPaymentStateTransitionException> {
-    override fun toResponse(exception: InvalidDomesticPaymentStateTransitionException): Response = Response.status(409)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                409,
-                ErrorCode.CONFLICT.code,
-                exception.message ?: "Conflict",
-                timestamp = Instant.now(),
-            ),
-        )
-        .build()
-}
+// DomesticPaymentNotFoundMapper / InvalidDomesticPaymentStateTransitionMapper (404/409) removed
+// here (#10911/#11059 phase 3): DomesticPaymentNotFoundException/
+// InvalidDomesticPaymentStateTransitionException now extend the libs-domain
+// ResourceNotFoundException/ResourceConflictException bases, handled by libs-runtime's
+// ResourceNotFoundExceptionMapper/ResourceConflictExceptionMapper — same status, code and
+// ApiError shape. See DomesticPaymentExceptionMapperEquivalenceTest.
 
 /** A key is replayable only for the exact normalized command and authenticated actor scope. */
 @Provider
