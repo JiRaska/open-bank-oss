@@ -2903,6 +2903,25 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
+  # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
+  # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
+  # HttpClient.newBuilder()/newHttpClient() in a service's src/main fails; the 29 sites measured on
+  # 2026-09-26 are baselined per file (count, so a second site in a baselined file still fails),
+  # and a healed entry is reported stale. Advisory per ADR-0320 until P1 has a migrated consumer.
+  - id: raw-http-client-ratchet
+    name: "raw java.net.http.HttpClient construction in services does not grow (ADR-0320 P1, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Every raw HttpClient is an outbound path with no SSRF allowlist or resolved-address check; this forbids new ones while the existing 29 migrate to SafeHttpClient."
+    review_after: "2027-03-31"
+    min_subjects: 1000   # 2319 service src/main files scanned 2026-09-26; findings may reach zero
+    selftest: python3 .github/scripts/check-raw-http-client.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-raw-http-client.py", ".github/scripts/raw-http-client-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-raw-http-client.py --root .
+
   # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
   # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
   # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.
