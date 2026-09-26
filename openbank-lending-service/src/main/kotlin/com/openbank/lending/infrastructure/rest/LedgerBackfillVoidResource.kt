@@ -14,6 +14,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -76,10 +77,14 @@ class LedgerBackfillVoidResource(private val voids: LedgerBackfillVoidService, p
     @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "lending.ledgerBackfill.propose", resource = "")
     @Operation(summary = "Propose voiding an EXECUTED backfill's synthetic loans (maker)")
-    fun propose(request: ProposeVoidRequest?): Uni<Response> = guarded {
+    fun propose(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: ProposeVoidRequest?,
+    ): Uni<Response> = guarded {
+        val key = requireKey(idempotencyKey)
         requireNotNull(request) { "request body is required" }
         val source = requireNotNull(request.sourceRequestId) { "sourceRequestId is required" }
-        voids.propose(source, actor()).map { Response.status(HTTP_CREATED).entity(it).build() }
+        voids.propose(source, actor(), key).map { Response.status(HTTP_CREATED).entity(it).build() }
     }
 
     @POST
@@ -87,18 +92,41 @@ class LedgerBackfillVoidResource(private val voids: LedgerBackfillVoidService, p
     @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "lending.ledgerBackfill.decide", resource = "#id")
     @Operation(summary = "Approve or reject a void (checker, must differ from the maker)")
-    fun decide(@PathParam("id") id: UUID, request: DecideBackfillRequest?): Uni<Response> = guarded {
+    fun decide(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: DecideBackfillRequest?,
+    ): Uni<Response> = guarded {
+        val key = requireKey(idempotencyKey)
         requireNotNull(request) { "request body is required" }
         requireNotNull(request.approve) { "approve is required" }
-        voids.decide(id, request.approve, actor(), request.reason).map { Response.ok(it).build() }
+        voids.decide(id, request.approve, actor(), request.reason, key).map { Response.ok(it).build() }
     }
 
     @POST
     @Path("/{id}/execute")
     @Authorize(action = "lending.ledgerBackfill.execute", resource = "#id")
     @Operation(summary = "Execute an APPROVED void; without execute=true it only returns the plan")
-    fun execute(@PathParam("id") id: UUID, @QueryParam("execute") execute: Boolean?): Uni<Response> = guarded {
-        voids.execute(id, execute == true, actor()).map { Response.ok(it.toResponse()).build() }
+    fun execute(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @QueryParam("execute") execute: Boolean?,
+    ): Uni<Response> = guarded {
+        val key = requireKey(idempotencyKey)
+        voids.execute(id, execute == true, actor(), key).map { Response.ok(it.toResponse()).build() }
+    }
+
+    /**
+     * Money-path idempotency (#8351): every command POST requires `Idempotency-Key`. A replay is already
+     * safe by construction (propose returns the pending twin by plan hash, decide is a conditional
+     * PROPOSED->decided update, execute holds a lease and posts under the ledger's own references);
+     * the key is recorded on the audit event so a client retry is correlatable. Declared nullable:
+     * a non-null header parameter answers 500 for the absent case, not 400.
+     */
+    private fun requireKey(key: String?): String {
+        requireNotNull(key) { "header '$IDEMPOTENCY_KEY' is required" }
+        require(key.isNotBlank()) { "header '$IDEMPOTENCY_KEY' must not be blank" }
+        return key
     }
 
     /** 400 for input errors, 409 for state/hash refusals, 422 for a four-eyes violation. */
@@ -121,6 +149,7 @@ class LedgerBackfillVoidResource(private val voids: LedgerBackfillVoidService, p
         const val HTTP_BAD_REQUEST = 400
         const val HTTP_CONFLICT = 409
         const val HTTP_UNPROCESSABLE = 422
+        const val IDEMPOTENCY_KEY = "Idempotency-Key"
     }
 }
 

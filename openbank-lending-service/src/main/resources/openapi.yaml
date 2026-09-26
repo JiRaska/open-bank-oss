@@ -1245,6 +1245,12 @@ paths:
       operationId: proposeLedgerBackfillVoid
       summary: Propose voiding an EXECUTED backfill's synthetic loans (maker); the approval binds to the plan hash
       description: "Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account; the same `lending.ledgerBackfill.*` actions as the backfill). The maker and checker identities are the JWT subjects and must differ."
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Required on this money-path command (#8351). A replay is safe by construction (natural key, conditional state update, lease); the key is recorded on the audit event.
+          schema: { type: string, minLength: 1 }
       requestBody:
         required: true
         content:
@@ -1294,6 +1300,11 @@ paths:
       summary: Approve or reject a void (checker, must differ from the maker)
       description: "Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account; the same `lending.ledgerBackfill.*` actions as the backfill). The maker and checker identities are the JWT subjects and must differ."
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Required on this money-path command (#8351). A replay is safe by construction (natural key, conditional state update, lease); the key is recorded on the audit event.
+          schema: { type: string, minLength: 1 }
         - name: id
           in: path
           required: true
@@ -1329,6 +1340,11 @@ paths:
       summary: Execute an APPROVED void; without execute=true only returns the plan
       description: "Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account; the same `lending.ledgerBackfill.*` actions as the backfill). The maker and checker identities are the JWT subjects and must differ."
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Required on this money-path command (#8351). A replay is safe by construction (natural key, conditional state update, lease); the key is recorded on the audit event.
+          schema: { type: string, minLength: 1 }
         - name: id
           in: path
           required: true

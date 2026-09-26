@@ -119,7 +119,7 @@ class LedgerBackfillVoidService(
 
     fun get(id: UUID): Uni<VoidRequestView?> = voids.findById(id).map { it?.toView() }
 
-    fun propose(sourceRequestId: UUID, maker: String): Uni<VoidRequestView> {
+    fun propose(sourceRequestId: UUID, maker: String, idempotencyKey: String? = null): Uni<VoidRequestView> {
         require(maker.isNotBlank()) { "Proposer identity is required" }
         return dryRun(sourceRequestId).flatMap { plan ->
             require(plan.executable) { "void plan is not executable: ${refusal(plan)}" }
@@ -142,12 +142,18 @@ class LedgerBackfillVoidService(
                 voids.findProposedByHash(plan.planHash)
             }.flatMap { twin ->
                 twin?.let { Uni.createFrom().item(it.toView()) }
-                    ?: voids.save(entity).call { saved -> audit(saved, "PROPOSED", maker) }.map { it.toView() }
+                    ?: voids.save(entity).call { saved -> audit(saved, "PROPOSED", maker, idempotencyKey) }.map { it.toView() }
             }
         }
     }
 
-    fun decide(id: UUID, approve: Boolean, checker: String, reason: String?): Uni<VoidRequestView> =
+    fun decide(
+        id: UUID,
+        approve: Boolean,
+        checker: String,
+        reason: String?,
+        idempotencyKey: String? = null,
+    ): Uni<VoidRequestView> =
         voids.findById(id).flatMap { entity ->
             requireNotNull(entity) { "Void request not found: $id" }
             require(entity.state == ProposalState.PROPOSED) { "Void request $id is ${entity.state}, not decidable" }
@@ -163,7 +169,7 @@ class LedgerBackfillVoidService(
             entity.updatedAt = OffsetDateTime.now(clock)
             voids.compareAndSetDecision(entity).flatMap { claimed ->
                 require(claimed == 1) { "Void request $id was decided concurrently and is no longer decidable" }
-                audit(entity, decided.state.name, checker).map { entity.toView() }
+                audit(entity, decided.state.name, checker, idempotencyKey).map { entity.toView() }
             }
         }
 
@@ -172,7 +178,12 @@ class LedgerBackfillVoidService(
      * Posting requires an APPROVED void whose plan hash still matches (nothing moved since approval)
      * and a void date that has not passed.
      */
-    fun execute(id: UUID, execute: Boolean, executor: String): Uni<VoidExecution> = voids.findById(id).flatMap { v ->
+    fun execute(
+        id: UUID,
+        execute: Boolean,
+        executor: String,
+        idempotencyKey: String? = null,
+    ): Uni<VoidExecution> = voids.findById(id).flatMap { v ->
         requireNotNull(v) { "Void request not found: $id" }
         backfills.findById(v.sourceRequestId).flatMap { source ->
             checkNotNull(source) { "source backfill request ${v.sourceRequestId} is gone" }
@@ -181,7 +192,7 @@ class LedgerBackfillVoidService(
                     Uni.createFrom().item(VoidExecution(id, false, false, plan, emptyList()))
                 } else {
                     guardExecution(v, plan, executor)
-                    runClaimed(v, source, plan, executor)
+                    runClaimed(v, source, plan, executor, idempotencyKey)
                 }
             }
         }
@@ -216,12 +227,13 @@ class LedgerBackfillVoidService(
         source: LedgerBackfillRequestEntity,
         plan: BackfillPlan,
         executor: String,
+        idempotencyKey: String?,
     ): Uni<VoidExecution> {
         val now = OffsetDateTime.now(clock)
         return voids.claimExecution(entity.id, executor, now, now.minus(LedgerBackfillService.EXECUTION_LEASE))
             .flatMap { claimed ->
                 check(claimed == 1) { "Void request ${entity.id} is already being executed" }
-                audit(entity, "EXECUTION_STARTED", executor)
+                audit(entity, "EXECUTION_STARTED", executor, idempotencyKey)
                     .flatMap {
                         Multi.createFrom().iterable(plan.loans)
                             .onItem().transformToUniAndConcatenate { loan ->
@@ -343,7 +355,12 @@ class LedgerBackfillVoidService(
     }
 
     /** Audit trail on the lending topic (audit-service consumes it). Carries no party data. */
-    private fun audit(entity: LedgerBackfillVoidRequestEntity, transition: String, actor: String): Uni<Unit> =
+    private fun audit(
+        entity: LedgerBackfillVoidRequestEntity,
+        transition: String,
+        actor: String,
+        idempotencyKey: String? = null,
+    ): Uni<Unit> =
         events.emit(
             LendingOutboxMessage(
                 aggregateId = entity.id,
@@ -359,6 +376,7 @@ class LedgerBackfillVoidService(
                         "voidDate" to entity.voidDate.toString(),
                         "loanCount" to entity.loanCount,
                         "legCount" to entity.legCount,
+                        "idempotencyKey" to idempotencyKey,
                         "occurredAt" to clock.instant().toString(),
                         "sourceService" to "lending",
                     ),

@@ -386,17 +386,28 @@ class LedgerBackfillIT {
         val planned = plan.getList<Map<String, Any>>("plan.loans").map { it["loanId"] }
         assertThat(planned).contains(czkLoan.toString(), eurLoan.toString())
 
+        // #8351: a money-path command without Idempotency-Key is a 400, not a 500 and not a write.
+        Given {
+            contentType("application/json")
+            body("""{"sourceRequestId":"$requestId"}""")
+        } When { post("/api/v1/lending/ledger-backfill/voids") } Then { statusCode(400) }
+
         voidId = Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
             contentType("application/json")
             body("""{"sourceRequestId":"$requestId"}""")
         } When { post("/api/v1/lending/ledger-backfill/voids") } Then { statusCode(201) } Extract {
             jsonPath().getString("id")
         }
         Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
             contentType("application/json")
             body("""{"approve":true}""")
         } When { post("/api/v1/lending/ledger-backfill/voids/$voidId/decide") } Then { statusCode(422) }
-        Given { queryParam("execute", true) } When {
+        Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            queryParam("execute", true)
+        } When {
             post("/api/v1/lending/ledger-backfill/voids/$voidId/execute")
         } Then { statusCode(422) }
         assertThat(
@@ -411,6 +422,7 @@ class LedgerBackfillIT {
     @TestSecurity(user = "backfill-checker", roles = ["ROLE_ADMIN"])
     fun `12 - a different admin approves the void`() {
         Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
             contentType("application/json")
             body("""{"approve":true,"reason":"IT: synthetic, never paid out"}""")
         } When { post("/api/v1/lending/ledger-backfill/voids/$voidId/decide") } Then { statusCode(200) }
@@ -421,7 +433,10 @@ class LedgerBackfillIT {
     @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `13 - the void offsets every leg to zero and takes the loans off the book`() {
         val originals = mine().filterKeys { !it.startsWith("void:") }
-        val body = Given { queryParam("execute", true) } When {
+        val body = Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            queryParam("execute", true)
+        } When {
             post("/api/v1/lending/ledger-backfill/voids/$voidId/execute")
         } Then { statusCode(200) } Extract { jsonPath() }
         assertThat(body.getBoolean("execution.complete")).isTrue()
@@ -456,7 +471,10 @@ class LedgerBackfillIT {
     @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `14 - an executed void cannot run again and a voided loan is out of every later plan`() {
         val journalsBefore = mine().size
-        Given { queryParam("execute", true) } When {
+        Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            queryParam("execute", true)
+        } When {
             post("/api/v1/lending/ledger-backfill/voids/$voidId/execute")
         } Then { statusCode(422) }
         assertThat(mine()).hasSize(journalsBefore)
