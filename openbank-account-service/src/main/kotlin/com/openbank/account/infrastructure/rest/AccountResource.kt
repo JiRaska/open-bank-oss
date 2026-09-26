@@ -4,7 +4,9 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.AddPocketCommand
 import com.openbank.account.application.port.`in`.ClearSavingsGoalCommand
@@ -36,6 +38,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.security.Roles
 import io.quarkus.logging.Log
 import io.quarkus.security.identity.SecurityIdentity
@@ -70,6 +73,8 @@ import java.util.UUID
  * operator/admin. Roles come from [Roles] (not raw strings). Enforced by Quarkus OIDC and locked by
  * AccountSecurityContractTest.
  */
+private const val ACCOUNTS_PATH = "/api/v1/accounts"
+
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -121,6 +126,20 @@ class AccountResource(
             customerPartyId != null && ownerPartyId != customerPartyId
     }
 
+    /**
+     * The canonical request fingerprint (#10916): the DESERIALISED DTO re-serialised with sorted
+     * keys, so whitespace and JSON key order in the raw body do not change the hash, while any
+     * change in a field value does.
+     */
+    private fun requestFingerprint(method: String, path: String, body: Any): String =
+        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
+
+    private val canonicalMapper: ObjectMapper by lazy {
+        objectMapper.copy()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+    }
+
     @POST
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.create")
@@ -133,7 +152,10 @@ class AccountResource(
         // non-nullable type only decided where the NPE landed — a 500 that tells the caller the
         // server broke. libs-runtime maps IllegalArgumentException to 400.
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
+        // #10916: the key is bound to this request's fingerprint — the same key with a different
+        // opening request answers 422 IDEMPOTENCY_KEY_REUSED instead of replaying the first one.
+        val requestHash = requestFingerprint("POST", ACCOUNTS_PATH, request)
+        idempotencyStore.lookup(idempotencyKey, requestHash)?.let { cached ->
             return Response.status(cached.statusCode)
                 .entity(cached.responseBody)
                 .header("X-Idempotency-Replayed", "true")
@@ -156,7 +178,7 @@ class AccountResource(
         )
         val responseBody = account.toResponse()
         val json = objectMapper.writeValueAsString(responseBody)
-        idempotencyStore.save(idempotencyKey, 201, json)
+        idempotencyStore.save(idempotencyKey, requestHash, 201, json)
 
         return Response.created(URI.create("/api/v1/accounts/${account.id}"))
             .entity(responseBody)

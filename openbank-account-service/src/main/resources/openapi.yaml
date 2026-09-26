@@ -12,7 +12,9 @@ info:
   # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
   # opening other account types are unaffected; term-deposit openings come only from
   # customer-edge, updated in the same change).
-  version: 1.18.0
+  # 1.18 -> 1.19 (#10916): additive — 422 IDEMPOTENCY_KEY_REUSED on open-account when an
+  # Idempotency-Key is reused with a different request body.
+  version: 1.19.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -74,6 +76,9 @@ paths:
             (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
             (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
             neither the matched name nor the party (#8512).
+            Also IDEMPOTENCY_KEY_REUSED: the Idempotency-Key was already used for a
+            different request (method, path or canonical body differ), so the stored
+            response is not replayed (#10916).
         '503':
           description: >
             Sanctions screening temporarily unavailable; the opening gate fails
