@@ -27,15 +27,17 @@ import java.util.concurrent.atomic.AtomicLong
 @ApplicationScoped
 class ContextAuditCommitmentRelay(
     private val sessions: Mutiny.SessionFactory,
+    private val dispatchSettings: ContextCommitmentDispatchSettings,
     @Channel("context-audit-commitments-out") private val emitter: Instance<MutinyEmitter<String>>,
     private val mapper: ObjectMapper,
     private val clock: Clock,
     private val meters: MeterRegistry,
     private val domainMetrics: DomainMetrics,
-    @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.audit-export.enabled", defaultValue = "false")
     private val enabled: Boolean,
 ) {
+    private val bankScope: String get() = dispatchSettings.bankScope
+
     private val pending = AtomicLong(0).also { meters.gauge("openbank_context_audit_outbox_pending", it) }
     private var liveness: WorkflowLivenessRecorder? = null
 
@@ -44,7 +46,7 @@ class ContextAuditCommitmentRelay(
     }
 
     @Scheduled(
-        every = "5s",
+        every = "1s",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
         skipExecutionIf = Scheduled.ApplicationNotRunning::class,
     )
@@ -105,6 +107,7 @@ class ContextAuditCommitmentRelay(
                         .setParameter("now", now)
                         .setParameter("stale", stale)
                         .setParameter("retryBefore", retryBefore)
+                        .setParameter("batchSize", dispatchSettings.batchSize)
                         .resultList
                 }
         }.awaitSuspending()
@@ -128,7 +131,7 @@ class ContextAuditCommitmentRelay(
 
     companion object {
         private const val WORKFLOW_NAME = "context-audit-commitment-relay"
-        private const val POLL_INTERVAL_SECONDS = 5L
+        private const val POLL_INTERVAL_SECONDS = 1L
         private val EXPECTED_INTERVAL = Duration.ofSeconds(POLL_INTERVAL_SECONDS)
         private const val RETRY_DELAY_SECONDS = 30L
         private val RETRY_DELAY = Duration.ofSeconds(RETRY_DELAY_SECONDS)
@@ -143,7 +146,7 @@ class ContextAuditCommitmentRelay(
                     OR (status = 'DISPATCHING' AND claimed_at <= :stale)
                 )
                 ORDER BY occurred_at, audit_id
-                LIMIT 100 FOR UPDATE SKIP LOCKED
+                LIMIT :batchSize FOR UPDATE SKIP LOCKED
             )
             RETURNING *
         """
