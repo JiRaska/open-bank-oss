@@ -274,5 +274,9 @@ class CustomerIntakeResourceTest {
         ) {
             saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now(), requestHash)
         }
+        override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long) =
+            saved[key]?.let { com.openbank.libs.idempotency.ReserveResult.Replay(it) }
+                ?: com.openbank.libs.idempotency.ReserveResult.Reserved
+        override suspend fun release(key: String, requestHash: String) = Unit
     }
 }
