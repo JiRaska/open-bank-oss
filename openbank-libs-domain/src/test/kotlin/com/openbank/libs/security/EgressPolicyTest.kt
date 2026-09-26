@@ -103,6 +103,30 @@ class EgressPolicyTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
+    @Test
+    fun `Teredo, local-use NAT64 and the 6to4 relay anycast are RESERVED, not PUBLIC`() {
+        listOf("2001::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "64:ff9b:1::a00:1", "192.88.99.1").forEach {
+            assertThat(EgressAddressClass.of(InetAddress.getByName(it))).`as`(it).isEqualTo(EgressAddressClass.RESERVED)
+        }
+        // neighbours stay public
+        assertThat(EgressAddressClass.of(InetAddress.getByName("2001:4860::8888"))).isEqualTo(EgressAddressClass.PUBLIC)
+        assertThat(EgressAddressClass.of(InetAddress.getByName("192.88.98.1"))).isEqualTo(EgressAddressClass.PUBLIC)
+    }
+
+    @Test
+    fun `fromConfig rejects entries whose host is not a DNS name`() {
+        listOf("[::1]:80", ":443", "bad_host.example", "-lead.example", "a..b.example", "sp ace.example").forEach {
+            assertThatThrownBy { EgressPolicy.fromConfig(listOf(it)) }.`as`(it)
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    @Test
+    fun `the target exposes the absolute FQDN for resolution`() {
+        assertThat(allowed("https://api.example.com/").absoluteName).isEqualTo("api.example.com.")
+        assertThat(allowed("https://API.example.com./").host).isEqualTo("api.example.com")
+    }
+
     private fun allowed(url: String) = (policy.checkUrl(url) as EgressDecision.Allowed).target
 
     companion object {

@@ -133,7 +133,8 @@ class EgressPolicy(rules: Map<String, EgressHostRule>) {
                 val hostPort = parts.first()
                 val flags = parts.drop(1).toSet()
                 require(flags.all { it in setOf("http", "private") }) { "unknown egress flag in '$entry'" }
-                val host = hostPort.substringBefore(':')
+                val host = normaliseHost(hostPort.substringBefore(':'))
+                require(isDnsName(host)) { "egress allowlist entry '$entry' does not name a valid DNS host" }
                 val ports =
                     if (':' in hostPort) {
                         hostPort.substringAfter(':').split('|').map { p ->
@@ -154,6 +155,13 @@ class EgressPolicy(rules: Map<String, EgressHostRule>) {
         }
 
         internal fun normaliseHost(host: String): String = host.lowercase().removeSuffix(".")
+
+        private const val MAX_DNS_NAME = 253
+        private val DNS_LABEL = Regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+        /** LDH host name (RFC 1123): 1..63-char labels of letters, digits and inner hyphens. */
+        internal fun isDnsName(host: String): Boolean =
+            host.isNotEmpty() && host.length <= MAX_DNS_NAME && host.split('.').all { DNS_LABEL.matches(it) }
 
         private fun defaultPort(scheme: String): Int = if (scheme == "http") HTTP_PORT else HTTPS_PORT
 
@@ -180,7 +188,15 @@ data class EgressHostRule(
     val allowPrivateAddresses: Boolean = false,
 )
 
-data class EgressTarget(val scheme: String, val host: String, val port: Int, val uri: URI, val rule: EgressHostRule)
+data class EgressTarget(val scheme: String, val host: String, val port: Int, val uri: URI, val rule: EgressHostRule) {
+    /**
+     * [host] as an absolute FQDN (trailing dot). Resolve THIS, never [host]: in Kubernetes a
+     * relative name with fewer than `ndots` dots is first tried against every search domain, so
+     * `api.example.com` could resolve to an in-cluster `api.example.com.<ns>.svc.cluster.local`
+     * Service. SNI, certificate identity and the `Host` header keep using [host].
+     */
+    val absoluteName: String get() = "$host."
+}
 
 sealed interface EgressDecision {
     data class Allowed(val target: EgressTarget) : EgressDecision
@@ -233,6 +249,7 @@ enum class EgressAddressClass {
                 o[0] == 169 && o[1] == 254 -> LINK_LOCAL
                 o[0] == 192 && o[1] == 0 && o[2] == 0 -> RESERVED
                 o[0] == 192 && o[1] == 0 && o[2] == 2 -> RESERVED
+                o[0] == 192 && o[1] == 88 && o[2] == 99 -> RESERVED // deprecated 6to4 relay anycast
                 o[0] == 198 && o[1] in 18..19 -> RESERVED
                 o[0] == 198 && o[1] == 51 && o[2] == 100 -> RESERVED
                 o[0] == 203 && o[1] == 0 && o[2] == 113 -> RESERVED
@@ -273,6 +290,9 @@ enum class EgressAddressClass {
                 u[0] == 0xfe && (u[1] and 0xc0) == 0xc0 -> PRIVATE // deprecated site-local
                 (u[0] and 0xfe) == 0xfc -> PRIVATE // fc00::/7 unique-local, incl. fd00::/8
                 u[0] == 0x20 && u[1] == 0x01 && u[2] == 0x0d && u[3] == 0xb8 -> RESERVED // documentation
+                u[0] == 0x20 && u[1] == 0x01 && u[2] == 0x00 && u[3] == 0x00 -> RESERVED // Teredo 2001::/32
+                // local-use NAT64 64:ff9b:1::/48 (RFC 8215): already outside 2000::/3, named for clarity
+                u[0] == 0x00 && u[1] == 0x64 && u[2] == 0xff && u[3] == 0x9b && u[4] == 0 && u[5] == 1 -> RESERVED
                 u[0] == 0x01 && u[1] == 0x00 && (2 until 8).all { u[it] == 0 } -> RESERVED // discard-only
                 (u[0] and 0xe0) != 0x20 -> RESERVED // outside 2000::/3 global unicast
                 else -> PUBLIC

@@ -103,9 +103,9 @@ class SafeHttpClientTest {
         val (serverCtx, clientCtx) = tlsContexts(dir, "stub.test")
         val stub = Stub(server = serverCtx.serverSocketFactory.createServerSocket(0, 50, loopback) as SSLServerSocket)
         val client =
-            SafeHttpClient(policy("stub.test:${stub.port};private"), resolver = {
+            SafeHttpClient.withTrustForTesting(clientCtx, policy("stub.test:${stub.port};private")) {
                 listOf(loopback)
-            }, sslContext = clientCtx)
+            }
 
         val resp = client.send(EgressRequest("POST", "https://stub.test:${stub.port}/x", body = "hi".toByteArray()))
 
@@ -119,9 +119,9 @@ class SafeHttpClientTest {
         val (serverCtx, clientCtx) = tlsContexts(dir, "other.test")
         val stub = Stub(server = serverCtx.serverSocketFactory.createServerSocket(0, 50, loopback) as SSLServerSocket)
         val client =
-            SafeHttpClient(policy("stub.test:${stub.port};private"), resolver = {
+            SafeHttpClient.withTrustForTesting(clientCtx, policy("stub.test:${stub.port};private")) {
                 listOf(loopback)
-            }, sslContext = clientCtx)
+            }
 
         assertThatThrownBy { client.send(EgressRequest("GET", "https://stub.test:${stub.port}/")) }
             .isInstanceOf(SSLHandshakeException::class.java)
