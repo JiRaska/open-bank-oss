@@ -12,16 +12,14 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
 
 @ApplicationScoped
-class AuthzProducer {
+class AuthzProducer(
     @ConfigProperty(name = "opa.url", defaultValue = OpaSidecarPolicyDecisionPoint.DEFAULT_BASE_URL)
-    lateinit var opaUrl: String
-
+    private val opaUrl: String,
     @ConfigProperty(name = "opa.path", defaultValue = OpaSidecarPolicyDecisionPoint.DEFAULT_QUERY_PATH)
-    lateinit var opaPath: String
-
-    @ConfigProperty(name = "opa.timeout-ms", defaultValue = DEFAULT_TIMEOUT_MS_STR)
-    var opaTimeoutMs: Long = DEFAULT_TIMEOUT_MS
-
+    private val opaPath: String,
+    @ConfigProperty(name = "opa.timeout-ms", defaultValue = "500")
+    private val opaTimeoutMs: Long,
+) {
     @Produces
     @ApplicationScoped
     fun policyDecisionPoint(): PolicyDecisionPoint = OpaSidecarPolicyDecisionPoint(
@@ -29,12 +27,4 @@ class AuthzProducer {
         queryPath = opaPath,
         timeout = Duration.ofMillis(opaTimeoutMs),
     )
-
-    companion object {
-        // Mirrors OpaSidecarPolicyDecisionPoint.DEFAULT_TIMEOUT (500ms); kept as a
-        // named long here too since @ConfigProperty needs a compile-time default and
-        // a plain Duration constant can't be used as an annotation default value.
-        private const val DEFAULT_TIMEOUT_MS: Long = 500
-        private const val DEFAULT_TIMEOUT_MS_STR: String = "500"
-    }
 }
