@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle2, CircleDot, GitMerge, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, CircleDot, GitMerge, OctagonAlert, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -26,7 +26,11 @@ interface CaseSummary {
   deadlineAtEpochMs: number
   contestedRate: number
   contributionCount: number
+  haltedAtEpochMs?: number
+  haltReason?: string
 }
+
+interface KillSwitchScope { scope: string; reason: string; setBy: string }
 
 type ListEnvelope =
   | { available: true; cases: CaseSummary[] }
@@ -54,12 +58,34 @@ export default function IaopsCasesPage() {
   const [cases, setCases] = useState<CaseSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [killSwitch, setKillSwitch] = useState<{ active: boolean; scopes: KillSwitchScope[]; available: true } | null>(null)
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = useCallback(
     (epochMs: number) => new Date(epochMs).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' }),
     [locale],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/iaops/kill-switch', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((body: unknown) => {
+        if (cancelled) return
+        const status = body as { available?: boolean; active?: boolean; scopes?: KillSwitchScope[] }
+        if (status.available === false) {
+          setKillSwitch(null)
+          return
+        }
+        setKillSwitch({
+          available: true,
+          active: !!status.active,
+          scopes: Array.isArray(status.scopes) ? status.scopes : [],
+        })
+      })
+      .catch(() => setKillSwitch(null))
+    return () => { cancelled = true }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -109,6 +135,41 @@ export default function IaopsCasesPage() {
         subtitle={t('Sdílené případy, ve kterých agenti koordinovaně přispívají do jednoho vlákna (Temporal CaseWorkflow, ADR-0244). Jen pro čtení.', 'Shared cases agents coordinate on in a single thread (Temporal CaseWorkflow, ADR-0244). Read-only.')}
         actions={<Link href="/iaops" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na IAOps', 'Back to IAOps')}</Link>}
       />
+
+      {killSwitch?.active && (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            marginBottom: '16px',
+            padding: '12px 16px',
+            borderRadius: '12px',
+            border: '1px solid var(--error-border, #dc3545)',
+            background: 'var(--error-bg, #fff0f0)',
+            color: 'var(--error-text, #c82333)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+          }}
+        >
+          <OctagonAlert size={20} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>
+              {t('Kill-switch aktivní', 'Kill switch active')}
+            </div>
+            <div style={{ fontSize: '12px', lineHeight: 1.45 }}>
+              {killSwitch.scopes.map((scope) => (
+                <div key={scope.scope}>
+                  <strong>{scope.scope}</strong>
+                  {' — '}
+                  {scope.reason}
+                  {scope.setBy && ` (${scope.setBy})`}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div role="group" aria-label={t('Filtrovat swarm cases podle stavu', 'Filter swarm cases by status')} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
         <button
@@ -173,9 +234,12 @@ export default function IaopsCasesPage() {
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {cases.map((item) => {
-              const visual = statusVisual(item.status)
+              const halted = item.haltedAtEpochMs !== undefined
+              const visual = halted
+                ? { icon: TriangleAlert, fg: 'var(--warning-text)', bg: 'var(--warning-bg)' }
+                : statusVisual(item.status)
               const Icon = visual.icon
-              const presentation = caseStatusPresentation(item.status, language)
+              const presentation = caseStatusPresentation(item.status, language, halted)
               return (
                 <Link
                   key={item.caseId}

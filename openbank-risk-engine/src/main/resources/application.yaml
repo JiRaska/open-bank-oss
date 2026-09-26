@@ -1,0 +1,337 @@
+quarkus:
+  application:
+    name: openbank-risk-engine
+  http:
+    port: 8159
+    test-port: 0
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      Referrer-Policy:
+        value: no-referrer
+      Permissions-Policy:
+        value: geolocation=(), microphone=(), camera=()
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: max-age=31536000; includeSubDomains
+    limits:
+      max-body-size: 1M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_risk
+    # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
+    # datasource, and a service that boots only because the environment supplied one cannot start
+    # from this repo alone (check-flyway-default-datasource.py, #3080).
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_risk
+
+  flyway:
+    # Committing migrations does not run them — this key defaults to FALSE (#3350).
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  # LedgerClient carries OidcClientRequestReactiveFilter, which mints its bearer token from HERE.
+  # Without an oidc-client the ledger call leaves unauthenticated and ledger answers 401
+  # (check-oidc-client-configured.py).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
+  rest-client:
+    ledger-service:
+      # Local default only. The in-cluster URL (ledger's mTLS listener, 8443) is declared in the
+      # gitops Deployment env, where gen-network-policies.py can see the edge; a cluster URL
+      # baked in here would be an edge that generator cannot see (network-policy-code-edges).
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+    # ADR-0314 D4: lending's loan-book read. Local default only, as for ledger above; the gitops
+    # Deployment points it at lending's private-CA mTLS listener (8443, #10732).
+    lending-service:
+      url: ${LENDING_SERVICE_URL:http://localhost:8126}
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    console:
+      format: '%d{HH:mm:ss} %-5p [%c{3.}] %s%e%n'
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-risk-engine
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # fx-service's central-bank fixings (ADR-0314 D5), reference data for every snapshot.
+      #
+      # Every multi-part key below is NESTED, never a dotted leaf: SmallRye's YAML source quotes a
+      # leaf key containing a dot, so `group.id: x` registers as ..."group.id" and the connector
+      # silently uses its default (#686, #2945). The nested form resolves to the plain property.
+      #
+      # failure-strategy: the consumer acks malformed events and RETHROWS a failed write after
+      # bounded retries. SmallRye's default `fail` would then STOP the channel, so the record is
+      # parked in an EXPLICIT per-service dead-letter topic instead (#5745): the implicit name is
+      # derived from the channel name alone, which repeats across services. The topic's KafkaTopic
+      # CR and this service's Write ACL on it live in openbank-infra (kafka-dlq-topics.yaml,
+      # kafka-risk-engine-mtls.yaml) — all four parts or the DLQ send itself wedges.
+      fx-fixing-in:
+        connector: smallrye-kafka
+        topic: openbank.fx.fixing.published
+        client:
+          id: risk-engine-fx-fixing-${quarkus.uuid}
+        group:
+          id: risk-engine-fx-fixing
+        # A new group with no committed offset: read the retained fixings (30 days) rather than
+        # only those published after the first deploy. No replay risk — nothing was consumed yet.
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.risk-engine.fx-fixing-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+openbank:
+  risk:
+    # ADR-0313 D13: a run says which world it describes. Defaults to synthetic, so a run is
+    # labelled production only where an environment explicitly says so.
+    provenance: ${OPENBANK_RISK_PROVENANCE:synthetic}
+    lending:
+      # ADR-0314 D4: read lending's loan book into every snapshot (loans become contract-level
+      # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
+      enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
+    # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
+    # EUR is BCBS d368 (April 2016) Annex 2 Table 1. CZK is NOT in that table and is deliberately
+    # absent: its sizes must be taken from the EBA supervisory-outlier-test RTS by the operator
+    # (e.g. OPENBANK_RISK_IRRBB_SHOCK_SIZES="EUR=200/250/100;CZK=<from the RTS>"). Until then CZK
+    # is reported "shock sizes not configured", never shocked with a guess.
+    irrbb:
+      shock-sizes: ${OPENBANK_RISK_IRRBB_SHOCK_SIZES:EUR=200/250/100}
+      shock-source: ${OPENBANK_RISK_IRRBB_SHOCK_SOURCE:BCBS d368 (Apr 2016) Annex 2 Table 1 and shock formulas (x=4)}
+      # Post-shock floor `atZeroBp/slopeBpPerYear` is optional and unset here: d368 leaves floors
+      # to national supervisors (not above zero). Set OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR and
+      # OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE from the applicable supervisory text.
+    # ADR-0313 phase 1: LCR and NSFR. A VERSIONED parameter set — bump parameter-set-version on any
+    # change here; every /liquidity result names the id and version it was computed with.
+    # BCBS standard factors: d238 = "Basel III: The Liquidity Coverage Ratio and liquidity risk
+    # monitoring tools" (Jan 2013); d295 = "Basel III: the net stable funding ratio" (Oct 2014).
+    # EU CRR / Delegated Regulation (EU) 2015/61 deviations are NOT applied.
+    # Every key below is required (LiquidityConfig is a mapping; the domain rejects missing or
+    # unknown factor keys and values outside [0, 1]), so nothing here has a code default.
+    liquidity:
+      parameter-set-id: bcbs-d238-d295
+      # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
+      parameter-set-version: "2"
+      source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
+      factors:
+        lcr-l1-haircut: 0                    # d238 ¶49
+        lcr-l2a-haircut: 0.15                # d238 ¶52
+        lcr-l2b-rmbs-haircut: 0.25           # d238 ¶54(a)
+        lcr-l2b-other-haircut: 0.50          # d238 ¶54(b),(c)
+        lcr-level2-cap: 0.40                 # d238 ¶46, ¶51, Annex 1
+        lcr-level2b-cap: 0.15                # d238 ¶47, Annex 1
+        lcr-retail-stable-runoff: 0.05       # d238 ¶75 (¶78: a jurisdiction may allow 3%)
+        lcr-retail-less-stable-runoff: 0.10  # d238 ¶79 (minimum)
+        lcr-operational-deposit-runoff: 0.25 # d238 ¶93
+        lcr-other-contractual-outflow: 1.00  # d238 ¶141
+        lcr-retail-loan-inflow: 0.50         # d238 ¶153
+        lcr-fi-inflow: 1.00                  # d238 ¶154
+        lcr-operational-deposit-inflow: 0    # d238 ¶156 (and ¶98)
+        lcr-inflow-cap: 0.75                 # d238 ¶69, ¶144
+        nsfr-asf-capital: 1.00               # d295 ¶21(a)
+        nsfr-asf-retail-stable: 0.95         # d295 ¶22
+        nsfr-asf-retail-less-stable: 0.90    # d295 ¶23
+        nsfr-asf-operational-deposit: 0.50   # d295 ¶24(b)
+        nsfr-asf-other: 0                    # d295 ¶25
+        nsfr-rsf-cash-and-reserves: 0        # d295 ¶36(a),(b)
+        nsfr-rsf-l1-securities: 0.05         # d295 ¶37
+        nsfr-rsf-l2a: 0.15                   # d295 ¶39(a)
+        nsfr-rsf-l2b: 0.50                   # d295 ¶40(a)
+        nsfr-rsf-fi-under-6m: 0.15           # d295 ¶39(b)
+        nsfr-rsf-operational-deposit-at-fi: 0.50 # d295 ¶40(d)
+        nsfr-rsf-loan-under-1y: 0.50         # d295 ¶40(e), amortising split per ¶29
+        nsfr-rsf-loan-1y-low-rw: 0.65        # d295 ¶41(b)
+        nsfr-rsf-loan-1y-other: 0.85         # d295 ¶42(b)
+        nsfr-rsf-other-asset: 1.00           # d295 ¶43(c)
+      classification:
+        # d238 ¶80: deposit-insurance coverage and depositor relationship are not in the data, so
+        # ALL retail deposits are "less stable". Raise only with evidence of ¶75 eligibility.
+        retail-stable-share: 0
+        # d238 ¶93-104: operational treatment needs a clearing/custody/cash-management
+        # relationship and supervisory approval. None unless configured.
+        operational-deposit-share: 0
+        # d295 ¶21(a): Tier 2 counts 100% only for residual maturity ≥ 1 year; maturities of
+        # capital instruments are not in the ledger, so none is assumed.
+        tier2-over-one-year-share: 0
+        # d295 ¶41(b) vs ¶42(b): risk weights are not in the data -> the 85% (conservative) factor.
+        loans-qualify-for-low-risk-weight: false
+        # GL code -> class. ONLY accounts named here count; any other balance is reported as not
+        # classified. The only HQLA account is treasury's 1510 (below); otherwise the chart has no
+        # central-bank reserve account, and
+        # 1000 "Cash and Cash Equivalents" is not known to be coins/banknotes/reserves (d238
+        # ¶50(a),(b)) — map it here only once it is. Nostro 1001 is a balance at a commercial
+        # bank: never HQLA; treated as operational (clearing) -> 0% inflow (d238 ¶156), 50% RSF
+        # (d295 ¶40(d)), the conservative reading of both.
+        #
+        # Treasury (ADR-0315, #10618). 1510 "Deposit Facility at CNB" is an OVERNIGHT deposit at the
+        # central bank: Level 1 as central-bank reserves (d238 ¶50(b) and its footnote on overnight
+        # deposits with the central bank). 1002 EUR nostro is treated like 1001. Money-market
+        # placements 1500/1501 are claims on banks whose d238 ¶154 100% inflow and d295 ¶39(b) 15%
+        # RSF both depend on RESIDUAL MATURITY (≤30 days / <6 months), which a GL-level mapping
+        # cannot see — so they are mapped conservatively as other-asset (no inflow, 100% RSF) until
+        # the risk engine reads treasury deals as contract-level MONEY_MARKET_DEAL instruments
+        # (ADR-0314 D4 follow-up). Borrowings 2300/2301 are unsecured wholesale funding from
+        # financial institutions: other-liability (100% outflow, d238 ¶141 conservative; 0% ASF,
+        # d295 ¶25(b)). Accrued interest follows its principal's side.
+        gl-accounts:
+          "1001": deposit-at-fi-operational
+          "1002": deposit-at-fi-operational
+          "1500": other-asset
+          "1501": other-asset
+          "1510": hqla-l1-cash-or-reserves
+          "1520": other-asset
+          "1521": other-asset
+          "2300": other-liability
+          "2301": other-liability
+          "2310": other-liability
+          "2311": other-liability
+          "1300": other-asset
+          "1301": other-asset
+          "1302": other-asset
+          "1303": other-asset
+          "6000": capital
+          "6010": capital
+          "6020": capital
+          "6030": capital
+          "6040": capital-deduction
+          "6050": capital
+          "6060": capital-tier2
+        # Income / expense accounts not yet closed to equity: 0% ASF (d295 ¶25(a)); no LCR flow.
+        gl-account-types:
+          INCOME: current-year-result
+          EXPENSE: current-year-result
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
+
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%prod":
+  quarkus:
+    # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
+    # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
+    # this stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      ledger-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
+      # lending-service's 8443 listener (#10732) requires a client certificate from the same
+      # private CA, so the same risk-internal-tls pair authenticates this engine to it. A bucket
+      # of its own so the two edges stay independently configurable.
+      lending-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      ledger-service:
+        tls-configuration-name: ledger-authority
+      lending-service:
+        tls-configuration-name: lending-authority
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+  authz:
+    enforce: "false"
+
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+  authz:
+    enforce: "false"

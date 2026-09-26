@@ -171,6 +171,25 @@ allowed_reasons contains "service-balance-m2m" if {
 #
 # balance.overdraftLimit is included even though it is not in the matrix grant: the veto is
 # cheap, and a future matrix edit must never be able to hand the edge a supervisory action.
+# #10486 batch 2 — per-service machine identities (ROLE_API only; BalanceResource already admits
+# ROLE_API on these four writes at the RBAC layer, so OPA is the whole control for ROLE_API
+# callers and each rule below is its principal's WHOLE grant here).
+#   transaction-service (BalanceCoverRestClient, named oidc-client `m2m`): the cover hold and its
+#     release -> balance.hold + balance.holdRelease. Never a booked debit/credit.
+#   settlement-service  (BalanceRestClient, named oidc-client `m2m`): the settlement workflow's
+#     balance legs -> balance.debit + balance.credit. Never a hold.
+allowed_reasons contains "service-transaction-balance-hold" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-transaction"
+	input.action in {"balance.hold", "balance.holdRelease"}
+}
+
+allowed_reasons contains "service-settlement-balance-move" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-settlement"
+	input.action in {"balance.debit", "balance.credit"}
+}
+
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {

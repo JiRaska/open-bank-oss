@@ -8,7 +8,14 @@ info:
   # MINOR is the required class. 1.22.0 is what live origin/main holds; read in the same turn and
   # 1.23.0 confirmed unused on this file, because a taken version is textually identical to a free
   # one and nothing in a merge can tell them apart.
-  version: 1.23.0
+  # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
+  # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
+  # 1.26.0 -> 1.26.1: description-only — the ledger-backfill operations now name their roles
+  # (ROLE_FINANCE or ROLE_ADMIN, humans only, #10618). No schema or path change.
+  # 1.26.1 -> 1.27.0: additive — ledger-backfill request history (GET .../requests, GET
+  # .../requests/{id}) and proposedAt/decidedAt/executedAt on LedgerBackfillRequestView, for the
+  # admin console's finance workspace (#10618).
+  version: 1.27.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -407,6 +414,34 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/CreditPortfolioSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/loan-book:
+    get:
+      tags: [Lending]
+      operationId: loanBook
+      summary: Loans on the book as of a date, with rate terms and remaining installments (ADR-0314 D4)
+      description: >-
+        READ-ONLY. Every loan not closed, written off, unwound, settled or withdrawn and disbursed on
+        or before asOf, with its Loans Receivable GL code, outstanding principal (the sum of its
+        remaining installments' principal), rate terms, latest IFRS 9 stage and the installments
+        unpaid at asOf. The whole book or an error, never a prefix. As-of reconstruction is best
+        effort: lending keeps no status history, and a reschedule replaces the unpaid tail. Read by
+        the risk engine's snapshot (the service account of the shared M2M client) and the credit desk.
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: ISO date; defaults to today (UTC).
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The loan book as of asOf
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanBook' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/risk/policy:
@@ -986,6 +1021,171 @@ paths:
                 items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/ledger-backfill/plan:
+    get:
+      tags: [Lending]
+      operationId: planLedgerBackfill
+      summary: "Dry-run of the one-off ledger backfill (#10746): exact journal set, GL totals, tie-out. Writes nothing."
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
+      parameters:
+        - name: cutoverDate
+          in: query
+          required: true
+          description: Accounting day the journals are booked into (today or later); original dates travel as valueDate.
+          schema: { type: string, format: date }
+        - name: disbursedBefore
+          in: query
+          required: true
+          description: Only loans disbursed strictly before this date are in scope.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillPlanResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/ledger-backfill/requests:
+    get:
+      tags: [Lending]
+      operationId: listLedgerBackfillRequests
+      summary: Ledger backfill request history, newest first
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (#10618).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Page size, 1..100 (default 25).
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: The requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/LedgerBackfillRequestView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Lending]
+      operationId: proposeLedgerBackfill
+      summary: Propose a ledger backfill (maker); the approval binds to the plan hash
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cutoverDate, disbursedBefore]
+              properties:
+                cutoverDate: { type: string, format: date }
+                disbursedBefore: { type: string, format: date }
+      responses:
+        '201':
+          description: Proposal recorded, awaiting a different approver
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillRequestView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/ledger-backfill/requests/{id}:
+    get:
+      tags: [Lending]
+      operationId: getLedgerBackfillRequest
+      summary: One ledger backfill request with its four-eyes state
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (#10618).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillRequestView' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such request
+  /api/v1/lending/ledger-backfill/requests/{id}/decide:
+    post:
+      tags: [Lending]
+      operationId: decideLedgerBackfill
+      summary: Approve or reject a ledger backfill request (checker, must differ from the maker)
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillRequestView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The request was decided concurrently
+        '422':
+          description: Four-eyes violation (approver equals proposer)
+  /api/v1/lending/ledger-backfill/requests/{id}/execute:
+    post:
+      tags: [Lending]
+      operationId: executeLedgerBackfill
+      summary: Execute an APPROVED ledger backfill; without execute=true only returns the plan
+      description: Requires ROLE_FINANCE or ROLE_ADMIN, human callers only (OPA vetoes every service account, #10618). The maker and checker identities are the JWT subjects and must differ.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: execute
+          in: query
+          required: false
+          description: Must be true to post; anything else is a dry-run.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Plan (dry-run) or per-loan execution outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerBackfillExecutionResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Plan hash changed since approval, cut-over passed, or a run is already in progress
+        '422':
+          description: The request is not APPROVED
 
 components:
   securitySchemes:
@@ -1019,6 +1219,47 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    LedgerBackfillRequestView:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        state: { type: string, enum: [PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED] }
+        cutoverDate: { type: string, format: date }
+        planHash: { type: string }
+        loanCount: { type: integer }
+        legCount: { type: integer }
+        proposedBy: { type: string }
+        decidedBy: { type: string, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        executedBy: { type: string, nullable: true }
+        lastResult: { type: string, nullable: true }
+        proposedAt: { type: string, format: date-time, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        executedAt: { type: string, format: date-time, nullable: true }
+    LedgerBackfillGlTotal:
+      type: object
+      properties:
+        code: { type: string }
+        currency: { type: string }
+        debit: { type: number }
+        credit: { type: number }
+        net: { type: number }
+    LedgerBackfillPlanResponse:
+      type: object
+      properties:
+        plan: { type: object, additionalProperties: true }
+        executable: { type: boolean }
+        journalCount: { type: integer }
+        glTotals:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerBackfillGlTotal' }
+    LedgerBackfillExecutionResponse:
+      type: object
+      properties:
+        execution: { type: object, additionalProperties: true }
+        glTotals:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerBackfillGlTotal' }
     PackActivationView:
       type: object
       required:
@@ -1358,13 +1599,31 @@ components:
         termMonths:
           type: integer
           description: Requested term. Bounds are server configuration; outside them is a 400.
+    LoanRateTerms:
+      type: object
+      description: >-
+        ADR-0314. Omitted = FIXED. FIXED carries no other field; FLOATING requires all four. FLOATING
+        origination is a 400 while `lending.origination.floating-rate-enabled` is off (the default),
+        because nothing reprices a floating loan at its reset date yet. A catalog loan is always FIXED.
+      properties:
+        rateType: { type: string, enum: [FIXED, FLOATING], default: FIXED }
+        rateIndex:
+          type: string
+          nullable: true
+          enum: [CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3M]
+        spread: { type: number, nullable: true, description: Margin over rateIndex, decimal fraction. }
+        resetFrequencyMonths: { type: integer, nullable: true, enum: [1, 3, 6, 12] }
+        nextResetDate: { type: string, format: date, nullable: true, description: Not before firstDueDate. }
     LoanApplicationRequest:
       type: object
       required: [partyId, requestedAmount, nominalAnnualRate, termPeriods, firstDueDate]
       properties:
         partyId: { type: string, format: uuid }
         requestedAmount: { $ref: '#/components/schemas/Money' }
-        nominalAnnualRate: { type: number }
+        nominalAnnualRate:
+          type: number
+          description: The rate applied. For a FLOATING loan, index + spread at origination.
+        rateTerms: { $ref: '#/components/schemas/LoanRateTerms' }
         termPeriods: { type: integer }
         periodsPerYear: { type: integer, default: 12 }
         method:
@@ -1449,3 +1708,53 @@ components:
         newFirstDueDate: { type: string, format: date }
         principalForgiveness: { $ref: '#/components/schemas/Money' }
         reason: { type: string, nullable: true }
+    LoanBook:
+      type: object
+      required: [asOf, loans]
+      properties:
+        asOf: { type: string, format: date }
+        loans:
+          type: array
+          items: { $ref: '#/components/schemas/LoanBookEntry' }
+    LoanBookEntry:
+      type: object
+      required: [loanId, counterpartyRef, status, currency, outstandingPrincipal, nominalAnnualRate, rateTerms,
+        method, periodsPerYear, disbursedOn, remainingInstallments]
+      properties:
+        loanId: { type: string, format: uuid }
+        counterpartyRef:
+          type: string
+          format: uuid
+          description: Opaque party reference; identity stays in party-service.
+        status:
+          type: string
+          enum: [ACTIVE, DELINQUENT, DEFAULTED, FORBEARANCE_ASSESSED, TERMINATION_NOTICED, ACCELERATED,
+            EARLY_REPAYMENT_REQUESTED, SETTLEMENT_QUOTED, SETTLED, WITHDRAWN, UNWOUND, CLOSED, WRITTEN_OFF]
+        currency: { type: string }
+        glAccountCode:
+          type: string
+          nullable: true
+          description: Loans Receivable GL code the loan is carried on (1200 CZK, 1201 EUR, 1202 USD, 1203 GBP).
+        outstandingPrincipal:
+          type: number
+          description: Sum of remainingInstallments' principal.
+        nominalAnnualRate:
+          type: number
+          description: The rate currently applied; for FLOATING, index + spread at the last reset.
+        rateTerms: { $ref: '#/components/schemas/LoanRateTerms' }
+        method: { type: string, enum: [ANNUITY, EQUAL_PRINCIPAL, BULLET] }
+        periodsPerYear: { type: integer }
+        disbursedOn: { type: string, format: date }
+        maturityDate: { type: string, format: date, nullable: true }
+        ifrs9Stage: { type: string, nullable: true, enum: [STAGE_1, STAGE_2, STAGE_3] }
+        remainingInstallments:
+          type: array
+          items: { $ref: '#/components/schemas/RemainingInstallment' }
+    RemainingInstallment:
+      type: object
+      required: [number, dueDate, principal, interest]
+      properties:
+        number: { type: integer }
+        dueDate: { type: string, format: date }
+        principal: { type: number }
+        interest: { type: number }

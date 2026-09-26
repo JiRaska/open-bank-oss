@@ -229,6 +229,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: loyalty
+            cluster: loyalty-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: messaging
             cluster: apicurio-db
             origin: manifest
@@ -379,6 +385,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: risk
+            cluster: risk-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: sanctions
             cluster: sanctions-db
             origin: manifest
@@ -417,6 +429,12 @@ spec:
           labels:
             namespace: tpp-registry
             cluster: tpp-registry-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: treasury
+            cluster: treasury-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)

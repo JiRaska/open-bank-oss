@@ -86,6 +86,7 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'onboarding',        label: 'Onboarding',       group: 'compliance',   container: 'openbank-onboarding-service',     port: 8130 },
   { id: 'document',          label: 'Documents',        group: 'platform',     container: 'openbank-document-service',       port: 8143 },
   { id: 'lending',           label: 'Lending',          group: 'payments',     container: 'openbank-lending-service',        port: 8126 },
+  { id: 'risk-engine',       label: 'Risk Engine',      group: 'core',         container: 'openbank-risk-engine',            port: 8159 },
   { id: 'sdd',               label: 'SDD',              group: 'payments',     container: 'openbank-sdd-service',            port: 8129 },
   { id: 'copilot',           label: 'Copilot',          group: 'platform',     container: 'openbank-copilot-service',        port: 8131 },
   { id: 'fraud',             label: 'Fraud',            group: 'compliance',   container: 'openbank-fraud-service',          port: 8133 },

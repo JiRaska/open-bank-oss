@@ -46,6 +46,14 @@ class LedgerWireMockResource : QuarkusTestResourceLifecycleManager {
             "quarkus.oidc-client.client-id" to "openbank-services",
             "quarkus.oidc-client.credentials.secret" to "test-secret",
             "quarkus.oidc-client.grant.type" to "client",
+            // #10486 batch 2: the ledger and balance-cover clients now mint from the NAMED client
+            // `m2m` (openbank-transaction), so it needs the same stubbed token endpoint.
+            "quarkus.oidc-client.m2m.auth-server-url" to base,
+            "quarkus.oidc-client.m2m.discovery-enabled" to "false",
+            "quarkus.oidc-client.m2m.token-path" to "/token",
+            "quarkus.oidc-client.m2m.client-id" to "openbank-transaction",
+            "quarkus.oidc-client.m2m.credentials.secret" to "test-secret",
+            "quarkus.oidc-client.m2m.grant.type" to "client",
         )
     }
 

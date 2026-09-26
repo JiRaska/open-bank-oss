@@ -92,8 +92,7 @@ class PartyServiceMarketingConsentTest {
         assertThat(result.consentGdpr).isTrue()
         assertThat(result.consentCapturedAt).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"))
         coVerify(exactly = 1) { service.marketingConsentForwarding.grant(partyId) }
-        coVerify(exactly = 0) { service.partyRepo.update(any()) }
-        coVerify(exactly = 0) { service.partyRepo.update(any(), any()) }
+        coVerify(exactly = 0) { service.partyRepo.modify(any(), any()) }
     }
 
     @Test
@@ -110,7 +109,7 @@ class PartyServiceMarketingConsentTest {
         assertThat(result.consentMarketing).isFalse()
         assertThat(result.consentMarketingUpdatedAt).isEqualTo(now)
         coVerify(exactly = 1) { service.marketingConsentForwarding.revoke(partyId, trackedConsentId, any()) }
-        coVerify(exactly = 0) { service.partyRepo.update(any()) }
+        coVerify(exactly = 0) { service.partyRepo.modify(any(), any()) }
     }
 
     @Test

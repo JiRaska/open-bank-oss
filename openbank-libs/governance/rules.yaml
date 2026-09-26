@@ -1036,6 +1036,17 @@ money_path_services:
                                             # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
                                             # without the cardholder's SCA today — add a verb here when one ships.
                                             # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+  - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                            # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                            # a journal through ledger's POST /api/v1/journals. Threat model:
+                                            # docs/threat-models/openbank-treasury-service.md.
+                                            # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                            # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                            # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                            # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                            # needs an X-Approval-Id round-trip the deal's own
+                                            # PENDING_APPROVAL state already is. Writes are human-only in
+                                            # treasury_rest_ext.rego.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -3272,6 +3283,23 @@ authz:
     ROLE_COMMS_APPROVER:
       grant:
         - commstyle.approval.read
+    # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+    # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+    # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+    # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+    # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+    # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+    # here on purpose: every treasury action, the reads included, is granted in
+    # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+    # treasury depends on this matrix.
+    ROLE_RISK:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
+    ROLE_FINANCE:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
 # `data.rules.shared_m2m_write_prohibition.reasons`, and gen-rules-opa-data.py selects only
@@ -3569,13 +3597,20 @@ pr_file_overlap:
     - "openbank-infra/gitops/"
 
 # ---------------------------------------------------------------------------
-# AGENT CASE COLLABORATION (ADR-0271 proposal; no live grants)
+# AGENT CASE COLLABORATION (ADR-0271 bounded shadow grant)
 #
 # This matrix is an independent authorization boundary, intersected with each
 # principal's agents.yaml case_capabilities by the case-coordinator-only OPA bundle.
-# Empty is intentional: the policy and PEP may be reviewed without silently creating
-# a production grant. Every entry requires a separate authorization review.
-agent_case_capability_matrix: []
+# Every entry requires a separate authorization review. The first grant is deliberately
+# restricted to the incident-response SHADOW rollout; HITL and every other class still deny.
+agent_case_capability_matrix:
+  - agent_id: rca-investigator
+    capabilities: [case.join, case.contribute]
+    case_class: INCIDENT_RESPONSE
+    delivery_mode: SHADOW
+    enabled: true
+    rollout_id: incident-triage-shadow-2026-08-20
+    max_signals_per_case: 8
 
 # ---------------------------------------------------------------------------
 # AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)

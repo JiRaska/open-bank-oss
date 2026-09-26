@@ -12,6 +12,7 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.domain.model.BorrowerDistressSignals
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -74,7 +75,10 @@ class RestCreditOffersConsentAdapter(@param:RestClient private val consents: Len
 
 /** analytics-sink's ADR-0269 credit profile (#6215) — the single definition of these numbers. */
 @RegisterRestClient(configKey = "analytics-sink")
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 6: the credit-profile read is minted by the NAMED oidc-client `m2m` - Keycloak
+// client `openbank-lending` (ROLE_API only) - which analytics-sink admits by name; never the shared
+// `openbank-services` one.
+@OidcClientFilter("m2m")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/analytics/credit-profile")
 @Produces(MediaType.APPLICATION_JSON)

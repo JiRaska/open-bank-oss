@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.adapter
 
+import com.openbank.lending.application.port.out.LedgerPostResult
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.infrastructure.client.JournalResponse
@@ -20,6 +21,7 @@ import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.jboss.resteasy.reactive.RestResponse
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -84,5 +86,23 @@ class RestLedgerPostingAdapterTest {
         assertThatThrownBy { adapter.post(posting(PostingKind.WRITE_OFF)).await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("ledger down")
+    }
+
+    // #10904: the header is the only thing telling a replay from a posting. An absent header (a
+    // ledger older than API 1.20.0) must read as UNCONFIRMED, never as POSTED.
+    @Test
+    fun `the Idempotent-Replayed header decides POSTED, REPLAYED or UNCONFIRMED`() {
+        every { config.systemActorId() } returns actor
+        val body = JournalResponse(id = UUID.randomUUID(), transactionId = UUID.randomUUID(), status = "POSTED")
+        fun answer(header: String?): LedgerPostResult {
+            val builder = RestResponse.ResponseBuilder.create(RestResponse.Status.CREATED, body)
+            header?.let { builder.header("Idempotent-Replayed", it) }
+            every { guard.postJournalWithHeaders(any()) } returns Uni.createFrom().item(builder.build())
+            return adapter.postReportingReplay(posting()).await().indefinitely()
+        }
+
+        assertThat(answer("false")).isEqualTo(LedgerPostResult.POSTED)
+        assertThat(answer("true")).isEqualTo(LedgerPostResult.REPLAYED)
+        assertThat(answer(null)).isEqualTo(LedgerPostResult.UNCONFIRMED)
     }
 }

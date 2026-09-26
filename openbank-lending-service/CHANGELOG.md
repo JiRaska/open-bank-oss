@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.0...lending-service-v0.37.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **lending:** stop counting idempotent replays as posted in the ledger backfill ([#10938](https://github.com/JiRaska/open-bank-oss/issues/10938)) ([a28de17](https://github.com/JiRaska/open-bank-oss/commit/a28de17cd76c5203622236b02b2bb005c840f098))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.36.0...lending-service-v0.37.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.2...lending-service-v0.36.0) (2026-09-25)
+
+
+### Features
+
+* **infra:** risk, finance and treasury department roles ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10833](https://github.com/JiRaska/open-bank-oss/issues/10833)) ([43a94a2](https://github.com/JiRaska/open-bank-oss/commit/43a94a2cfb0267d53c7573a33b592df9b474d77c))
+
+## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.1...lending-service-v0.35.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **lending:** four-eyes ledger backfill for the 44 loans that never posted ([#10746](https://github.com/JiRaska/open-bank-oss/issues/10746)) ([#10765](https://github.com/JiRaska/open-bank-oss/issues/10765)) ([c86b350](https://github.com/JiRaska/open-bank-oss/commit/c86b350bf0531f429722988b93946307b1572512))
+
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.0...lending-service-v0.35.1) (2026-09-24)
+
+
+### Security
+
+* **lending:** open the east-west mTLS listener on 8443 ([#10732](https://github.com/JiRaska/open-bank-oss/issues/10732)) ([2741836](https://github.com/JiRaska/open-bank-oss/commit/274183675bf72f837a3df13e66b5739f4a632935)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.34.0...lending-service-v0.35.0) (2026-09-24)
+
+
+### Features
+
+* **risk-engine:** loans as contract-level instruments, with a read-only lending loan book (ADR-0314 D4) ([#10729](https://github.com/JiRaska/open-bank-oss/issues/10729)) ([5cee641](https://github.com/JiRaska/open-bank-oss/commit/5cee641635fcbd0d3cd1a8bada5021bdbcd60859))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.9...lending-service-v0.34.0) (2026-09-24)
+
+
+### Features
+
+* **lending:** record fixed or floating rate terms on loans ([#10693](https://github.com/JiRaska/open-bank-oss/issues/10693)) ([bd41c32](https://github.com/JiRaska/open-bank-oss/commit/bd41c3206138ecbc1255732736e818450e12ad08)), closes [#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)
+
+## [0.33.9](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.8...lending-service-v0.33.9) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.33.8](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.7...lending-service-v0.33.8) (2026-09-23)
+
+
+### Security
+
+* **fx:** admit ROLE_API on machine-read endpoints and add the final-step runbook ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 4) ([#10544](https://github.com/JiRaska/open-bank-oss/issues/10544)) ([3fb9575](https://github.com/JiRaska/open-bank-oss/commit/3fb9575e6c68d7a7670f2ead8a6b6909f1cffe54))
+
+## [0.33.7](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.6...lending-service-v0.33.7) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
+## [0.33.6](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.5...lending-service-v0.33.6) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.33.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.4...lending-service-v0.33.5) (2026-09-20)
+
+
+### Bug Fixes
+
+* **consent:** add an mTLS listener and point lending + copilot at it ([#10400](https://github.com/JiRaska/open-bank-oss/issues/10400)) ([4de039d](https://github.com/JiRaska/open-bank-oss/commit/4de039d0fdb285b79df402ec3e68aa71b5524112))
+
 ## [0.33.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.3...lending-service-v0.33.4) (2026-09-17)
 
 
