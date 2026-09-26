@@ -49,9 +49,14 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.util.UUID
+
+private val log: Logger = Logger.getLogger("com.openbank.delegation.infrastructure.rest.IdempotencyReservation")
 
 /**
  * `reserve` -> Reserved: run [block], then the fingerprinted `save`; any failure from [block]
@@ -59,9 +64,11 @@ import java.util.UUID
  * stored response is returned verbatim. Mismatch/InFlight: throw the matching exception so
  * libs-runtime's mappers answer 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS.
  * Side effects never run before `reserve` returns [ReserveResult.Reserved]. Kept top-level (not a
- * class member) so it does not count against any resource class's detekt TooManyFunctions.
+ * class member) so it does not count against any resource class's detekt TooManyFunctions, and
+ * `internal` because it is implementation plumbing shared by this module's REST classes, not
+ * public API.
  */
-suspend fun IdempotencyStore.withReservation(
+internal suspend fun IdempotencyStore.withReservation(
     key: String,
     requestHash: String,
     ttlSeconds: Long = 86400,
@@ -70,7 +77,18 @@ suspend fun IdempotencyStore.withReservation(
     is ReserveResult.Replay -> replayResponse(reservation.record.statusCode, reservation.record.responseBody)
     ReserveResult.Reserved -> {
         val (statusCode, body, location) = runCatching { block() }
-            .onFailure { release(key, requestHash) }
+            .onFailure {
+                // Shielded from cancellation and never rethrows: a release failure must not mask
+                // the ORIGINAL exception from block() (rethrown by getOrThrow() below), and a
+                // cancelled caller must not abandon the release mid-flight and leave the key stuck
+                // IN_PROGRESS for its full TTL.
+                withContext(NonCancellable) {
+                    runCatching { release(key, requestHash) }
+                        .onFailure { releaseFailure ->
+                            log.warn("Failed to release idempotency key after failure", releaseFailure)
+                        }
+                }
+            }
             .getOrThrow()
         save(key, requestHash, statusCode, body, ttlSeconds)
         val builder = Response.status(statusCode).entity(body).type(MediaType.APPLICATION_JSON)

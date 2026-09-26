@@ -27,6 +27,7 @@ class WithReservationTest {
         val released = mutableListOf<String>()
         val saved = mutableListOf<String>()
         var reserveResult: ReserveResult = ReserveResult.Reserved
+        var releaseFailure: Throwable? = null
 
         override suspend fun get(key: String): IdempotencyRecord? = null
         override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) = Unit
@@ -42,6 +43,7 @@ class WithReservationTest {
         override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long) = reserveResult
         override suspend fun release(key: String, requestHash: String) {
             released += key
+            releaseFailure?.let { throw it }
         }
     }
 
@@ -62,6 +64,24 @@ class WithReservationTest {
     @Test
     fun `a block failure releases the reservation and rethrows, without saving`() {
         val store = FakeIdempotencyStore()
+        assertThatThrownBy {
+            runBlocking {
+                store.withReservation("k", "h") {
+                    error("use case failed")
+                }
+            }
+        }.hasMessage("use case failed")
+        assertThat(store.released).containsExactly("k")
+        assertThat(store.saved).isEmpty()
+    }
+
+    @Test
+    fun `a release failure does not mask the original block failure`() {
+        // Without withContext(NonCancellable) { runCatching { ... } } around the release() call
+        // inside onFailure, an exception thrown by release() propagates from Result.onFailure and
+        // REPLACES the original block failure that getOrThrow() would otherwise rethrow.
+        val store = FakeIdempotencyStore()
+        store.releaseFailure = IllegalStateException("redis unavailable")
         assertThatThrownBy {
             runBlocking {
                 store.withReservation("k", "h") {
