@@ -3080,6 +3080,26 @@ gates:
     run: |
       python3 .github/scripts/check-domain-purity.py .
 
+  # ADR-0317: bounded-context packages leave openbank-libs-domain for openbank-libs-<context>
+  # so a business change rebuilds its 1-11 declarers, not all 57 core consumers. Three things
+  # silently undo that — a moved package reappearing in core, core depending on a context
+  # module, a libs module missing from LIBS_MODULES (#2983) — and this reports each. ADVISORY
+  # through phases 1-3, enforced in phase 4 (rules.yaml: architecture.libs_core_purity).
+  - id: libs-core-purity
+    name: "libs-core-purity — business packages stay out of libs-domain (ADR-0317, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Business packages drifting back into openbank-libs-domain, or a libs module missing from LIBS_MODULES, silently restores the 57-module rebuild fan-out ADR-0317 removes (or the #2983 no-rebuild defect)."
+    review_after: "2027-03-31"
+    verified: "2026-09-26 — advisory until ADR-0317 phases 2-3 move the remaining packages; 0 findings on the phase-1 tree, sabotage of each rule (a/b/c) goes red under --enforce"
+    budget_seconds: 10
+    min_subjects: 50   # 109 measured 2026-09-26 (libs-domain sources + 2 build files + libs modules)
+    selftest_inputs: [".github/scripts/check-libs-core-purity.py"]
+    selftest: python3 .github/scripts/check-libs-core-purity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-libs-core-purity.py
+
   # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
   # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
   # Applying one compiled, reviewed as correct, and did nothing; @Idempotent on a payment
