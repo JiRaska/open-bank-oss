@@ -114,3 +114,21 @@ BALANCE_STATE_UNKNOWN outbox fact must exist. The completed history is retained.
 This verifies the current conservative failure state, not a terminal business rejection or
 automatic reconciliation. A failed cover activity is still reported as BALANCE_STATE_UNKNOWN;
 this test does not claim that distinction has been resolved or exercise lost cover replies.
+
+## Lose every committed cover response
+
+```sh
+python3 openbank-infra/scripts/settlement-real-services-e2e.py --drop-cover-responses
+```
+
+This standalone three-service mode routes the settlement balance client through the loopback
+fault proxy. It drops all five replies only after the real balance service returns a successful
+active hold. Every upstream response must identify the same hold. The closed workflow must
+record BALANCE_STATE_UNKNOWN without scheduling BookToLedger. The proof requires one active
+40 CZK hold, no settlement journal, payer booked/reserved/available amounts of 100/40/60,
+zero payee balances, and unchanged balance versions after origination replay. One durable
+uncertainty outbox fact and the completed workflow history are retained.
+
+This is the counterpart to insufficient cover: both can leave a failed activity, but here
+money really is reserved. It proves safe retention, not completed reconciliation or cancellation.
+Do not turn an exhausted reservation request into a blind release or terminal rejection.

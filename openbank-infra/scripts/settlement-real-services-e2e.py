@@ -36,26 +36,29 @@ REQUEST_TIMEOUT_SECONDS = 10
 containers: list[str] = []
 processes: list[subprocess.Popen[str]] = []
 process_logs: list[Any] = []
-response_loss_proxy: LedgerResponseLossProxy | None = None
+response_loss_proxy: CommittedResponseLossProxy | None = None
 
 
-class LedgerResponseLossProxy:
-    """Forward real journal posts, losing a bounded number of successful replies after commit."""
+class CommittedResponseLossProxy:
+    """Forward real writes, losing bounded successful replies after a journal or hold commits."""
 
-    def __init__(self, ledger_port: int, drop_count: int):
+    def __init__(self, upstream_port: int, drop_count: int, resource: str = "journal"):
+        assert resource in {"journal", "hold"}
+        self.resource = resource
         self.drop_count = drop_count
         self.lock = threading.Lock()
-        self.successful_journal_ids: list[str] = []
+        self.successful_resource_ids: list[str] = []
         self.dropped_responses = 0
         proxy = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self) -> None:
-                if self.path != "/api/v1/journals":
+                if not (self.path == "/api/v1/journals" if resource == "journal" else
+                        self.path.startswith("/api/v1/balances/") and self.path.endswith("/holds")):
                     self.send_error(404)
                     return
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-                upstream = http.client.HTTPConnection("127.0.0.1", ledger_port, timeout=REQUEST_TIMEOUT_SECONDS)
+                upstream = http.client.HTTPConnection("127.0.0.1", upstream_port, timeout=REQUEST_TIMEOUT_SECONDS)
                 try:
                     upstream.request("POST", self.path, body, {
                         "Content-Type": "application/json",
@@ -67,16 +70,18 @@ class LedgerResponseLossProxy:
                     content_type = response.getheader("Content-Type", "application/json")
                     drop = False
                     if 200 <= status < 300:
-                        journal = json.loads(payload)
-                        if journal.get("status") != "POSTED":
+                        committed = json.loads(payload)
+                        if resource == "journal" and committed.get("status") != "POSTED":
                             raise ValueError("Fault injection requires a confirmed POSTED journal")
+                        if resource == "hold" and (committed.get("releasedAt") is not None or not committed.get("referenceId")):
+                            raise ValueError("Fault injection requires a committed active hold")
                         with proxy.lock:
-                            proxy.successful_journal_ids.append(journal["id"])
+                            proxy.successful_resource_ids.append(committed["id"])
                             if proxy.dropped_responses < proxy.drop_count:
                                 proxy.dropped_responses += 1
                                 drop = True
                     if drop:
-                        # No synthetic ledger success: the real upstream has returned POSTED.
+                        # Only lose a successful response from the real upstream.
                         self.close_connection = True
                         self.connection.shutdown(socket.SHUT_RDWR)
                         return
@@ -101,16 +106,16 @@ class LedgerResponseLossProxy:
     def port(self) -> int:
         return self.server.server_address[1]
 
-    def evidence(self, journal_id: str) -> dict[str, Any]:
+    def evidence(self, resource_id: str) -> dict[str, Any]:
         with self.lock:
-            assert self.dropped_responses == self.drop_count, "Expected committed ledger replies were not lost"
+            assert self.dropped_responses == self.drop_count, "Expected committed replies were not lost"
             expected_posts = 2 if self.drop_count == 1 else 5
-            assert len(self.successful_journal_ids) == expected_posts, "Unexpected settlement retry count"
-            assert set(self.successful_journal_ids) == {journal_id}, "Retry created a different journal"
+            assert len(self.successful_resource_ids) == expected_posts, "Unexpected settlement retry count"
+            assert set(self.successful_resource_ids) == {resource_id}, "Retry created a different resource"
             return {
                 "droppedResponses": self.dropped_responses,
-                "successfulUpstreamPosts": len(self.successful_journal_ids),
-                "journalId": journal_id,
+                "successfulUpstreamPosts": len(self.successful_resource_ids),
+                ("journalId" if self.resource == "journal" else "holdId"): resource_id,
             }
 
     def close(self) -> None:
@@ -390,7 +395,10 @@ def main() -> None:
     parser.add_argument("--recover-after-loss", action="store_true", help="Reset the exhausted local workflow before journal booking")
     parser.add_argument("--with-audit", action="store_true", help="Prove real settlement outbox ingestion and audit chain integrity")
     parser.add_argument("--reject-cover", action="store_true", help="Verify insufficient cover never reaches ledger booking")
+    parser.add_argument("--drop-cover-responses", action="store_true", help="Lose all five committed cover replies and verify safe uncertainty")
     args = parser.parse_args()
+    if args.drop_cover_responses and (args.drop_ledger_response or args.reject_cover or args.with_audit):
+        parser.error("--drop-cover-responses is a standalone three-service proof")
     if args.recover_after_loss and args.drop_ledger_response != 5:
         parser.error("--recover-after-loss requires --drop-ledger-response 5")
     global postgres
@@ -515,8 +523,12 @@ def main() -> None:
     service_ports = {name: port() for name in service_names}
     ledger_client_port = service_ports["ledger"]
     if args.drop_ledger_response:
-        response_loss_proxy = LedgerResponseLossProxy(ledger_client_port, args.drop_ledger_response)
+        response_loss_proxy = CommittedResponseLossProxy(ledger_client_port, args.drop_ledger_response)
         ledger_client_port = response_loss_proxy.port
+    balance_client_port = service_ports["balance"]
+    if args.drop_cover_responses:
+        response_loss_proxy = CommittedResponseLossProxy(balance_client_port, 5, resource="hold")
+        balance_client_port = response_loss_proxy.port
     opa_ports = {
         name: start_opa(name, component)
         for name, component in ([("ledger", "ledger"), ("balance", "balances"), ("settlement", "payments")]
@@ -544,7 +556,7 @@ def main() -> None:
                 "OPA_TIMEOUT_MS": "5000",
                 "OPENBANK_TEMPORAL_SERVER_URL": f"127.0.0.1:{temporal_port}",
                 "OPENBANK_TEMPORAL_NAMESPACE": "openbank-settlement",
-                "BALANCE_SERVICE_URL": f"http://127.0.0.1:{service_ports['balance']}",
+                "BALANCE_SERVICE_URL": f"http://127.0.0.1:{balance_client_port}",
                 "LEDGER_SERVICE_URL": f"http://127.0.0.1:{ledger_client_port}",
                 "SETTLEMENT_LEDGER_PROJECTION_ENABLED": "true",
                 "QUARKUS_OTEL_SDK_DISABLED": "true",
@@ -657,6 +669,47 @@ def main() -> None:
     created = request(settlement_endpoint, settlement_body, token)
     settlement_id = created["id"]
     print(f"Originated settlement {settlement_id}", flush=True)
+    if args.drop_cover_responses:
+        until(
+            lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{settlement_id}'") == "BALANCE_STATE_UNKNOWN",
+            "lost cover replies recorded as uncertain", 90,
+        )
+
+        def closed_history() -> dict[str, Any] | None:
+            history = json.loads(run(
+                "docker", "exec", temporal, "temporal", "workflow", "show",
+                "--workflow-id", f"settlement-{settlement_id}", "--namespace", "openbank-settlement",
+                "--address", "127.0.0.1:7233", "--output", "json", "--command-timeout", "10s",
+            ))
+            return history if history["events"][-1]["eventType"] == "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED" else None
+
+        history = until(closed_history, "lost-cover workflow completion", 30)
+        (OUT / "workflow-lost-cover.json").write_text(json.dumps(history, indent=2))
+        scheduled = [e["activityTaskScheduledEventAttributes"]["activityType"]["name"]
+                     for e in history["events"] if "activityTaskScheduledEventAttributes" in e]
+        assert "ReserveSettlementCover" in scheduled and "BookToLedger" not in scheduled, scheduled
+        holds = json.loads(sql("balance", "SELECT json_agg(h) FROM (SELECT hold_id AS id, amount, released_at "
+                              f"FROM balance_holds WHERE reference_id='{settlement_id}' AND account_id='{payer}' AND currency='CZK') h"))
+        assert len(holds) == 1 and Decimal(str(holds[0]["amount"])) == Decimal("40") and holds[0]["released_at"] is None
+        journals = request(f"{ledger_endpoint}/transaction/{settlement_id}", token=token)
+        assert journals == [], journals
+        balances = [request(f"{balance}/{account}/CZK", token=token) for account in (payer, payee)]
+        for observed, expected in zip(balances, [(100, 40, 60), (0, 0, 0)]):
+            assert tuple(Decimal(str(observed[k])) for k in ("bookedAmount", "reservedAmount", "availableAmount")) == expected
+        assert request(settlement_endpoint, settlement_body, token)["id"] == settlement_id
+        replayed = [request(f"{balance}/{account}/CZK", token=token) for account in (payer, payee)]
+        assert [b["version"] for b in replayed] == [b["version"] for b in balances]
+        assert sql("settlement", "SELECT count(*) FROM settlement_outbox "
+                   f"WHERE aggregate_id='{settlement_id}' AND payload::jsonb->>'status'='BALANCE_STATE_UNKNOWN'") == "1"
+        assert response_loss_proxy is not None
+        evidence = response_loss_proxy.evidence(holds[0]["id"])
+        (OUT / "result.json").write_text(json.dumps({
+            "status": "PASS", "settlementId": settlement_id, "settlementStatus": "BALANCE_STATE_UNKNOWN",
+            "coverResponseLoss": evidence, "holds": holds, "journals": journals,
+            "balances": balances, "scheduledActivities": scheduled, "source": source_metadata,
+        }, indent=2))
+        print("PASS lost cover replies", json.dumps(evidence), flush=True)
+        return
     expected_status = "LEDGER_STATE_UNKNOWN" if args.drop_ledger_response == 5 else "BOOKED"
     until(
         lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{settlement_id}'") == expected_status,
@@ -771,7 +824,7 @@ def main() -> None:
         assert response_loss_proxy is not None
         with response_loss_proxy.lock:
             assert response_loss_proxy.dropped_responses == 5
-            assert response_loss_proxy.successful_journal_ids == [journals[0]["id"]] * 6
+            assert response_loss_proxy.successful_resource_ids == [journals[0]["id"]] * 6
         recovery_evidence = {
             "status": "BOOKED", "resetEventId": reset_event, "successfulUpstreamPosts": 6,
             "originalRunId": original_run, "recoveredRunId": observed_run, "durableRecoveryFacts": 1,

@@ -29,6 +29,7 @@ journal event can still project the movement and atomically consume the matching
 settlement remains `LEDGER_STATE_UNKNOWN`. Otherwise the cover remains reserved. Reconcile by
 settlement ID against the hold reference,
 ledger transaction ID, projection markers and outbox delivery before any approved correction.
+The local proof `--drop-cover-responses` exercises five lost replies after a real hold commits: one active hold remains, no journal activity starts, and the row is `BALANCE_STATE_UNKNOWN`. By contrast, `--reject-cover` exercises insufficient funds with no hold created. Both currently produce the same uncertainty state; operators must inspect the actual hold and workflow history rather than infer reservation existence from that status.
 Never release a hold merely because the caller timed out. Never reissue the transfer under a new
 idempotency key to clear a stalled row. `BOOKED` confirms the journal, not completion of asynchronous
 projection on both balance pockets.
