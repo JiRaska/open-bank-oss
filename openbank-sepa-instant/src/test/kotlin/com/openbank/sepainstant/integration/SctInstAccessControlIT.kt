@@ -22,11 +22,13 @@ import java.util.UUID
 class SctInstAccessControlIT {
 
     @Test
-    fun `anonymous cannot submit an SCT Inst payment`(): Unit {
+    fun `anonymous cannot submit an SCT Inst payment`() {
         Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
-            body("""{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""")
+            body(
+                """{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""",
+            )
         } When {
             post("/api/v1/sepa-instant")
         } Then {
@@ -36,11 +38,13 @@ class SctInstAccessControlIT {
 
     @Test
     @TestSecurity(user = "viewer-only", roles = ["ROLE_VIEWER"])
-    fun `viewer cannot submit an SCT Inst payment`(): Unit {
+    fun `viewer cannot submit an SCT Inst payment`() {
         Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
-            body("""{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""")
+            body(
+                """{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""",
+            )
         } When {
             post("/api/v1/sepa-instant")
         } Then {
@@ -50,7 +54,7 @@ class SctInstAccessControlIT {
 
     @Test
     @TestSecurity(user = "viewer-only", roles = ["ROLE_VIEWER"])
-    fun `viewer can list SCT Inst payments`(): Unit {
+    fun `viewer can list SCT Inst payments`() {
         Given {
             contentType("application/json")
         } When {
@@ -61,7 +65,7 @@ class SctInstAccessControlIT {
     }
 
     @Test
-    fun `anonymous cannot list SCT Inst payments`(): Unit {
+    fun `anonymous cannot list SCT Inst payments`() {
         Given {
             contentType("application/json")
         } When {

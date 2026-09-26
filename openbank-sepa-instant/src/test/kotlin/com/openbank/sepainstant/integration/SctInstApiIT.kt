@@ -41,14 +41,14 @@ class SctInstApiIT {
 
     @Test
     @Order(1)
-    fun `GET health ready returns UP`(): Unit {
+    fun `GET health ready returns UP`() {
         Given { this } When { get("/q/health/ready") } Then { statusCode(200) }
     }
 
     @Test
     @Order(2)
     @TestSecurity(user = "operator-01", roles = ["ROLE_OPERATOR"])
-    fun `POST sepa-instant submits payment with CLEAR screening and returns 201`(): Unit {
+    fun `POST sepa-instant submits payment with CLEAR screening and returns 201`() {
         val idempotencyKey = UUID.randomUUID().toString()
         val endToEndId = "E2E${System.currentTimeMillis()}"
         val payload = """
@@ -89,7 +89,7 @@ class SctInstApiIT {
     @Test
     @Order(3)
     @TestSecurity(user = "viewer-01", roles = ["ROLE_VIEWER"])
-    fun `GET sepa-instant by id returns the submitted payment`(): Unit {
+    fun `GET sepa-instant by id returns the submitted payment`() {
         val id = createdPaymentId ?: return
         Given {
             contentType("application/json")
@@ -105,7 +105,7 @@ class SctInstApiIT {
     @Test
     @Order(4)
     @TestSecurity(user = "viewer-01", roles = ["ROLE_VIEWER"])
-    fun `GET sepa-instant list returns results`(): Unit {
+    fun `GET sepa-instant list returns results`() {
         Given {
             contentType("application/json")
         } When {
@@ -118,7 +118,7 @@ class SctInstApiIT {
     @Test
     @Order(5)
     @TestSecurity(user = "viewer-01", roles = ["ROLE_VIEWER"])
-    fun `GET sepa-instant by debtor returns results`(): Unit {
+    fun `GET sepa-instant by debtor returns results`() {
         Given {
             contentType("application/json")
         } When {

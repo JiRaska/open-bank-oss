@@ -4,8 +4,8 @@
 
 package com.openbank.clearing.integration
 
-import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.clearing.it.TraceContractProfile
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg

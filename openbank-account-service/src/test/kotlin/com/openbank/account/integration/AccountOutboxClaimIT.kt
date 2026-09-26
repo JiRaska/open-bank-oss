@@ -4,10 +4,10 @@
 package com.openbank.account.integration
 
 import com.openbank.account.infrastructure.persistence.repository.AccountOutboxRepositoryImpl
-import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg

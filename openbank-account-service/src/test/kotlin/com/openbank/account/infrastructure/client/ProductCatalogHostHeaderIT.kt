@@ -6,8 +6,8 @@ package com.openbank.account.infrastructure.client
 
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject

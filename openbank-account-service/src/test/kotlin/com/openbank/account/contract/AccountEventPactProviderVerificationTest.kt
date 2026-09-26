@@ -22,9 +22,9 @@ import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.DelegatedAccessGrant
-import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest

@@ -7,8 +7,8 @@ package com.openbank.account.integration
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
-import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
