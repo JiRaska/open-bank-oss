@@ -319,6 +319,14 @@ every URL and the upload path is unaffected.
 
 ## 6. Change log
 
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, `@RolesAllowed`/`@Authorize` values, status codes, JSON field
+  names and `openapi.yaml` are unchanged. Only the `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag`
+  annotations remain per-service, and `checkerId(identity)` is resolved AFTER the null-body check
+  (same ordering `decide` documents in libs-runtime, fixed in #11033/#11047).
+
 - **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
 
 - **2026-09-08** — Logo ingest from an operator-named URL (`POST …/logo/fetch`), plus `GET …/logo-sources` so the operator screen can tell "off by design" from "broken" (§4g). This is the service's only outbound internet call and an SSRF primitive by construction; it is fenced by an allowlist that is **empty by default**, https-only, a publicly-routable check on every resolved address, and refusal (not following) of redirects. Fetched bytes get the same re-encode as an upload. Residual DNS-rebinding risk is recorded in §4g rather than claimed closed. Rollback: unset the allowlist and the endpoint refuses everything.

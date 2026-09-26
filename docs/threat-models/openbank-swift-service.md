@@ -113,6 +113,16 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, `@RolesAllowed`/`@Authorize` values, status codes, JSON field
+  names and `openapi.yaml` are unchanged; `swift.send`'s lack of a `@PathParam` still means
+  `PendingApproval.resourceId` is always `null` for this service. Only the
+  `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag` annotations remain per-service, and
+  `checkerId(identity)` is resolved AFTER the null-body check (same ordering `decide` documents in
+  libs-runtime, fixed in #11033/#11047).
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal clearing and transaction REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-05-30** — Added `swift_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/

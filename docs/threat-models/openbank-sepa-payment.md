@@ -142,6 +142,16 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, status codes, JSON field names and `openapi.yaml` are unchanged,
+  and the intentionally asymmetric role sets stay exactly as before — `listPending` stays
+  `ROLE_OPERATOR`/`ROLE_ADMIN` only, `decide` additionally admits `ROLE_PAYMENTS` — only the
+  `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag` annotations remain per-service, and
+  `checkerId(identity)` is resolved AFTER the null-body check (same ordering `decide` documents in
+  libs-runtime, fixed in #11033/#11047).
+
 - **2026-09-14** — Return-evidence source revision (ADR-0306): SEPA lifecycle transitions increment
   persisted `aggregate_revision` under a row lock, and created, status and return outbox bodies
   carry that revision. The existing `sepa.payment.returned` evidence remains atomic with
