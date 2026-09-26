@@ -7,11 +7,8 @@ package com.openbank.libs.security
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.io.IOException
-import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.time.Duration
 import java.util.Base64
 
 /**
@@ -22,27 +19,29 @@ import java.util.Base64
  * in by producing one from its own `src/main`, so libs-runtime registers nothing in any consumer's
  * bean archive.
  *
- * - Ciphertext is Transit's own `vault:v<N>:` string, passed through untouched, so values written
- *   by `vault write transit/encrypt/...` or card-issuance's KEK wrap stay readable.
- * - AAD maps to Transit's `associated_data` (AES-GCM keys). Transit's `context` is key-DERIVATION
- *   input, not AAD, and is not used.
- * - Every request has a timeout; every non-200, timeout, I/O error or malformed response throws
- *   [FieldProtectionException]. Nothing is logged here, and exception messages carry only the key
- *   name and HTTP status — never plaintext, ciphertext, token or response body.
- * - No retry: a caller that wants one wraps the call. Silently retrying a decrypt on a hot path
- *   would multiply a Transit outage into latency everywhere.
- *
- * @param tokenSupplier returns a Transit-capable OpenBao token; see [OpenBaoKubernetesLogin].
+ * - Ciphertext is Transit's own `vault:v<N>:` string, passed through untouched.
+ * - AAD maps to Transit's `associated_data`. Keys must be NON-DERIVED AEAD types
+ *   (`aes256-gcm96`, `aes128-gcm96`, `chacha20-poly1305`); [verifyKey] checks this at startup.
+ *   Transit's `context` is key-DERIVATION input, not AAD, and is not used.
+ * - [rewrap] with AAD is decrypt + encrypt in this process: OpenBao's `rewrap` endpoint takes no
+ *   `associated_data` (verified against openbao 2.5.4 in `OpenBaoTransitFieldProtectorIT`).
+ * - **Policy.** Grant the service `update` on `transit/encrypt/<key>`, `transit/decrypt/<key>`
+ *   (and `transit/rewrap/<key>` if used) and NOT `create`: with `create`, an encrypt against a
+ *   mistyped key name silently upserts a fresh key. [verifyKey] additionally needs `read` on
+ *   `transit/keys/<key>`.
+ * - Transport: https only, bounded response body, path prefix preserved — see [OpenBaoTransport].
+ * - A 403 invalidates the token at the [OpenBaoTokenSource] and retries ONCE with a fresh token;
+ *   a second 403 fails closed. No other retry.
+ * - Every non-200, timeout, I/O error or malformed response throws [FieldProtectionException].
+ *   Nothing is logged here, and exception messages carry only the key name and HTTP status —
+ *   never plaintext, ciphertext, token or response body.
  */
-@Suppress("LongParameterList")
 class OpenBaoTransitFieldProtector(
-    private val baoAddr: URI,
+    private val transport: OpenBaoTransport,
     private val keyName: String,
-    private val tokenSupplier: () -> String,
+    private val tokenSource: OpenBaoTokenSource,
     tokenizationPepper: ByteArray,
     private val transitMount: String = "transit",
-    private val requestTimeout: Duration = Duration.ofSeconds(DEFAULT_REQUEST_TIMEOUT_SECONDS),
-    private val httpClient: HttpClient = defaultHttpClient(),
     private val objectMapper: ObjectMapper = ObjectMapper(),
 ) : FieldProtector {
 
@@ -55,7 +54,7 @@ class OpenBaoTransitFieldProtector(
 
     override fun encrypt(plaintext: ByteArray, aad: ByteArray?): String {
         val data = call("encrypt", mapOf("plaintext" to b64(plaintext)), aad)
-        return validCiphertext(data)
+        return validCiphertext(data, keyName)
     }
 
     override fun decrypt(ciphertext: String, aad: ByteArray?): ByteArray {
@@ -72,47 +71,78 @@ class OpenBaoTransitFieldProtector(
 
     override fun rewrap(ciphertext: String, aad: ByteArray?): String {
         TransitCiphertext.parse(ciphertext)
-        return validCiphertext(call("rewrap", mapOf("ciphertext" to ciphertext), aad))
+        if (aad != null) {
+            val plaintext = decrypt(ciphertext, aad)
+            try {
+                return encrypt(plaintext, aad)
+            } finally {
+                plaintext.fill(0)
+            }
+        }
+        return validCiphertext(call("rewrap", mapOf("ciphertext" to ciphertext), null), keyName)
     }
 
     override fun tokenize(value: String): String = tokenizer.tokenize(value)
 
-    private fun validCiphertext(data: JsonNode): String {
-        val ct = data["ciphertext"]?.takeIf { it.isTextual }?.asText()
-            ?: throw FieldProtectionException("Transit response for key '$keyName' carried no ciphertext")
-        TransitCiphertext.parse(ct)
-        return ct
+    override fun tokenize(value: String, domain: String): String = tokenizer.tokenize(value, domain)
+
+    /**
+     * Optional startup check: the key exists, is not derived, and is an AEAD type that honours
+     * `associated_data`. Throws [FieldProtectionException] otherwise.
+     */
+    fun verifyKey() {
+        val data = exchange("keys", "GET", null)
+        val type = data["type"]?.asText()
+        if (type !in AEAD_KEY_TYPES) {
+            throw FieldProtectionException("Transit key '$keyName' has unsupported type '$type'")
+        }
+        if (data["derived"]?.asBoolean() == true) {
+            throw FieldProtectionException("Transit key '$keyName' is derived; only non-derived keys are supported")
+        }
     }
 
     private fun call(operation: String, fields: Map<String, String>, aad: ByteArray?): JsonNode {
         val body = if (aad == null) fields else fields + ("associated_data" to b64(aad))
-        val response = send(operation, body)
+        return exchange(operation, "POST", objectMapper.writeValueAsString(body))
+    }
+
+    private fun exchange(operation: String, method: String, body: String?): JsonNode {
+        var token = tokenSource.token()
+        var response = send(operation, method, body, token)
+        if (response.statusCode() == HTTP_FORBIDDEN) {
+            tokenSource.invalidate(token)
+            token = tokenSource.token()
+            response = send(operation, method, body, token)
+        }
         if (response.statusCode() != HTTP_OK) {
             throw FieldProtectionException(
                 "Transit $operation for key '$keyName' failed: HTTP ${response.statusCode()}",
             )
         }
+        return parseData(operation, response.body())
+    }
+
+    private fun parseData(operation: String, body: String): JsonNode {
         val data = try {
-            objectMapper.readTree(response.body())?.get("data")
+            objectMapper.readTree(body)?.get("data")
         } catch (e: IOException) {
             throw FieldProtectionException("Transit $operation for key '$keyName' returned malformed JSON", e)
         }
-        return data ?: fail("Transit $operation for key '$keyName' returned no data")
+        return data ?: throw FieldProtectionException("Transit $operation for key '$keyName' returned no data")
     }
 
     /** Every transport failure (timeout is an IOException) becomes a [FieldProtectionException]. */
     @Suppress("TooGenericExceptionCaught")
-    private fun send(operation: String, body: Map<String, String>): HttpResponse<String> = try {
+    private fun send(operation: String, method: String, body: String?, token: String): HttpResponse<String> = try {
+        val publisher = body?.let { HttpRequest.BodyPublishers.ofString(it) } ?: HttpRequest.BodyPublishers.noBody()
         val request = HttpRequest.newBuilder()
-            .uri(baoAddr.resolve("/v1/$transitMount/$operation/$keyName"))
-            .timeout(requestTimeout)
+            .uri(transport.uri("v1/$transitMount/$operation/$keyName"))
+            .timeout(transport.requestTimeout)
             .header("Content-Type", "application/json")
-            .header("X-Vault-Token", tokenSupplier())
-            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+            .header("X-Vault-Token", token)
+            .method(method, publisher)
             .build()
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-    } catch (e: FieldProtectionException) {
-        throw e
+        transport.httpClient.send(request, OpenBaoTransport.boundedBody())
     } catch (e: InterruptedException) {
         Thread.currentThread().interrupt()
         throw FieldProtectionException("Transit $operation for key '$keyName' interrupted", e)
@@ -120,19 +150,21 @@ class OpenBaoTransitFieldProtector(
         throw FieldProtectionException("Transit $operation for key '$keyName' failed: ${e.javaClass.simpleName}", e)
     }
 
-    private fun fail(message: String): Nothing = throw FieldProtectionException(message)
-
-    private fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
-
     companion object {
-        const val DEFAULT_REQUEST_TIMEOUT_SECONDS = 10L
-        const val DEFAULT_CONNECT_TIMEOUT_SECONDS = 5L
         private const val HTTP_OK = 200
+        private const val HTTP_FORBIDDEN = 403
         private val PATH_SEGMENT = Regex("^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
-        fun defaultHttpClient(): HttpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(DEFAULT_CONNECT_TIMEOUT_SECONDS))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build()
+        /** Transit key types that authenticate `associated_data`. */
+        val AEAD_KEY_TYPES = setOf("aes256-gcm96", "aes128-gcm96", "chacha20-poly1305")
     }
+}
+
+private fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
+
+private fun validCiphertext(data: JsonNode, keyName: String): String {
+    val ct = data["ciphertext"]?.takeIf { it.isTextual }?.asText()
+        ?: throw FieldProtectionException("Transit response for key '$keyName' carried no ciphertext")
+    TransitCiphertext.parse(ct)
+    return ct
 }

@@ -40,9 +40,12 @@ class OpenBaoTransitFieldProtectorTest {
         @Volatile var forcedStatus: Int? = null
 
         @Volatile var delayMillis: Long = 0
+
+        @Volatile var oversizedBytes: Int = 0
         val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
             executor = Executors.newCachedThreadPool()
             createContext("/v1/transit/") { handle(it) }
+            createContext("/bao/v1/transit/") { handle(it, prefix = 1) }
             start()
         }
         val uri: URI get() = URI.create("http://127.0.0.1:${server.address.port}")
@@ -56,19 +59,20 @@ class OpenBaoTransitFieldProtectorTest {
             return ct
         }
 
-        private fun handle(ex: HttpExchange) {
+        private fun handle(ex: HttpExchange, prefix: Int = 0) {
             val body = ex.requestBody.readAllBytes().decodeToString()
             synchronized(requests) { requests += ex.requestURI.path to body }
             if (delayMillis > 0) Thread.sleep(delayMillis)
             forcedStatus?.let { return reply(ex, it, """{"errors":["forced"]}""") }
+            if (oversizedBytes > 0) return reply(ex, 200, "{\"data\":{\"x\":\"" + "a".repeat(oversizedBytes) + "\"}}")
             if (ex.requestHeaders.getFirst("X-Vault-Token") !=
                 TOKEN
             ) {
                 return reply(ex, 403, """{"errors":["permission denied"]}""")
             }
             val segments = ex.requestURI.path.split("/")
-            val op = segments[3]
-            val key = segments[4]
+            val op = segments[3 + prefix]
+            val key = segments[4 + prefix]
             if (!latestVersion.containsKey(key)) return reply(ex, 400, """{"errors":["encryption key not found"]}""")
             val json = mapper.readTree(body)
             val aad = json["associated_data"]?.asText()
@@ -79,10 +83,7 @@ class OpenBaoTransitFieldProtectorTest {
                 )
                 "decrypt", "rewrap" -> {
                     val s = sealed[json["ciphertext"].asText()]
-                    if (s == null ||
-                        s.key != key ||
-                        s.aad != aad
-                    ) {
+                    if (s == null || rejects(op, s, key, aad)) {
                         return reply(ex, 400, """{"errors":["cipher: message authentication failed"]}""")
                     }
                     if (op ==
@@ -100,6 +101,14 @@ class OpenBaoTransitFieldProtectorTest {
             reply(ex, 200, mapper.writeValueAsString(mapOf("data" to out)))
         }
 
+        // Real OpenBao rewrap takes no associated_data: an AAD-bound ciphertext cannot be rewrapped
+        // server-side (measured, see OpenBaoTransitFieldProtectorIT).
+        private fun rejects(op: String, s: Sealed, key: String, aad: String?): Boolean = when {
+            s.key != key -> true
+            op == "rewrap" -> s.aad != null
+            else -> s.aad != aad
+        }
+
         private fun reply(ex: HttpExchange, status: Int, body: String) {
             val bytes = body.toByteArray()
             ex.sendResponseHeaders(status, bytes.size.toLong())
@@ -115,8 +124,11 @@ class OpenBaoTransitFieldProtectorTest {
 
     @AfterEach fun stop() = stub.server.stop(0)
 
+    private fun transport(uri: URI = stub.uri, timeout: Duration = Duration.ofSeconds(5)) =
+        OpenBaoTransport(uri, requestTimeout = timeout, allowInsecureHttpForTests = true)
+
     private fun protector(key: String = "pan", timeout: Duration = Duration.ofSeconds(5), token: String = TOKEN) =
-        OpenBaoTransitFieldProtector(stub.uri, key, { token }, PEPPER, requestTimeout = timeout)
+        OpenBaoTransitFieldProtector(transport(timeout = timeout), key, { token }, PEPPER)
 
     @Test fun `encrypt then decrypt round-trips and yields a vault v1 ciphertext`() {
         val ct = protector().encrypt(SECRET)
@@ -171,7 +183,7 @@ class OpenBaoTransitFieldProtectorTest {
             assertThatThrownBy { op() }
                 .isInstanceOf(FieldProtectionException::class.java)
                 .hasMessageContaining("HTTP 503")
-                .satisfies({ assertThat(it.message).doesNotContain(ct).doesNotContain(TOKEN) })
+                .satisfies({ assertThat(it.message).doesNotContain(ct, TOKEN, SECRET.decodeToString(), SECRET_B64) })
         }
     }
 
@@ -183,7 +195,7 @@ class OpenBaoTransitFieldProtectorTest {
     @Test fun `unreachable Transit fails closed`() {
         val dead = stub.uri
         stub.server.stop(0)
-        assertThatThrownBy { OpenBaoTransitFieldProtector(dead, "pan", { TOKEN }, PEPPER).encrypt(SECRET) }
+        assertThatThrownBy { OpenBaoTransitFieldProtector(transport(dead), "pan", { TOKEN }, PEPPER).encrypt(SECRET) }
             .isInstanceOf(FieldProtectionException::class.java)
     }
 
@@ -197,7 +209,7 @@ class OpenBaoTransitFieldProtectorTest {
     @Test fun `tokenize is the ADR-0189 blind index, deterministic and pepper-bound`() {
         assertThat(protector().tokenize("4111111111111111")).isEqualTo(BlindIndex.compute(PEPPER, "4111111111111111"))
         assertThat(
-            OpenBaoTransitFieldProtector(stub.uri, "pan", {
+            OpenBaoTransitFieldProtector(transport(), "pan", {
                 TOKEN
             }, "other".toByteArray()).tokenize("4111111111111111"),
         )
@@ -206,13 +218,86 @@ class OpenBaoTransitFieldProtectorTest {
     }
 
     @Test fun `key name cannot inject a path`() {
-        assertThatThrownBy { OpenBaoTransitFieldProtector(stub.uri, "../sys", { TOKEN }, PEPPER) }
+        assertThatThrownBy { OpenBaoTransitFieldProtector(transport(), "../sys", { TOKEN }, PEPPER) }
             .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test fun `plain http is refused unless the test-only opt-out is set`() {
+        assertThatThrownBy { OpenBaoTransport(stub.uri) }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("https")
+        assertThatThrownBy { OpenBaoTransport(URI.create("ftp://bao.example")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(OpenBaoTransport(URI.create("https://bao.example:8200")).uri("v1/x").toString())
+            .isEqualTo("https://bao.example:8200/v1/x")
+    }
+
+    @Test fun `a path prefix on the OpenBao address is preserved`() {
+        val prefixed = OpenBaoTransport(
+            URI.create("${stub.uri}/bao"),
+            requestTimeout = Duration.ofSeconds(5),
+            allowInsecureHttpForTests = true,
+        )
+        val p = OpenBaoTransitFieldProtector(prefixed, "pan", { TOKEN }, PEPPER)
+        assertThat(p.decrypt(p.encrypt(SECRET))).isEqualTo(SECRET)
+        assertThat(stub.requests.map { it.first }).allMatch { it.startsWith("/bao/v1/transit/") }
+    }
+
+    @Test fun `an oversized response fails closed instead of being buffered`() {
+        stub.oversizedBytes = OpenBaoTransport.MAX_RESPONSE_BYTES + 1
+        assertThatThrownBy { protector().encrypt(SECRET) }
+            .isInstanceOf(FieldProtectionException::class.java)
+            .hasRootCauseInstanceOf(ResponseTooLargeException::class.java)
+    }
+
+    @Test fun `a 403 invalidates the token and retries exactly once`() {
+        val handed = mutableListOf<String>()
+        val invalidated = mutableListOf<String>()
+        val source = object : OpenBaoTokenSource {
+            override fun token(): String = (if (handed.isEmpty()) "stale" else TOKEN).also { handed += it }
+
+            override fun invalidate(rejected: String) {
+                invalidated += rejected
+            }
+        }
+        val p = OpenBaoTransitFieldProtector(transport(), "pan", source, PEPPER)
+        assertThat(p.decrypt(p.encrypt(SECRET))).isEqualTo(SECRET)
+        assertThat(invalidated).containsExactly("stale")
+
+        val alwaysBad = object : OpenBaoTokenSource {
+            var calls = 0
+
+            override fun token(): String = "bad".also { calls++ }
+        }
+        assertThatThrownBy { OpenBaoTransitFieldProtector(transport(), "pan", alwaysBad, PEPPER).encrypt(SECRET) }
+            .isInstanceOf(FieldProtectionException::class.java).hasMessageContaining("HTTP 403")
+        assertThat(alwaysBad.calls).isEqualTo(2)
+    }
+
+    @Test fun `rewrap with associated data re-encrypts instead of calling server rewrap`() {
+        val ct = protector().encrypt(SECRET, "card:1".toByteArray())
+        stub.latestVersion["pan"] = 2
+        val v2 = protector().rewrap(ct, "card:1".toByteArray())
+        assertThat(TransitCiphertext.parse(v2).keyVersion).isEqualTo(2)
+        assertThat(protector().decrypt(v2, "card:1".toByteArray())).isEqualTo(SECRET)
+        assertThat(stub.requests.map { it.first }).noneMatch { it.contains("/rewrap/") }
+    }
+
+    @Test fun `domain-separated tokens differ per field and are stable`() {
+        val p = protector()
+        assertThat(p.tokenize("4111", "pan")).isEqualTo(p.tokenize("4111", "pan"))
+        assertThat(p.tokenize("4111", "pan")).isNotEqualTo(p.tokenize("4111", "iban"))
+        assertThat(p.tokenize("4111", "pan")).isNotEqualTo(p.tokenize("4111"))
+    }
+
+    @Test fun `the in-memory AES adapter is not shipped in libs-runtime`() {
+        assertThatThrownBy { Class.forName("com.openbank.libs.security.LocalAesGcmFieldProtector") }
+            .isInstanceOf(ClassNotFoundException::class.java)
     }
 
     private companion object {
         const val TOKEN = "s.test-token"
         val PEPPER = "test-pepper".toByteArray()
         val SECRET = "4111111111111111".toByteArray()
+        val SECRET_B64: String = Base64.getEncoder().encodeToString(SECRET)
     }
 }

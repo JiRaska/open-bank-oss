@@ -1,5 +1,17 @@
 # check-field-crypto-in-libs.py baseline (ADR-0320 P3). One repo-relative path per line.
 # Shrink-only: a file listed here that no longer matches is reported as stale.
-# card-issuance migrates to com.openbank.libs.security.FieldProtector first (ADR-0320 P3, ADR-0262).
+# Re-baselined 2026-09-27 after the signal set widened (JCA Mac/SecretKeySpec/KeyGenerator,
+# BouncyCastle, Tink, X-Vault-Token, concatenated Transit paths, .java, pgp_sym_* in SQL).
+#
+# Field encryption / Transit — migrate to com.openbank.libs.security.FieldProtector first (ADR-0262):
 openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/crypto/AesGcmCardSecretCipher.kt
 openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/crypto/OpenBaoTransitDekUnwrapper.kt
+# Direct OpenBao/Vault call (X-Vault-Token) — crypto-erasure key handling:
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/erasure/VaultCryptoErasure.kt
+# HMAC via javax.crypto.Mac + SecretKeySpec (signing/MAC, not field encryption; still local key handling):
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/worm/S3WormArchive.kt
+openbank-audit-service/src/main/kotlin/com/openbank/audit/infrastructure/signing/LocalHmacAnchorSigner.kt
+openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/webauthn/EnrollmentTicketService.kt
+# BouncyCastle (PAdES document signing, not field encryption):
+openbank-document-service/src/main/kotlin/com/openbank/document/infrastructure/render/OpenBaoClientSignatureAdapter.kt
+openbank-document-service/src/main/kotlin/com/openbank/document/infrastructure/render/PadesSigning.kt

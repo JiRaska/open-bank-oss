@@ -3533,11 +3533,12 @@ matrix_sa_excluded_action_grants:
 field_protection:
   # ADR-0320 P3. Reversible field encryption and deterministic tokenization go through
   # com.openbank.libs.security.FieldProtector (libs-domain port; OpenBaoTransitFieldProtector
-  # and LocalAesGcmFieldProtector in libs-runtime, plain classes, no CDI bean). tokenize
+  # in libs-runtime, a plain class, no CDI bean; the test-only LocalAesGcmFieldProtector lives in
+  # openbank-libs-testing so no src/main can produce it). tokenize
   # delegates to the ADR-0189/ADR-0072 BlindIndex — no second HMAC scheme.
-  detect: ["<service>/src/main/**/*.kt"]
+  detect: ["<service>/src/main/**/*.kt", "<service>/src/main/**/*.java", "<service>/src/main/**/*.sql"]
   require:
-    - "no javax.crypto.Cipher and no OpenBao Transit encrypt/decrypt/rewrap path in a service's src/main outside the shrink-only baseline"
+    - "no javax.crypto Cipher/Mac/SecretKeySpec/KeyGenerator, BouncyCastle, Tink, X-Vault-Token or OpenBao Transit path, and no pgp_sym_encrypt in SQL, in a service's src/main outside the shrink-only baseline"
     - "ciphertext keeps the Transit `vault:v<N>:` envelope; every failure throws FieldProtectionException (fail closed)"
   gate: field-crypto-in-libs
   baseline: ".github/scripts/field-crypto-in-libs-baseline.txt"

@@ -2,8 +2,12 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.libs.security
+package com.openbank.libs.testing.security
 
+import com.openbank.libs.security.BlindIndexTokenizer
+import com.openbank.libs.security.FieldProtectionException
+import com.openbank.libs.security.FieldProtector
+import com.openbank.libs.security.TransitCiphertext
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.util.Base64
@@ -12,7 +16,11 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Local AES-256-GCM [FieldProtector] (ADR-0320 P3) for tests and dev, emitting the same
+ * Local AES-256-GCM [FieldProtector] (ADR-0320 P3) for TESTS ONLY. It lives in
+ * openbank-libs-testing (a `testImplementation` dependency) so it cannot be produced from a
+ * service's `src/main`: key material in process memory is exactly what the Transit adapter exists
+ * to avoid. Same placement as `AllowAllPolicyDecisionPoint` (#10936).
+ * emitting the same
  * `vault:v<N>:` envelope as Transit so code under test handles key versions identically.
  * Payload is `base64(iv || ciphertext+tag)`. It is NOT byte-compatible with Transit ciphertext
  * (different key material by construction) — only the envelope is shared.
@@ -58,6 +66,8 @@ class LocalAesGcmFieldProtector(keys: Map<Int, ByteArray>, tokenizationPepper: B
     override fun rewrap(ciphertext: String, aad: ByteArray?): String = seal(latest, decrypt(ciphertext, aad), aad)
 
     override fun tokenize(value: String): String = tokenizer.tokenize(value)
+
+    override fun tokenize(value: String, domain: String): String = tokenizer.tokenize(value, domain)
 
     private fun seal(version: Int, plaintext: ByteArray, aad: ByteArray?): String {
         val iv = ByteArray(IV_BYTES).also(random::nextBytes)

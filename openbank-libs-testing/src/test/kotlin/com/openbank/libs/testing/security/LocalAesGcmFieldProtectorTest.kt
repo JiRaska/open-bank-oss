@@ -2,11 +2,14 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.libs.security
+package com.openbank.libs.testing.security
 
+import com.openbank.libs.security.FieldProtectionException
+import com.openbank.libs.security.TransitCiphertext
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.util.Base64
 
 class LocalAesGcmFieldProtectorTest {
 
@@ -32,5 +35,14 @@ class LocalAesGcmFieldProtectorTest {
             .isInstanceOf(FieldProtectionException::class.java)
         assertThatThrownBy { LocalAesGcmFieldProtector(mapOf(2 to k1), pepper).decrypt(ct, "a".toByteArray()) }
             .isInstanceOf(FieldProtectionException::class.java)
+    }
+
+    @Test fun `every encryption draws a fresh 96-bit nonce`() {
+        val p = LocalAesGcmFieldProtector(mapOf(1 to k1), pepper)
+        val nonces = (1..2_000).map {
+            val raw = Base64.getDecoder().decode(TransitCiphertext.parse(p.encrypt("same".toByteArray())).payload)
+            raw.copyOfRange(0, 12).toList()
+        }
+        assertThat(nonces.toSet()).hasSize(nonces.size)
     }
 }

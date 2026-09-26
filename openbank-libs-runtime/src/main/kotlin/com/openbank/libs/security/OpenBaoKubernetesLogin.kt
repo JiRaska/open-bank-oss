@@ -6,8 +6,6 @@ package com.openbank.libs.security
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.io.IOException
-import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
@@ -16,31 +14,40 @@ import java.time.Duration
 
 /**
  * OpenBao Kubernetes-auth login, lifted from card-issuance's `OpenBaoTransitDekUnwrapper.login`
- * (ADR-0262) so an [OpenBaoTransitFieldProtector] can use `OpenBaoKubernetesLogin(...)::login` as
- * its token supplier. Plain class, not a CDI bean (ADR-0320 rule 1). Logs nothing; the service
- * account JWT and the returned token never appear in an exception message.
+ * (ADR-0262). Plain class, not a CDI bean (ADR-0320 rule 1). Logs nothing; the service account JWT
+ * and the returned token never appear in an exception message.
+ *
+ * Do NOT hand `login::login` to a protector directly — that logs in on every Transit call. Wrap it:
+ * `OpenBaoTransitFieldProtector(transport, key, CachingOpenBaoTokenSource(login::login), pepper)`,
+ * which caches the token for its `auth.lease_duration` and re-logs-in once on a 403.
+ *
+ * @param authMount the Kubernetes auth mount path (default `kubernetes`).
  */
 class OpenBaoKubernetesLogin(
-    private val baoAddr: URI,
+    private val transport: OpenBaoTransport,
     private val role: String,
     private val saTokenPath: Path = Path.of("/var/run/secrets/kubernetes.io/serviceaccount/token"),
-    private val requestTimeout: Duration = Duration.ofSeconds(
-        OpenBaoTransitFieldProtector.DEFAULT_REQUEST_TIMEOUT_SECONDS,
-    ),
-    private val httpClient: HttpClient = OpenBaoTransitFieldProtector.defaultHttpClient(),
+    private val authMount: String = "kubernetes",
     private val objectMapper: ObjectMapper = ObjectMapper(),
 ) {
-    fun login(): String {
+    init {
+        require(MOUNT.matches(authMount)) { "invalid auth mount" }
+    }
+
+    fun login(): OpenBaoToken {
         val response = send()
         if (response.statusCode() != HTTP_OK) {
             throw FieldProtectionException("OpenBao kubernetes-auth login failed: HTTP ${response.statusCode()}")
         }
-        val token = try {
-            objectMapper.readTree(response.body())?.get("auth")?.get("client_token")?.takeIf { it.isTextual }?.asText()
+        val auth = try {
+            objectMapper.readTree(response.body())?.get("auth")
         } catch (e: IOException) {
             throw FieldProtectionException("OpenBao kubernetes-auth login returned malformed JSON", e)
         }
-        return token ?: fail("OpenBao kubernetes-auth login returned no client_token")
+        val token = auth?.get("client_token")?.takeIf { it.isTextual }?.asText()
+            ?: fail("OpenBao kubernetes-auth login returned no client_token")
+        val lease = auth.get("lease_duration")?.takeIf { it.canConvertToLong() }?.asLong() ?: 0L
+        return OpenBaoToken(token, Duration.ofSeconds(lease))
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -48,12 +55,12 @@ class OpenBaoKubernetesLogin(
         val jwt = Files.readString(saTokenPath).trim()
         val body = objectMapper.writeValueAsString(mapOf("role" to role, "jwt" to jwt))
         val request = HttpRequest.newBuilder()
-            .uri(baoAddr.resolve("/v1/auth/kubernetes/login"))
-            .timeout(requestTimeout)
+            .uri(transport.uri("v1/auth/$authMount/login"))
+            .timeout(transport.requestTimeout)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        transport.httpClient.send(request, OpenBaoTransport.boundedBody())
     } catch (e: InterruptedException) {
         Thread.currentThread().interrupt()
         throw FieldProtectionException("OpenBao kubernetes-auth login interrupted", e)
@@ -65,5 +72,6 @@ class OpenBaoKubernetesLogin(
 
     private companion object {
         const val HTTP_OK = 200
+        val MOUNT = Regex("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_-]{0,63}){0,3}$")
     }
 }

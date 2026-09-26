@@ -144,6 +144,12 @@ dependencies {
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
+    // OpenBaoTransitFieldProtectorIT drives a REAL openbao/openbao container (ADR-0320 P3 security
+    // review): the stub-based AAD/rewrap tests cannot tell whether the stub matches the server.
+    // 2.0.5 (the line the Quarkus BOM resolves for every service), not the catalog's 1.20.4: 1.20.x
+    // negotiates Docker API 1.32, which Docker Engine 29 (min API 1.40) rejects, so the container
+    // never starts and a local run can only SKIP. Measured 2026-09-27 on this module.
+    testImplementation("org.testcontainers:testcontainers:2.0.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
