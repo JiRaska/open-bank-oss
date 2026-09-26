@@ -535,7 +535,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         purpose: { type: string }
-        method: { type: string, enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC] }
+        method: { type: string }
         amount: { type: string, nullable: true }
         currency: { type: string, nullable: true }
         creditorIban: { type: string, nullable: true }
