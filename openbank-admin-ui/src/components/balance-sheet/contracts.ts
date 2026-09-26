@@ -180,6 +180,28 @@ export const liquiditySchema = z.object({
   }),
 })
 
+// Liquidity survival forecast (risk-engine GET /snapshots/{id}/liquidity-forecast, ADR-0313
+// forecasting). A null survival day means no breach within the horizon — never "day 0".
+export const forecastRowSchema = z.object({
+  fromDay: z.number().int(), toDay: z.number().int(), from: z.string(), to: z.string(),
+  contractualInflows: money, contractualOutflows: money, behaviouralInflows: money, behaviouralOutflows: money,
+  inflows: money, outflows: money, net: money, cumulative: money,
+})
+export const currencyForecastSchema = z.object({
+  currency: z.string(), hqla: hqlaSchema.nullable().optional(), openingLiquidity: money,
+  survivalHorizonDays: z.number().int().nullable().optional(), survivalDate: z.string().nullable().optional(),
+  minimumCumulative: money, flowsBeyondHorizon: z.number().int(), ladder: z.array(forecastRowSchema),
+})
+export const liquidityForecastSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, curveSetId: z.string(), curveSetProvenance: provenance,
+  model: z.object({ id: z.string(), version: z.string() }).passthrough(),
+  parameterSetId: z.string(), parameterSetVersion: z.string(),
+  horizonDays: z.number().int(), dailyDays: z.number().int(),
+  currencies: z.array(currencyForecastSchema),
+  assumptions: z.array(z.object({ key: z.string(), statement: z.string() })),
+})
+export type LiquidityForecast = z.infer<typeof liquidityForecastSchema>
+
 // Pillar 1 credit-risk capital, standardised approach (risk-engine GET /snapshots/{id}/capital,
 // ADR-0313 phase 2).
 export const exposureLineSchema = z.object({

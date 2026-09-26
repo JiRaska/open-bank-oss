@@ -32,6 +32,7 @@ import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
 import SnapshotCapitalPage from '@/app/balance-sheet/snapshots/[id]/capital/page'
 import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
 import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/page'
+import SnapshotLiquidityForecastPage from '@/app/balance-sheet/snapshots/[id]/liquidity-forecast/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
 
 const json = (body: unknown, status = 200) =>
@@ -374,5 +375,72 @@ describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
     await renderPage(<SnapshotCapitalPage params={Promise.resolve({ id: 'run-5' })} />)
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByTestId('total-rwa')).toBeNull()
+  })
+})
+
+const fRow = (fromDay: number, toDay: number, behaviouralOutflows: number, cumulative: number) => ({
+  fromDay, toDay, from: '2026-10-01', to: `2026-10-${String(toDay).padStart(2, '0')}`,
+  contractualInflows: 0, contractualOutflows: 0, behaviouralInflows: 0, behaviouralOutflows,
+  inflows: 0, outflows: behaviouralOutflows, net: behaviouralOutflows, cumulative,
+})
+const FORECAST = (survival: number | null, hqla: boolean) => ({
+  runId: 'run-6', asOf: '2026-09-30', provenance: 'synthetic', curveSetId: 'cs-1', curveSetProvenance: 'synthetic',
+  model: { id: 'nmd-linear-core', version: '1.0.0', coreRatio: 0.7, coreRunoffYears: 5, annualDepositRate: 0 },
+  parameterSetId: 'bcbs-d238-d295', parameterSetVersion: '2', horizonDays: 90, dailyDays: 30,
+  currencies: [{
+    currency: 'CZK',
+    hqla: hqla ? { lines: [], level1: 1000, level2a: 0, level2b: 0, adjustmentFor15Cap: 0, adjustmentFor40Cap: 0, level2bCapBinding: false, level2CapBinding: false, stock: 1000 } : null,
+    openingLiquidity: hqla ? 1000 : 0,
+    survivalHorizonDays: survival, survivalDate: survival === null ? null : '2026-10-01',
+    minimumCumulative: survival === null ? 550 : -450, flowsBeyondHorizon: 57,
+    ladder: survival === null ? [fRow(1, 1, -450, 550), fRow(2, 2, 0, 550)] : [fRow(1, 1, -450, -450), fRow(2, 2, 0, -450)],
+  }],
+  assumptions: [
+    { key: 'opening-liquidity', statement: 'Opening liquidity is the HQLA stock as the LCR reports it.' },
+    { key: 'new-business-not-modelled', statement: 'New business is not modelled.' },
+  ],
+})
+
+describe('Liquidity forecast (survival horizon)', () => {
+  const route = (body: unknown, status = 200) => (url: string) => url.includes('/curve-sets')
+    ? json({ curveSets: [{ id: 'cs-1', asOf: '2026-09-30', provenance: 'synthetic', source: 'desk', recordedAt: '2026-09-30T06:00:00Z', indices: ['CZEONIA'] }] })
+    : json(body, status)
+
+  it('shows the ladder, the opening HQLA and a survival horizon that is not breached as such, never as a day', async () => {
+    router = route(FORECAST(null, true))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    const forecastCalls = calls.filter(c => c.url.includes('/liquidity-forecast'))
+    expect(forecastCalls.length).toBeGreaterThan(0)
+    expect(forecastCalls.every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/liquidity-forecast?') && c.url.includes('curveSetId=cs-1') && c.url.includes('horizonDays=90'))).toBe(true)
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/no shortfall within 90 days|bez výpadku do 90 dnů/)
+    expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(0)
+    expect(screen.getByText(/New business is not modelled/)).toBeTruthy()
+    expect(screen.getByText(/bcbs-d238-d295 v2/)).toBeTruthy()
+    expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
+  })
+
+  it('names the breach day, marks negative rows and says when a currency holds no HQLA', async () => {
+    router = route(FORECAST(1, false))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/day 1|1\. den/)
+    expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(2)
+    expect(screen.getByText(/no HQLA held in this currency|nemá žádná HQLA/)).toBeTruthy()
+  })
+
+  it('sends the chosen horizon', async () => {
+    router = route(FORECAST(null, true))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    await act(async () => { fireEvent.change(screen.getByLabelText(/^(Forecast horizon|Horizont prognózy)$/), { target: { value: '365' } }) })
+    expect(calls.some(c => c.url.includes('/liquidity-forecast') && c.url.includes('horizonDays=365'))).toBe(true)
+  })
+
+  it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
+    router = route({ error: 'UNTIED', runId: 'run-6', mismatches: [] }, 409)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('survival-CZK')).toBeNull()
   })
 })

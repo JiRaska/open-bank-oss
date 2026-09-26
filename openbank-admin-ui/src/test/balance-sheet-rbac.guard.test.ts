@@ -21,6 +21,7 @@ const PAGES: [string, string, string][] = [
   ['app/balance-sheet/snapshots/[id]/page.tsx', '/balance-sheet/snapshots/sample', 'balance-sheet:view'],
   ['app/balance-sheet/snapshots/[id]/irrbb/page.tsx', '/balance-sheet/snapshots/sample/irrbb', 'balance-sheet:view'],
   ['app/balance-sheet/snapshots/[id]/liquidity/page.tsx', '/balance-sheet/snapshots/sample/liquidity', 'balance-sheet:view'],
+  ['app/balance-sheet/snapshots/[id]/liquidity-forecast/page.tsx', '/balance-sheet/snapshots/sample/liquidity-forecast', 'balance-sheet:view'],
   ['app/balance-sheet/snapshots/[id]/capital/page.tsx', '/balance-sheet/snapshots/sample/capital', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/page.tsx', '/balance-sheet/curve-sets', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/[id]/page.tsx', '/balance-sheet/curve-sets/sample', 'balance-sheet:view'],

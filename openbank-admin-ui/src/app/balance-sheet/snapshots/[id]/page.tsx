@@ -144,6 +144,11 @@ function SnapshotDetail({ id }: { id: string }) {
           </Link>
         )}
         {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/liquidity-forecast`} className="btn btn-secondary btn-sm">
+            {t('Prognóza likvidity', 'Liquidity forecast')}
+          </Link>
+        )}
+        {tied && (
           <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/capital`} className="btn btn-secondary btn-sm">
             {t('Kapitál: úvěrové riziko (SA)', 'Capital: credit risk (SA)')}
           </Link>
