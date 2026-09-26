@@ -4,13 +4,12 @@
 package com.openbank.cardissuance.integration
 
 import com.openbank.cardissuance.infrastructure.persistence.repository.CardOutboxRepositoryImpl
+import com.openbank.cardissuance.it.PostgresRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -33,10 +32,7 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_cards_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class CardOutboxClaimIT {
 
     @Inject

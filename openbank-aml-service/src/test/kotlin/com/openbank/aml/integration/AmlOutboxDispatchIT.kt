@@ -8,11 +8,9 @@ import com.openbank.aml.infrastructure.persistence.entity.AmlOutboxEntity
 import com.openbank.aml.infrastructure.persistence.repository.AmlOutboxRepositoryImpl
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.OutboxStatus
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -53,10 +51,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(AmlOutboxDispatchIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_aml_it")],
-)
+@QuarkusTestResource(com.openbank.aml.it.PostgresRedisTestResource::class)
 class AmlOutboxDispatchIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

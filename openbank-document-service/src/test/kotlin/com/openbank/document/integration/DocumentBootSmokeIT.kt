@@ -4,10 +4,9 @@
 
 package com.openbank.document.integration
 
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import com.openbank.document.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -23,10 +22,7 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @QuarkusTestResource(DocumentBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class DocumentBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

@@ -5,11 +5,10 @@ package com.openbank.cardissuance.integration
 
 import com.openbank.cardissuance.infrastructure.persistence.entity.CardOutboxEntity
 import com.openbank.cardissuance.infrastructure.persistence.repository.CardOutboxRepositoryImpl
+import com.openbank.cardissuance.it.PostgresRedisTestResource
 import com.openbank.libs.persistence.outbox.OutboxStatus
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -41,10 +40,7 @@ import java.util.UUID
  *    `@QueryParam`; only a real request exercises that.
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_cards_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class CardOutboxRequeueIT {
 
     @Inject

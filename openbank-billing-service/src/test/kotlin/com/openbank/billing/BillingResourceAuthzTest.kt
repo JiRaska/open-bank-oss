@@ -4,9 +4,8 @@
 
 package com.openbank.billing
 
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import com.openbank.billing.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -24,10 +23,7 @@ import org.junit.jupiter.api.Test
  * depends on the persisted `BillingCycleService` (ADR-0143 phase 2c).
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_billing_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class BillingResourceAuthzTest {
 
     @Test

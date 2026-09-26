@@ -4,9 +4,8 @@
 
 package com.openbank.fraud.infrastructure.rest
 
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import com.openbank.fraud.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -24,10 +23,7 @@ import org.junit.jupiter.api.Test
  * openbank-infra/gitops/components/fraud-service/gen-fraud-opa-bundle.sh).
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_fraud_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class FraudResourceAuthzTest {
 
     @Test

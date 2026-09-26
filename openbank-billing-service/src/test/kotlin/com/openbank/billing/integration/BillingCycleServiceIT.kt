@@ -8,9 +8,8 @@ import com.openbank.billing.application.usecase.BillingCycleService
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.PostingStatus
 import com.openbank.billing.infrastructure.outbox.BillingOutboxRepositoryImpl
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import com.openbank.billing.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -45,10 +44,7 @@ import java.util.concurrent.TimeUnit
  * inferring a non-`Unit` type makes JUnit5 silently SKIP the test.
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_billing_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class BillingCycleServiceIT {
 
     @Inject

@@ -6,10 +6,8 @@ package com.openbank.aml.it
 import com.openbank.aml.application.port.out.PartyDirectoryPort
 import com.openbank.aml.application.port.out.PartyPage
 import com.openbank.aml.application.port.out.PartySummary
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -43,10 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @QuarkusTest
 @QuarkusTestResource(OnboardingScreeningReconcilerIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_aml_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 @TestProfile(OnboardingScreeningReconcilerIT.FastReconcileProfile::class)
 class OnboardingScreeningReconcilerIT {
 

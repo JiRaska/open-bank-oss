@@ -11,9 +11,7 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -55,10 +53,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * load-bearing half, issue #2338 — is unchanged.
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
-)
+@QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-document-service")
 @PactBroker(enablePendingPacts = "true")

@@ -9,10 +9,9 @@ import com.openbank.billing.application.port.out.AccountContextPort
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.application.port.out.ProductCatalogPort
 import com.openbank.billing.domain.BillableFee
+import com.openbank.billing.it.PostgresRedisTestResource
 import com.openbank.libs.product.FeeContext
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -84,10 +83,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @TestProfile(BillingOutboxAtomicityIT.ChargeableFeeNoDispatchProfile::class)
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_billing_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class BillingOutboxAtomicityIT {
 
     class ChargeableFeeNoDispatchProfile : QuarkusTestProfile {

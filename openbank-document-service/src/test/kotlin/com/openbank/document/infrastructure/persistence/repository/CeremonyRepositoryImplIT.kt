@@ -10,9 +10,8 @@ import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.SignatureLevel
 import com.openbank.document.domain.model.Signer
 import com.openbank.document.domain.model.SignerStatus
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import com.openbank.document.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -41,10 +40,7 @@ import java.util.UUID
  * (mirrors `openbank-anacredit-service`'s `LoanStageProjectionRepositoryIT`).
  */
 @QuarkusTest
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
-)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 class CeremonyRepositoryImplIT {
 
     @Inject
