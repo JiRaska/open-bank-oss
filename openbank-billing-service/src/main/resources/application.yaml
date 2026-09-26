@@ -52,7 +52,7 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
 
   # Outbound service-to-service auth (client-credentials). The PII read clients and the ledger
   # posting client (@RegisterProvider OidcClientRequestReactiveFilter) mint an openbank-services token.
@@ -64,7 +64,7 @@ quarkus:
     grant:
       type: client
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
     # #10486 batch 5: the account reads (account.list for the fee run, account.read per account) no
     # longer ride the shared openbank-services principal. AccountRestClient selects this NAMED client
     # (@OidcClientFilter("m2m")), so its principal is service-account-openbank-billing (ROLE_API only),
@@ -218,11 +218,16 @@ openbank:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%test":

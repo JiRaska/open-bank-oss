@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Client-credentials token for the outbound ledger journal post (ADR-0281) — same service
   # identity the inbound side authenticates.
   oidc-client:
@@ -68,8 +66,6 @@ quarkus:
         secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
       grant:
         type: client
-    tls:
-      verification: none
   redis:
     hosts: redis://localhost:6379
   rest-client:
@@ -104,11 +100,16 @@ quarkus:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

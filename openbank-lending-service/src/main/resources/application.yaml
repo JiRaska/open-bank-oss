@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     client-id: openbank-services
@@ -66,8 +64,6 @@ quarkus:
         secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
       grant:
         type: client
-    tls:
-      verification: none
   rest-client:
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
@@ -132,11 +128,16 @@ quarkus:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

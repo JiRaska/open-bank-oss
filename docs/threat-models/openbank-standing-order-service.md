@@ -116,6 +116,28 @@ openbank-sdd-service.
   construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
   network edge or privilege; no new trust boundary.
 
+- **2026-09-21** — Business multi-signature on creation (#10281, ADR-0312 addendum). A standing
+  order created under `X-Acting-For` for a legal entity is no longer created on one person's word:
+  customer-edge `createStandingOrder` asks delegation-service `signing/evaluate` (kind
+  `STANDING_ORDER`, banded by the per-execution amount, never the trusted-payee shortcut) and, when
+  more than one signature is required, holds the exact create body as an approval request (202)
+  instead of calling this service. The last co-signature releases it here once, through the
+  single-use `release-claim`, with `Idempotency-Key = approvalId`; the frozen body keeps the
+  `idempotencyKey` minted at hold time, so a replayed release cannot create a second order. No new
+  endpoint, caller or role on this service: the caller is still customer-edge, the body shape is
+  unchanged, and the party is still the entity. Residual: pause/resume/cancel stay
+  single-signature — none of them creates or enlarges an outflow. Proven by
+  `BusinessRecurringApprovalIT` (edge) and `BusinessSigningApiIT` (delegation-service).
+  **Edit is an atomic replace.** An edit used to be create-then-cancel from the client, so a
+  held replacement released later would run alongside the original until someone cancelled it —
+  a double debit. `POST /api/v1/standing-orders` now takes `replacesStandingOrderId`:
+  `StandingOrderRepositoryImpl.replace` cancels the original with a conditional update (same party,
+  ACTIVE or PAUSED) and inserts the replacement in ONE transaction; a mismatch writes nothing
+  (422). A replay of the same `idempotencyKey` returns the order already created. The edge checks
+  the replaced order belongs to the caller before any signing. Proven by `StandingOrderReplaceIT`
+  (one ACTIVE order after replace, same `xmin` on both rows, replay no-op, refused replace
+  unchanged).
+
 - **2026-09-06** — Create DTO rejects a non-positive amount at the trust boundary (#8351
   burn-down). `CreateStandingOrderRequest.amountMinorUnits` is a Kotlin primitive, so Jackson
   silently substitutes 0 when the field is omitted — an undocumented bypass that would have

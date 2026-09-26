@@ -195,6 +195,8 @@ retiring the corresponding KEK version in Transit, not after.
   construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
   network edge or privilege; no new trust boundary.
 
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+
 - **2026-09-05** — Money-path classification (ADR-0283 phase 0, #8808). No code change. The
   service joins `rules.yaml: money_path_services` because the authorisation decision point (§4a)
   and the SCA-gated limit/control changes (ADR-0194) decide whether money may move. Measured

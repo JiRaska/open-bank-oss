@@ -46,8 +46,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound service-to-service token (#889): the SEPA rest-client mints an openbank-services M2M
   # token (ROLE_OPERATOR) via this oidc-client so sepa-payment's createPayment accepts the call.
   # Disabled under %test (units call the consumer directly; the boot IT never dispatches a payment).
@@ -118,6 +116,8 @@ quarkus:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

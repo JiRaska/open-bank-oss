@@ -109,6 +109,8 @@ not change any existing request's outcome until explicitly flipped.
   construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
   network edge or privilege; no new trust boundary.
 
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+
 - **2026-09-06** — **New INBOUND reader on the fleet sweep**, no new route and no new privilege.
   `openbank-analytics-sink` now calls the existing `GET /api/v1/accounts/active` (ADR-0143's
   staff/service sweep, already used by billing-service's cycle scheduler) with an OIDC
