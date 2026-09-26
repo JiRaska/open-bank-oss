@@ -94,6 +94,22 @@
         "description": "Communication Studio checker: publishes and retires style/playbook versions and decides commstyle.publish four-eyes approvals (ADR-0285 D3/D6). Never granted to the same person's own draft (application-layer maker!=checker check)."
       },
       {
+        "name": "ROLE_RISK",
+        "description": "Risk department (ALM/market risk): reads balance-sheet snapshots, instruments, cash-flow ladders and curve sets in openbank-risk-engine; creates snapshots and uploads curve sets (humans only, ADR-0313/0314). #10618"
+      },
+      {
+        "name": "ROLE_FINANCE",
+        "description": "Finance department (accounting/GL): reads risk-engine snapshots and runs the lending ledger backfill four-eyes flow (propose/approve/execute; maker != checker enforced in lending). #10618"
+      },
+      {
+        "name": "ROLE_TREASURY_DEALER",
+        "description": "Treasury dealer (front office, maker). DECLARED ONLY: no service grants it yet; reserved so treasury SoD (dealer != approver) exists before the first treasury endpoint. #10618"
+      },
+      {
+        "name": "ROLE_TREASURY_APPROVER",
+        "description": "Treasury approver (checker for dealer trades). DECLARED ONLY: no service grants it yet; the four-eyes counterpart of ROLE_TREASURY_DEALER. #10618"
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
@@ -1027,6 +1043,25 @@
       "secret": "__LENDING_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-treasury",
+      "name": "OpenBank Treasury Service",
+      "description": "Per-service M2M client for treasury deal settlement, maturity and reversal journals (ledger.create only) (ADR-0315, #10486 pattern). Holds ROLE_API only; its action is granted by identity in ledger_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__TREASURY_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-clearing",
       "name": "OpenBank Clearing Service",
       "description": "Per-service M2M client for clearing's net-settlement journal (ledger.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1678,6 +1713,14 @@
       "username": "service-account-openbank-lending",
       "enabled": true,
       "serviceAccountClientId": "openbank-lending",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-treasury",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-treasury",
       "realmRoles": [
         "ROLE_API"
       ]

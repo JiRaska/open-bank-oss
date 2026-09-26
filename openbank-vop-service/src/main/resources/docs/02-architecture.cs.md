@@ -23,7 +23,6 @@ infrastructure/
   adapter/                        AccountHolderNameLookupAdapter, NoSchemeRoutingAdapter
   persistence/                    VopVerificationEntity, VopVerificationRecordAdapter
   authz/AuthzProducer.kt          OPA sidecar PDP
-  ClockProducer.kt                injektované Clock (ADR-0100)
 ```
 
 Use case je **zapojovací** vrstva: routuje (domácí vs zahraniční), volá porty a zapíše evidenci. Každé *rozhodnutí* je ve `VopNameMatchPolicy`. Stejný tvar jako `ScreeningPolicy` v sepa-instant nebo `CollectionAuthorisationPolicy` v sdd-service.

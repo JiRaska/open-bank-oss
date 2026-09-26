@@ -120,6 +120,10 @@ object TopicProducers {
         // openbank-standing-order-service/src/main/resources/application.yaml ->
         // standing-order-events-out.
         "openbank.standing-orders.order.event" to "standing-order-service",
+        // ADR-0315 (#10618): openbank-treasury-service/src/main/resources/application.yaml ->
+        // treasury-events-out. Its payloads also carry "sourceService": "treasury-service", so the
+        // rows resolve AttributionSource.EVENT; this entry is the fallback and the coverage fact.
+        "openbank.treasury.deal.events" to "treasury-service",
         // #8792: the four topics analytics-sink subscribes to that audit-service does not, added
         // when this table became the shared definition. Same rule as every row above — read off the
         // module that DECLARES the outgoing channel, not from the topic segment, which would have

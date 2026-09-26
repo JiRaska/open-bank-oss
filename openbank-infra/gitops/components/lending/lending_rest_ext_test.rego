@@ -237,3 +237,42 @@ test_backfill_veto_does_not_touch_other_admin_writes if {
 	not rest.prohibited with input as {"principal": admin, "action": "lending.disburse"}
 		with data.rules as rules_mock
 }
+
+# ── #10618: ROLE_FINANCE runs the backfill; the service-account veto still holds ───────────────
+
+finance := {"type": "HUMAN", "id": "u-fin", "roles": ["ROLE_FINANCE"]}
+
+test_finance_may_run_every_backfill_action if {
+	every action in backfill_actions {
+		rest.allow with input as {"principal": finance, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_service_account_with_finance_role_denied_every_backfill_action if {
+	every action in backfill_actions {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_FINANCE"]},
+			"action": action,
+		}
+			with data.rules as rules_mock
+	}
+}
+
+# The finance grant is scoped to the backfill: it opens no other lending action.
+test_finance_denied_other_lending_writes if {
+	every action in ["lending.disburse", "lending.approve", "lending.writeoff", "lending.create"] {
+		not rest.allow with input as {"principal": finance, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_treasury_roles_denied_backfill if {
+	every action in backfill_actions {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "u-tr", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]},
+			"action": action,
+		}
+			with data.rules as rules_mock
+	}
+}

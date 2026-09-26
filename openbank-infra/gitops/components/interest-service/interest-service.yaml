@@ -25,7 +25,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "732ca544ad7f368e"
+        openbank.tech/policy-checksum: "f9ebff0b723de05f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-a096988a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-dad4c4b2
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}

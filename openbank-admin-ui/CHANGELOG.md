@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.257.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.256.0...admin-ui-v0.257.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** treasury section — blotter, new deal, four-eyes approval inbox, limits, daily position (ADR-0315) ([#10877](https://github.com/JiRaska/open-bank-oss/issues/10877)) ([c7de662](https://github.com/JiRaska/open-bank-oss/commit/c7de662d992be3f4f7e1475c8cf11e9406aeb12c))
+
+## [0.256.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.255.0...admin-ui-v0.256.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** LCR and NSFR on BCBS factors, with an admin-ui page (ADR-0313 phase 1) ([#10860](https://github.com/JiRaska/open-bank-oss/issues/10860)) ([6998a83](https://github.com/JiRaska/open-bank-oss/commit/6998a831635be984d661da2cb89f4aa9c5f469dd))
+
+## [0.255.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.254.0...admin-ui-v0.255.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** IRRBB — repricing gap, supervisory shocks, ΔEVE/ΔNII, with an admin-ui page (ADR-0313 phase 1) ([#10853](https://github.com/JiRaska/open-bank-oss/issues/10853)) ([5f5518f](https://github.com/JiRaska/open-bank-oss/commit/5f5518faefaf99fc041a06a0aed5c807b512bf64))
+
+## [0.254.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.253.0...admin-ui-v0.254.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
+## [0.253.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.1...admin-ui-v0.253.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** explain and expose every CI quality gate ([#10828](https://github.com/JiRaska/open-bank-oss/issues/10828)) ([8c46ca2](https://github.com/JiRaska/open-bank-oss/commit/8c46ca2828271e0e1646cde891f60f9c992661ef))
+
+## [0.252.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.0...admin-ui-v0.252.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish enforced SDLC controls from policy goals ([#10800](https://github.com/JiRaska/open-bank-oss/issues/10800)) ([a71a92c](https://github.com/JiRaska/open-bank-oss/commit/a71a92c2ed5c5008973a5ab03ebd858417b25bd3))
+
+## [0.252.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.1...admin-ui-v0.252.0) (2026-09-24)
+
+
+### Features
+
+* **admin-ui:** explain SDLC and quality gates ([#10790](https://github.com/JiRaska/open-bank-oss/issues/10790)) ([a7810fa](https://github.com/JiRaska/open-bank-oss/commit/a7810fa74ff124c35971e3d301ea4046aa674cc3))
+
 ## [0.251.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.0...admin-ui-v0.251.1) (2026-09-24)
 
 

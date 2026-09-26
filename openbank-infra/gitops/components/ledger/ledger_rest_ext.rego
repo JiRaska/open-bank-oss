@@ -210,6 +210,17 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 	input.action in {"ledger.create", "ledger.read"}
 }
 
+# ADR-0315 — treasury-service on its own identity (named oidc-client `m2m`, Keycloak client
+# `openbank-treasury`, ROLE_API only). It posts the settlement, maturity and reversal journals of a
+# money-market deal -> ledger.create and NOTHING else: a reversal is an offsetting journal it posts
+# itself (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse, and it
+# reads nothing from the ledger.
+allowed_reasons contains "service-treasury-ledger-post" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-treasury"
+	input.action == "ledger.create"
+}
+
 # Only transaction-service's client exposes a reverseJournal call. lending-service and
 # settlement-service have NO reverseJournal method on their ledger RestClients — granting
 # ledger.reverse to every caller sharing the openbank-services identity would open the one

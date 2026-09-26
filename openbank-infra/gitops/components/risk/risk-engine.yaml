@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-risk-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "665d5f2c13e541f6"
+        openbank.tech/policy-checksum: "c85ff34c378eb32e"
       labels:
         app.kubernetes.io/name: risk-engine
         app.kubernetes.io/part-of: risk
@@ -49,7 +49,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-risk-engine to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-0c1b0639
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-ef666121
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8159 and management 8085 — both read off the service's own application.yaml

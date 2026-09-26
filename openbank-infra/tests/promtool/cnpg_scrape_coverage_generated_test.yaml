@@ -158,6 +158,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="accounts"}'
@@ -263,6 +265,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -436,6 +440,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="accounts"}'
@@ -541,6 +547,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -690,6 +698,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="accounts"}'
@@ -795,6 +805,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -956,6 +968,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="ai-platform"}'
@@ -1059,6 +1073,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -1215,6 +1231,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="ai-platform"}'
@@ -1318,6 +1336,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"

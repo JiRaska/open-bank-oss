@@ -13,6 +13,8 @@ import com.openbank.lending.it.TestRecordingLedgerPostingPort
 import io.quarkus.arc.ClientProxy
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
@@ -20,6 +22,9 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.containsString
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -44,8 +49,14 @@ import javax.sql.DataSource
  * self-approval are refused); a failed leg stops that loan and leaves the request re-runnable; the
  * re-run completes WITHOUT a duplicate journal; the borrower-credit port is never called; and the
  * post-backfill Loans Receivable per currency equals lending's unpaid principal.
+ *
+ * Runs with the servicing schedulers OFF ([NoServicingSchedulersProfile]). The seeded 2020 dates make
+ * every unaccrued installment due, so an interest-accrual pass (first tick 30 s after boot) or a
+ * provisioning cycle landing mid-class posts to these loans, moves the book, changes the plan hash,
+ * and turns the later steps into 409s. That was a timing flake, not a backfill defect.
  */
 @QuarkusTest
+@TestProfile(LedgerBackfillIT.NoServicingSchedulersProfile::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
@@ -139,7 +150,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(2)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `2 - the dry-run returns the journal set and ties out, and writes nothing`() {
         val before = ledger.recorded.size
         val body =
@@ -165,7 +176,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(3)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `3 - maker proposes, and cannot execute or approve their own request`() {
         requestId = Given {
             contentType("application/json")
@@ -203,11 +214,23 @@ class LedgerBackfillIT {
             statusCode(200)
         }
         assertThat(state()).isEqualTo("APPROVED")
+
+        // #10904: an approved plan gets no second request that could later run as a no-op "success".
+        Given {
+            contentType("application/json")
+            body("""{"cutoverDate":"$cutover","disbursedBefore":"2020-02-01"}""")
+        } When {
+            post("/api/v1/lending/ledger-backfill/requests")
+        } Then {
+            statusCode(409)
+            body("error", containsString(requestId))
+        }
+        assertThat(count("SELECT count(*) FROM ledger_backfill_request")).isEqualTo(1)
     }
 
     @Test
     @Order(5)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `5 - without execute=true the approved request only returns its plan`() {
         Given { queryParam("execute", false) } When {
             post("/api/v1/lending/ledger-backfill/requests/$requestId/execute")
@@ -220,7 +243,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(6)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `6 - a failed leg stops that loan only and leaves the request re-runnable`() {
         ledger.failOnce += "loan:$czkLoan:inst:1:principal"
         val body = Given { queryParam("execute", true) } When {
@@ -239,7 +262,7 @@ class LedgerBackfillIT {
 
     @Test
     @Order(7)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `7 - the re-run completes with exactly one journal per leg, value-dated, and ties out`() {
         val attemptsBefore = ledger.recorded.count {
             it.reference.contains(czkLoan.toString()) ||
@@ -252,6 +275,8 @@ class LedgerBackfillIT {
         } Extract { jsonPath() }
         assertThat(body.getBoolean("execution.complete")).isTrue()
         assertThat(state()).isEqualTo("EXECUTED")
+
+        assertReplaysAreNotCountedAsPosted(body)
 
         val journals = mine()
         // The re-run re-sent every leg (replays included) and the ledger kept ONE journal per reference.
@@ -301,11 +326,49 @@ class LedgerBackfillIT {
 
     @Test
     @Order(8)
-    @TestSecurity(user = "backfill-maker", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "backfill-maker", roles = ["ROLE_FINANCE"])
     fun `8 - an executed request cannot run again`() {
         Given { queryParam("execute", true) } When {
             post("/api/v1/lending/ledger-backfill/requests/$requestId/execute")
         } Then { statusCode(422) }
+    }
+
+    // #10618: the maker above is ROLE_FINANCE and the checker ROLE_ADMIN; roles outside the pair get 403.
+    @Test
+    @Order(9)
+    @TestSecurity(user = "desk-operator", roles = ["ROLE_OPERATOR", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"])
+    fun `9 - a role outside finance and admin is refused the dry-run`() {
+        Given {
+            queryParam("cutoverDate", cutover.toString())
+            queryParam("disbursedBefore", "2020-02-01")
+        } When {
+            get("/api/v1/lending/ledger-backfill/plan")
+        } Then { statusCode(403) }
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "backfill-auditor", roles = ["ROLE_FINANCE"])
+    fun `10 - the request history shows who proposed, approved and executed it`() {
+        Given { queryParam("limit", 5) } When {
+            get("/api/v1/lending/ledger-backfill/requests")
+        } Then {
+            statusCode(200)
+            body("requests[0].id", equalTo(requestId))
+            body("requests[0].state", equalTo("EXECUTED"))
+            body("requests[0].proposedBy", equalTo("backfill-maker"))
+            body("requests[0].decidedBy", equalTo("backfill-checker"))
+            body("requests[0].proposedAt", notNullValue())
+        }
+        Given { this } When { get("/api/v1/lending/ledger-backfill/requests/$requestId") } Then {
+            statusCode(200)
+            body("executedBy", equalTo("backfill-maker"))
+        }
+        Given { this } When { get("/api/v1/lending/ledger-backfill/requests/${UUID.randomUUID()}") } Then
+            { statusCode(404) }
+        Given { queryParam("limit", 0) } When { get("/api/v1/lending/ledger-backfill/requests") } Then {
+            statusCode(400)
+        }
     }
 
     /** The IT database is shared by every @QuarkusTest: leave nothing behind for book-wide counts (LendingSummaryIT). */
@@ -318,6 +381,29 @@ class LedgerBackfillIT {
         sql("DELETE FROM loan_provisioning WHERE loan_id IN ($loans)")
         sql("DELETE FROM loan WHERE id IN ($loans)")
         applicationId?.let { sql("DELETE FROM loan_application WHERE id = '$it'") }
+    }
+
+    /**
+     * #10904: the EUR loan was fully booked by the first run, so every leg is a replay now and the loan
+     * must NOT count as posted. The CZK loan had legs left to book, so it does.
+     */
+    private fun assertReplaysAreNotCountedAsPosted(body: io.restassured.path.json.JsonPath) {
+        val loans = body.getList<Map<String, Any>>("execution.loans").associateBy { it["loanId"] }
+        assertThat(loans.getValue(eurLoan.toString())["status"]).isEqualTo("ALREADY_POSTED")
+        assertThat(loans.getValue(eurLoan.toString())["legsPosted"]).isEqualTo(0)
+        assertThat(loans.getValue(czkLoan.toString())["status"]).isEqualTo("POSTED")
+        val result = dataSource.connection.use { c ->
+            c.prepareStatement("SELECT last_result FROM ledger_backfill_request WHERE id = ?::uuid").use { st ->
+                st.setString(1, requestId)
+                st.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getString(1)
+                }
+            }
+        }
+        val alreadyPosted = Regex("\"loansAlreadyPosted\":(\\d+)").find(result)?.groupValues?.get(1)?.toInt()
+        // >= 1, not == 1: the IT database is shared, so other suites' loans may also be in scope.
+        assertThat(alreadyPosted).isNotNull().isGreaterThanOrEqualTo(1)
     }
 
     private fun state(): String = dataSource.connection.use { c ->
@@ -350,5 +436,16 @@ class LedgerBackfillIT {
                 rs.getBigDecimal(1)
             }
         }
+    }
+
+    /**
+     * `off` is Quarkus' literal for "never schedule this method". Literals only: a profile is loaded in
+     * a different classloader from the test class, so a computed value could diverge between the two.
+     */
+    class NoServicingSchedulersProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "lending.servicing.accrual.every" to "off",
+            "lending.provisioning.cycle.every" to "off",
+        )
     }
 }

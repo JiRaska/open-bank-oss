@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.0...lending-service-v0.37.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **lending:** stop counting idempotent replays as posted in the ledger backfill ([#10938](https://github.com/JiRaska/open-bank-oss/issues/10938)) ([a28de17](https://github.com/JiRaska/open-bank-oss/commit/a28de17cd76c5203622236b02b2bb005c840f098))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.36.0...lending-service-v0.37.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.2...lending-service-v0.36.0) (2026-09-25)
+
+
+### Features
+
+* **infra:** risk, finance and treasury department roles ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10833](https://github.com/JiRaska/open-bank-oss/issues/10833)) ([43a94a2](https://github.com/JiRaska/open-bank-oss/commit/43a94a2cfb0267d53c7573a33b592df9b474d77c))
+
 ## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.1...lending-service-v0.35.2) (2026-09-24)
 
 

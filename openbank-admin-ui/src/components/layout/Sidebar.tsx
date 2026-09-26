@@ -10,6 +10,11 @@ import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import {
   Activity,
+  FilePlus,
+  Handshake,
+  Inbox,
+  Landmark,
+  Wallet,
   AlertOctagon,
   ArrowLeftRight,
   Banknote,
@@ -102,6 +107,24 @@ const revenueNav: NavItem[] = [
   { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view' },
 ]
 
+// #10618: risk-engine snapshots/curves and the lending ledger backfill, for the risk and finance
+// departments. Each entry carries the permission of the page it opens (roles.ts).
+const balanceSheetNav: NavItem[] = [
+  { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view' },
+  { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view' },
+  { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view' },
+]
+
+// ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
+// permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
+const treasuryNav: NavItem[] = [
+  { nameCs: 'Obchody',          nameEn: 'Deal blotter',     href: '/treasury/deals',          icon: Landmark,  permission: 'treasury:view' },
+  { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create' },
+  { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve' },
+  { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view' },
+  { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view' },
+]
+
 const customerNav: NavItem[] = [
   { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view' },
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
@@ -181,6 +204,7 @@ const platformNav: NavItem[] = [
   // near the bottom of System made an implemented route effectively invisible.
   { nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', href: '/system/tests', icon: FlaskConical, permission: 'system:view', badge: 'LIVE' },
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
+  { nameCs: 'SDLC / CI·CD', nameEn: 'SDLC / CI·CD', href: '/devops/sdlc', icon: Workflow, permission: 'system:view', badge: 'GUIDE' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
   { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
   { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },
@@ -217,7 +241,7 @@ const sysNav: NavItem[] = [
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...customerNav, ...paymentsNav,
+  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...customerNav, ...paymentsNav,
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
@@ -355,6 +379,18 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
         <NavSection items={filter(coreNav)} currentHref={currentHref} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
         <NavSection items={filter(revenueNav)} currentHref={currentHref} />
+        {filter(balanceSheetNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Rozvaha a riziko', 'Balance sheet & risk')}</SectionLabel>
+            <NavSection items={filter(balanceSheetNav)} currentHref={currentHref} />
+          </>
+        )}
+        {filter(treasuryNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Treasury', 'Treasury')}</SectionLabel>
+            <NavSection items={filter(treasuryNav)} currentHref={currentHref} />
+          </>
+        )}
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
         <NavSection items={filter(customerNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>

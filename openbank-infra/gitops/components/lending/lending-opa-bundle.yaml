@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "47eea62cc20fec93"
+    openbank.tech/policy-checksum: "32ca9bba6d4ac414"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -603,8 +603,8 @@ data:
     #                                 differ from the registrant)
     #   lending.ledgerBackfill.*    — one-off four-eyes ledger backfill (#10746): read (dry-run),
     #                                 propose (maker), decide (checker, must differ — enforced in
-    #                                 LedgerBackfillService), execute. ROLE_ADMIN humans only; see the
-    #                                 veto at the end of this file.
+    #                                 LedgerBackfillService), execute. ROLE_FINANCE / ROLE_ADMIN humans
+    #                                 only (#10618); see the allow + veto at the end of this file.
     #
     # Base rest.rego already grants: operator-read-any (OPERATOR/ADMIN on *.read/*.list),
     # compliance-read-any (*.read), party-self-service (reads where the JWT sub equals the
@@ -784,9 +784,8 @@ data:
     	}
     }
 
-
     # #10746: the ledger backfill re-posts GL history for loans whose journals never reached the ledger.
-    # It books real journals, so it is narrower than the desk: ROLE_ADMIN humans only. `operator-lending-write`
+    # It books real journals, so it is narrower than the desk: ROLE_ADMIN (and, since #10618, ROLE_FINANCE) humans only. `operator-lending-write`
     # above would otherwise admit ROLE_OPERATOR to any `lending.*`, and base operator-read-any would admit
     # the dry-run read to any operator — including the service accounts that carry ROLE_OPERATOR (and, in
     # some realms, the shared client). The veto closes every path at once: no service account, whatever
@@ -796,10 +795,29 @@ data:
     	startswith(input.principal.id, "service-account-")
     }
 
+    #
+    # #10618: ROLE_FINANCE owns this flow (it is the department that answers for the GL). Its own allow
+    # reason below, since neither operator-lending-write nor operator-read-any names it. The veto is
+    # widened to "neither ROLE_ADMIN nor ROLE_FINANCE"; the service-account veto above is unchanged, so a
+    # service account holding ROLE_FINANCE is still refused. Execute is granted to FINANCE too: the
+    # four-eyes control is propose/approve by two different people, bound to the plan hash that
+    # LedgerBackfillService re-checks at execution — keeping execute ADMIN-only would make a platform
+    # administrator a party to every finance posting, which is the wrong segregation of duties.
+    allowed_reasons contains "finance-ledger-backfill" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	"ROLE_FINANCE" in input.principal.roles
+    	startswith(input.action, "lending.ledgerBackfill.")
+    }
+
     prohibited if {
     	startswith(input.action, "lending.ledgerBackfill.")
-    	not "ROLE_ADMIN" in input.principal.roles
+    	not backfill_role_held
     }
+
+    backfill_role_held if "ROLE_ADMIN" in input.principal.roles
+
+    backfill_role_held if "ROLE_FINANCE" in input.principal.roles
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1484,6 +1502,16 @@ data:
                                                 # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                                 # joins the #3679 cohort.
       - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                                # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                                # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                                # may move, which is money-path for the same reason sca/consent/vop/
+                                                # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                                # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                                # repair money movement; card.create/activate are SCA-bound customer
+                                                # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                                # without the cardholder's SCA today — add a verb here when one ships.
+                                                # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1920,6 +1948,23 @@ data:
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
+        # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+        # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+        # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # here on purpose: every treasury action, the reads included, is granted in
+        # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+        # treasury depends on this matrix.
+        ROLE_RISK:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
+        ROLE_FINANCE:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity
