@@ -19,6 +19,22 @@ The isolated fixture used synthetic accounts and counterparties, separate Postgr
 
 ## Limits and remaining acceptance
 
-This proves one local synthetic source-backed flow and its access/state/outage boundaries. It does not prove deployed Kafka ACLs, actual Audit-service ingestion, browser rendering/BFF behavior, historical role changes, concurrency or race coverage, annual 1x/10x performance, the other banking scenarios, required human review, or sandbox deployment. Runtime and request evidence is machine-local; a portable automated E2E harness remains required.
+This proves one local synthetic source-backed flow and its access/state/outage boundaries. It does not prove deployed Kafka ACLs, actual Audit-service ingestion, browser rendering/BFF behavior, historical role changes, concurrency or race coverage, annual 1x/10x performance, the other banking scenarios, required human review, or sandbox deployment. Runtime and request evidence is machine-local. The portable harness described below covers the API lifecycle; runtime provisioning and the outage/recovery drill remain separate.
 
 Initial fixture errors were corrected without changing production security gates: an undeclared Kafka channel override prevented startup, the source HTTPS port must satisfy the existing 8443 gate, and the isolated consumer needed its own actual group. The first synthetic CA lacked a required key-usage extension; it was corrected instead of disabling verification. Initial assertion assumptions were corrected to use the actual `CLOSED_NO_FINDING` status and allow an empty HTTP 403 body.
+
+## Portable lifecycle probe
+
+`perf/scripts/context-fraud-source-e2e.py` was executed against the same isolated real services with verified TLS, OIDC, production OPA policies and Kafka. It exited 0: three review-queue checks, assigned shared-account matching, unassigned administrator/non-admin/hidden-root denials, closed-related removal, closed-root denial, and normal API cleanup all passed.
+
+Provision an isolated synthetic fixture first. Supply HTTPS Fraud/Context base URLs, the trusted CA certificate, and a private JSON file containing `maker`, `checker`, `reader`, and `denied` bearer tokens. The first three must be distinct administrators and the fourth a distinct non-admin; tokens must remain valid through execution and cleanup. The servers verify token signatures and policies; parsing claims in the runner is input validation only.
+
+```sh
+python3 perf/scripts/context-fraud-source-e2e.py --synthetic-fixture \
+  --fraud-url "$FRAUD_E2E_URL" --context-url "$CONTEXT_E2E_URL" \
+  --ca-file "$E2E_CA_FILE" --tokens-json "$E2E_TOKENS_FILE"
+```
+
+The probe creates random synthetic accounts/counterparties and owns only its created cases and assignment proposals. It closes owned cases and revokes their assignments through normal APIs, failing if cleanup fails. Immutable source scores and audit evidence remain intentionally. An indeterminate transport failure during creation can leave an unidentified synthetic record and requires fixture-owner reconciliation. No production fixture or real client data should be supplied.
+
+The automated probe does not stop services, provision Kafka ACLs, prove hidden-case projection readiness independently, exercise browser login/BFF/UI, or certify performance. The source outage/recovery result above came from the separate controlled runtime drill.
