@@ -2,7 +2,7 @@
 
 ## Scope and result
 
-Runtime under test: Context head `a20da39c7d1794d6c30a51b18180341cedf20e5b`, packaged JVM application, custom `perf` runtime profile. Authentication and OPA enforcement were enabled; neither `%test` nor `%dev` security overrides were used.
+Initial runtime under test: a previously packaged Context JVM application, custom `perf` runtime profile. A later fresh build detected a V21 migration checksum mismatch against its disposable database, so attribution of this first smoke to head `a20da39c7d1794d6c30a51b18180341cedf20e5b` is withdrawn. Its figures describe that initial artifact only and do not validate the current source head. Authentication and OPA enforcement were enabled; neither `%test` nor `%dev` security overrides were used.
 
 The existing `perf/k6/context-graph-read-baseline.js` complaint smoke profile completed successfully: two minutes, 1→5→0 virtual users, 13,162 requests, 52,648 successful checks, zero failed requests/checks. Mean graph latency was 35.12 ms, median 24.56 ms, p95 91.65 ms, maximum 676.62 ms. Both configured latency thresholds (p95 <300 ms and p99 <1000 ms) passed; p99 was not separately exported as a percentile. Observed throughput averaged 109.64 requests/s in this closed-loop smoke; this is **not** a constant-arrival-rate capacity result.
 
@@ -23,3 +23,9 @@ The fixture is deliberately small and proves the authenticated API path, not ann
 Commitment relay export was not enabled: local decisions, disclosures and outbox commits were verified, but delivery into the Audit service was not. Two startup emitter-wiring errors preceded application readiness and must be investigated separately before claiming enabled relay delivery. A malformed initial synthetic event with the wrong source-service literal was rejected before the corrected valid event was projected; it was not a successful ingestion sample.
 
 Credentials and tokens stayed in restricted temporary files and are excluded from this report and the repository.
+
+## Fresh-build relay correction in progress
+
+The startup race was traced to scheduled construction before messaging channel initialization. Both relays now skip execution until ApplicationNotRunning permits it and resolve their emitter lazily after the enabled guard. The audit integration test drives the real scheduler and waits for both publication and persisted SENT status; the disclosure integration test retains direct idempotency coverage. Both focused tests, ktlint, Detekt and quarkusBuild passed.
+
+The disposable schema was recreated rather than repairing migration checksums. The fresh package applied all migrations through V21 and started with both commitment exports enabled, without the earlier emitter startup errors. A new authenticated smoke is running; its result and actual Kafka commitment delivery are not yet certified here.

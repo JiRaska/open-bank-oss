@@ -12,6 +12,7 @@ import io.smallrye.reactive.messaging.MutinyEmitter
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.enterprise.inject.Instance
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
@@ -26,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong
 @ApplicationScoped
 class ContextDisclosureCommitmentRelay(
     private val sessions: Mutiny.SessionFactory,
-    @Channel("context-audit-commitments-out") private val emitter: MutinyEmitter<String>,
+    @Channel("context-audit-commitments-out") private val emitter: Instance<MutinyEmitter<String>>,
     private val mapper: ObjectMapper,
     private val clock: Clock,
     private val meters: MeterRegistry,
@@ -42,7 +43,11 @@ class ContextDisclosureCommitmentRelay(
         if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
-    @Scheduled(every = "5s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Scheduled(
+        every = "5s",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
+        skipExecutionIf = Scheduled.ApplicationNotRunning::class,
+    )
     suspend fun dispatch() {
         if (!enabled) return
         refreshPending()
@@ -64,7 +69,7 @@ class ContextDisclosureCommitmentRelay(
                 val metadata = OutgoingKafkaRecordMetadata.builder<String>().withKey(
                     row.disclosureId.toString(),
                 ).build()
-                emitter.sendMessage(Message.of(payload).addMetadata(metadata)).awaitSuspending()
+                emitter.get().sendMessage(Message.of(payload).addMetadata(metadata)).awaitSuspending()
                 update(row.disclosureId, "SENT", clock.instant())
             } catch (_: Exception) {
                 // No payload or restricted row values in logs; the same ID remains retryable.
