@@ -34,8 +34,12 @@ class OpaPolicyDecisionPointProducer {
     @ConfigProperty(name = "opa.path", defaultValue = OpaSidecarPolicyDecisionPoint.DEFAULT_QUERY_PATH)
     lateinit var opaPath: String
 
+    // A Kotlin default here (`= 500L`) would generate a synthetic constructor and silently
+    // discard whatever `opa.timeout-ms` says (rules.yaml: configproperty_kotlin_defaults). Use
+    // `lateinit` over the boxed type instead, exactly as `opaUrl`/`opaPath` above rely solely on
+    // the annotation's defaultValue.
     @ConfigProperty(name = "opa.timeout-ms", defaultValue = DEFAULT_OPA_TIMEOUT_MS_STR)
-    var opaTimeoutMs: Long = DEFAULT_OPA_TIMEOUT_MS
+    lateinit var opaTimeoutMs: java.lang.Long
 
     @Produces
     @ApplicationScoped
@@ -44,12 +48,11 @@ class OpaPolicyDecisionPointProducer {
     fun policyDecisionPoint(): PolicyDecisionPoint = OpaSidecarPolicyDecisionPoint(
         baseUrl = opaUrl,
         queryPath = opaPath,
-        timeout = Duration.ofMillis(opaTimeoutMs),
+        timeout = Duration.ofMillis(opaTimeoutMs.toLong()),
     )
 
     companion object {
         const val ENABLED_PROPERTY = "openbank.authz.opa-pdp-producer.enabled"
-        const val DEFAULT_OPA_TIMEOUT_MS = 500L
         private const val DEFAULT_OPA_TIMEOUT_MS_STR = "500"
     }
 }

@@ -23,7 +23,7 @@ class OpaPolicyDecisionPointProducerTest {
         assertThat(default("opaPath").defaultValue).isEqualTo("/v1/data/openbank/rest/allow")
         assertThat(default("opaTimeoutMs").name).isEqualTo("opa.timeout-ms")
         assertThat(default("opaTimeoutMs").defaultValue).isEqualTo("500")
-        assertThat(Duration.ofMillis(OpaPolicyDecisionPointProducer.DEFAULT_OPA_TIMEOUT_MS))
+        assertThat(Duration.ofMillis(default("opaTimeoutMs").defaultValue.toLong()))
             .isEqualTo(OpaSidecarPolicyDecisionPoint.DEFAULT_TIMEOUT)
     }
 
@@ -42,7 +42,7 @@ class OpaPolicyDecisionPointProducerTest {
         val producer = OpaPolicyDecisionPointProducer().apply {
             opaUrl = "http://opa.example:9191"
             opaPath = "/v1/data/openbank/psd2/allow"
-            opaTimeoutMs = 250
+            opaTimeoutMs = 250L as java.lang.Long
         }
         assertThat(producer.policyDecisionPoint()).isInstanceOf(OpaSidecarPolicyDecisionPoint::class.java)
     }
