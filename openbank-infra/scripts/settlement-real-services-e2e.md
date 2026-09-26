@@ -69,3 +69,21 @@ attempts. This case requires `LEDGER_STATE_UNKNOWN` rather than `BOOKED`, exactl
 one journal ID, and the same 60/40 balances with the consumed cover released by projection. It proves
 that exhausted retries preserve uncertainty without refunding a committed transfer. Operator
 reconciliation after that state and process-crash recovery remain separate acceptance cases.
+
+## Recover the exhausted workflow
+
+```sh
+python3 openbank-infra/scripts/settlement-real-services-e2e.py \
+  --drop-ledger-response 5 --recover-after-loss
+```
+
+After proving `LEDGER_STATE_UNKNOWN` with one posted journal and correct balances, this mode waits
+for the original Temporal execution to complete. It selects the workflow-task completion that
+scheduled `BookToLedger` and resets that exact run at that event. The recovered activity uses the
+original settlement ID and ledger idempotency key. The proof requires `BOOKED`, exactly one journal
+with the original ID, six successful posts total (five lost responses and one recovery response),
+and unchanged balances and balance versions. It also requires a different Temporal run ID and one
+durable outbox fact for `LEDGER_STATE_UNKNOWN` → `BOOKED`. The evidence directory retains histories
+for the explicit original/recovered executions and the
+reset command result. This is a controlled local recovery exercise; it does not reset any shared
+workflow or prove production operator authorization.

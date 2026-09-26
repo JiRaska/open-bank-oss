@@ -387,7 +387,10 @@ def main() -> None:
         "--drop-ledger-response", nargs="?", const=1, default=0, type=int, choices=(1, 5),
         help="Lose one committed journal reply, or all five activity attempts",
     )
+    parser.add_argument("--recover-after-loss", action="store_true", help="Reset the exhausted local workflow before journal booking")
     args = parser.parse_args()
+    if args.recover_after_loss and args.drop_ledger_response != 5:
+        parser.error("--recover-after-loss requires --drop-ledger-response 5")
     global postgres
 
     java = java_executable()
@@ -698,6 +701,69 @@ def main() -> None:
     assert balances_correct(), "Duplicate request changed balances"
 
     fault_evidence = response_loss_proxy.evidence(journals[0]["id"]) if response_loss_proxy else None
+    recovery_evidence = None
+    if args.recover_after_loss:
+        workflow_id = f"settlement-{settlement_id}"
+
+        def temporal_command(*command: str) -> dict[str, Any]:
+            return json.loads(run(
+                "docker", "exec", temporal, "temporal", "workflow", *command,
+                "--workflow-id", workflow_id, "--namespace", "openbank-settlement",
+                "--address", "127.0.0.1:7233", "--output", "json", "--command-timeout", "10s",
+            ))
+
+        observed_run: str | None = None
+
+        def completed_history() -> dict[str, Any] | None:
+            history = temporal_command("show", "--run-id", observed_run) if observed_run else temporal_command("show")
+            events = history["events"]
+            return history if events[-1]["eventType"] == "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED" else None
+
+        history = until(completed_history, "original workflow completion", 30)
+        (OUT / "workflow-before-reset.json").write_text(json.dumps(history, indent=2))
+        bookings = [
+            event["activityTaskScheduledEventAttributes"] for event in history["events"]
+            if event.get("activityTaskScheduledEventAttributes", {}).get("activityType", {}).get("name") == "BookToLedger"
+        ]
+        assert len(bookings) == 1, "Expected exactly one journal activity in the original history"
+        reset_event = str(bookings[0]["workflowTaskCompletedEventId"])
+        original_run = history["events"][0]["workflowExecutionStartedEventAttributes"]["originalExecutionRunId"]
+        reset = temporal_command(
+            "reset", "--run-id", original_run, "--event-id", reset_event,
+            "--reason", "Isolated E2E: recover confirmed journal after five lost replies",
+        )
+        assert reset["runId"] != original_run, "Reset did not create a new execution"
+        observed_run = reset["runId"]
+        (OUT / "workflow-reset.json").write_text(json.dumps(reset, indent=2))
+        until(
+            lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{settlement_id}'") == "BOOKED",
+            "reset workflow booked", 60,
+        )
+        recovered_history = until(completed_history, "recovered workflow completion", 30)
+        (OUT / "workflow-after-reset.json").write_text(json.dumps(recovered_history, indent=2))
+        recovered_journals = request(
+            f"http://127.0.0.1:{service_ports['ledger']}/api/v1/journals/transaction/{settlement_id}", token=token,
+        )
+        assert len(recovered_journals) == 1 and recovered_journals[0]["id"] == journals[0]["id"]
+        recovered_balances = balances_correct()
+        assert recovered_balances, "Workflow recovery changed customer balances"
+        assert [b["version"] for b in recovered_balances] == [b["version"] for b in final_balances]
+        assert sql(
+            "settlement",
+            "SELECT count(*) FROM settlement_outbox "
+            f"WHERE aggregate_id='{settlement_id}' "
+            "AND payload::jsonb->>'previousStatus'='LEDGER_STATE_UNKNOWN' "
+            "AND payload::jsonb->>'status'='BOOKED'",
+        ) == "1", "Missing or duplicate durable recovery audit fact"
+        assert response_loss_proxy is not None
+        with response_loss_proxy.lock:
+            assert response_loss_proxy.dropped_responses == 5
+            assert response_loss_proxy.successful_journal_ids == [journals[0]["id"]] * 6
+        recovery_evidence = {
+            "status": "BOOKED", "resetEventId": reset_event, "successfulUpstreamPosts": 6,
+            "originalRunId": original_run, "recoveredRunId": observed_run, "durableRecoveryFacts": 1,
+        }
+        print("Recovery", json.dumps(recovery_evidence), flush=True)
     print("Fault injection", json.dumps(fault_evidence), flush=True)
     print("Journals response", json.dumps(journals), flush=True)
     print("Balances", json.dumps(final_balances), flush=True)
@@ -710,7 +776,8 @@ def main() -> None:
                 "journals": journals,
                 "source": source_metadata,
                 "responseLoss": fault_evidence,
-                "settlementStatus": expected_status,
+                "settlementStatus": "BOOKED" if recovery_evidence else expected_status,
+                "recovery": recovery_evidence,
             },
             indent=2,
         )

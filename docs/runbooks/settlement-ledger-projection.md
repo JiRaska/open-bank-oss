@@ -68,3 +68,32 @@ retry to resolve to the same journal. `--drop-ledger-response 5` loses all five 
 requires `LEDGER_STATE_UNKNOWN` with exactly one journal, correctly projected balances and consumed
 cover. These modes verify safe uncertainty handling, not completed operator reconciliation or
 sandbox rollout acceptance. See the adjacent harness README for prerequisites and evidence.
+
+## Recover a confirmed posting after exhausted replies
+
+This procedure is limited to `LEDGER_PROJECTION` settlements in `LEDGER_STATE_UNKNOWN` where the
+original journal is positively established as `POSTED`. It does not authorize financial corrections,
+new transfers, legacy saga recovery, or reset of an in-flight execution.
+
+1. Use the approved operator access to inspect the exact settlement and its Temporal run. Retain
+   the completed original history. Confirm the execution is closed and no original activity is
+   still outstanding.
+2. Read the ledger by the original settlement transaction ID. Require exactly one `POSTED` journal
+   with the intended payer/payee subaccounts, currency, amount and balanced legs. Reconcile both
+   projected balances, the matching hold and projection/outbox delivery. Missing or contradictory
+   evidence requires investigation; a timeout or an empty lookup does not authorize a reset.
+3. In the original history, locate the `ActivityTaskScheduled` event whose activity type is
+   `BookToLedger`. Use its `workflowTaskCompletedEventId` as the reset point. The successful cover
+   reservation must precede this point. Do not select the first workflow task or reset a different
+   workflow type merely because its name looks similar.
+4. Through the existing authorized Temporal operator interface, reset that exact workflow ID and
+   original run ID at the selected event, recording the recovery reason. Preserve history and use
+   the compatible worker binary. Do not change the settlement, idempotency key, or stored protocol.
+5. Verify the new run completes, the durable settlement becomes `BOOKED`, and its transition audit
+   is present. Verify the same single journal ID and unchanged customer balances; the recovery
+   must not create another journal or release any unrelated reservation. If it fails, retain the
+   new evidence and investigate rather than repeatedly resetting.
+
+The harness option `--drop-ledger-response 5 --recover-after-loss` exercises the same history-based
+reset with isolated infrastructure. The runtime has no automatic reset loop. Access control for the
+operator interface and approval evidence must be verified separately in the deployment environment.
