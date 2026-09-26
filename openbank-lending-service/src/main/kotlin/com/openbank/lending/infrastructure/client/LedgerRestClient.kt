@@ -14,6 +14,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import org.jboss.resteasy.reactive.RestResponse
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -38,6 +39,10 @@ interface LedgerRestClient {
 
     @POST
     fun postJournal(request: PostJournalRequest): Uni<JournalResponse>
+
+    /** Same call, keeping the response headers: `Idempotent-Replayed` says whether it booked (#10904). */
+    @POST
+    fun postJournalWithHeaders(request: PostJournalRequest): Uni<RestResponse<JournalResponse>>
 }
 
 data class PostJournalRequest(

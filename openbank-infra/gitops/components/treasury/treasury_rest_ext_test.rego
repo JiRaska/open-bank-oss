@@ -13,6 +13,8 @@ approver := {"type": "HUMAN", "id": "approver-1", "roles": ["ROLE_TREASURY_APPRO
 
 admin := {"type": "HUMAN", "id": "admin-1", "roles": ["ROLE_ADMIN"]}
 
+senior := {"type": "HUMAN", "id": "senior-1", "roles": ["ROLE_TREASURY_SENIOR_APPROVER"]}
+
 nobody := {"type": "HUMAN", "id": "teller-1", "roles": ["ROLE_CUSTOMER"]}
 
 # The shared backend client, given the approver role by mistake: still a machine, still denied.
@@ -106,4 +108,26 @@ test_ai_agent_denied_draft_approve_settle if {
 	every a in {"treasury.deal.draft", "treasury.deal.approve", "treasury.deal.settle"} {
 		not allowed(agent, a)
 	}
+}
+
+# --- ADR-0315 D4: senior limit override ---
+
+test_senior_may_override_and_read if {
+	allowed(senior, "treasury.deal.override-limit")
+	every a in reads { allowed(senior, a) }
+}
+
+test_only_the_senior_may_override if {
+	every p in [dealer, approver, admin, nobody] { not allowed(p, "treasury.deal.override-limit") }
+}
+
+test_senior_may_not_book_or_draft if {
+	every a in all_writes { not allowed(senior, a) }
+}
+
+test_machines_and_agents_may_not_override if {
+	sa := object.union(shared_sa, {"roles": ["ROLE_TREASURY_SENIOR_APPROVER"]})
+	not allowed(sa, "treasury.deal.override-limit")
+	ag := object.union(agent, {"roles": ["ROLE_TREASURY_SENIOR_APPROVER"]})
+	not allowed(ag, "treasury.deal.override-limit")
 }

@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.rest
 import com.openbank.delegation.application.usecase.BusinessSigningService
 import com.openbank.delegation.application.usecase.PaymentApprovalCommand
 import com.openbank.delegation.application.usecase.SigningPayloadCodec
+import com.openbank.delegation.domain.model.ApprovalKind
 import com.openbank.delegation.domain.model.ApprovalStatus
 import com.openbank.delegation.domain.model.SignerGroup
 import com.openbank.delegation.domain.model.SigningAmount
@@ -62,23 +63,25 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
     @POST
     @Path("/signing/evaluate")
     @Authorize(action = "delegation.signing.evaluate", resource = "#entityId")
-    @Operation(summary = "How many signatures a payment needs, and from whom")
+    @Operation(summary = "How many signatures a payment, standing order or SDD mandate needs, and from whom")
     suspend fun evaluate(@PathParam("entityId") entityId: UUID, body: EvaluateRequest?): EvaluationResponse {
         requireNotNull(body) { "request body is required" }
-        val amount =
+        val kind = heldKind(body.kind)
+        val amount = if (kind == ApprovalKind.SDD_MANDATE && body.amount == null) {
+            null
+        } else {
             SigningAmount(
-                requireNotNull(body.amount) {
-                    "amount is required"
-                },
+                requireNotNull(body.amount) { "amount is required" },
                 requireNotNull(body.currency?.uppercase()) { "currency is required" },
             )
+        }
+        val creditorIban = if (kind == ApprovalKind.SDD_MANDATE) {
+            null
+        } else {
+            requireNotNull(body.creditorIban) { "creditorIban is required" }
+        }
         return EvaluationResponse.from(
-            service.evaluate(
-                entityId,
-                amount,
-                requireNotNull(body.creditorIban) { "creditorIban is required" },
-                requireNotNull(body.rail) { "rail is required" },
-            ),
+            service.evaluateFor(kind, entityId, amount, creditorIban, requireNotNull(body.rail) { "rail is required" }),
         )
     }
 
@@ -167,14 +170,36 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
     @Path("/approval-requests")
     @Authorize(action = "delegation.signing.approval.create", resource = "#entityId")
     @Operation(
-        summary = "Hold a payment for co-signature (kind PAYMENT; the initiator's consumed SCA is the first signature)",
+        summary = "Hold a payment, standing order or SDD mandate for co-signature (the initiator's consumed SCA " +
+            "is the first signature)",
     )
     suspend fun createPayment(@PathParam("entityId") entityId: UUID, body: CreatePaymentApprovalRequest?): Response {
         requireNotNull(body) { "request body is required" }
-        require(body.kind == null || body.kind == "PAYMENT") { "only kind PAYMENT is created here" }
+        val kind = heldKind(body.kind)
         val initiator = requireNotNull(body.initiatorSignature) { "initiatorSignature is required" }
         val payload = requireNotNull(body.payload) { "payload is required" }
         require(payload["railRequest"] is Map<*, *>) { "payload.railRequest must be an object" }
+        val sdd = kind == ApprovalKind.SDD_MANDATE
+        val amount = if (sdd && payload["amount"] == null) {
+            null
+        } else {
+            MoneyBody(payload["amount"]?.toString()?.toBigDecimalOrNull(), payload["currency"] as? String)
+                .toDomain("payload")
+        }
+        val extras = if (sdd) {
+            mapOf(
+                "creditorIdentifier" to
+                    requireNotNull((payload["creditorIdentifier"] as? String)?.takeIf { it.isNotBlank() }) {
+                        "payload.creditorIdentifier is required"
+                    },
+                "mandateReference" to
+                    requireNotNull((payload["mandateReference"] as? String)?.takeIf { it.isNotBlank() }) {
+                        "payload.mandateReference is required"
+                    },
+            )
+        } else {
+            mapOf("frequency" to payload["frequency"] as? String).filterValues { it != null }
+        }
         val request = service.createPayment(
             PaymentApprovalCommand(
                 entityPartyId = entityId,
@@ -182,21 +207,20 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
                 initiatorScaChallengeId = requireNotNull(initiator.scaChallengeId) {
                     "initiatorSignature.scaChallengeId is required"
                 },
-                amount = MoneyBody(
-                    payload["amount"]?.toString()?.toBigDecimalOrNull(),
-                    payload["currency"] as? String,
-                ).toDomain("payload"),
-                creditorIban = requireNotNull(payload["creditorIban"] as? String) {
-                    "payload.creditorIban is required"
+                amount = amount,
+                creditorIban = if (sdd) {
+                    null
+                } else {
+                    requireNotNull(payload["creditorIban"] as? String) { "payload.creditorIban is required" }
                 },
                 creditorName = payload["creditorName"] as? String,
-                rail = requireNotNull(
-                    (payload["rail"] as? String)?.takeIf {
-                        it.isNotBlank()
-                    },
-                ) { "payload.rail is required" },
+                rail = requireNotNull((payload["rail"] as? String)?.takeIf { it.isNotBlank() }) {
+                    "payload.rail is required"
+                },
                 payload = payload,
                 ttl = body.expiresInSeconds?.let { Duration.ofSeconds(it) },
+                kind = kind,
+                summaryExtras = extras,
             ),
         )
         return Response.status(Response.Status.CREATED).entity(ApprovalRequestResponse.from(request, codec)).build()
@@ -300,6 +324,14 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
 
     private fun accepted(request: com.openbank.delegation.domain.model.ApprovalRequest): Response =
         Response.status(Response.Status.ACCEPTED).entity(ApprovalRequestResponse.from(request, codec)).build()
+
+    /** The held-instruction kinds created here; PAYMENT when omitted (the #10314 edge body). */
+    private fun heldKind(raw: String?): ApprovalKind {
+        if (raw == null) return ApprovalKind.PAYMENT
+        val kind = ApprovalKind.entries.firstOrNull { it.name == raw }
+        require(kind != null && kind.releasable) { "kind must be one of PAYMENT, STANDING_ORDER, SDD_MANDATE" }
+        return kind
+    }
 }
 
 /** One mapper for the whole signing boundary: `{status, error, code}`. */

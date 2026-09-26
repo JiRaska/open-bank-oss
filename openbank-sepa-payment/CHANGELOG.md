@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.3...sepa-payment-v0.14.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.2...sepa-payment-v0.14.3) (2026-09-23)
 
 
