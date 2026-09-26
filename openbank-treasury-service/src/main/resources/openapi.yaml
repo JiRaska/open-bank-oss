@@ -6,7 +6,7 @@ info:
   #        per-currency daily positions.
   # 1.1.0: additive — POST /deals/{id}/override-limit (ROLE_TREASURY_SENIOR_APPROVER) and
   #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
-  version: 1.1.0
+  version: 1.2.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -265,6 +265,21 @@ paths:
                 items:
                   $ref: '#/components/schemas/CounterpartyLimit'
 
+  /api/v1/treasury/limits/utilisation:
+    get:
+      tags: [Treasury]
+      operationId: getLimitsUtilisation
+      summary: >-
+        Per-counterparty limit utilisation: limit, utilised (sum of principal of deals on book),
+        available, utilisation %, breached flag and count of active senior overrides (ADR-0315 D4)
+      responses:
+        '200':
+          description: Limit utilisation lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LimitUtilisation'
+
   /api/v1/treasury/positions:
     get:
       tags: [Treasury]
@@ -456,6 +471,24 @@ components:
         limit: { type: number }
         exposure: { type: number }
         headroom: { type: number }
+    LimitUtilisation:
+      type: object
+      properties:
+        limits:
+          type: array
+          items:
+            type: object
+            properties:
+              counterpartyId: { type: string }
+              name: { type: string }
+              synthetic: { type: boolean }
+              currency: { type: string }
+              limit: { type: number }
+              utilised: { type: number }
+              available: { type: number }
+              utilisationPercent: { type: number }
+              breached: { type: boolean }
+              activeOverrides: { type: integer }
     Positions:
       type: object
       properties:

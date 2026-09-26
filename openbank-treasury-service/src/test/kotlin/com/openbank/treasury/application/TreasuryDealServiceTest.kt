@@ -142,6 +142,52 @@ class TreasuryDealServiceTest {
         val a = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
         assertThat(a.exposure).isEqualByComparingTo("250000.00")
         assertThat(a.headroom).isEqualByComparingTo("750000.00")
+        assertThat(a.utilisationPercent).isEqualByComparingTo("25.00")
+        assertThat(a.breached).isFalse()
+        assertThat(a.activeOverrides).isEqualTo(0)
+    }
+
+    /**
+     * #10896: the limit-utilisation view (`counterparties()`) and the booking-time [LimitCheck] both
+     * read [DealRepository.exposure] — proving they cannot disagree means proving the view's
+     * `exposure` for a counterparty/currency equals what a fresh [com.openbank.treasury.domain.model.LimitCheck]
+     * computes for the NEXT deal against the same book. Both numbers come from the identical
+     * on-book deals (`Deal.LIMIT_CONSUMING_STATES`), so they must match exactly.
+     */
+    @Test
+    fun `the limit-utilisation view and the booking-time limit check agree on exposure`(): Unit = runBlocking {
+        book(cmd(principal = "250000.00"))
+        val pendingOnly = service.draft(cmd(principal = "50000.00"), DealFixtures.dealer)
+        val pending = service.submit(pendingOnly.id, DealFixtures.dealer)
+
+        val view = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
+        // the view's exposure already counts BOOKED + PENDING_APPROVAL, exactly like the check.
+        assertThat(view.exposure).isEqualByComparingTo("300000.00")
+        assertThat(pending.limitCheck!!.exposureBefore).isEqualByComparingTo("250000.00")
+        assertThat(pending.limitCheck!!.exposureAfter).isEqualByComparingTo(view.exposure)
+    }
+
+    @Test
+    fun `an active override counts while PENDING_APPROVAL, and not after booking`(): Unit = runBlocking {
+        book(cmd(principal = "700000.00"))
+        val second = service.draft(cmd(principal = "400000.00"), DealFixtures.dealer)
+        val pending = service.submit(second.id, DealFixtures.dealer)
+        assertThat(pending.limitCheck!!.breached).isTrue()
+
+        service.overrideLimit(second.id, "desk head approved, temporary excess", DealFixtures.seniorApprover)
+        val afterOverride = service.counterparties().first {
+            it.counterparty.id == "SIMBK-A" && it.currency == "CZK"
+        }
+        assertThat(afterOverride.activeOverrides).isEqualTo(1)
+        assertThat(afterOverride.breached).isTrue()
+
+        service.approve(second.id, DealFixtures.approver)
+        val afterBooking = service.counterparties().first {
+            it.counterparty.id == "SIMBK-A" && it.currency == "CZK"
+        }
+        assertThat(afterBooking.activeOverrides)
+            .describedAs("booking moves the deal off PENDING_APPROVAL; the override is no longer 'active'")
+            .isEqualTo(0)
     }
 
     @Test
@@ -259,6 +305,12 @@ class TreasuryDealServiceTest {
                     it.consumesLimit &&
                     it.id != excludeDealId
             }.sumOf { it.principal }
+        override suspend fun activeLimitOverrideCount(counterpartyId: String, currency: String) = rows.values.count {
+            it.counterpartyId == counterpartyId &&
+                it.currency == currency &&
+                it.state == DealState.PENDING_APPROVAL &&
+                it.limitOverride != null
+        }
         override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
         override suspend fun recordJournal(journal: LedgerJournalRef) {
             if (journals.none { it.idempotencyKey == journal.idempotencyKey }) journals += journal

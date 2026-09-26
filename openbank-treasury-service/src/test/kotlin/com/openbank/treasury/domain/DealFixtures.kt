@@ -25,6 +25,7 @@ object DealFixtures {
 
     val dealer = Actor("dana.dealer", ActorType.HUMAN)
     val approver = Actor("adam.approver", ActorType.HUMAN)
+    val seniorApprover = Actor("sam.senior", ActorType.HUMAN)
     val agent = Actor("agent:treasury-drafter", ActorType.AI_AGENT)
     val serviceAccount = Actor("service-account-openbank-services", ActorType.SERVICE)
 

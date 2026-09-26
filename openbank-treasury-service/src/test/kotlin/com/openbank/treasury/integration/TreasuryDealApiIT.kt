@@ -218,6 +218,12 @@ class TreasuryDealApiIT {
             .body("limitOverride.reason", equalTo("ALCO-approved temporary excess"))
         action(breachId, "approve").then().statusCode(403) // a senior cannot book (RBAC)
         assertThat(state(breachId)).isEqualTo("PENDING_APPROVAL")
+        given().`when`().get("/api/v1/treasury/limits/utilisation").then().statusCode(200)
+            .body("limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.breached", equalTo(true))
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.activeOverrides",
+                equalTo(1),
+            )
     }
 
     @Test
@@ -229,6 +235,14 @@ class TreasuryDealApiIT {
         action(breachId, "approve").then().statusCode(200)
             .body("state", equalTo("BOOKED"))
             .body("limitOverride.by", equalTo("sara.senior"))
+        // booking moves the deal off PENDING_APPROVAL: the override is no longer "active", but the
+        // deal still consumes the limit (BOOKED is on-book), so utilisation stays breached.
+        given().`when`().get("/api/v1/treasury/limits/utilisation").then().statusCode(200)
+            .body("limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.breached", equalTo(true))
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.activeOverrides",
+                equalTo(0),
+            )
     }
 
     private fun state(id: String): String = jdbc { c ->

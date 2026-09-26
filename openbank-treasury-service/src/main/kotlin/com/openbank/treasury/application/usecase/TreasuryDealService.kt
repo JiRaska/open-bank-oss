@@ -215,7 +215,13 @@ class TreasuryDealService(
     override suspend fun counterparties(): List<CounterpartyExposure> = counterparties.list().flatMap { cp ->
         Deal.SUPPORTED_CURRENCIES.sorted().mapNotNull { ccy ->
             if (!cp.limits.containsKey(ccy)) return@mapNotNull null
-            CounterpartyExposure(cp, ccy, cp.limitFor(ccy), deals.exposure(cp.id, ccy, null))
+            CounterpartyExposure(
+                counterparty = cp,
+                currency = ccy,
+                limit = cp.limitFor(ccy),
+                exposure = deals.exposure(cp.id, ccy, null),
+                activeOverrides = deals.activeLimitOverrideCount(cp.id, ccy),
+            )
         }
     }
 

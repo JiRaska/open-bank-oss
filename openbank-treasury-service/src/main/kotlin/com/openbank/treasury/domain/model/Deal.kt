@@ -246,7 +246,7 @@ data class Deal(
 
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
-        get() = product.isAsset && state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+        get() = product.isAsset && state in LIMIT_CONSUMING_STATES
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(
         state = to,
@@ -297,6 +297,18 @@ data class Deal(
         val SUPPORTED_CURRENCIES = setOf(CZK, EUR)
         const val CNB_COUNTERPARTY_ID = "CNB"
         private val MAX_RATE = BigDecimal("100")
+
+        /**
+         * The single source of truth for "on book" (ADR-0315, treasury limit utilisation, #10896):
+         * a deal in one of these states still consumes its counterparty's credit limit. Both the
+         * booking-time [LimitCheck] (via [consumesLimit] / the repository's `exposure` query) and
+         * the read-only limit-utilisation view MUST derive from this one set — duplicating it as a
+         * second literal list anywhere else is exactly the divergence this constant exists to rule
+         * out (a limit-utilisation view unable to disagree with the check that actually blocks
+         * booking is worth nothing if it silently reads a different rule).
+         */
+        val LIMIT_CONSUMING_STATES: Set<DealState> =
+            setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
 
         /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or

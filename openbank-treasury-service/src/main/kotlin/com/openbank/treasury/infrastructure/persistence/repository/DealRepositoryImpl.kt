@@ -188,19 +188,32 @@ class DealRepositoryImpl(
     )
 
     override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal {
-        val consuming = listOf(DealState.PENDING_APPROVAL.name, DealState.BOOKED.name, DealState.SETTLED.name)
-        val assets = listOf(ProductType.MM_PLACEMENT.name, ProductType.CNB_DEPOSIT_FACILITY.name)
         val rows = Panache.withSession {
             find(
                 "counterpartyId = ?1 and currency = ?2 and state in ?3 and product in ?4",
                 counterpartyId,
                 currency,
-                consuming,
-                assets,
+                LIMIT_CONSUMING_STATE_NAMES,
+                LIMIT_CONSUMING_PRODUCT_NAMES,
             ).list()
         }.awaitSuspending()
         return rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
     }
+
+    /**
+     * Count of deals currently PENDING_APPROVAL, for this counterparty/currency, that carry a
+     * senior limit override still in force (ADR-0315 D4, #10896). Booking clears nothing about the
+     * override; only a re-submission (which clears `limitOverrideBy` via [Deal.reject]) or moving
+     * off PENDING_APPROVAL retires it from this count.
+     */
+    override suspend fun activeLimitOverrideCount(counterpartyId: String, currency: String): Int = Panache.withSession {
+        count(
+            "counterpartyId = ?1 and currency = ?2 and state = ?3 and limitOverrideBy is not null",
+            counterpartyId,
+            currency,
+            DealState.PENDING_APPROVAL.name,
+        )
+    }.awaitSuspending().toInt()
 
     /**
      * Idempotent on the key: an accrual pass and a maturity can record the same day concurrently.
@@ -317,5 +330,11 @@ class DealRepositoryImpl(
             limitOverride = overrideOrNull(),
             history = history,
         )
+    }
+
+    private companion object {
+        /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
+        val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
+        val LIMIT_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
     }
 }

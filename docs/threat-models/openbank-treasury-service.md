@@ -2,7 +2,7 @@
 # Threat model — openbank-treasury-service
 
 - **Status:** MVP (ADR-0315 D1–D6, D9), sandbox only — money-market deals against a SYNTHETIC counterparty set
-- **Last reviewed:** 2026-09-25
+- **Last reviewed:** 2026-09-26
 - **Owner:** treasury-service CODEOWNERS
 - **Related ADRs:** ADR-0003, ADR-0030, ADR-0031, ADR-0034, ADR-0313, ADR-0314, ADR-0315
 
@@ -27,6 +27,12 @@ Counterparties are banks and the central bank — no natural persons, no custome
    `ROLE_TREASURY_DEALER` drafts, submits and cancels; `ROLE_TREASURY_APPROVER` approves, rejects,
    settles, matures and reverses. RBAC (`TreasuryResource`), then OPA (`treasury_rest_ext.rego`,
    human principals only, every service-account excluded), then the domain (`Deal`).
+   `GET /limits/utilisation` (#10896) is read-only and gated by the SAME `treasury.counterparty.read`
+   action/roles as `GET /counterparties` — no new rego rule. Its `utilised`/`breached` fields are
+   never computed independently: both it and the booking-time limit check read
+   `DealRepository.exposure`, whose state/product filter derives from the single
+   `Deal.LIMIT_CONSUMING_STATES` constant, so the view cannot silently diverge from what actually
+   blocks booking.
 2. The service posts journals to ledger-service's private-CA mTLS listener (8443, client
    certificate `treasury-internal-tls`) with its OWN machine identity: the named oidc-client `m2m`
    = Keycloak client `openbank-treasury`, ROLE_API only (`LedgerRestClient`,

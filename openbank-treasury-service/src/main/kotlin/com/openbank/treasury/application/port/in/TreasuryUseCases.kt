@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.port.`in`
 
+import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
@@ -11,6 +12,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.LocalDate
 import java.util.UUID
 
@@ -28,13 +30,36 @@ data class DraftDealCommand(
 
 data class DealView(val deal: Deal, val journals: List<LedgerJournalRef>)
 
+/**
+ * Per counterparty/currency limit line, doubling as the treasury limit-utilisation view (#10896).
+ * [exposure] MUST be computed the exact same way the booking-time [com.openbank.treasury.domain.model.LimitCheck]
+ * is — both ultimately read [DealRepository.exposure], which itself derives its state/product
+ * filter from [com.openbank.treasury.domain.model.Deal.LIMIT_CONSUMING_STATES] — so this view and
+ * the check that actually blocks booking cannot silently disagree.
+ */
 data class CounterpartyExposure(
     val counterparty: Counterparty,
     val currency: String,
     val limit: BigDecimal,
     val exposure: BigDecimal,
+    /** Deals PENDING_APPROVAL right now whose senior limit override is still in force (ADR-0315 D4). */
+    val activeOverrides: Int = 0,
 ) {
     val headroom: BigDecimal get() = limit - exposure
+    val breached: Boolean get() = exposure > limit
+
+    /** 0 when the limit itself is zero (nothing to utilise), never a divide-by-zero. */
+    val utilisationPercent: BigDecimal
+        get() = if (limit.signum() == 0) {
+            BigDecimal.ZERO
+        } else {
+            exposure.multiply(HUNDRED).divide(limit, UTILISATION_SCALE, RoundingMode.HALF_UP)
+        }
+
+    private companion object {
+        val HUNDRED: BigDecimal = BigDecimal(100)
+        const val UTILISATION_SCALE = 2
+    }
 }
 
 /** Daily position per currency (outstanding principal of SETTLED deals as of a date). */

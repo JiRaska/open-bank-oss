@@ -190,6 +190,19 @@ class TreasuryResource {
     @Authorize(action = "treasury.counterparty.read")
     suspend fun counterparties(): List<CounterpartyResponse> = deals.counterparties().map(CounterpartyResponse::from)
 
+    /**
+     * Read-only limit-utilisation view (ADR-0315 D4, #10896): reuses [TreasuryDealUseCase.counterparties]
+     * (and, underneath it, the same repository exposure query the booking-time limit check calls) so
+     * this can never disagree with what actually blocks booking. Same read action/roles as the other
+     * treasury GETs — no new rego rule needed.
+     */
+    @GET
+    @Path("/limits/utilisation")
+    @Operation(summary = "Per-counterparty limit utilisation: limit, utilised, available, % and active overrides")
+    @Authorize(action = "treasury.counterparty.read")
+    suspend fun limitsUtilisation(): LimitUtilisationResponse =
+        LimitUtilisationResponse(deals.counterparties().map(LimitUtilisationEntryResponse::from))
+
     @GET
     @Path("/positions")
     @Operation(summary = "Daily position per currency: placed, borrowed, at ČNB, net")

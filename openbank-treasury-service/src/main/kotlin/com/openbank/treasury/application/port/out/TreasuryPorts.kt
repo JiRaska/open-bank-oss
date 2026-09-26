@@ -68,6 +68,9 @@ interface DealRepository {
     /** Outstanding placed principal with [counterpartyId] in [currency], excluding [excludeDealId]. */
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
 
+    /** Count of PENDING_APPROVAL deals for [counterpartyId]/[currency] with a senior override still in force. */
+    suspend fun activeLimitOverrideCount(counterpartyId: String, currency: String): Int
+
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
 
     /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
