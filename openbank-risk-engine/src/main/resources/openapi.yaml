@@ -15,7 +15,11 @@ info:
   #        standard factors from a versioned parameter set. Additive.
   # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
-  version: 1.7.0
+  # 1.6.1 (#11005), 1.7.0 (#10998) and 1.8.0 (#11015) are claimed by other open risk-engine PRs at
+  #        the time this bump was written; requestedBy on SnapshotRun/SnapshotRunSummary is
+  #        additive too, so this takes the next free number after all three. Whoever lands after
+  #        this must re-check info.version against live origin/main and re-bump if needed.
+  version: 1.9.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
