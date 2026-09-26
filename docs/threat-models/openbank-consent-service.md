@@ -172,3 +172,19 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+
+- **2026-09-27** — **Exception-mapper consolidation (#10911 phase 2, money-path), no wire change.**
+  `ConsentNotFoundMapper`/`ConsentAlreadyActiveMapper` are deleted; `ConsentNotFoundException`/
+  `ConsentAlreadyActiveException` now extend `com.openbank.libs.domain.error.ResourceNotFoundException`/
+  `ResourceConflictException`, handled by libs-runtime's `ResourceNotFoundExceptionMapper`/
+  `ResourceConflictExceptionMapper` (added, unused, by #10923). Status, `code`
+  (`NOT_FOUND`/`CONFLICT`) and `message` are byte-identical to the deleted mappers' output —
+  verified by `ConsentExceptionMapperEquivalenceTest`. Only `traceId`'s source changes (random UUID
+  → the correlation MDC), which #10911 phase 1 established is not part of the wire contract.
+  `ConsentScaChallengeNotFoundException` is DELIBERATELY left alone — it maps to 422
+  `VALIDATION_ERROR`, not 404, so migrating it onto the 404 base would be a response change.
+  This service is `rules.yaml: money_path_services` (consent grant/activate/revoke is on the
+  pre-execution path of every SCA-gated action); the originating PR (#11051) was opened describing
+  this migration as "non-money-path" and is corrected here — no endpoint, authorization or
+  consent-lifecycle logic changes. **Risk class:** none — response-plumbing de-duplication only.
+  Rollback: restore the deleted mapper classes and revert the exception base classes.
