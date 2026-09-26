@@ -50,12 +50,15 @@ class DomesticPaymentProjectionConsumer(
             }
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected domestic payment event source" }
             val event = parse(root)
-            sessions.withTransaction { session, _ ->
-                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-                    .setParameter("timeout", "${timeoutMs}ms").singleResult
-                    .flatMap { project(session, event) }
-            }
-                .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                operation.sql { session ->
+                    session.createNativeQuery(
+                        "select set_config('openbank.bank_scope', :bank, true)",
+                        String::class.java,
+                    )
+                        .setParameter("bank", bankScope).singleResult
+                }.flatMap { project(operation, event) }
+            }.awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", STREAM, "outcome", "projected").increment()
             projectionLagSeconds.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
         } catch (failure: RuntimeException) {
@@ -67,9 +70,9 @@ class DomesticPaymentProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: DomesticPaymentProjectionEvent): Uni<Void> =
+    private fun project(operation: ContextSqlOperation, event: DomesticPaymentProjectionEvent): Uni<Void> =
         GraphNodeHistoryWriter.append(
-            session,
+            operation,
             bankScope,
             projectionGeneration,
             event.eventKey,
@@ -78,7 +81,7 @@ class DomesticPaymentProjectionConsumer(
             clock.instant(),
         ).flatMap {
             GraphEdgeHistoryWriter.append(
-                session,
+                operation,
                 bankScope,
                 projectionGeneration,
                 event.eventKey,
@@ -97,7 +100,7 @@ class DomesticPaymentProjectionConsumer(
             )
         }.flatMap {
             mutation(
-                session,
+                operation,
                 """INSERT INTO context_projection_events
                     (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
                     VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
@@ -118,15 +121,15 @@ class DomesticPaymentProjectionConsumer(
             if (inserted == 0) {
                 Uni.createFrom().voidItem()
             } else {
-                upsertNode(session, event.paymentNode)
-                    .flatMap { upsertNode(session, event.stageNode) }
-                    .flatMap { upsertEdge(session, event.stageEdge) }
+                upsertNode(operation, event.paymentNode)
+                    .flatMap { upsertNode(operation, event.stageNode) }
+                    .flatMap { upsertEdge(operation, event.stageEdge) }
                     .replaceWithVoid()
             }
         }
 
-    private fun upsertNode(session: Mutiny.Session, node: PaymentProjectionNode): Uni<Int> = mutation(
-        session,
+    private fun upsertNode(operation: ContextSqlOperation, node: PaymentProjectionNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -160,8 +163,8 @@ class DomesticPaymentProjectionConsumer(
         ),
     )
 
-    private fun upsertEdge(session: Mutiny.Session, edge: PaymentProjectionEdge): Uni<Int> = mutation(
-        session,
+    private fun upsertEdge(operation: ContextSqlOperation, edge: PaymentProjectionEdge): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
              source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version, retained_history_from)
@@ -185,11 +188,12 @@ class DomesticPaymentProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private fun parse(root: JsonNode): DomesticPaymentProjectionEvent {
         val paymentId = root.text("paymentId")

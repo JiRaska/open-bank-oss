@@ -87,15 +87,15 @@ class PaymentRailProjectionConsumer(
                     meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "ignored").increment()
                     return
                 }
-                sessions.withTransaction { session, _ ->
-                    session.createNativeQuery(
-                        "select set_config('statement_timeout', :timeout, true)",
-                        String::class.java,
-                    )
-                        .setParameter("timeout", "${timeoutMs}ms").singleResult
-                        .flatMap { project(session, event) }
-                }
-                    .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+                ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                    operation.sql { session ->
+                        session.createNativeQuery(
+                            "select set_config('openbank.bank_scope', :bank, true)",
+                            String::class.java,
+                        )
+                            .setParameter("bank", bankScope).singleResult
+                    }.flatMap { project(operation, event) }
+                }.awaitSuspending()
                 meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "projected").increment()
                 (if (stream == CLEARING_STREAM) clearingLag else sepaReturnLag)
                     .set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
@@ -108,60 +108,61 @@ class PaymentRailProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: RailProjectionEvent): Uni<Void> = GraphNodeHistoryWriter.append(
-        session,
-        bankScope,
-        projectionGeneration,
-        event.eventKey,
-        event.aggregateRef,
-        event.nodes.map { it.observation() },
-        clock.instant(),
-    ).flatMap {
-        GraphEdgeHistoryWriter.append(
-            session,
+    private fun project(operation: ContextSqlOperation, event: RailProjectionEvent): Uni<Void> =
+        GraphNodeHistoryWriter.append(
+            operation,
             bankScope,
             projectionGeneration,
             event.eventKey,
             event.aggregateRef,
-            event.edges.map {
-                GraphEdgeObservation(it.from, it.to, it.relation, event.source, event.occurredAt, event.version)
-            },
+            event.nodes.map { it.observation() },
             clock.instant(),
-        )
-    }.flatMap {
-        mutation(
-            session,
-            """INSERT INTO context_projection_events
+        ).flatMap {
+            GraphEdgeHistoryWriter.append(
+                operation,
+                bankScope,
+                projectionGeneration,
+                event.eventKey,
+                event.aggregateRef,
+                event.edges.map {
+                    GraphEdgeObservation(it.from, it.to, it.relation, event.source, event.occurredAt, event.version)
+                },
+                clock.instant(),
+            )
+        }.flatMap {
+            mutation(
+                operation,
+                """INSERT INTO context_projection_events
                     (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
                     VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
                     ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
-            """.trimIndent(),
-            mapOf(
-                "bankScope" to bankScope,
-                "generation" to projectionGeneration,
-                "eventKey" to event.eventKey,
-                "source" to event.source,
-                "aggregateRef" to event.aggregateRef,
-                "version" to event.version,
-                "occurredAt" to event.occurredAt,
-                "processedAt" to clock.instant(),
-            ),
-        )
-    }.flatMap { inserted ->
-        if (inserted == 0) {
-            Uni.createFrom().voidItem()
-        } else {
-            val nodes = event.nodes.fold(Uni.createFrom().voidItem()) { chain, node ->
-                chain.flatMap { upsertNode(session, node).replaceWithVoid() }
-            }
-            event.edges.fold(nodes) { chain, edge ->
-                chain.flatMap { insertEdge(session, event, edge).replaceWithVoid() }
+                """.trimIndent(),
+                mapOf(
+                    "bankScope" to bankScope,
+                    "generation" to projectionGeneration,
+                    "eventKey" to event.eventKey,
+                    "source" to event.source,
+                    "aggregateRef" to event.aggregateRef,
+                    "version" to event.version,
+                    "occurredAt" to event.occurredAt,
+                    "processedAt" to clock.instant(),
+                ),
+            )
+        }.flatMap { inserted ->
+            if (inserted == 0) {
+                Uni.createFrom().voidItem()
+            } else {
+                val nodes = event.nodes.fold(Uni.createFrom().voidItem()) { chain, node ->
+                    chain.flatMap { upsertNode(operation, node).replaceWithVoid() }
+                }
+                event.edges.fold(nodes) { chain, edge ->
+                    chain.flatMap { insertEdge(operation, event, edge).replaceWithVoid() }
+                }
             }
         }
-    }
 
-    private fun upsertNode(session: Mutiny.Session, node: RailNode): Uni<Int> = mutation(
-        session,
+    private fun upsertNode(operation: ContextSqlOperation, node: RailNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -177,36 +178,38 @@ class PaymentRailProjectionConsumer(
         node.values(bankScope, projectionGeneration, clock.instant()),
     )
 
-    private fun insertEdge(session: Mutiny.Session, event: RailProjectionEvent, edge: RailEdge): Uni<Int> = mutation(
-        session,
-        """INSERT INTO context_edges
+    private fun insertEdge(operation: ContextSqlOperation, event: RailProjectionEvent, edge: RailEdge): Uni<Int> =
+        mutation(
+            operation,
+            """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
              source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version, retained_history_from)
             VALUES (:id, :bankScope, :generation, 'COMPLAINT', :fromKey, :toKey, :relation,
                     :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version, :validFrom)
             ON CONFLICT (bank_scope, projection_generation, edge_id) DO UPDATE SET
               retained_history_from = LEAST(context_edges.retained_history_from, EXCLUDED.retained_history_from)
-        """.trimIndent(),
-        mapOf(
-            "id" to railStableId("COMPLAINT|${edge.from}|${edge.to}|${edge.relation}"),
-            "bankScope" to bankScope,
-            "generation" to projectionGeneration,
-            "fromKey" to edge.from,
-            "toKey" to edge.to,
-            "relation" to edge.relation,
-            "source" to event.source,
-            "evidenceRef" to event.eventKey,
-            "validFrom" to event.occurredAt,
-            "recordedAt" to clock.instant(),
-            "version" to event.version,
-        ),
-    )
+            """.trimIndent(),
+            mapOf(
+                "id" to railStableId("COMPLAINT|${edge.from}|${edge.to}|${edge.relation}"),
+                "bankScope" to bankScope,
+                "generation" to projectionGeneration,
+                "fromKey" to edge.from,
+                "toKey" to edge.to,
+                "relation" to edge.relation,
+                "source" to event.source,
+                "evidenceRef" to event.eventKey,
+                "validFrom" to event.occurredAt,
+                "recordedAt" to clock.instant(),
+                "version" to event.version,
+            ),
+        )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private fun lagGauge(stream: String) = AtomicLong().also {
         meters.gauge(METRIC_LAG, io.micrometer.core.instrument.Tags.of("stream", stream), it)

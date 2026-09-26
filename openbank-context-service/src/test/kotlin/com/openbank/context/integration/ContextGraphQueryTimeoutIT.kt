@@ -3,6 +3,7 @@ package com.openbank.context.integration
 
 import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.infrastructure.ContextGraphRepository
+import com.openbank.context.infrastructure.ContextSqlOperation
 import com.openbank.context.infrastructure.boundedContextTransaction
 import com.openbank.context.infrastructure.boundedGraphRead
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -33,6 +34,8 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -206,6 +209,50 @@ class ContextGraphQueryTimeoutIT {
         sessions.boundedGraphRead(timeoutMs) { session ->
             session.createNativeQuery(sql, Int::class.javaObjectType).singleResult
         }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+    }
+
+    @Test
+    fun `successful SQL result remains successful after delayed result processing`() {
+        assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        val result = VertxContextSupport.subscribeAndAwait<Int> {
+            ContextSqlOperation.execute(sessions, 100) { operation ->
+                operation.sql { session ->
+                    session.createNativeQuery("select 1", Int::class.javaObjectType).singleResult
+                }.flatMap { delayedOnContext(it) }
+            }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+        }
+        assertThat(result).isEqualTo(1)
+    }
+
+    @Test
+    fun `expired statement admission budget prevents subsequent SQL submission`() {
+        assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        val secondSubmitted = AtomicBoolean()
+        assertThatThrownBy {
+            VertxContextSupport.subscribeAndAwait<Int> {
+                ContextSqlOperation.execute(sessions, 100) { operation ->
+                    operation.sql { session ->
+                        session.createNativeQuery("select 1", Int::class.javaObjectType).singleResult
+                    }.flatMap { delayedOnContext(it) }.flatMap {
+                        operation.sql { session ->
+                            secondSubmitted.set(true)
+                            session.createNativeQuery("select 2", Int::class.javaObjectType).singleResult
+                        }
+                    }
+                }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+            }
+        }.satisfies(
+            java.util.function.Consumer<Throwable> { failure ->
+                assertThat(generateSequence(failure) { it.cause }.any { it is TimeoutException }).isTrue()
+            },
+        )
+        assertThat(secondSubmitted.get()).isFalse()
+    }
+
+    private fun <T> delayedOnContext(value: T): Uni<T> {
+        val context = checkNotNull(Vertx.currentContext())
+        return Uni.createFrom().item(value).onItem().delayIt().by(Duration.ofMillis(200))
+            .emitOn { task -> context.runOnContext { task.run() } }
     }
 
     @Test

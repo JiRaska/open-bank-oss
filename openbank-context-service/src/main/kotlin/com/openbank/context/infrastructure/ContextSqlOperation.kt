@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Controlled operation lifecycle. Every SQL statement (including flush) must use [sql].
  * Each callback submits one statement; callers must not cancel or time out its returned Uni.
+ * The deadline admits new statements; completed SQL results remain valid after callback delays.
  * Cancellation stops later guarded statements and retains observation until server timeout.
  * A legacy whole-block bridge cannot stop statements chained inside its callback.
  * It does not send PostgreSQL cancellation. Acquisition and cleanup are not time bounded here.
@@ -31,12 +32,16 @@ internal class ContextSqlOperation private constructor(
             .setParameter("timeout", "${remaining}ms").singleResult.flatMap {
                 remainingMillis()
                 statement(session)
-            }.invoke(java.util.function.Consumer<T> { remainingMillis() })
+            }.invoke(java.util.function.Consumer<T> { ensureNotCancelled() })
             .onItemOrFailure().invoke(java.util.function.BiConsumer<T?, Throwable?> { _, _ -> activeSql.set(false) })
     }
 
-    private fun remainingMillis(): Long {
+    private fun ensureNotCancelled() {
         if (cancelled.get()) throw CancellationException("Context SQL operation cancelled")
+    }
+
+    private fun remainingMillis(): Long {
+        ensureNotCancelled()
         val remaining = deadlineNanos - System.nanoTime()
         if (remaining <= 0) throw TimeoutException("Context SQL operation deadline expired")
         return TimeUnit.NANOSECONDS.toMillis(remaining).coerceAtLeast(1)
@@ -59,7 +64,6 @@ internal class ContextSqlOperation private constructor(
                 val context = checkNotNull(Vertx.currentContext()) { "Context SQL requires a Vertx context" }
                 val cancelled = AtomicBoolean()
                 val delivered = AtomicBoolean()
-                val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.toLong())
                 var transaction: Mutiny.Transaction? = null
                 val phase = AtomicInteger(WORKING)
                 downstream.onTermination {
@@ -74,13 +78,14 @@ internal class ContextSqlOperation private constructor(
                 sessions.openSession().flatMap { session ->
                     session.withTransaction<T> { tx ->
                         transaction = tx
+                        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.toLong())
                         val operation = ContextSqlOperation(session, deadline, cancelled)
                         Uni.createFrom().deferred<T> {
                             operation.remainingMillis()
                             work(operation)
                         }.invoke(
                             java.util.function.Consumer<T> {
-                                operation.remainingMillis()
+                                operation.ensureNotCancelled()
                                 check(!operation.activeSql.get()) {
                                     "Context SQL work finished with an active statement"
                                 }

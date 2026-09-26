@@ -16,7 +16,6 @@ import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.io.Serializable
-import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -95,7 +94,7 @@ class FraudCaseReferenceRepository(
                 ).setParameter("bank", bankScope).setParameter("root", root)
                     .setParameter("principal", principalId).setParameter("now", at)
                     .setMaxResults(MAX_ASSIGNED_CANDIDATES + 1).resultList
-            }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            }.awaitSuspending()
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
@@ -108,40 +107,47 @@ class FraudCaseReferenceRepository(
     }
 
     suspend fun append(reference: FraudCaseReference) {
-        transaction { session ->
-            session.createNativeMutationQuery(
-                """INSERT INTO context_fraud_case_references
+        scopedTransaction { operation ->
+            operation.sql { session ->
+                session.createNativeMutationQuery(
+                    """INSERT INTO context_fraud_case_references
                    (bank_scope, event_id, case_id, event_type, revision, occurred_at)
                    VALUES (:bank, :event, :case, :type, :revision, :occurredAt)
                    ON CONFLICT DO NOTHING
-                """.trimIndent(),
-            ).setParameter("bank", bankScope).setParameter("event", reference.eventId)
-                .setParameter("case", reference.caseId).setParameter("type", reference.eventType)
-                .setParameter("revision", reference.revision).setParameter("occurredAt", reference.occurredAt)
-                .executeUpdate().flatMap {
+                    """.trimIndent(),
+                ).setParameter("bank", bankScope).setParameter("event", reference.eventId)
+                    .setParameter("case", reference.caseId).setParameter("type", reference.eventType)
+                    .setParameter("revision", reference.revision).setParameter("occurredAt", reference.occurredAt)
+                    .executeUpdate()
+            }.flatMap {
+                operation.sql { session ->
                     session.createQuery(
                         "from FraudCaseReferenceEntity where bankScope = :bank and eventId = :event",
                         FraudCaseReferenceEntity::class.java,
                     ).setParameter("bank", bankScope).setParameter("event", reference.eventId).singleResultOrNull
-                }.invoke { row ->
-                    check(
-                        row != null &&
-                            row.caseId == reference.caseId &&
-                            row.eventType == reference.eventType &&
-                            row.revision == reference.revision &&
-                            row.occurredAt == reference.occurredAt,
-                    ) { "conflicting Fraud case reference" }
                 }
-        }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            }.invoke { row ->
+                check(
+                    row != null &&
+                        row.caseId == reference.caseId &&
+                        row.eventType == reference.eventType &&
+                        row.revision == reference.revision &&
+                        row.occurredAt == reference.occurredAt,
+                ) { "conflicting Fraud case reference" }
+            }
+        }.awaitSuspending()
     }
 
-    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> = sessions.withTransaction { session, _ ->
-        session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-            .setParameter("bank", bankScope).singleResult.flatMap {
-                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-                    .setParameter("timeout", "${timeoutMs}ms").singleResult
-            }.flatMap { block(session) }
-    }
+    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> =
+        scopedTransaction { operation -> operation.sql(block) }
+
+    private fun <T> scopedTransaction(block: (ContextSqlOperation) -> Uni<T>): Uni<T> =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { block(operation) }
+        }
 
     private companion object {
         const val MAX_ASSIGNED_CANDIDATES = 256

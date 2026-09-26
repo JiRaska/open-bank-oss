@@ -16,7 +16,6 @@ import jakarta.persistence.Table
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.security.MessageDigest
-import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -67,44 +66,53 @@ class AuthorityHistoryRepository(
         val json = mapper.writeValueAsString(evidence)
         val hash = MessageDigest.getInstance("SHA-256").digest(json.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        transaction { session ->
-            session.createNativeMutationQuery(
-                """INSERT INTO context_authority_history
-                    (observation_id, bank_scope, delegation_id, revision, event_type, evidence, occurred_at,
-                     evidence_ref, content_hash)
-                    VALUES (:id, :bank, :delegation, :revision, :type, :evidence, :occurred,
-                     :ref, :hash) ON CONFLICT (bank_scope, delegation_id, revision) DO NOTHING
-                """.trimIndent(),
-            ).setParameter("id", Ids.newId()).setParameter("bank", bankScope)
-                .setParameter("delegation", evidence.delegationId).setParameter("revision", evidence.revision)
-                .setParameter("type", evidence.eventType).setParameter("evidence", json)
-                .setParameter("occurred", evidence.occurredAt)
-                .setParameter("ref", "delegation:${evidence.delegationId}:${evidence.revision}")
-                .setParameter("hash", hash).executeUpdate().flatMap {
+        transaction { operation ->
+            operation.sql { session ->
+                session.createNativeMutationQuery(
+                    """INSERT INTO context_authority_history
+                        (observation_id, bank_scope, delegation_id, revision, event_type, evidence, occurred_at,
+                         evidence_ref, content_hash)
+                        VALUES (:id, :bank, :delegation, :revision, :type, :evidence, :occurred,
+                         :ref, :hash) ON CONFLICT (bank_scope, delegation_id, revision) DO NOTHING
+                    """.trimIndent(),
+                ).setParameter("id", Ids.newId()).setParameter("bank", bankScope)
+                    .setParameter("delegation", evidence.delegationId).setParameter("revision", evidence.revision)
+                    .setParameter("type", evidence.eventType).setParameter("evidence", json)
+                    .setParameter("occurred", evidence.occurredAt)
+                    .setParameter("ref", "delegation:${evidence.delegationId}:${evidence.revision}")
+                    .setParameter("hash", hash).executeUpdate()
+            }.flatMap {
+                operation.sql { session ->
                     session.createQuery(
                         "select contentHash from AuthorityHistoryEntity where bankScope = :bank and " +
                             "delegationId = :delegation and revision = :revision",
                         String::class.java,
                     ).setParameter("bank", bankScope).setParameter("delegation", evidence.delegationId)
                         .setParameter("revision", evidence.revision).singleResult
-                }.invoke { stored -> check(stored == hash) { "conflicting authority evidence revision" } }
-        }.bounded().awaitSuspending()
+                }
+            }.invoke { stored -> check(stored == hash) { "conflicting authority evidence revision" } }
+                .flatMap { operation.sql { session -> session.flush() } }
+        }.awaitSuspending()
     }
 
     /** PostgreSQL owns recordedAt; use its clock for an omitted knownAt cutoff. */
-    suspend fun databaseNow(): Instant = transaction { session ->
-        session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
-    }.bounded().awaitSuspending().toInstant()
+    suspend fun databaseNow(): Instant = transaction { operation ->
+        operation.sql { session ->
+            session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
+        }
+    }.awaitSuspending().toInstant()
 
     suspend fun history(id: UUID, effectiveAt: Instant, knownAt: Instant): AuthorityHistory {
-        val rows = transaction { session ->
-            session.createQuery(
-                "from AuthorityHistoryEntity where bankScope = :bank and delegationId = :id " +
-                    "and occurredAt <= :effectiveAt and recordedAt <= :knownAt order by revision desc",
-                AuthorityHistoryEntity::class.java,
-            ).setParameter("bank", bankScope).setParameter("id", id).setParameter("effectiveAt", effectiveAt)
-                .setParameter("knownAt", knownAt).setMaxResults(MAX_OBSERVATIONS + 1).resultList
-        }.bounded().awaitSuspending()
+        val rows = transaction { operation ->
+            operation.sql { session ->
+                session.createQuery(
+                    "from AuthorityHistoryEntity where bankScope = :bank and delegationId = :id " +
+                        "and occurredAt <= :effectiveAt and recordedAt <= :knownAt order by revision desc",
+                    AuthorityHistoryEntity::class.java,
+                ).setParameter("bank", bankScope).setParameter("id", id).setParameter("effectiveAt", effectiveAt)
+                    .setParameter("knownAt", knownAt).setMaxResults(MAX_OBSERVATIONS + 1).resultList
+            }
+        }.awaitSuspending()
         return AuthorityHistory(
             "delegation:$id",
             effectiveAt,
@@ -121,15 +129,13 @@ class AuthorityHistoryRepository(
         )
     }
 
-    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> = sessions.withTransaction { session, _ ->
-        session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-            .setParameter("bank", bankScope).singleResult.flatMap {
-                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-                    .setParameter("timeout", "${timeoutMs}ms").singleResult
-            }.flatMap { block(session) }
-    }
-
-    private fun <T> Uni<T>.bounded(): Uni<T> = ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+    private fun <T> transaction(block: (ContextSqlOperation) -> Uni<T>): Uni<T> =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { block(operation) }
+        }
 
     private companion object {
         const val MAX_OBSERVATIONS = 100

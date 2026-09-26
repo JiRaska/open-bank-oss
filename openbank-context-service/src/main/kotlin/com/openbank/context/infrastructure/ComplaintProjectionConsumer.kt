@@ -50,17 +50,15 @@ class ComplaintProjectionConsumer(
             }
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected complaint event source" }
             val event = parse(root)
-            sessions.withTransaction { session, _ ->
-                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                    .setParameter("bank", bankScope).singleResult.flatMap {
-                        session.createNativeQuery(
-                            "select set_config('statement_timeout', :timeout, true)",
-                            String::class.java,
-                        )
-                            .setParameter("timeout", "${timeoutMs}ms").singleResult
-                    }.flatMap { project(session, event) }
-            }
-                .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                operation.sql { session ->
+                    session.createNativeQuery(
+                        "select set_config('openbank.bank_scope', :bank, true)",
+                        String::class.java,
+                    )
+                        .setParameter("bank", bankScope).singleResult
+                }.flatMap { project(operation, event) }
+            }.awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", "complaint", "outcome", "projected").increment()
             projectionLagSeconds.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
         } catch (failure: RuntimeException) {
@@ -72,12 +70,12 @@ class ComplaintProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> =
-        appendRevision(session, event).flatMap { projectCurrent(session, event) }
+    private fun project(operation: ContextSqlOperation, event: ComplaintProjectionEvent): Uni<Void> =
+        appendRevision(operation, event).flatMap { projectCurrent(operation, event) }
 
     /** Every delivered revision is retained even when it is older than the current projection. */
-    private fun appendRevision(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> = mutation(
-        session,
+    private fun appendRevision(operation: ContextSqlOperation, event: ComplaintProjectionEvent): Uni<Void> = mutation(
+        operation,
         """INSERT INTO context_complaint_revisions
             (bank_scope, projection_generation, complaint_id, source_version, reference, event_key,
              event_type, status, account_id, transaction_id, dispute_id, occurred_at, content_hash)
@@ -101,20 +99,22 @@ class ComplaintProjectionConsumer(
             "hash" to event.contentHash,
         ),
     ).flatMap {
-        session.createNativeQuery(
-            """SELECT content_hash FROM context_complaint_revisions
-               WHERE bank_scope = :bank AND projection_generation = :generation
-                 AND complaint_id = :id AND source_version = :version
-            """.trimIndent(),
-            String::class.java,
-        ).setParameter("bank", bankScope).setParameter("generation", projectionGeneration)
-            .setParameter("id", UUID.fromString(event.complaintId)).setParameter("version", event.sourceVersion)
-            .singleResult.invoke { stored -> check(stored == event.contentHash) { "conflicting complaint revision" } }
+        operation.sql { session ->
+            session.createNativeQuery(
+                """SELECT content_hash FROM context_complaint_revisions
+                   WHERE bank_scope = :bank AND projection_generation = :generation
+                     AND complaint_id = :id AND source_version = :version
+                """.trimIndent(),
+                String::class.java,
+            ).setParameter("bank", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("id", UUID.fromString(event.complaintId)).setParameter("version", event.sourceVersion)
+                .singleResult
+        }.invoke { stored -> check(stored == event.contentHash) { "conflicting complaint revision" } }
             .replaceWithVoid()
     }
 
-    private fun projectCurrent(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> = mutation(
-        session,
+    private fun projectCurrent(operation: ContextSqlOperation, event: ComplaintProjectionEvent): Uni<Void> = mutation(
+        operation,
         """INSERT INTO context_projection_events
                 (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
                 VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
@@ -134,22 +134,22 @@ class ComplaintProjectionConsumer(
         if (inserted == 0) {
             Uni.createFrom().voidItem()
         } else {
-            upsertNode(session, event.complaintNode).flatMap { changed ->
+            upsertNode(operation, event.complaintNode).flatMap { changed ->
                 if (changed == 0) {
                     Uni.createFrom().voidItem()
                 } else {
-                    upsertOptionalNode(session, event.accountNode)
-                        .flatMap { upsertOptionalNode(session, event.transactionNode) }
-                        .flatMap { upsertOptionalNode(session, event.disputeNode) }
-                        .flatMap { deletePriorEdges(session, event) }
-                        .flatMap { upsertEdges(session, event) }
+                    upsertOptionalNode(operation, event.accountNode)
+                        .flatMap { upsertOptionalNode(operation, event.transactionNode) }
+                        .flatMap { upsertOptionalNode(operation, event.disputeNode) }
+                        .flatMap { deletePriorEdges(operation, event) }
+                        .flatMap { upsertEdges(operation, event) }
                 }
             }
         }
     }
 
-    private fun deletePriorEdges(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Int> = mutation(
-        session,
+    private fun deletePriorEdges(operation: ContextSqlOperation, event: ComplaintProjectionEvent): Uni<Int> = mutation(
+        operation,
         """DELETE FROM context_edges
              WHERE bank_scope = :bankScope AND projection_generation = :generation
                AND namespace = 'COMPLAINT' AND from_key = :root
@@ -157,11 +157,11 @@ class ComplaintProjectionConsumer(
         mapOf("bankScope" to bankScope, "generation" to projectionGeneration, "root" to event.complaintKey),
     )
 
-    private fun upsertOptionalNode(session: Mutiny.Session, node: ProjectionNode?): Uni<Int> =
-        node?.let { upsertNode(session, it) } ?: Uni.createFrom().item(0)
+    private fun upsertOptionalNode(operation: ContextSqlOperation, node: ProjectionNode?): Uni<Int> =
+        node?.let { upsertNode(operation, it) } ?: Uni.createFrom().item(0)
 
-    private fun upsertNode(session: Mutiny.Session, node: ProjectionNode): Uni<Int> = mutation(
-        session,
+    private fun upsertNode(operation: ContextSqlOperation, node: ProjectionNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system, source_ref, display_label,
              classification, valid_from, valid_to, recorded_at, source_version)
@@ -196,14 +196,14 @@ class ComplaintProjectionConsumer(
         ),
     )
 
-    private fun upsertEdges(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> {
+    private fun upsertEdges(operation: ContextSqlOperation, event: ComplaintProjectionEvent): Uni<Void> {
         var chain: Uni<*> = Uni.createFrom().voidItem()
-        event.edges.forEach { edge -> chain = chain.flatMap { upsertEdge(session, edge) } }
+        event.edges.forEach { edge -> chain = chain.flatMap { upsertEdge(operation, edge) } }
         return chain.replaceWithVoid()
     }
 
-    private fun upsertEdge(session: Mutiny.Session, edge: ProjectionEdge): Uni<Int> = mutation(
-        session,
+    private fun upsertEdge(operation: ContextSqlOperation, edge: ProjectionEdge): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type, source_system, evidence_ref,
              valid_from, valid_to, recorded_at, source_version)
@@ -232,11 +232,12 @@ class ComplaintProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any?>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any?>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private fun parse(root: JsonNode): ComplaintProjectionEvent {
         require(root.long("schemaVersion") == SCHEMA_VERSION) { "unsupported complaint schemaVersion" }

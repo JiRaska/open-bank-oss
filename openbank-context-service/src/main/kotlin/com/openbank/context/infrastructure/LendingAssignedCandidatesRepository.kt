@@ -7,7 +7,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
-import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -42,7 +41,7 @@ class LendingAssignedCandidatesRepository(
                 ).setParameter("bank", bankScope).setParameter("principal", principalId)
                     .setParameter("root", root.toString()).setParameter("now", at)
                     .setMaxResults(MAX_CANDIDATES + 1).resultList
-            }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            }.awaitSuspending()
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
@@ -51,13 +50,13 @@ class LendingAssignedCandidatesRepository(
         return LendingAssignedCandidates(ids.take(MAX_CANDIDATES).map(UUID::fromString), ids.size > MAX_CANDIDATES)
     }
 
-    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> = sessions.withTransaction { session, _ ->
-        session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-            .setParameter("bank", bankScope).singleResult.flatMap {
-                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-                    .setParameter("timeout", "${timeoutMs}ms").singleResult
-            }.flatMap { block(session) }
-    }
+    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { operation.sql(block) }
+        }
 
     private companion object {
         const val MAX_CANDIDATES = 256

@@ -86,15 +86,15 @@ class PaymentBookingProjectionConsumer(
                     meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "ignored").increment()
                     return
                 }
-                sessions.withTransaction { session, _ ->
-                    session.createNativeQuery(
-                        "select set_config('statement_timeout', :timeout, true)",
-                        String::class.java,
-                    )
-                        .setParameter("timeout", "${timeoutMs}ms").singleResult
-                        .flatMap { project(session, event) }
-                }
-                    .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+                ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                    operation.sql { session ->
+                        session.createNativeQuery(
+                            "select set_config('openbank.bank_scope', :bank, true)",
+                            String::class.java,
+                        )
+                            .setParameter("bank", bankScope).singleResult
+                    }.flatMap { project(operation, event) }
+                }.awaitSuspending()
                 meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "projected").increment()
                 val lag = if (stream == TRANSACTION_STREAM) transactionLag else ledgerLag
                 lag.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
@@ -107,9 +107,9 @@ class PaymentBookingProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: BookingProjectionEvent): Uni<Void> =
+    private fun project(operation: ContextSqlOperation, event: BookingProjectionEvent): Uni<Void> =
         GraphNodeHistoryWriter.append(
-            session,
+            operation,
             bankScope,
             projectionGeneration,
             event.eventKey,
@@ -118,7 +118,7 @@ class PaymentBookingProjectionConsumer(
             clock.instant(),
         ).flatMap {
             GraphEdgeHistoryWriter.append(
-                session,
+                operation,
                 bankScope,
                 projectionGeneration,
                 event.eventKey,
@@ -137,7 +137,7 @@ class PaymentBookingProjectionConsumer(
             )
         }.flatMap {
             mutation(
-                session,
+                operation,
                 """INSERT INTO context_projection_events
                     (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
                     VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
@@ -158,16 +158,16 @@ class PaymentBookingProjectionConsumer(
             if (inserted == 0) {
                 Uni.createFrom().voidItem()
             } else {
-                upsertPlaceholderNode(session, event.fromNode)
-                    .flatMap { upsertEvidenceNode(session, event.toNode) }
-                    .flatMap { insertEdge(session, event) }
+                upsertPlaceholderNode(operation, event.fromNode)
+                    .flatMap { upsertEvidenceNode(operation, event.toNode) }
+                    .flatMap { insertEdge(operation, event) }
                     .replaceWithVoid()
             }
         }
 
     /** A placeholder makes projection order irrelevant; its owning source replaces it later. */
-    private fun upsertPlaceholderNode(session: Mutiny.Session, node: BookingNode): Uni<Int> = mutation(
-        session,
+    private fun upsertPlaceholderNode(operation: ContextSqlOperation, node: BookingNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -178,8 +178,8 @@ class PaymentBookingProjectionConsumer(
         node.values(bankScope, projectionGeneration, clock.instant()),
     )
 
-    private fun upsertEvidenceNode(session: Mutiny.Session, node: BookingNode): Uni<Int> = mutation(
-        session,
+    private fun upsertEvidenceNode(operation: ContextSqlOperation, node: BookingNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -196,8 +196,8 @@ class PaymentBookingProjectionConsumer(
         node.values(bankScope, projectionGeneration, clock.instant()),
     )
 
-    private fun insertEdge(session: Mutiny.Session, event: BookingProjectionEvent): Uni<Int> = mutation(
-        session,
+    private fun insertEdge(operation: ContextSqlOperation, event: BookingProjectionEvent): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
              source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version, retained_history_from)
@@ -221,11 +221,12 @@ class PaymentBookingProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private companion object {
         const val TRANSACTION_INITIATED = "TransactionInitiated"

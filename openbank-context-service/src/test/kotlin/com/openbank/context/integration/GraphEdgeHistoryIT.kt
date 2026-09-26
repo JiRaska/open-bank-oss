@@ -2,6 +2,7 @@
 package com.openbank.context.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.context.infrastructure.ContextSqlOperation
 import com.openbank.context.infrastructure.GraphEdgeHistoryReader
 import com.openbank.context.infrastructure.GraphEdgeHistoryWriter
 import com.openbank.context.infrastructure.GraphEdgeObservation
@@ -185,8 +186,8 @@ class GraphEdgeHistoryIT {
     )
 
     private fun append(root: String, event: String, observations: List<GraphEdgeObservation>) = onVertx {
-        sessions.withTransaction { session, _ ->
-            GraphEdgeHistoryWriter.append(session, BANK, GENERATION, event, root, observations, TIME)
+        ContextSqlOperation.execute(sessions, 5000) { operation ->
+            GraphEdgeHistoryWriter.append(operation, BANK, GENERATION, event, root, observations, TIME)
         }.awaitSuspending()
     }
 

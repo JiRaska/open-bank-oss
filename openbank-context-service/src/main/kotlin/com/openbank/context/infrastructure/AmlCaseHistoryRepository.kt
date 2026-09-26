@@ -12,7 +12,6 @@ import jakarta.persistence.Table
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.security.MessageDigest
-import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -111,7 +110,7 @@ class AmlCaseHistoryRepository(
                 .setParameter("transactions", transactions)
                 .setParameter("principal", principalId).setParameter("now", at)
                 .setMaxResults(MAX_RELATED_CASES).resultList
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
         return ids.map(UUID::fromString)
     }
 
@@ -119,32 +118,36 @@ class AmlCaseHistoryRepository(
         val json = mapper.writeValueAsString(evidence)
         val hash = MessageDigest.getInstance("SHA-256").digest(json.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        transaction { session ->
-            session.createNativeMutationQuery(
-                """INSERT INTO context_aml_case_evidence
-                   (bank_scope, event_id, case_id, party_id, account_id, transaction_id,
-                    event_type, occurred_at, evidence, content_hash)
-                   VALUES (:bank, :event, :case, :party, :account, :transaction, :type, :occurred,
-                           :evidence, :hash)
-                   ON CONFLICT (bank_scope, event_id) DO NOTHING
-                """.trimIndent(),
-            ).setParameter("bank", bankScope).setParameter("event", evidence.eventId)
-                .setParameter("case", evidence.caseId).setParameter("party", evidence.partyId)
-                .setParameter("account", evidence.accountId).setParameter("transaction", evidence.transactionId)
-                .setParameter("type", evidence.eventType).setParameter("occurred", evidence.occurredAt)
-                .setParameter("evidence", json).setParameter("hash", hash).executeUpdate().flatMap {
+        scopedOperation { operation ->
+            operation.sql { session ->
+                session.createNativeMutationQuery(
+                    """INSERT INTO context_aml_case_evidence
+                       (bank_scope, event_id, case_id, party_id, account_id, transaction_id,
+                        event_type, occurred_at, evidence, content_hash)
+                       VALUES (:bank, :event, :case, :party, :account, :transaction, :type, :occurred,
+                               :evidence, :hash)
+                       ON CONFLICT (bank_scope, event_id) DO NOTHING
+                    """.trimIndent(),
+                ).setParameter("bank", bankScope).setParameter("event", evidence.eventId)
+                    .setParameter("case", evidence.caseId).setParameter("party", evidence.partyId)
+                    .setParameter("account", evidence.accountId).setParameter("transaction", evidence.transactionId)
+                    .setParameter("type", evidence.eventType).setParameter("occurred", evidence.occurredAt)
+                    .setParameter("evidence", json).setParameter("hash", hash).executeUpdate()
+            }.flatMap {
+                operation.sql { session ->
                     session.createQuery(
                         "select contentHash from AmlCaseEvidenceEntity where bankScope = :bank and eventId = :event",
                         String::class.java,
                     ).setParameter("bank", bankScope).setParameter("event", evidence.eventId).singleResult
-                }.invoke { stored -> check(stored == hash) { "conflicting AML event identifier" } }
-        }.bounded().awaitSuspending()
+                }
+            }.invoke { stored -> check(stored == hash) { "conflicting AML event identifier" } }
+        }.awaitSuspending()
     }
 
     /** PostgreSQL owns recordedAt; use its clock for an omitted knownAt cutoff. */
     suspend fun databaseNow(): Instant = transaction { session ->
         session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
-    }.bounded().awaitSuspending().toInstant()
+    }.awaitSuspending().toInstant()
 
     suspend fun history(
         id: UUID,
@@ -162,7 +165,7 @@ class AmlCaseHistoryRepository(
             ).setParameter("bank", bankScope).setParameter("id", id)
                 .setParameter("effectiveAt", effectiveAt).setParameter("knownAt", knownAt)
                 .setMaxResults(observationLimit + 1).resultList
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
         return AmlCaseHistory(
             "aml-case:$id",
             effectiveAt,
@@ -179,15 +182,16 @@ class AmlCaseHistoryRepository(
         )
     }
 
-    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> = sessions.withTransaction { session, _ ->
-        session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-            .setParameter("bank", bankScope).singleResult.flatMap {
-                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-                    .setParameter("timeout", "${timeoutMs}ms").singleResult
-            }.flatMap { block(session) }
-    }
+    private fun <T> transaction(statement: (Mutiny.Session) -> Uni<T>): Uni<T> =
+        scopedOperation { operation -> operation.sql(statement) }
 
-    private fun <T> Uni<T>.bounded(): Uni<T> = ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+    private fun <T> scopedOperation(block: (ContextSqlOperation) -> Uni<T>): Uni<T> =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { block(operation) }
+        }
 
     private companion object {
         const val MAX_OBSERVATIONS = 100
