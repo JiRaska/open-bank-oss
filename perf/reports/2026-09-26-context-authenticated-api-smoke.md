@@ -24,8 +24,12 @@ Commitment relay export was not enabled: local decisions, disclosures and outbox
 
 Credentials and tokens stayed in restricted temporary files and are excluded from this report and the repository.
 
-## Fresh-build relay correction in progress
+## Fresh-build relay correction and repeat smoke
 
 The startup race was traced to scheduled construction before messaging channel initialization. Both relays now skip execution until ApplicationNotRunning permits it and resolve their emitter lazily after the enabled guard. The audit integration test drives the real scheduler and waits for both publication and persisted SENT status; the disclosure integration test retains direct idempotency coverage. Both focused tests, ktlint, Detekt and quarkusBuild passed.
 
-The disposable schema was recreated rather than repairing migration checksums. The fresh package applied all migrations through V21 and started with both commitment exports enabled, without the earlier emitter startup errors. A new authenticated smoke is running; its result and actual Kafka commitment delivery are not yet certified here.
+The disposable schema was recreated rather than repairing migration checksums. The fresh package applied all migrations through V21 and started with both commitment exports enabled, without the earlier emitter startup errors. The repeat two-minute authenticated smoke completed with 14,902 requests, 59,608 successful checks, no failed requests/checks, mean 31.00 ms, median 21.09 ms, p95 85.74 ms and maximum 624.89 ms. Configured p95/p99 thresholds passed. Closed-loop observed throughput was 124.15 requests/s. Both export relays were enabled during this run.
+
+A separate real Kafka consumer inspected 500 commitment messages and verified the exact eight-field allowlist, SHA-256-shaped commitments and presence of both CONTEXT_READ_AUDIT_COMMITTED and CONTEXT_DISCLOSURE_COMMITTED. This proves publication into the isolated Kafka topic, not ingestion by Audit service.
+
+The repeat exposed a capacity limitation: each relay claims at most 100 rows per five-second invocation (at most 20 commitments/s before processing overhead). Both outbox queues grow under the smoke workload. The next implementation must provide bounded dispatch throughput and drain verification sufficient for the planned 100 RPS, rather than claiming the read-latency success proves sustainable end-to-end audit capacity.
