@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.30.0...ledger-service-v1.31.0) (2026-09-26)
+
+
+### Features
+
+* **ledger:** report idempotent replays with an Idempotent-Replayed header ([#10906](https://github.com/JiRaska/open-bank-oss/issues/10906)) ([b6f1225](https://github.com/JiRaska/open-bank-oss/commit/b6f122594e53d55dcea8c2ce4a44b06c81d3411f))
+
 ## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.4...ledger-service-v1.30.0) (2026-09-25)
 
 
