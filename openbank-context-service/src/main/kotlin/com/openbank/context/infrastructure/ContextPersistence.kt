@@ -309,12 +309,7 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
 internal fun <T> Mutiny.SessionFactory.boundedContextTransaction(
     timeoutMs: Int,
     block: (Mutiny.Session) -> Uni<T>,
-): Uni<T> = openSession().flatMap { session ->
-    session.withTransaction {
-        session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-            .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
-    }.onTermination().call { session.close() }
-}
+): Uni<T> = ContextSqlOperation.execute(this, timeoutMs) { operation -> operation.sql(block) }
 
 /** PostgreSQL bounds each statement; server timeout reaches cleanup without cancelling SQL observation. */
 internal fun <T> Mutiny.SessionFactory.boundedGraphRead(timeoutMs: Int, block: (Mutiny.Session) -> Uni<T>): Uni<T> =
@@ -641,12 +636,13 @@ class ContextReadAuditRepository(
             status = "PENDING"
             updatedAt = entity.occurredAt
         }
-        sessions.boundedContextTransaction(queryTimeoutMs) { session ->
-            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult
-                .flatMap { session.persist(entity) }
-                .flatMap { session.persist(commitment) }
-                .flatMap { session.flush() }
+        ContextSqlOperation.execute(sessions, queryTimeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { operation.sql { session -> session.persist(entity) } }
+                .flatMap { operation.sql { session -> session.persist(commitment) } }
+                .flatMap { operation.sql { session -> session.flush() } }
         }.awaitSuspending()
     }
 
@@ -670,12 +666,13 @@ class ContextReadAuditRepository(
             status = "PENDING"
             updatedAt = entity.occurredAt
         }
-        sessions.boundedContextTransaction(queryTimeoutMs) { session ->
-            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult
-                .flatMap { session.persist(entity) }
-                .flatMap { session.persist(commitment) }
-                .flatMap { session.flush() }
+        ContextSqlOperation.execute(sessions, queryTimeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { operation.sql { session -> session.persist(entity) } }
+                .flatMap { operation.sql { session -> session.persist(commitment) } }
+                .flatMap { operation.sql { session -> session.flush() } }
         }.awaitSuspending()
     }
 }

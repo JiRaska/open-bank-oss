@@ -78,9 +78,12 @@ internal class ComplaintSnapshotReader(
 ) {
     suspend fun find(root: String, asOf: Instant): ComplaintSnapshot? {
         if (!root.startsWith("complaint:")) return null
-        val revision = sessions.boundedGraphRead(timeoutMs) { session ->
-            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult.flatMap {
+        val revision = ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap {
+                operation.sql { session ->
                     session.createQuery(
                         "from ComplaintRevisionEntity where bankScope = :bank and projectionGeneration = :generation " +
                             "and reference = :reference and occurredAt <= :asOf order by sourceVersion desc",
@@ -89,6 +92,7 @@ internal class ComplaintSnapshotReader(
                         .setParameter("reference", root.removePrefix("complaint:"))
                         .setParameter("asOf", asOf).setMaxResults(1).singleResultOrNull
                 }
+            }
         }.awaitSuspending() ?: return null
         return ComplaintSnapshot(revision)
     }

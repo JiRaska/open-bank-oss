@@ -15,6 +15,8 @@ import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.Context
+import io.vertx.core.Vertx
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +33,8 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 @QuarkusTest
 @TestProfile(ContextGraphTimeoutRecoveryProfile::class)
@@ -58,7 +62,7 @@ class ContextGraphQueryTimeoutIT {
                 }.awaitSuspending()
             }.asUni()
         }
-        assertThat(actual).isEqualTo(configured)
+        assertThat(actual).isBetween(1, configured)
     }
 
     @Test
@@ -84,6 +88,7 @@ class ContextGraphQueryTimeoutIT {
 
     @Test
     fun `database timeout finishes SQL before transaction cleanup and pool recovery`() {
+        assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
         assertThatThrownBy {
             VertxContextSupport.subscribeAndAwait<Int> {
                 sessions.boundedContextTransaction(100) { session ->
@@ -106,6 +111,70 @@ class ContextGraphQueryTimeoutIT {
         )
         repeat(6) {
             assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        }
+    }
+
+    @Test
+    @Suppress("LongMethod", "NestedBlockDepth") // JDBC observes SQL independently of the cancelled subscription.
+    fun `caller cancellation keeps session open until active SQL stops`() {
+        val backend = AtomicInteger()
+        val activeSession = AtomicReference<Mutiny.Session>()
+        val subscriptionContext = AtomicReference<Context>()
+        val subscription = VertxContextSupport.subscribeAndAwait {
+            Uni.createFrom().item {
+                subscriptionContext.set(Vertx.currentContext())
+                sessions.boundedContextTransaction(500) { session ->
+                    activeSession.set(session)
+                    session.createNativeQuery("select pg_backend_pid()", Int::class.javaObjectType)
+                        .singleResult.flatMap { pid ->
+                            backend.set(pid)
+                            session.createNativeQuery("select 1 from pg_sleep(2)", Int::class.javaObjectType)
+                                .singleResult
+                        }
+                }.subscribe().with({ }, { })
+            }
+        }
+        fun cancelOnContext() {
+            val cancelled = CompletableFuture<Void>()
+            subscriptionContext.get().runOnContext {
+                subscription.cancel()
+                cancelled.complete(null)
+            }
+            cancelled.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        val config = ConfigProvider.getConfig()
+        try {
+            DriverManager.getConnection(
+                config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+                config.getValue("quarkus.datasource.username", String::class.java),
+                config.getValue("quarkus.datasource.password", String::class.java),
+            ).use { connection ->
+                connection.prepareStatement(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ? " +
+                        "AND state = 'active' AND query LIKE '%pg_sleep(2)%')",
+                ).use { statement ->
+                    fun sqlActive(): Boolean {
+                        statement.setInt(1, backend.get())
+                        return statement.executeQuery().use { rows ->
+                            rows.next()
+                            rows.getBoolean(1)
+                        }
+                    }
+                    val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+                    while (!sqlActive() && System.nanoTime() < deadline) Thread.sleep(5)
+                    assertThat(sqlActive()).`as`("delayed SQL must be running before cancellation").isTrue()
+                    cancelOnContext()
+                    while (sqlActive() && System.nanoTime() < deadline) {
+                        assertThat(activeSession.get().isOpen)
+                            .`as`("session must remain open while PostgreSQL still executes its query").isTrue()
+                        Thread.sleep(5)
+                    }
+                    assertThat(sqlActive()).`as`("cancelled database work must stop within the watchdog").isFalse()
+                }
+            }
+            repeat(6) { assertThat(boundedSql(2000, "select 1")).isEqualTo(1) }
+        } finally {
+            cancelOnContext()
         }
     }
 
