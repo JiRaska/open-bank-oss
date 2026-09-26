@@ -4,12 +4,15 @@
 
 package com.openbank.sca.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.sca.application.port.`in`.ConsumeScaCommand
 import com.openbank.sca.application.port.`in`.ConsumeScaUseCase
 import com.openbank.sca.application.port.`in`.EnrollDeviceCommand
@@ -233,8 +236,9 @@ class ScaResource(
         @HeaderParam("X-Request-ID") xRequestId: String?,
     ): Response {
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
+        val requestHash = fingerprint("POST", CHALLENGES_PATH, request)
         requestKey?.let { key ->
-            idempotencyStore.get(scaCreateKey(request.partyId, key))?.let { cached ->
+            idempotencyStore.lookup(scaCreateKey(request.partyId, key), requestHash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -257,9 +261,10 @@ class ScaResource(
         requestKey?.let { key ->
             idempotencyStore.save(
                 scaCreateKey(request.partyId, key),
-                201,
-                objectMapper.writeValueAsString(responseBody),
-                300,
+                requestHash = requestHash,
+                statusCode = 201,
+                responseBody = objectMapper.writeValueAsString(responseBody),
+                ttlSeconds = 300,
             )
         }
         return Response.status(201).entity(responseBody).build()
@@ -406,6 +411,24 @@ class ScaResource(
     }
 
     private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
+
+    /**
+     * Binds an Idempotency-Key to the request it was first used for (#10916): the deserialised
+     * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
+     * while any field value does.
+     */
+    private fun fingerprint(method: String, path: String, body: Any): String =
+        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
+
+    private val canonicalMapper: ObjectMapper by lazy {
+        objectMapper.copy()
+            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+    }
+
+    private companion object {
+        const val CHALLENGES_PATH = "/api/v1/sca/challenges"
+    }
 }
 
 private fun err(code: ErrorCode, msg: String) = ApiError(
