@@ -8,6 +8,7 @@ import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
@@ -95,23 +96,33 @@ class DateTimeExceptionMapper : ExceptionMapper<DateTimeException> {
 }
 
 /**
- * Same `Idempotency-Key`, different request fingerprint → **422 IDEMPOTENCY_KEY_REUSED**.
+ * Same `Idempotency-Key`, different request fingerprint → **409 IDEMPOTENCY_KEY_REUSED**, the
+ * fleet-wide status (domestic-payment, delegation and customer-edge already answer 409).
  * Replaying the stored response here would answer a different payment with the first one's result.
- * The key is not echoed in the message beyond what the client itself sent.
+ * Body is the libs [ApiError] shape; the key is never echoed.
  */
 @Provider
 class IdempotencyKeyReusedExceptionMapper : ExceptionMapper<IdempotencyKeyReusedException> {
-    override fun toResponse(exception: IdempotencyKeyReusedException): Response =
-        Response.status(ErrorCode.IDEMPOTENCY_KEY_REUSED.httpStatus)
-            .entity(
-                apiError(
-                    ErrorCode.IDEMPOTENCY_KEY_REUSED.httpStatus,
-                    ErrorCode.IDEMPOTENCY_KEY_REUSED.code,
-                    exception.message ?: "Idempotency-Key reused for a different request",
-                ),
-            )
-            .build()
+    override fun toResponse(exception: IdempotencyKeyReusedException): Response = idempotencyConflict(
+        ErrorCode.IDEMPOTENCY_KEY_REUSED,
+        "Idempotency-Key was already used for a different request",
+    )
 }
+
+/**
+ * The same request is still executing under this key → **409 IDEMPOTENCY_REQUEST_IN_PROGRESS**.
+ * A distinct code from reuse: the client did nothing wrong and should retry after a short wait.
+ */
+@Provider
+class IdempotencyRequestInProgressExceptionMapper : ExceptionMapper<IdempotencyRequestInProgressException> {
+    override fun toResponse(exception: IdempotencyRequestInProgressException): Response = idempotencyConflict(
+        ErrorCode.IDEMPOTENCY_REQUEST_IN_PROGRESS,
+        "A request with this Idempotency-Key is still being processed; retry later",
+    )
+}
+
+private fun idempotencyConflict(code: ErrorCode, message: String): Response =
+    Response.status(code.httpStatus).entity(apiError(code.httpStatus, code.code, message)).build()
 
 @Provider
 class NoSuchElementExceptionMapper : ExceptionMapper<NoSuchElementException> {

@@ -35,7 +35,7 @@ data class ApiError(
 
 data class FieldError(val field: String, val message: String, val rejectedValue: Any? = null)
 
-private const val HTTP_UNPROCESSABLE_CONTENT = 422
+private const val HTTP_CONFLICT = 409
 
 enum class ErrorCode(val httpStatus: Int, val code: String) {
     ACCOUNT_NOT_FOUND(404, "ACCOUNT_NOT_FOUND"),
@@ -47,7 +47,8 @@ enum class ErrorCode(val httpStatus: Int, val code: String) {
     INVALID_IBAN(400, "INVALID_IBAN"),
     INVALID_AMOUNT(400, "INVALID_AMOUNT"),
     DUPLICATE_REQUEST(409, "DUPLICATE_REQUEST"),
-    IDEMPOTENCY_KEY_REUSED(HTTP_UNPROCESSABLE_CONTENT, "IDEMPOTENCY_KEY_REUSED"),
+    IDEMPOTENCY_KEY_REUSED(HTTP_CONFLICT, "IDEMPOTENCY_KEY_REUSED"),
+    IDEMPOTENCY_REQUEST_IN_PROGRESS(HTTP_CONFLICT, "IDEMPOTENCY_REQUEST_IN_PROGRESS"),
     VALIDATION_ERROR(400, "VALIDATION_ERROR"),
     NOT_FOUND(404, "NOT_FOUND"),
     CONFLICT(409, "CONFLICT"),
