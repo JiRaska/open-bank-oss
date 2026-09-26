@@ -18,7 +18,7 @@ import java.util.UUID
  * Regression coverage for wiring a real [com.openbank.libs.authz.PolicyDecisionPoint] bean
  * (ADR-0034 Phase 5, issue #266) into ledger-service, the core money-path double-entry ledger.
  * `authz.enforce` defaults to `false` (advisory) and no OPA sidecar runs in the test profile, so
- * these assert the interceptor + a real [com.openbank.ledger.infrastructure.authz.AuthzProducer]
+ * these assert the interceptor + a real [com.openbank.libs.authz.OpaPolicyDecisionPointProducer]
  * bean are a correct no-op in that state (the OPA sidecar call fails — connection refused — and
  * advisory mode logs + proceeds) — not that a real policy decision is enforced. Real decisions are
  * asserted by `opa eval` against the composed bundle in

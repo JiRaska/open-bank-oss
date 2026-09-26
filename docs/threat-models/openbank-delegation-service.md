@@ -176,6 +176,19 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-21** — Two releasable approval kinds, `STANDING_ORDER` and `SDD_MANDATE` (#10281,
   ADR-0312 addendum, migration V26). Same boundary and caller as `PAYMENT` (customer-edge's service
   account); the guards are unchanged code paths — distinct signer and initiator-not-cosigner in

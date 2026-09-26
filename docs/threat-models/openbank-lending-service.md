@@ -549,6 +549,19 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 
 ## 10. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
 
 - **2026-09-25** — Ledger-backfill request history for the admin console (#10618): READ-ONLY `GET /api/v1/lending/ledger-backfill/requests?limit=` (1..100) and `GET .../requests/{id}`, both on the existing action `lending.ledgerBackfill.read` (ROLE_FINANCE / ROLE_ADMIN humans; the service-account veto applies unchanged). `BackfillRequestView` additively exposes `proposedAt` / `decidedAt` / `executedAt`. **Information disclosure:** the rows carry maker/checker/executor principal names and plan hashes — already visible to the same roles through the write responses; no party data. No write path, posting, event or migration. Rollback: revert.

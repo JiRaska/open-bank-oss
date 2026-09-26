@@ -128,6 +128,11 @@ authz:
   enforce: "${AUTHZ_ENFORCE:true}"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   vop:
     # IBAN country prefixes we can answer for ourselves. Anything else has no EPC VoP scheme link
     # and honestly returns NO_DATA / NO_SCHEME_CONNECTIVITY (ADR-0171 §4) rather than a fabricated

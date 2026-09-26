@@ -147,6 +147,11 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
