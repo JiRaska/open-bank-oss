@@ -2,6 +2,7 @@
 package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.MeterRegistry
@@ -21,7 +22,6 @@ import org.eclipse.microprofile.reactive.messaging.Message
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Clock
 import java.time.Duration
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 /** Relays only commitments. A crashed claim is retried with the same audit ID. */
@@ -120,7 +120,7 @@ class ContextAuditCommitmentRelay(
                     session.createNativeQuery(CLAIM_SQL, ContextAuditCommitmentOutboxEntity::class.java)
                         .setParameter("bank", bankScope)
                         .setParameter("now", now)
-                        .setParameter("claimToken", UUID.randomUUID())
+                        .setParameter("claimToken", Ids.randomId())
                         .setParameter("stale", stale)
                         .setParameter("retryBefore", retryBefore)
                         .setParameter("batchSize", dispatchSettings.batchSize)
