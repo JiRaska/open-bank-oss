@@ -7,6 +7,7 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
@@ -88,6 +89,25 @@ class DateTimeExceptionMapper : ExceptionMapper<DateTimeException> {
                     ErrorCode.VALIDATION_ERROR.httpStatus,
                     ErrorCode.VALIDATION_ERROR.code,
                     exception.message ?: "Invalid date or time value",
+                ),
+            )
+            .build()
+}
+
+/**
+ * Same `Idempotency-Key`, different request fingerprint → **422 IDEMPOTENCY_KEY_REUSED**.
+ * Replaying the stored response here would answer a different payment with the first one's result.
+ * The key is not echoed in the message beyond what the client itself sent.
+ */
+@Provider
+class IdempotencyKeyReusedExceptionMapper : ExceptionMapper<IdempotencyKeyReusedException> {
+    override fun toResponse(exception: IdempotencyKeyReusedException): Response =
+        Response.status(ErrorCode.IDEMPOTENCY_KEY_REUSED.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.IDEMPOTENCY_KEY_REUSED.httpStatus,
+                    ErrorCode.IDEMPOTENCY_KEY_REUSED.code,
+                    exception.message ?: "Idempotency-Key reused for a different request",
                 ),
             )
             .build()
