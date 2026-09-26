@@ -86,7 +86,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
   const user = session?.user
   const roles: string[] = user?.roles ?? []
   // Show highest-privilege role badge
-  const primaryRole = ['ROLE_ADMIN', 'ROLE_SUPERVISOR', 'ROLE_COMPLIANCE', 'ROLE_KYC_REVIEWER', 'ROLE_KYC_OPENER', 'ROLE_KYC', 'ROLE_PAYMENTS', 'ROLE_AUDITOR', 'ROLE_OPERATOR', 'ROLE_VIEWER']
+  const primaryRole = ['ROLE_ADMIN', 'ROLE_SUPERVISOR', 'ROLE_COMPLIANCE', 'ROLE_KYC_REVIEWER', 'ROLE_KYC_OPENER', 'ROLE_KYC', 'ROLE_PAYMENTS', 'ROLE_RISK', 'ROLE_FINANCE', 'ROLE_TREASURY_APPROVER', 'ROLE_TREASURY_DEALER', 'ROLE_AUDITOR', 'ROLE_OPERATOR', 'ROLE_VIEWER']
     .find(r => roles.includes(r))
   const roleInfo = primaryRole ? ROLE_LABELS[primaryRole] : null
   const canReadDocs = hasPermission(roles, 'docs:view')

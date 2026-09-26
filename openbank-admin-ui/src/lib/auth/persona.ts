@@ -9,7 +9,7 @@
 
 import { ROLES, type Permission, type Role } from './roles'
 
-export type Persona = 'backoffice' | 'payments' | 'compliance' | 'supervisor' | 'platform'
+export type Persona = 'backoffice' | 'payments' | 'compliance' | 'supervisor' | 'platform' | 'balance-sheet' | 'treasury'
 
 /** A persona shortcut carries its UI permission so every consumer can suppress
  * a destination before it becomes a 403 trap (ADR-0229 D3/D4). */
@@ -42,6 +42,19 @@ const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
     { href: '/sanctions', nameCs: 'Sankční dohled', nameEn: 'Sanctions oversight', permission: 'compliance:view' },
     { href: '/audit', nameCs: 'Audit', nameEn: 'Audit', permission: 'audit:view' },
   ],
+  // #10618: the risk and finance departments. The Sidebar filters each link by its permission,
+  // so a risk analyst never sees the finance-only ledger backfill shortcut.
+  'balance-sheet': [
+    { href: '/balance-sheet/snapshots', nameCs: 'Snímky rozvahy', nameEn: 'Balance-sheet snapshots', permission: 'balance-sheet:view' },
+    { href: '/balance-sheet/curve-sets', nameCs: 'Výnosové křivky', nameEn: 'Curve sets', permission: 'balance-sheet:view' },
+    { href: '/balance-sheet/ledger-backfill', nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill', permission: 'ledger-backfill:view' },
+  ],
+  // ADR-0315: the treasury desk. The approval inbox is filtered out for a dealer by its permission.
+  treasury: [
+    { href: '/treasury/deals', nameCs: 'Obchody treasury', nameEn: 'Treasury deals', permission: 'treasury:view' },
+    { href: '/treasury/approvals', nameCs: 'Ke schválení', nameEn: 'Approval inbox', permission: 'treasury:deal:approve' },
+    { href: '/treasury/positions', nameCs: 'Denní pozice', nameEn: 'Daily position', permission: 'treasury:view' },
+  ],
   platform: [
     { href: '/system/tests', nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', permission: 'system:view' },
     { href: '/system/health', nameCs: 'Zdraví systému', nameEn: 'System Health', permission: 'system:view' },
@@ -56,6 +69,8 @@ const PERSONA_LABELS: Record<Persona, { cs: string; en: string }> = {
   compliance: { cs: 'Compliance', en: 'Compliance' },
   supervisor: { cs: 'Supervize', en: 'Supervision' },
   platform: { cs: 'Platforma', en: 'Platform' },
+  'balance-sheet': { cs: 'Rozvaha a riziko', en: 'Balance sheet & risk' },
+  treasury: { cs: 'Treasury', en: 'Treasury' },
 }
 
 const has = (roles: string[], r: Role) => roles.includes(r)
@@ -72,6 +87,8 @@ export function personaForRoles(roles: string[]): Persona {
     return 'compliance'
   }
   if (has(roles, ROLES.PAYMENTS)) return 'payments'
+  if (has(roles, ROLES.RISK) || has(roles, ROLES.FINANCE)) return 'balance-sheet'
+  if (has(roles, ROLES.TREASURY_DEALER) || has(roles, ROLES.TREASURY_APPROVER)) return 'treasury'
   return 'backoffice'
 }
 

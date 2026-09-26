@@ -187,7 +187,7 @@ Authorization: Bearer <token>
 | `UN_CONSOLIDATED` | UN Security Council | UN consolidated list |
 | `HM_TREASURY` | UK HM Treasury | UK Financial Sanctions |
 | `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions |
-| `CNB_DOMESTIC` | Czech National Bank | Domestic Czech sanctions |
+| `CNB_DOMESTIC` | Czech Ministry of Foreign Affairs (MZV) | Czech national sanctions list (Act No. 1/2023 Coll.) |
 
 ## Error model
 

@@ -43,6 +43,16 @@ class ScaDeviceDecisionEntity : PanacheEntityBase() {
     @Column(name = "challenge_version", nullable = false)
     var challengeVersion: Int = 0
 
-    fun toDomain() =
-        DeviceApprovalDecision(challengeId, credentialId, decision, signatureB64, decidedAt, challengeVersion)
+    @Column(name = "deciding_party_id", nullable = false)
+    lateinit var decidingPartyId: UUID
+
+    fun toDomain() = DeviceApprovalDecision(
+        challengeId = challengeId,
+        credentialId = credentialId,
+        decision = decision,
+        signatureB64 = signatureB64,
+        decidedAt = decidedAt,
+        challengeVersion = challengeVersion,
+        decidingPartyId = decidingPartyId,
+    )
 }

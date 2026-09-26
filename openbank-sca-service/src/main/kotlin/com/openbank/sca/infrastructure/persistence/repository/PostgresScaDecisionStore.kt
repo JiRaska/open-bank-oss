@@ -129,4 +129,5 @@ private fun DeviceApprovalDecision.toEntity(challenge: ScaChallengeEntity, expir
         it.decidedAt = decidedAt
         it.expiresAt = expiry
         it.challengeVersion = challengeVersion
+        it.decidingPartyId = challenge.partyId
     }

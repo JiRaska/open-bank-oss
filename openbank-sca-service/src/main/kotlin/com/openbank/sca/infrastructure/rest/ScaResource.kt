@@ -31,6 +31,8 @@ import com.openbank.sca.application.usecase.DeviceNotEnrolledException
 import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
 import com.openbank.sca.application.usecase.DeviceRevokedException
 import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
+import com.openbank.sca.application.usecase.NonNaturalPersonEnrolmentException
+import com.openbank.sca.application.usecase.PartyRegisterUnavailableException
 import com.openbank.sca.application.usecase.ScaChallengeAlreadyConsumedException
 import com.openbank.sca.application.usecase.ScaChallengeExpiredException
 import com.openbank.sca.application.usecase.ScaChallengeMaxAttemptsException
@@ -77,6 +79,8 @@ data class InitiateScaRequest(
     val preferredMethod: ScaMethod?,
     val dynamicLinkingData: DynamicLinkingData?,
     val redirectUrl: String?,
+    /** The entity the human acts for (`X-Acting-For` at the edge). Context only (#10281 item 3). */
+    val onBehalfOfPartyId: UUID? = null,
 )
 
 data class VerifyScaRequest(val partyId: UUID, val otp: String?)
@@ -139,6 +143,10 @@ data class ScaChallengeResponse(
     val consumedAt: String?,
     val attemptCount: Int,
     val maxAttempts: Int,
+    /** The entity the human acted for, when the challenge was raised under `X-Acting-For`. */
+    val onBehalfOfPartyId: UUID? = null,
+    /** Whose enrolled device decided this challenge (#10281 item 3); null while undecided. */
+    val decidedByPartyId: UUID? = null,
 ) {
     companion object {
         fun from(c: ScaChallenge) = ScaChallengeResponse(
@@ -152,6 +160,8 @@ data class ScaChallengeResponse(
             consumedAt = c.consumedAt?.toString(),
             attemptCount = c.attemptCount,
             maxAttempts = c.maxAttempts,
+            onBehalfOfPartyId = c.onBehalfOfPartyId,
+            decidedByPartyId = c.decidedByPartyId,
         )
     }
 }
@@ -171,6 +181,11 @@ data class PendingScaResponse(
     val reference: String?,
     val expiresAt: String,
     val createdAt: String,
+    /** For an APPROVAL challenge: the approval request being co-signed. */
+    val approvalRequestId: String? = null,
+    /** For an APPROVAL challenge: SHA-256 of the frozen payload the signer is shown. */
+    val payloadSha256: String? = null,
+    val onBehalfOfPartyId: UUID? = null,
 ) {
     companion object {
         fun from(c: ScaChallenge) = PendingScaResponse(
@@ -184,6 +199,9 @@ data class PendingScaResponse(
             reference = c.dynamicLinkingData?.reference,
             expiresAt = c.expiresAt.toString(),
             createdAt = c.createdAt.toString(),
+            approvalRequestId = c.dynamicLinkingData?.approvalRequestId,
+            payloadSha256 = c.dynamicLinkingData?.payloadSha256,
+            onBehalfOfPartyId = c.onBehalfOfPartyId,
         )
     }
 }
@@ -207,6 +225,10 @@ data class ConsumeScaRequest(
     val cardId: String? = null,
     /** The card operation being executed (`LIMIT_INCREASE`, `REVEAL_DETAILS`, ...), for a CARD_MANAGEMENT challenge. */
     val cardAction: String? = null,
+    /** The approval request this consume is scoped to, for an APPROVAL challenge (#10281). */
+    val approvalRequestId: String? = null,
+    /** SHA-256 of the frozen payload being released or co-signed, for an APPROVAL challenge. */
+    val payloadSha256: String? = null,
 )
 
 @Path("/api/v1/sca")
@@ -257,6 +279,7 @@ class ScaResource(
                 preferredMethod = request.preferredMethod,
                 dynamicLinkingData = request.dynamicLinkingData,
                 redirectUrl = request.redirectUrl,
+                onBehalfOfPartyId = request.onBehalfOfPartyId,
             ),
         )
         val responseBody = ScaChallengeResponse.from(challenge)
@@ -400,6 +423,8 @@ class ScaResource(
                 ceremonyId = request.ceremonyId,
                 cardId = request.cardId,
                 cardAction = request.cardAction,
+                approvalRequestId = request.approvalRequestId,
+                payloadSha256 = request.payloadSha256,
             ),
         )
         return ScaChallengeResponse.from(challenge)
@@ -528,4 +553,19 @@ private fun SecurityIdentity.requirePartyOwnership(partyId: UUID) {
     if (principalPartyId != null && principalPartyId != partyId) {
         throw ForbiddenException("Cannot access another party's SCA data")
     }
+}
+
+/** #10281 item 1: a device key belongs to a person, never to a company or trust. */
+@Provider
+class NonNaturalPersonEnrolmentMapper : ExceptionMapper<NonNaturalPersonEnrolmentException> {
+    override fun toResponse(e: NonNaturalPersonEnrolmentException): Response = Response.status(UNPROCESSABLE_ENTITY)
+        .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Device enrolment refused")).build()
+}
+
+/** Fail closed: the register could not say the party is a person, so nothing is enrolled. */
+@Provider
+class PartyRegisterUnavailableMapper : ExceptionMapper<PartyRegisterUnavailableException> {
+    override fun toResponse(e: PartyRegisterUnavailableException): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .entity(err(ErrorCode.INTERNAL_ERROR, e.message ?: "Party register unavailable").copy(status = 503)).build()
 }

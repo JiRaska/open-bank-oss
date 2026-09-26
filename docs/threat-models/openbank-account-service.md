@@ -53,7 +53,7 @@ that is balance-service).
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-customer inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): `openbank.accounts.created` tagged only by `product_type` (closed `AccountType` enum) + `currency`; `openbank.accounts.closed` adds a `reason` **normalized to a closed set** (`customer_request`/`regulatory`/`fraud`/`inactivity`/`unspecified`/`other`) — the operator-supplied free-text reason never becomes a label; outbox-backlog gauge tagged only by `service`. Never an account id, IBAN, party id, or balance. Counters increment only after the commit + publish. `/q/metrics` is cluster-internal |
 | **I**nfo disclosure | Authorization-id enumeration via the revoke route: `DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}` distinguishing "this id exists on another account" from "this id does not exist" | `AuthorizationNotFoundExceptionMapper` and `AuthorizationNotOnAccountExceptionMapper` both answer 404 with a byte-identical `AUTHORIZATION_NOT_FOUND` body, so an operator scoped to one account gets no existence oracle over ids on accounts they do not hold. The distinction is kept in a WARN log, not on the wire. Same posture as the `X-Customer-Party-Id` row above. |
-| **S**poofing / **E**oP | Forged or replayed `PARTY_CREATED` for a COMPANY / SOLE_TRADER causes an unreviewed automatic business account | Only party-service publishes `openbank.party.events` (Kafka mTLS + KafkaUser ACLs); opening is **flag-gated default-OFF** (`openbank.account.onboarding.open-business-accounts`, sandbox only) so production keeps operator opening; the account opens `PENDING_ACTIVATION` (no debit/credit) and activates only when party-service's KYC+AML two-key gate flips the party ACTIVE; idempotent per party (`onboarding-business-account-<partyId>` + existing-CURRENT check) so a replay opens nothing; TRUST and unknown types are never opened; no savings account and no welcome bonus for business accounts |
+| **S**poofing / **E**oP | Forged or replayed `PARTY_CREATED`, or a party-ACTIVE event (`KYC_STATUS_CHANGED` / `PARTY_UPDATED`), for a COMPANY / SOLE_TRADER causes an unreviewed automatic business account | Only party-service publishes `openbank.party.events` (Kafka mTLS + KafkaUser ACLs); opening is **flag-gated default-OFF** (`openbank.account.onboarding.open-business-accounts`, sandbox only) so production keeps operator opening; the account opens `PENDING_ACTIVATION` (no debit/credit) and activates only when party-service's KYC+AML two-key gate flips the party ACTIVE; idempotent per party (`onboarding-business-account-<partyId>` + existing-CURRENT check) so a replay opens nothing; TRUST and unknown types are never opened; no savings account and no welcome bonus for business accounts |
 | **D**oS | Mass open/close churn | Gateway rate limits; outbox decouples event load |
 | **E**oP | Viewer escalates to freeze/close | Distinct roles; OPA enforce; deny-by-default |
 | **S**poofing / **E**oP (M2M) | Compromise of the `oidc-client` secret → mint a ROLE_OPERATOR token → inject arbitrary transactions via transaction-service `POST /api/v1/transactions` | Secret held only in a K8s Secret (ExternalSecret from Vault), never in image/git; rotatable; least-privilege client (`openbank-services`); welcome-bonus call is **flag-gated default-OFF** and **sandbox-only**. Residual: transaction-service does not currently distinguish caller identity beyond the role — accepted residual risk in sandbox (see §5) |
@@ -193,6 +193,16 @@ not change any existing request's outcome until explicitly flipped.
   and the endpoint returns only the public product list. This is a production-like
   availability assertion, not an access-control bypass: Product Catalog still owns
   request handling, and removing the policy restores fail-closed connection denial.
+
+- **2026-09-24** — **New synthetic principal on that edge (#7324):** the same journey now
+  authenticates as the Keycloak client `openbank-synthetic-catalog-read`. It holds no realm
+  role (explicitly not `ROLE_API`, `fullScopeAllowed: false`); its only grant is the
+  `catalog:read` client scope, which `CatalogScopeRoleMapper` maps to `CATALOG_SCOPE_READ`, so it
+  reaches only product-catalog's read endpoints that admit that role (never author or publish) and no other
+  service. The secret is Keycloak-generated, stored at Vault KV `keycloak/synthetic-catalog-read`
+  and projected by an ExternalSecret only into the labelled journey pod; the script never logs
+  the secret, token or bodies. The added Keycloak ingress rule admits only that pod on `:8080`.
+  Rollback: disable the client in Keycloak; the journey then fails red on the token request.
 
 - **2026-08-26** — The operator approval inbox gains a bounded, read-only
   `GET /api/v1/accounts/approvals` edge. It exposes only the pending approval id, action,
@@ -612,6 +622,9 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+- **2026-09-21** — **Own machine identity for the welcome-bonus credit (#10486 batch 1).** `TransactionServiceRestClient` now mints its bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-account` (realm role `ROLE_API` only). transaction-service grants that principal exactly `transaction.create` by identity (`service-account-transaction-create`). **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/account-service` (`client_secret`), projected by the `account-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
+- **2026-09-21** — **Account reads admitted by named machine identity (#10486 batch 5).** `account_rest_ext.rego` adds six identity rules, one per caller that listed accounts through the shared `openbank-services` principal's `ROLE_OPERATOR` (base `operator-read-any`): analytics-sink, document, lending and party get `account.list`; billing and interest get `account.list` and `account.read`. Each principal holds `ROLE_API` only, and `AccountResource`'s RBAC already admitted `ROLE_API` on these reads, so no RBAC changes. **STRIDE-I:** `account.list` cannot be narrowed by query parameter at this layer (`/accounts/active` is the whole active book), so each rule is a real PII grant; it names one principal each, and `account_rest_ext_test.rego` asserts that another `ROLE_API` service account and the shared client with `ROLE_API` only are denied both reads (negative case run: widening one rule to a `service-account-` prefix turned two tests red). **Repudiation improves:** the decision line now names the reading service. Enforcement: `AUTHZ_ENFORCE` is on for account-service. Rollback: revert the commit.
+
 ## Delegation lifecycle ordering
 
 The local enforcement projection accepts authority-opening events only with a positive,
@@ -687,3 +700,86 @@ decision use first; the additive projection table may remain until its consumer 
   retail. A business account never receives the retail welcome bonus. **Risk class:** integrity of
   account opening (a forged party event could open an inert account); no money mutation, no new
   principal. Rollback: set the flag false; already-opened accounts are ordinary accounts.
+- **2026-09-19** — **The business current account is also opened on party ACTIVATION**, no new
+  route, caller, edge or privilege (#10372). A COMPANY / SOLE_TRADER party that reaches `ACTIVE`
+  (a `KYC_STATUS_CHANGED` / `PARTY_UPDATED` with `status: ACTIVE` on the existing `party-events-in`
+  channel) with no CURRENT account now gets the same business account `PARTY_CREATED` would have
+  opened: same product, currency, `PENDING_ACTIVATION` start, and the **same idempotency key**
+  `onboarding-business-account-<partyId>` plus the existing-CURRENT check, so the two paths and any
+  replay can never open two. The existing activation pass then activates it. This self-heals business
+  parties created before account-service opened business accounts, which otherwise needed an operator
+  to hand-call APIs. **Who can trigger it:** only party-service, and only on the two-key gate result;
+  still behind `openbank.account.onboarding.open-business-accounts` (**default false**, sandbox only).
+  INDIVIDUAL and TRUST parties are untouched by this path. **Risk class:** integrity of account
+  opening (a forged ACTIVE event for a business party could open and activate an account; the
+  mitigation is unchanged — only party-service publishes the topic over mTLS + KafkaUser ACLs); no
+  money mutation, no welcome bonus, no new principal. Rollback: set the flag false.
+- **2026-09-19** — **Business-account catch-up (new outbound read: account-service → party-service)**
+  (#10372). `BusinessAccountCatchUp` (suspend `@Scheduled`, ~30 s after start then every 15 min) pages
+  party-service's existing `GET /api/v1/parties?status=ACTIVE` (`ROLE_API`, OIDC client-credentials) over
+  party-service's private-CA mTLS listener (8443, client cert `account-internal-tls`), and for every ACTIVE
+  COMPANY / SOLE_TRADER with no CURRENT account opens and activates the business account through the same
+  `BusinessOnboardingAccount` the event path uses (same idempotency key, so a race or replay yields one).
+  It makes the outcome independent of deploy order: a party that became ACTIVE before this service could
+  react gets no second event. **Who can trigger it:** nobody over HTTP; its input is party-service's
+  register, read-only. Behind BOTH `open-business-accounts` and `business-catch-up.enabled` (default
+  false, sandbox on). Only id, type, status and legal name are bound from the response. **Risk class:**
+  integrity of account opening (a compromised party-service could list a forged ACTIVE business party —
+  the same trust already placed in its events); no money mutation, no bonus. Rollback: set the flag false.
+- **2026-09-19** — **New inbound edge: aml-service → account-service over a new private-CA mTLS listener**
+  (8443, client auth REQUIRED, TLSv1.3; server cert `account-service-internal-tls`), the same shape as
+  party-service. HTTP/8100 stays for existing callers. The only caller on 8443 is aml-service
+  `PartyResolutionScheduler` (#3413), reading `GET /api/v1/accounts/{id}` (`account.read`) as the shared
+  `service-account-openbank-services`, which `account_rest_ext.rego` already admits for `account.read`
+  only — no policy change. Before this, aml had no `ACCOUNT_SERVICE_URL` and dialled localhost, so the
+  edge existed in code but never reached this service. **Risk class:** confidentiality of account
+  reads (party id of an account) to a compliance service; no mutation, no new action. Rollback: drop
+  the listener env and the aml env var.
+
+- **2026-09-20** — **New outbound edge: sca-service over private-CA mTLS (8443), plus a bearer this
+  client never sent.** `SavingsProposalService`'s SCA approval reaches
+  `sca-service.sca.svc:8443` (`GET /api/v1/sca/challenges/{id}`, `POST /{id}/consume`) with the new
+  CLIENT certificate `account-service-client-tls` (`%prod` TLS bucket `sca-authority`, TLSv1.3) —
+  distinct from `account-service-internal-tls`, which is this service's own SERVER certificate for
+  its 8443 listener (#10380). Previously `SCA_SERVICE_URL` was unset in gitops and the client
+  dialled `localhost:8110`, so the approval never left the pod (#10383). **Second defect fixed in
+  the same change:** `ScaServiceRestClient` registered only `SyntheticTaintClientFilter` and not
+  `OidcClientRequestReactiveFilter`, so it carried **no Authorization header** — unlike all three
+  sibling clients in the same package. Both upstream methods are
+  `@RolesAllowed("ROLE_API","ROLE_OPERATOR","ROLE_ADMIN")` + `@Authorize`, so supplying only the URL
+  would have converted a connection refused into a 401. The filter is now registered, and
+  `sca_rest_ext.rego`'s `service-sca-shared-client-m2m` rule already admits
+  `service-account-openbank-services` for `scaChallenge.read` and `scaChallenge.consume`, which
+  `rules.yaml` `four_eyes.exemptions` exempts for that principal — no policy change.
+  **Risk class:** integrity of savings-withdrawal SCA approval (a challenge consume is a
+  state-changing call on the SCA aggregate, not a money movement); the transport is now mutually
+  authenticated and the caller now proves its identity where before it proved nothing. Rollback:
+  drop `SCA_SERVICE_URL` and the `sca-tls` volume; the filter registration is inert while the
+  request cannot leave the pod.
+
+- **2026-09-20** — **Namespace note, not a change to this service.** `product-catalog` shares the
+  `accounts` namespace and component directory, and it gains a parallel private-CA mTLS listener on
+  8443 (server cert `product-catalog-internal-tls`, client auth REQUIRED, TLSv1.3) for
+  interest-service and lending-service (#10383). The regenerated
+  `accounts/network-policies.yaml` therefore admits the `interest` and `lending` namespaces to
+  **product-catalog's own pod selector on 8443** — account-service's own ingress allow-list, ports
+  and workload are untouched, and no new principal, action or data path reaches account-service.
+  **Risk class:** none for this service; the confidentiality and integrity considerations belong to
+  product-catalog's catalog reads. Rollback: drop product-catalog's listener env and the two caller
+  env vars.
+
+- **2026-09-20** — **Correction, and the fix: the 8443 listener's client-certificate validation was
+  declared but not in effect.** Earlier entries describe this listener as "client auth REQUIRED".
+  That posture was expressed only as the container env `QUARKUS_HTTP_SSL_CLIENT_AUTH`, and
+  `quarkus.http.ssl.client-auth` is a **build-time** property: Quarkus fixes it into the image at
+  build time and ignores a differing runtime value (it says so in the boot log). The deployed
+  listener therefore ran with the default, `none` — server-authenticated TLS, encrypted in transit,
+  but the caller's certificate was not demanded or validated. The transport-confidentiality claims in
+  the earlier entries hold; the caller-authentication half did not, and those entries should be read
+  with this one. Completed here by setting `quarkus.http.ssl.client-auth: required` in this service's
+  `application.yaml`, the file the image is built from, so the value is baked rather than injected;
+  the gitops env is kept in the same spelling so manifest and image cannot disagree. Every declared
+  caller of this listener already mounts a private-CA client certificate and names it on its
+  rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
+  restored to what the design always stated. Rollback: revert the property (and expect the listener
+  to return to server-only TLS).

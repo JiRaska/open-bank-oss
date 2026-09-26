@@ -221,6 +221,7 @@ NOT_PROBED = [
     # service. A failure blocks the sync or the pull loudly — it cannot go silent the way a
     # 404 on a data feed did (#2204), which is exactly why they are declared and not probed.
     ("https://github.com/JiRaska/open-bank-oss.git", "this repo, cloned by the realm-drift and tier-classifier CronJobs; a clone failure is loud"),
+    ("https://github.com/infracost/infracost/releases/download", "pinned infracost release binary fetched by the cloud-finops-collector CronJob (ADR-0316); sha256-verified, and a failed download or checksum fails the Job"),
     ("https://gitlab.com", "upstream source repo pinned by the GlitchTip chart; deploy-time"),
     ("https://grafana.github.io", "Helm chart repository; deploy-time, a failure blocks the Argo CD sync"),
     ("https://open-telemetry.github.io", "Helm chart repository; deploy-time"),

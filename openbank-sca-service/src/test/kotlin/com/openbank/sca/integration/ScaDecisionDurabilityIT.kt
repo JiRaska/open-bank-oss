@@ -47,6 +47,7 @@ class ScaDecisionDurabilityIT {
         given().contentType("application/json").body(mapOf("partyId" to fixture.party))
             .post("/api/v1/sca/challenges/${fixture.challenge}/verify").then().statusCode(200)
             .body("status", equalTo("COMPLETED"))
+            .body("decidedByPartyId", equalTo(fixture.party.toString()))
     }
 
     @Test
@@ -56,6 +57,17 @@ class ScaDecisionDurabilityIT {
         val writers = writers(fixture.challenge)
         assertThat(writers).describedAs("durable decision and audit rows must both exist").isNotNull()
         assertThat(writers!!.first).isEqualTo(writers.second)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT deciding_party_id FROM sca_device_decisions WHERE challenge_id = ?",
+            ).use { query ->
+                query.setObject(1, fixture.challenge)
+                query.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject("deciding_party_id", UUID::class.java)).isEqualTo(fixture.party)
+                }
+            }
+        }
         val stored = event(fixture.challenge)
         val body = stored["body"]
         assertThat(body["eventId"].asText()).isEqualTo(stored["storedEventId"].asText())

@@ -17,3 +17,20 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# ČNB/ECB fixing feed (ADR-0314 D5). One event per ingested fixing; the risk engine reads it to
+# take reference rates from the stream. Retention 30 days so a consumer rebuilding a month of
+# snapshots can replay it; the fx_rates table stays the state of record.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.fx.fixing.published
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

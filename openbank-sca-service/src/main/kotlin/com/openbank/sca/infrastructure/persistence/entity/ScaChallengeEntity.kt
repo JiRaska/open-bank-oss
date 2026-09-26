@@ -81,6 +81,21 @@ class ScaChallengeEntity : PanacheEntityBase() {
     @Column(name = "dynamic_card_action")
     var dynamicCardAction: String? = null
 
+    @Column(name = "dynamic_approval_request_id")
+    var dynamicApprovalRequestId: String? = null
+
+    @Column(name = "dynamic_payload_sha256")
+    var dynamicPayloadSha256: String? = null
+
+    @Column(name = "on_behalf_of_party_id")
+    var onBehalfOfPartyId: UUID? = null
+
+    @Column(name = "decided_by_party_id")
+    var decidedByPartyId: UUID? = null
+
+    @Column(name = "decided_by_credential_id")
+    var decidedByCredentialId: String? = null
+
     @Column(name = "redirect_url")
     var redirectUrl: String? = null
 
@@ -113,6 +128,8 @@ class ScaChallengeEntity : PanacheEntityBase() {
                 dynamicCeremonyId,
                 dynamicCardId,
                 dynamicCardAction,
+                dynamicApprovalRequestId,
+                dynamicPayloadSha256,
             )
         } else {
             null
@@ -121,6 +138,10 @@ class ScaChallengeEntity : PanacheEntityBase() {
         consumedAt = consumedAt,
         createdAt = createdAt,
         version = version,
+
+        onBehalfOfPartyId = onBehalfOfPartyId,
+        decidedByPartyId = decidedByPartyId,
+        decidedByCredentialId = decidedByCredentialId,
     )
 
     private fun hasDynamicLinkingData(): Boolean = dynamicAmount != null ||
@@ -128,7 +149,9 @@ class ScaChallengeEntity : PanacheEntityBase() {
         dynamicDocumentSha256 != null ||
         dynamicCeremonyId != null ||
         dynamicCardId != null ||
-        dynamicCardAction != null
+        dynamicCardAction != null ||
+        dynamicApprovalRequestId != null ||
+        dynamicPayloadSha256 != null
 
     companion object {
         fun fromDomain(c: ScaChallenge): ScaChallengeEntity = ScaChallengeEntity().apply {
@@ -152,6 +175,11 @@ class ScaChallengeEntity : PanacheEntityBase() {
             dynamicCeremonyId = c.dynamicLinkingData?.ceremonyId
             dynamicCardId = c.dynamicLinkingData?.cardId
             dynamicCardAction = c.dynamicLinkingData?.cardAction
+            dynamicApprovalRequestId = c.dynamicLinkingData?.approvalRequestId
+            dynamicPayloadSha256 = c.dynamicLinkingData?.payloadSha256
+            onBehalfOfPartyId = c.onBehalfOfPartyId
+            decidedByPartyId = c.decidedByPartyId
+            decidedByCredentialId = c.decidedByCredentialId
             redirectUrl = c.redirectUrl
             consumedAt = c.consumedAt
             createdAt = c.createdAt

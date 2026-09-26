@@ -17,6 +17,14 @@ describe('defaultTrendWindow', () => {
     expect(toOut).toBe(to.toISOString())
     expect(from).toBe('2026-03-15T12:00:00.000Z')
   })
+
+  it('clamps a month-end date like the customer app instead of overflowing into March', () => {
+    expect(defaultTrendWindow(new Date('2026-05-31T12:00:00.000Z'))).toEqual({
+      from: '2026-02-28T12:00:00.000Z',
+      to: '2026-05-31T12:00:00.000Z',
+    })
+    expect(defaultTrendWindow(new Date('2024-05-31T12:00:00.000Z')).from).toBe('2024-02-29T12:00:00.000Z')
+  })
 })
 
 describe('buildCnbTrend', () => {

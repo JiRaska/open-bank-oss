@@ -44,6 +44,9 @@ is the **authentication assurance gate** for payments and consent — defeating 
 | **E**oP | **SCA bypass via push/biometric (audit K2)** | **FIXED (ADR-0021):** push/biometric `verify` no longer auto-approves; it consults a signature-verified, dynamic-linked decision recorded out-of-band by the enrolled device. No decision ⇒ challenge stays `PENDING` (never auto-completes). |
 | **S**poofing | Forge a device approval | Decision must carry a signature over the challenge's dynamic-linking payload, verified against the party's enrolled public key; device must belong to the challenge party (ownership check) |
 | **T**ampering | Replay an approval for a different amount/payee or flip DENIED→APPROVED | Signed payload binds challenge id + decision + amount + currency + creditor (RTS Art. 5); a captured signature is invalid for any other payload |
+| **S**poofing | A person's device key enrolled to a COMPANY party approves any challenge raised for that company, unattributed (#10281 item 1) | Enrolment reads the party's register type from party-service and refuses anything but `INDIVIDUAL`/`SOLE_TRADER` (422); a register that cannot answer fails closed (503). Pre-existing entity-bound rows: inventory + reviewed purge (`openbank-sca-service/scripts/purge_entity_bound_devices.py`, dry-run default, `--expect-count` gate) |
+| **T**ampering | A co-signature on one business approval spent on another approval, or on an edited payload (#10281 item 2) | `APPROVAL` purpose: the device signs the canonical `id|decision|APPROVAL|approvalRequestId|payloadSha256[|amount|currency|creditorIban]` (amount `0.00` form, currency and IBAN upper-case and compact); initiate refuses an `APPROVAL` challenge without both (400); consume compares both, so a mismatch is 409 and does not burn the challenge |
+| **R**epudiation | A decision record that names only a credential cannot answer "who approved" once the transient decision expires (#10281 item 3) | The resolved challenge row carries `decided_by_party_id` + `decided_by_credential_id` (from the enrolled device) and `on_behalf_of_party_id` (the entity as context); both are returned by consume |
 
 ## 5. Residual risks / assumptions
 
@@ -58,6 +61,13 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-09-19** — Business approvals and attribution (#10281 items 1 and 3, plus the SCA half of
+  item 2). New outbound call sca → party-service (`GET /api/v1/parties/{id}`, `partyType` only,
+  service token) gates device enrolment to natural persons; fail-closed on a register outage,
+  so enrolment availability now depends on party-service. New `APPROVAL` purpose with dynamic
+  linking to an approval request and its payload hash. Challenge rows record the deciding party.
+  No new caller or privilege; the purge of existing entity-bound credentials is a documented,
+  reviewed procedure and has not been executed.
 - **2026-09-07** — Idempotency contract of the two creation POSTs verified and documented
   (ADR-0296, burn-down #8351). No code change: challenge initiation already replays on
   Idempotency-Key/X-Request-ID via the idempotency store (X-Idempotency-Replayed: true, 300 s
@@ -281,3 +291,36 @@ request binding and the two explicit service-account ceremony exemptions. The au
 actor is checked against the authenticated principal. The fixture has only synthetic users
 and generates its credentials at startup. This is local integration coverage, not an
 attestation of the target deployment's identity-provider configuration or admin login flow.
+
+- **2026-09-20** — **New inbound edge: a parallel private-CA mTLS listener (8443, client auth
+  REQUIRED, TLSv1.3; server cert `sca-service-internal-tls`), the same shape as account-service's and
+  document-service's.** HTTP/8110 stays for existing callers (document-service, consent-service).
+  Note the two certificates in this namespace are different objects: `sca-internal-tls` is this
+  service's CLIENT certificate for its read of party-service; `sca-service-internal-tls` is the new
+  SERVER certificate. The only caller on 8443 is account-service's `SavingsProposalService`
+  (`GET /api/v1/sca/challenges/{id}`, `POST /{id}/consume`) as the shared
+  `service-account-openbank-services`. Both methods are
+  `@RolesAllowed("ROLE_API","ROLE_OPERATOR","ROLE_ADMIN")` + `@Authorize("scaChallenge.read" /
+  "scaChallenge.consume")`, and `sca_rest_ext.rego`'s `service-sca-shared-client-m2m` rule already
+  admits that principal for both — no policy change. Before this, account-service had no
+  `SCA_SERVICE_URL` and dialled localhost, so the edge existed in code but never reached this
+  service, and its client sent no bearer at all (both fixed together, #10383). **Risk class:**
+  integrity of challenge consumption — a consume is state-changing, so the caller is now both
+  mutually authenticated at the transport and identified by an M2M token at the application layer,
+  where previously it was neither. Rollback: drop the listener env and account-service's env var.
+
+- **2026-09-20** — **Correction, and the fix: the 8443 listener's client-certificate validation was
+  declared but not in effect.** Earlier entries describe this listener as "client auth REQUIRED".
+  That posture was expressed only as the container env `QUARKUS_HTTP_SSL_CLIENT_AUTH`, and
+  `quarkus.http.ssl.client-auth` is a **build-time** property: Quarkus fixes it into the image at
+  build time and ignores a differing runtime value (it says so in the boot log). The deployed
+  listener therefore ran with the default, `none` — server-authenticated TLS, encrypted in transit,
+  but the caller's certificate was not demanded or validated. The transport-confidentiality claims in
+  the earlier entries hold; the caller-authentication half did not, and those entries should be read
+  with this one. Completed here by setting `quarkus.http.ssl.client-auth: required` in this service's
+  `application.yaml`, the file the image is built from, so the value is baked rather than injected;
+  the gitops env is kept in the same spelling so manifest and image cannot disagree. Every declared
+  caller of this listener already mounts a private-CA client certificate and names it on its
+  rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
+  restored to what the design always stated. Rollback: revert the property (and expect the listener
+  to return to server-only TLS).

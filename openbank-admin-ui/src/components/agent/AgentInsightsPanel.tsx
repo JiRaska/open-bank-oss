@@ -77,31 +77,32 @@ export interface AgentInsightsPanelProps {
 }
 
 const SEVERITY_CFG: Record<AgentSeverity, { color: string; bg: string }> = {
-  info:     { color: '#2563eb', bg: '#dbeafe' },
-  warning:  { color: '#d97706', bg: '#fef3c7' },
-  critical: { color: '#dc2626', bg: '#fee2e2' },
+  info:     { color: 'var(--info-text)', bg: 'var(--info-bg)' },
+  warning:  { color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+  critical: { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
 }
 
 // Lifecycle status colours — keyed by the uppercased status keyword, so both
 // "open" and "OPEN" resolve identically across the different agent backends.
 const STATUS_CFG: Record<string, { color: string; bg: string }> = {
-  OPEN:      { color: '#2563eb', bg: '#dbeafe' },
-  DIAGNOSED: { color: '#0891b2', bg: '#cffafe' },
-  PROPOSED:  { color: '#d97706', bg: '#fef3c7' },
-  APPROVED:  { color: '#16a34a', bg: '#dcfce7' },
-  REJECTED:  { color: '#dc2626', bg: '#fee2e2' },
+  OPEN:      { color: 'var(--info-text)', bg: 'var(--info-bg)' },
+  DIAGNOSED: { color: 'var(--info-text)', bg: 'var(--info-bg)' },
+  PROPOSED:  { color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+  APPROVED:  { color: 'var(--success-text)', bg: 'var(--success-bg)' },
+  REJECTED:  { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
   RESOLVED:  { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
+  UNKNOWN:   { color: 'var(--text-secondary)', bg: 'var(--surface-3)' },
 }
 
 const TAG_CFG: Record<NonNullable<AgentFindingTag['tone']>, { color: string; bg: string }> = {
-  accent:  { color: '#6366f1', bg: '#ede9fe' },
-  cyan:    { color: '#0891b2', bg: '#cffafe' },
-  success: { color: '#16a34a', bg: '#dcfce7' },
+  accent:  { color: 'var(--accent-text)', bg: 'var(--accent-bg)' },
+  cyan:    { color: 'var(--info-text)', bg: 'var(--info-bg)' },
+  success: { color: 'var(--success-text)', bg: 'var(--success-bg)' },
   neutral: { color: 'var(--text-secondary)', bg: 'var(--surface-3)' },
 }
 
 export function AgentInsightsPanel({
-  title, subtitle, findings, emptyMessage, icon, accentColor = '#d97706',
+  title, subtitle, findings, emptyMessage, icon, accentColor = 'var(--warning)',
   sourceLabel, notice, onApprove, onReject, decideLabels, decidingId,
 }: AgentInsightsPanelProps) {
   const { language } = useLanguage()
@@ -111,17 +112,17 @@ export function AgentInsightsPanel({
   const showHitl = Boolean(onApprove || onReject)
 
   return (
-    <div style={{ background: 'var(--surface)', border: `1px solid ${accentColor}40`,
+    <div style={{ background: 'var(--surface)', border: `1px solid color-mix(in srgb, ${accentColor} 25%, var(--border))`,
       borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: subtitle ? '6px' : '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <span style={{ color: '#6366f1', display: 'flex' }}>{icon ?? <Bot size={16} />}</span>
+          <span style={{ color: 'var(--accent-text)', display: 'flex' }}>{icon ?? <Bot size={16} />}</span>
           <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
           {notice && (
             <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-              background: '#fef9c3', color: '#92400e' }}>
+              background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>
               {notice}
             </span>
           )}
@@ -146,14 +147,14 @@ export function AgentInsightsPanel({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {findings.map(f => {
             const sev = f.severity ? SEVERITY_CFG[f.severity] : null
-            const sc = f.status ? (STATUS_CFG[f.status.toUpperCase()] ?? STATUS_CFG['OPEN']) : null
+            const sc = f.status ? (STATUS_CFG[f.status.toUpperCase()] ?? STATUS_CFG['UNKNOWN']) : null
             return (
               <div key={f.id} style={{ padding: '12px 14px', borderRadius: '10px',
                 border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: f.rootCause ? '6px' : 0 }}>
                   {f.detector && (
                     <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '6px',
-                      background: '#ede9fe', color: '#6366f1', fontFamily: 'monospace', flexShrink: 0 }}>
+                      background: 'var(--accent-bg)', color: 'var(--accent-text)', fontFamily: 'monospace', flexShrink: 0 }}>
                       {f.detector}
                     </span>
                   )}
@@ -193,7 +194,7 @@ export function AgentInsightsPanel({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     {f.proposalUrl && (
                       <a href={f.proposalUrl} target="_blank" rel="noopener noreferrer"
-                        style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textDecoration: 'none' }}>
+                        style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
                         {f.proposalLabel ?? 'View proposal →'}
                       </a>
                     )}
@@ -209,7 +210,7 @@ export function AgentInsightsPanel({
                             onClick={() => onApprove(f.id)}
                             disabled={decidingId === f.id}
                             style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
-                              border: 'none', background: '#16a34a', color: '#fff', marginLeft: f.detectedAt ? 0 : 'auto',
+                              border: '1px solid var(--success-border)', background: 'var(--success-bg)', color: 'var(--success-text)', marginLeft: f.detectedAt ? 0 : 'auto',
                               cursor: decidingId === f.id ? 'wait' : 'pointer', opacity: decidingId === f.id ? 0.6 : 1 }}>
                             {approveLabel}
                           </button>

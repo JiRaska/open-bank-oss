@@ -90,8 +90,10 @@
   --z-toast: 60;
 
   /* ── Brand / Accent ── */
-  --ob-accent:            #6366f1;
-  --ob-accent-hover:      #4f46e5;
+  /* The primary brand shade must work as text on light surfaces AND behind white button text.
+     #4f46e5 clears AA in both directions on white; the previous #6366f1 missed by 0.04. */
+  --ob-accent:            #4f46e5;
+  --ob-accent-hover:      #4338ca;
   --ob-accent-light:      #eef2ff;
   --ob-accent-border:     #c7d2fe;
   --ob-accent-text:       #4338ca;
@@ -100,16 +102,16 @@
    * --accent-light/-bg/-border) as a *real color*, e.g. `color: var(--accent)`
    * or `background: var(--accent)`. These MUST be valid color values — see the
    * note on the tailwind-compat block below for why the triplet form broke them. */
-  --accent:               #6366f1;
-  --accent-hover:         #4f46e5;
+  --accent:               #4f46e5;
+  --accent-hover:         #4338ca;
   --accent-light:         #eef2ff;
   --accent-bg:            #eef2ff;
   --accent-border:        #c7d2fe;
   --accent-text:          #4338ca;
-  /* A selected toggle fills with the accent and puts WHITE text on it, which is 4.47:1 on
-     --accent — under AA. This is that fill: same hue, dark enough for white text (6.29:1). It is
-     deliberately not --accent-hover, whose name promises an interaction state (#9749). */
+  /* The selected-control token remains explicit, even though the corrected base brand shade now
+     shares its value. This preserves the separate semantic role for future palette changes. */
   --accent-strong:        #4f46e5;
+  --accent-strong-text:   var(--text-inverse);
 
   /* ── Semantic ── */
   --success:              #10b981;
@@ -212,6 +214,7 @@
   --text-secondary: #cbd5e1;
   --text-tertiary: #94a3b8;
   --text-muted: var(--text-tertiary);
+  --muted-foreground: 215 20% 75%;
   --text-inverse: #0f172a;
   --accent: #a5b4fc;
   --accent-hover: #c7d2fe;
@@ -219,6 +222,7 @@
   --accent-bg: #1e1b4b;
   --accent-border: #4338ca;
   --accent-text: #c7d2fe;
+  --accent-strong-text: var(--sidebar-active-text);
   --ob-accent: var(--accent);
   --ob-accent-hover: var(--accent-hover);
   --ob-accent-light: var(--accent-light);
@@ -521,6 +525,10 @@ main {
   max-width: 1520px;
   margin: 0 auto;
   padding: 0.25rem 0 2.5rem;
+}
+.dark .campaign-composer {
+  --campaign-ink: var(--text-primary);
+  --campaign-muted: var(--text-secondary);
 }
 .campaign-composer-hero {
   position: relative;
@@ -988,6 +996,10 @@ main {
 .tone-text-neutral { color: var(--text-secondary); }
 .tone-text-accent  { color: var(--ob-accent-text); }
 
+/* Editorial API domain chips retain their identity colour without losing AA contrast in dark mode. */
+.api-group-chip { color: var(--api-group-color); }
+.dark .api-group-chip { color: color-mix(in srgb, var(--api-group-color) 45%, var(--text-primary)); }
+
 /* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
    a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */
 .tone-border-left { border-left-style: solid; border-left-width: 4px; }
@@ -1273,6 +1285,7 @@ main {
   .page-header > :last-child:not(:only-child) { align-self: flex-start; }
   .table,
   .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-scroll-region .table,
   .table-scroll-region .data-table {
     display: table;
     width: max-content;

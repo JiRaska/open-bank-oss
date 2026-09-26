@@ -238,6 +238,9 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 # new edge, the same one three other callers already have.
 V9.1 openbank-infra/gitops/components/analytics/ci-gate-runs-schema-apply-job.yaml:56: plaintext http:// env value http://clickhouse.analytics.svc:8123
 V9.1 openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml:82: plaintext http:// env value http://clickhouse.analytics.svc:8123
+# cloud-finops-collector (ADR-0316) -> ClickHouse: the same no-TLS-listener edge as the two lines above
+# and admin-ui's own BFF (same namespace, same Secret). Not a new edge class.
+V9.1 openbank-infra/gitops/components/admin-ui/cloud-finops-collector.yaml:104: plaintext http:// env value http://clickhouse.analytics.svc:8123
 # analytics-sink -> Apicurio schema registry (issue #1916). Same declared debt as every other
 # in-cluster edge here: the Service exposes exactly one port, named `http`, on 8080
 # (gitops/components/apicurio/registry.yaml) — there is no TLS listener to point at, so https
@@ -289,4 +292,34 @@ V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:89: plaintext h
 V9.1 openbank-infra/gitops/components/ai-platform/litellm.yaml:153: plaintext http:// env value http://langfuse.ai-platform.svc:3000
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:98: plaintext http:// env value http://tempo.observability.svc:4318
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plaintext http:// env value http://kyb-service.kyb.svc:8157
+# P3 shadow incident-response pilot injector (ADR-0244 D7): same-namespace CronJob calling the
+# case-coordinator-agent's HTTP listener. A genuinely NEW plaintext edge, declared as such: the
+# agent exposes only HTTP :8146 and there is no HTTPS listener to target instead. Retires with
+# the fleet-wide mesh-mTLS work (Layer 1; see #10486).
+V9.1 openbank-infra/gitops/components/case-coordinator/pilot-case-injector.yaml:173: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111
+V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:126: plaintext http:// env value http://document-service.documents.svc:8143
+# Tempo OTLP endpoint for the Deployments that had none and exported to localhost:4317.
+# Plaintext for the same reason as every other tempo.observability.svc:4317 line here;
+# retiring it is the mesh-mTLS work (baseline Layer 1).
+V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/communication/communication-service.yaml:47: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/context/context-service.yaml:36: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/finrep/finrep-service.yaml:54: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/incentive/incentive-service.yaml:49: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:73: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/loyalty/loyalty-service.yaml:119: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/referral/referral-service.yaml:42: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/risk/risk-engine.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/treasury/treasury-service.yaml:66: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/wealth/wealth-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/authz-policy-auditor/authz-policy-auditor.yaml:83: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/control-liveness-sentinel/control-liveness-sentinel.yaml:107: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:106: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/docs-truth-agent/docs-truth-agent.yaml:81: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/finops-agent/finops-agent.yaml:98: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/flaky-test-hunter/flaky-test-hunter.yaml:92: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/governance-auditor/governance-auditor.yaml:83: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/release-steward/release-steward.yaml:81: plaintext http:// env value http://tempo.observability.svc:4317

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "151c0c9854ebc9cb"
+    openbank.tech/policy-checksum: "1f60b5d4ed9edab3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -648,6 +648,34 @@ data:
     	input.action in {
     		"party.consent.update",
     		"party:resolve",
+    	}
+    }
+
+    # party.create (POST /api/v1/parties) by a KYC analyst, #10486 batch 3. The endpoint has always
+    # admitted ROLE_KYC; operator-party-write above covers OPERATOR/ADMIN but not this persona, so
+    # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
+    allowed_reasons contains "kyc-party-create" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	"ROLE_KYC" in input.principal.roles
+    	input.action == "party.create"
+    }
+
+    # kyb-service's OWN machine principal (client `openbank-kyb`, ROLE_API only), #10486 batch 3:
+    #   party.create        — the entity (legal-person) party for a business onboarding case
+    #                         (PartyServiceGateway.createEntityParty -> POST /api/v1/parties).
+    #   party.mandate.grant — binds each verified representative to that entity
+    #                         (PartyServiceGateway.grantMandate -> POST /api/v1/parties/{id}/mandates).
+    # Identity-gated, never a role: ROLE_API is held by every service account. The shared
+    # `service-account-openbank-services` is deliberately absent. While AUTHZ_ENFORCE=false the
+    # enforcing half for party.create is requireNamedPartyCreateCaller in PartyCreateCallerGuard.kt
+    # (PartyCreateCallerGuardTest pins that the two agree).
+    allowed_reasons contains "service-kyb-party-m2m" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-kyb"
+    	input.action in {
+    		"party.create",
+    		"party.mandate.grant",
     	}
     }
   agents.rego: |
@@ -1334,6 +1362,16 @@ data:
                                                 # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                                 # joins the #3679 cohort.
       - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                                # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                                # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                                # may move, which is money-path for the same reason sca/consent/vop/
+                                                # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                                # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                                # repair money movement; card.create/activate are SCA-bound customer
+                                                # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                                # without the cardholder's SCA today — add a verb here when one ships.
+                                                # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1770,6 +1808,23 @@ data:
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
+        # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+        # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+        # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # here on purpose: every treasury action, the reads included, is granted in
+        # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+        # treasury depends on this matrix.
+        ROLE_RISK:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
+        ROLE_FINANCE:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

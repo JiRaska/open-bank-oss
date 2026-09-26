@@ -41,7 +41,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-kyb-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b9cccedd9be51186"
+        openbank.tech/policy-checksum: "a5d744e831600cd3"
       labels:
         app.kubernetes.io/name: kyb-service
         app.kubernetes.io/part-of: kyb
@@ -57,7 +57,7 @@ spec:
         - name: kyb-service
           # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-9391bdb9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-dad4c4b2
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8157 and management 8090 — both read off the service's own
@@ -69,6 +69,10 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
             # application.yaml hardcodes localhost for both; these env vars override it,
             # since an env source outranks application.yaml in SmallRye's ordinal.
@@ -119,6 +123,11 @@ spec:
             # Entity party + representation mandates (ADR-0284 D3).
             - name: PARTY_SERVICE_URL
               value: http://party-service.party.svc:8111
+            # Business framework agreement + its SCA signature ceremony (business-contract spec).
+            # Declared here, not only in application.yaml, so gen-network-policies.py derives the
+            # documents-namespace ingress edge for kyb.
+            - name: DOCUMENT_SERVICE_URL
+              value: http://document-service.documents.svc:8143
             # Public registers, egress via the NAT gateway. Free, no key (ADR-0284 D1).
             - name: ARES_BASE_URL
               value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest
@@ -150,6 +159,17 @@ spec:
                 secretKeyRef:
                   name: kyb-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # #10486 batch 3: kyb-service's OWN Keycloak client (openbank-kyb, ROLE_API only) for
+            # the entity-party create + mandate grant (party.create, party.mandate.grant) - the
+            # named oidc-client `m2m`. optional: false so an unseeded Vault entry is a loud
+            # CreateContainerConfigError, never a silently empty credential. Run
+            # provision-m2m-clients.sh BEFORE this syncs.
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kyb-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
             # dependency: without it the ReactiveRedisDataSource bean is inactive and the
             # app dies with InactiveBeanException.

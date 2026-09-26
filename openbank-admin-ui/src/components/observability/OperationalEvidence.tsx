@@ -3,7 +3,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Activity, ExternalLink, GitBranch, RefreshCw, Scale, Workflow } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { parseTempoSearch, type TraceSummary } from '@/lib/observability/tempo-evidence'
@@ -24,10 +24,10 @@ type TemporalStatus = {
 
 const empty = <T,>(): LoadState<T> => ({ loading: true, data: null, failed: false })
 
-async function jsonFrom<T>(result: PromiseSettledResult<Response>): Promise<T | null> {
-  if (result.status !== 'fulfilled' || !result.value.ok) return null
+async function jsonFrom<T>(request: () => Promise<Response>): Promise<T | null> {
   try {
-    return await result.value.json() as T
+    const response = await request()
+    return response.ok ? await response.json() as T : null
   } catch {
     return null
   }
@@ -50,34 +50,40 @@ export function OperationalEvidence() {
   const [temporal, setTemporal] = useState<LoadState<TemporalStatus>>(empty)
   const [tempo, setTempo] = useState<LoadState<TraceSummary[]>>(empty)
   const [refreshing, setRefreshing] = useState(false)
+  const loadGeneration = useRef(0)
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current
+    const isCurrent = () => generation === loadGeneration.current
     setRefreshing(true)
     try {
       const now = Math.floor(Date.now() / 1000)
-      const [pyrraResult, temporalResult, tempoResult] = await Promise.allSettled([
-        fetch('/api/pyrra/summary', { signal: AbortSignal.timeout(9000) }),
-        fetch('/api/temporal/status', { signal: AbortSignal.timeout(9000) }),
-        fetch(`/api/tempo/api/search?limit=20&start=${now - 3600}&end=${now}`, { signal: AbortSignal.timeout(9000) }),
+      await Promise.allSettled([
+        (async () => {
+          const data = await jsonFrom<PyrraSummary>(() => fetch('/api/pyrra/summary', { signal: AbortSignal.timeout(9000) }))
+          if (isCurrent()) setPyrra({ loading: false, data, failed: data?.available !== true })
+        })(),
+        (async () => {
+          const data = await jsonFrom<TemporalStatus>(() => fetch('/api/temporal/status', { signal: AbortSignal.timeout(9000) }))
+          if (isCurrent()) setTemporal({ loading: false, data, failed: data?.available !== true })
+        })(),
+        (async () => {
+          const payload = await jsonFrom<unknown>(() => fetch(`/api/tempo/api/search?limit=20&start=${now - 3600}&end=${now}`, { signal: AbortSignal.timeout(9000) }))
+          const data = payload === null ? null : parseTempoSearch(payload)
+          if (isCurrent()) setTempo({ loading: false, data, failed: data === null })
+        })(),
       ])
-
-      const pyrraData = await jsonFrom<PyrraSummary>(pyrraResult)
-      setPyrra({ loading: false, data: pyrraData, failed: pyrraData?.available !== true })
-
-      const temporalData = await jsonFrom<TemporalStatus>(temporalResult)
-      setTemporal({ loading: false, data: temporalData, failed: temporalData?.available !== true })
-
-      const tempoPayload = await jsonFrom<unknown>(tempoResult)
-      const tempoData = tempoPayload === null ? null : parseTempoSearch(tempoPayload)
-      setTempo({ loading: false, data: tempoData, failed: tempoData === null })
     } finally {
-      setRefreshing(false)
+      if (isCurrent()) setRefreshing(false)
     }
   }, [])
 
   useEffect(() => {
     const initialLoad = window.setTimeout(load, 0)
-    return () => window.clearTimeout(initialLoad)
+    return () => {
+      window.clearTimeout(initialLoad)
+      loadGeneration.current += 1
+    }
   }, [load])
 
   const budgets = pyrra.data?.objectives.flatMap(objective => objective.budgetRemaining === null ? [] : [objective]) ?? []
@@ -112,8 +118,10 @@ export function OperationalEvidence() {
           icon={<Scale size={15} aria-hidden="true" />} source="Pyrra" hint={t('30denní SLO', '30-day SLO')}
           loading={pyrra.loading} status={pyrraStatus} statusLabel={sourceLabel(pyrraStatus, t)}
           value={budgetPct === null ? '—' : `${budgetPct}%`}
-          label={budgetPct === null
-            ? t('SLO jsou nakonfigurovaná, zatím ale nemají dost provozních vzorků.', 'SLOs are configured but do not have enough traffic samples yet.')
+          label={pyrra.failed
+            ? t('Důkazy z Pyrra nejsou dostupné; zbývající rozpočet nelze ověřit.', 'Pyrra evidence is unavailable; the remaining budget cannot be verified.')
+            : budgetPct === null
+              ? t('SLO jsou nakonfigurovaná, zatím ale nemají dost provozních vzorků.', 'SLOs are configured but do not have enough traffic samples yet.')
             : t(`Nejnižší zbývající error budget: ${worstBudget?.name ?? ''}.`, `Lowest remaining error budget: ${worstBudget?.name ?? ''}.`)}
           href="/tools/pyrra" link={t('Otevřít SLO', 'Open SLOs')}
         />
@@ -130,8 +138,10 @@ export function OperationalEvidence() {
           icon={<GitBranch size={15} aria-hidden="true" />} source="Tempo" hint={t('Poslední hodina', 'Last hour')}
           loading={tempo.loading} status={tempoStatus} statusLabel={sourceLabel(tempoStatus, t)}
           value={slowest?.durationMs === undefined ? '—' : slowest.durationMs >= 1000 ? `${(slowest.durationMs / 1000).toFixed(2)} s` : `${Math.round(slowest.durationMs)} ms`}
-          label={slowest
-            ? t(`Nejpomalejší trasa: ${slowest.rootTraceName ?? slowest.rootServiceName ?? slowest.traceID}.`, `Slowest trace: ${slowest.rootTraceName ?? slowest.rootServiceName ?? slowest.traceID}.`)
+          label={tempo.failed
+            ? t('Důkazy z Tempo nejsou dostupné; dobu požadavků nelze ověřit.', 'Tempo evidence is unavailable; request duration cannot be verified.')
+            : slowest
+              ? t(`Nejpomalejší trasa: ${slowest.rootTraceName ?? slowest.rootServiceName ?? slowest.traceID}.`, `Slowest trace: ${slowest.rootTraceName ?? slowest.rootServiceName ?? slowest.traceID}.`)
             : t('Tempo je dostupné, ale v poslední hodině není trasa s měřitelnou délkou.', 'Tempo is available, but no trace with measurable duration was found in the last hour.')}
           href="/observability/traces" link={t('Prozkoumat trasu', 'Explore trace')}
         />

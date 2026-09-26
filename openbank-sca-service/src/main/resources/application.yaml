@@ -64,6 +64,22 @@ quarkus:
     tls:
       verification: none
 
+  # OUTBOUND M2M for the party-register read that gates device enrolment (#10281 item 1). Without
+  # it the call carries no bearer, party-service answers 401, and every enrolment fails closed 503.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 2000
+
   shutdown:
     timeout: 30S
 
@@ -93,6 +109,45 @@ quarkus:
   dev-ui:
     enabled: false
 
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS: the 8443 listener must VALIDATE the caller's certificate, not merely offer
+      # TLS. `quarkus.http.ssl.client-auth` is a BUILD-TIME property, so the container env
+      # QUARKUS_HTTP_SSL_CLIENT_AUTH could never set it — Quarkus fixes the value into the image at
+      # build time and ignores a differing runtime value, leaving the listener at the default
+      # `none`. It therefore has to live in the file the image is built from.
+      #
+      # Under `%prod` specifically, and NOT at the top level: `quarkus.http.ssl.*` makes Quarkus
+      # treat TLS as intended, and with no certificate configured it then refuses to start
+      # ("Cannot set quarkus.http.insecure-requests without enabling SSL") — which is every dev run
+      # and every @QuarkusTest. `prod` is the active profile during quarkusBuild, so the value is
+      # still baked into the image; `test` and `dev` simply never see it.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port. With client-auth REQUIRED, Quarkus defaults
+      # `insecure-requests` to `disabled` and drops the HTTP listener entirely, so the
+      # readiness probe and every in-cluster plaintext caller get `connection refused`.
+      # mTLS applies to the 8443 listener only. Runtime property; see #10441.
+      insecure-requests: enabled
+    # The party-register read is an enrolment gate (#10281 item 1). Production uses a named TLS
+    # bucket over party-service's mTLS listener, as delegation-service does: trust, client identity
+    # and TLS version are one fail-closed unit. Local/test fixtures speak plain HTTP.
+    tls:
+      party-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      party-service:
+        tls-configuration-name: party-authority
+
 "%dev":
   quarkus:
     log:
@@ -102,6 +157,8 @@ quarkus:
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
 
 "%test":
   quarkus:
@@ -109,6 +166,9 @@ quarkus:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_sca_test
     oidc:
+      enabled: false
+    # Tests replace the party-register lookup with a stub bean, so nothing needs an outbound token.
+    oidc-client:
       enabled: false
 
 openbank:

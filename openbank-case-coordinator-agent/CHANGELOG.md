@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.10.1...case-coordinator-agent-v0.11.0) (2026-09-23)
+
+
+### Features
+
+* **case-coordinator:** P3 swarm guardrails ([#10662](https://github.com/JiRaska/open-bank-oss/issues/10662)) ([a386d82](https://github.com/JiRaska/open-bank-oss/commit/a386d82a79abadce9fa7ffd8a73b1d95fd5fc8e7))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.10.0...case-coordinator-agent-v0.10.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **agent:** emit kill-switch events from agent-service to case-coordinator topic ([#10593](https://github.com/JiRaska/open-bank-oss/issues/10593)) ([45b241e](https://github.com/JiRaska/open-bank-oss/commit/45b241e1ccd0eaf580e0920c87c353753c3149d7))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.9.0...case-coordinator-agent-v0.10.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** cancel cases on kill-switch halt ([#10572](https://github.com/JiRaska/open-bank-oss/issues/10572)) ([f8bff32](https://github.com/JiRaska/open-bank-oss/commit/f8bff32da82390aca2ac6605286fa1deaf1188f4))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.8.1...case-coordinator-agent-v0.9.0) (2026-09-22)
+
+
+### Features
+
+* **case-coordinator:** start the governed RCA shadow pilot ([#10570](https://github.com/JiRaska/open-bank-oss/issues/10570)) ([e673381](https://github.com/JiRaska/open-bank-oss/commit/e673381d76b64d6968d0973046f45edc9671b96e))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.8.0...case-coordinator-agent-v0.8.1) (2026-09-13)
 
 

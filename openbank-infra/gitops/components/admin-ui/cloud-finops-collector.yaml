@@ -1,0 +1,166 @@
+# ---------------------------------------------------------------------------
+# Cloud FinOps collector — daily IaC estimate + FinOps findings + actual spend into
+# ClickHouse, for the Grafana "OpenBank — Cloud FinOps" dashboard (ADR-0316).
+#
+# Lives next to cost-collector.yaml and REUSES its ServiceAccount: that SA is the one EKS Pod
+# Identity binds to the read-only ce:GetCostAndUsage role (aws/envs/sandbox-platform/
+# cost-collector.tf). Reusing it adds no new AWS privilege. The pod does not call the
+# Kubernetes API, so the SA token is not mounted (Pod Identity uses its own projected token).
+#
+# What one run does (all inside one container, no state kept between runs):
+#   1. downloads the pinned infracost release binary and verifies its sha256 — the official
+#      infracost images are amd64-only and every node here is Graviton (arm64);
+#   2. sparse-clones origin/main of the PUBLIC repo over anonymous https (read-only);
+#   3. `infracost breakdown --format json` per env listed in
+#      openbank-infra/aws/finops/cloud-finops-rules.json (HCL parse, no tofu state, no AWS creds);
+#   4. `aws ce get-cost-and-usage` DAILY x SERVICE for the last 35 days;
+#   5. runs openbank-infra/scripts/cloud-finops-collect.py FROM THE CLONE — so the evaluator and
+#      rules that execute are the ones on main that cloud_finops_collect_test.py covers.
+#
+# Fails loud: `set -eu`, no `2>/dev/null`, and the collector itself refuses an empty breakdown,
+# an empty Cost Explorer response, and any insert whose read-back count differs. A failed run
+# leaves no finops_ingest_runs row, so the dashboard's freshness tile goes red after 36h and
+# KubeJobFailed carries the failed Job.
+# ---------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cloud-finops-collector
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: cloud-finops-collector
+    app.kubernetes.io/part-of: admin-ui
+spec:
+  # 02:30 Prague: after the UTC day has closed in Cost Explorer.
+  schedule: "30 2 * * *"
+  timeZone: "Europe/Prague"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # 1, not 3 — see cost-collector.yaml: KubeJobFailed fires per surviving failed Job object.
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
+      # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
+      ttlSecondsAfterFinished: 172800
+      backoffLimit: 2
+      activeDeadlineSeconds: 1200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cloud-finops-collector
+        spec:
+          serviceAccountName: cost-collector
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          nodeSelector:
+            # The infracost binary below is the linux-arm64 build.
+            kubernetes.io/arch: arm64
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: collect
+              # Same image as cost-collector (aws-cli + git + python3 + curl + sha256sum), pinned
+              # by digest (multi-arch index incl. arm64).
+              image: docker.io/alpine/k8s:1.34.1@sha256:ec714df3813b5405292860f8a1c55c5727bf8c33c88992f1e981efad8065547f
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: INFRACOST_VERSION
+                  value: v0.10.46
+                # sha256 of infracost-linux-arm64.tar.gz for INFRACOST_VERSION, as published in
+                # the release's own .sha256 asset (checked 2026-09-25). Bump both together.
+                - name: INFRACOST_SHA256
+                  value: acd693c7d001fef44787bc5de65fffcb25bf5445885fd1da98a7b31281e32b43
+                - name: INFRACOST_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: cloud-finops-infracost
+                      key: api-key
+                - name: INFRACOST_SKIP_UPDATE_CHECK
+                  value: "true"
+                # Never upload runs to Infracost Cloud — the pricing API is the only call.
+                - name: INFRACOST_ENABLE_CLOUD
+                  value: "false"
+                - name: INFRACOST_NO_COLOR
+                  value: "true"
+                - name: REPO_URL
+                  value: https://github.com/JiRaska/open-bank-oss.git
+                - name: CLICKHOUSE_URL
+                  value: http://clickhouse.analytics.svc:8123
+                - name: CLICKHOUSE_USER
+                  value: analytics
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-auth
+                      key: password
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  mkdir -p /tmp/bin /tmp/ic
+                  curl -fsSL -o /tmp/infracost.tgz \
+                    "https://github.com/infracost/infracost/releases/download/${INFRACOST_VERSION}/infracost-linux-arm64.tar.gz"
+                  echo "${INFRACOST_SHA256}  /tmp/infracost.tgz" | sha256sum -c -
+                  tar -xzf /tmp/infracost.tgz -C /tmp/bin
+                  mv /tmp/bin/infracost-linux-arm64 /tmp/bin/infracost
+                  /tmp/bin/infracost --version
+
+                  git clone --quiet --depth 1 --filter=blob:none --sparse "$REPO_URL" /tmp/repo
+                  git -C /tmp/repo sparse-checkout set openbank-infra/aws openbank-infra/scripts
+                  echo "repo at $(git -C /tmp/repo rev-parse HEAD)"
+                  # Drop .git BEFORE infracost sees the tree. Inside a git repo infracost
+                  # rewrites a local module source (`../../modules/x`) into a remote
+                  # `git::<origin>?ref=<sha>&subdir=../../modules/x` and fetches it, which fails
+                  # ("could not normalize path") and leaves that env with ZERO resources while
+                  # infracost still exits 0. Measured: sparse clone -> sandbox-substrate 0 and
+                  # web-prod 0 resources, same tree with no .git -> 23 and 7.
+                  rm -rf /tmp/repo/.git
+                  RULES=/tmp/repo/openbank-infra/aws/finops/cloud-finops-rules.json
+                  COLLECT=/tmp/repo/openbank-infra/scripts/cloud-finops-collect.py
+
+                  for env in $(python3 "$COLLECT" list-envs --rules "$RULES"); do
+                    echo "infracost breakdown: $env"
+                    /tmp/bin/infracost breakdown \
+                      --path "/tmp/repo/openbank-infra/aws/envs/$env" \
+                      --format json --out-file "/tmp/ic/$env.json"
+                  done
+
+                  END=$(date -u +%Y-%m-%d)
+                  START=$(date -u -d "@$(( $(date -u +%s) - 35 * 86400 ))" +%Y-%m-%d)
+                  aws ce get-cost-and-usage \
+                    --time-period "Start=$START,End=$END" \
+                    --granularity DAILY --metrics UnblendedCost \
+                    --group-by Type=DIMENSION,Key=SERVICE \
+                    --region us-east-1 --output json > /tmp/ce.json
+
+                  python3 "$COLLECT" ingest --rules "$RULES" --infracost-dir /tmp/ic --ce /tmp/ce.json
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi

@@ -1,0 +1,31 @@
+# Kafka mTLS identity + ACLs for openbank-loyalty-service (ADR-0137 Tier 2).
+#
+# loyalty-service only PRODUCES openbank.loyalty.events (its outbox). It consumes nothing today,
+# so it holds no Read ACL and needs no consumer group: the ACL set is the whole statement of what
+# this identity can do. A future consumer must add its Read/group ACLs and wire its dead-letter
+# topic in the same change.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
+# service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same name in
+# `messaging`; ESO projection into `loyalty` is done by kafka-mtls-externalsecrets.yaml.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: loyalty-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.loyalty.events
+          patternType: literal
+        operations: [Write, Describe]

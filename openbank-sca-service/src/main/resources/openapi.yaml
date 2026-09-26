@@ -197,6 +197,8 @@ paths:
         Requires the expected party and matching dynamic-linking fields. The challenge must
         be completed, unexpired and unconsumed at the database update. A concurrent lifecycle
         update is rejected; the caller must re-read the challenge before retrying.
+        An APPROVAL challenge also binds approvalRequestId and payloadSha256; a mismatched
+        operation returns 409 without consuming the challenge.
       parameters:
         - $ref: '#/components/parameters/approvalId'
         - $ref: '#/components/parameters/challengeId'
@@ -340,8 +342,6 @@ paths:
       responses:
         '202':
           $ref: '#/components/responses/PendingApproval'
-        '503':
-          description: Authorization service or required approval infrastructure unavailable
         '201':
           description: Device enrolled
           content:
@@ -350,6 +350,21 @@ paths:
                 $ref: '#/components/schemas/EnrolledDeviceResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          description: >-
+            The party is not a natural person (register type other than INDIVIDUAL or
+            SOLE_TRADER, or unknown to the register). A device key is a person's credential
+            (#10281 item 1).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Party register, authorization service or required approval infrastructure unavailable; enrolment fails closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/sca/challenges/{id}/decision:
     post:
@@ -459,14 +474,78 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-                 SAVINGS_WITHDRAW_APPROVAL]
+                 SAVINGS_WITHDRAW_APPROVAL, APPROVAL]
         preferredMethod:
           type: string
         dynamicLinkingData:
           type: string
+          description: >-
+            Served as an object with the fields of the DynamicLinkingData schema below; the
+            published type predates that schema and is left unchanged here.
         redirectUrl:
           type: string
           nullable: true
+        onBehalfOfPartyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            The entity the human acts for (X-Acting-For at the edge). Context only — the
+            challenge still belongs to partyId (#10281 item 3).
+    DynamicLinkingData:
+      type: object
+      description: >-
+        What the device signs (RTS Art. 5). APPROVAL requires approvalRequestId and
+        payloadSha256; a payment approval also carries amount, currency and creditorIban.
+      properties:
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditorIban: { type: string, nullable: true }
+        creditorName: { type: string, nullable: true }
+        reference: { type: string, nullable: true }
+        documentSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, nullable: true }
+        cardId: { type: string, nullable: true }
+        cardAction: { type: string, nullable: true }
+        approvalRequestId:
+          type: string
+          nullable: true
+          description: The business approval request this challenge co-signs.
+        payloadSha256:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-fA-F]{64}$'
+          description: SHA-256 (hex) of the approval request's frozen payload.
+    ConsumeScaRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditor: { type: string, nullable: true }
+        documentSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, nullable: true }
+        cardId: { type: string, nullable: true }
+        cardAction: { type: string, nullable: true }
+        approvalRequestId: { type: string, nullable: true }
+        payloadSha256: { type: string, nullable: true }
+    PendingScaResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string }
+        method: { type: string, enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC] }
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditorIban: { type: string, nullable: true }
+        creditorName: { type: string, nullable: true }
+        reference: { type: string, nullable: true }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        approvalRequestId: { type: string, nullable: true }
+        payloadSha256: { type: string, nullable: true }
+        onBehalfOfPartyId: { type: string, format: uuid, nullable: true }
     VerifyScaRequest:
       type: object
       properties:
@@ -516,69 +595,15 @@ components:
         expiresAt:
           type: string
           format: date-time
-
-    PendingScaResponse:
-      type: object
-      properties:
-        id:
+        onBehalfOfPartyId:
           type: string
           format: uuid
-        purpose:
-          type: string
-        method:
-          type: string
-          enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC]
-        amount:
-          type: string
           nullable: true
-        currency:
-          type: string
-          nullable: true
-        creditorIban:
-          type: string
-          nullable: true
-        creditorName:
-          type: string
-          nullable: true
-        reference:
-          type: string
-          nullable: true
-        expiresAt:
-          type: string
-          format: date-time
-        createdAt:
-          type: string
-          format: date-time
-
-    ConsumeScaRequest:
-      type: object
-      required: [partyId]
-      properties:
-        partyId:
+        decidedByPartyId:
           type: string
           format: uuid
-        amount:
-          type: string
           nullable: true
-        currency:
-          type: string
-          nullable: true
-        creditor:
-          type: string
-          nullable: true
-          description: The creditor IBAN or domestic account displayed in the signed operation.
-        documentSha256:
-          type: string
-          nullable: true
-        ceremonyId:
-          type: string
-          nullable: true
-        cardId:
-          type: string
-          nullable: true
-        cardAction:
-          type: string
-          nullable: true
+          description: Whose enrolled device decided the challenge (#10281 item 3); null while undecided.
 
     EnrollDeviceRequest:
       type: object
