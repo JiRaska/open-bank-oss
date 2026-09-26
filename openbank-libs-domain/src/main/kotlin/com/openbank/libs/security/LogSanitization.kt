@@ -15,13 +15,17 @@ package com.openbank.libs.security
  * per-class idiom as a barrier, producing standing false positives on every already-sanitised
  * call site).
  *
- * Deliberately implemented via [java.lang.String.replaceAll] rather than Kotlin's
- * `replace(Char, Char)` (which compiles to `kotlin.text.StringsKt.replace$default` and is opaque
- * to CodeQL's default Java/Kotlin sanitizer recognition) — `String.replaceAll` is a shape CodeQL's
- * standard library already has partial modeling for, which is a strictly better starting point for
- * a `.github/codeql/` barrier model than a Kotlin stdlib call, even though the model addition
- * itself still needs a real CodeQL run to confirm (not done in this change — no `codeql` CLI was
- * available to verify locally; see #6378 for the follow-up and #10907 for this migration).
+ * Implemented as two chained `replace(Char, Char)` calls — identical output to the 14 copies it
+ * replaces, with no per-call regex compilation and no `java.lang.String` platform-type cast. An
+ * earlier draft of this migration used `(this as java.lang.String).replaceAll("[\r\n]", "_")` on
+ * the theory that CodeQL's Java-side modeling for `String.replaceAll` would make a better starting
+ * point for a `.github/codeql/` sanitizer-barrier model than a Kotlin stdlib call; that claim was
+ * never verified (no `codeql` CLI was available to confirm it locally) and is not worth the regex
+ * overhead and the platform-type cast on every call. Whether CodeQL's `java/log-injection` query
+ * recognises this shared function as a barrier at all is still open and tracked in #6378 — fix
+ * that gate by pointing a CodeQL sanitizer model at [sanitizeForLog] directly (a `neutralModel`/
+ * `summaryModel` row keyed on this exact source location), not by choosing an implementation shape
+ * to second-guess CodeQL's default recognition.
  *
  * Two fleet call sites intentionally do NOT use this shared function and are not migrated here,
  * because their behavior differs from simple CR/LF stripping:
@@ -32,5 +36,5 @@ package com.openbank.libs.security
  */
 fun String?.sanitizeForLog(): String {
     val safe = this ?: "-"
-    return (safe as java.lang.String).replaceAll("[\r\n]", "_")
+    return safe.replace('\n', '_').replace('\r', '_')
 }
