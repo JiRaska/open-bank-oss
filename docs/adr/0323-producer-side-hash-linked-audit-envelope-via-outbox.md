@@ -38,9 +38,9 @@ We will make the producer the first link of the chain.
    counter starting at 1, strictly incrementing by 1), `prevHash` (the previous event's `hash`, or
    64 zeros for `seq = 1`) and `hash`.
 2. **Hash.** `hash` is lower-case hex SHA-256 over the canonical JSON of the whole envelope minus
-   the `hash` key. Canonical JSON means: object keys (which must be strings) sorted by Unicode
-   code point, no insignificant whitespace, strings JSON-escaped, instants as ISO-8601 UTC
-   strings, nulls kept. Numbers are written without changing their value or scale: decimals as
+   the `hash` key. Canonical JSON means: object keys (which must be strings) sorted by UTF-16
+   code units as in RFC 8785 §3.2.3, no insignificant whitespace, strings JSON-escaped, instants
+   as ISO-8601 UTC strings, nulls kept. Numbers are written without changing their value or scale: decimals as
    given (`12.50` stays `12.50`, never normalised), integers only within +/-2^53, and non-integral
    binary floats or larger integers are refused — such values must be sent as strings or decimals. The canonical
    form is also the wire payload, so a verifier recomputes it from exactly the bytes it received.

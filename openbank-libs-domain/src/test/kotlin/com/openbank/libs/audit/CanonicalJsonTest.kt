@@ -13,12 +13,12 @@ import java.math.BigInteger
 class CanonicalJsonTest {
 
     @Test
-    fun `keys sort by code point - a supplementary character sorts after U+E000-U+FFFF`() {
+    fun `keys sort by UTF-16 code units (RFC 8785) - a surrogate pair sorts before U+E000-U+FFFF`() {
         val emoji = "😀" // U+1F600, UTF-16 high surrogate 0xD83D < 0xE000
         val privateUse = ""
         val fffd = "�"
         assertThat(CanonicalJson.write(mapOf(emoji to 1, fffd to 2, privateUse to 3)))
-            .isEqualTo("{\"$privateUse\":3,\"$fffd\":2,\"$emoji\":1}")
+            .isEqualTo("{\"$emoji\":1,\"$privateUse\":3,\"$fffd\":2}")
     }
 
     @Test

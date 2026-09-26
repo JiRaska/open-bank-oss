@@ -114,8 +114,8 @@ data class AuditChainVerification(
 )
 
 /**
- * Minimal canonical JSON writer: object keys sorted by Unicode CODE POINT (not UTF-16 code unit,
- * which misorders supplementary characters against U+E000..U+FFFF), no whitespace, nulls kept.
+ * Minimal canonical JSON writer: object keys sorted by UTF-16 code units as in RFC 8785 §3.2.3
+ * (Kotlin/Java `String.compareTo`), no whitespace, nulls kept.
  * Pure Kotlin so the domain module stays framework-free (ADR-0122).
  *
  * Numbers are written deterministically WITHOUT changing their value or scale:
@@ -185,7 +185,7 @@ object CanonicalJson {
                 "canonical JSON object keys must be String, got ${k?.let { c -> c::class.java.name }} ($k)"
             }
             k to it.value
-        }.sortedWith { a, b -> compareCodePoints(a.first, b.first) }
+        }.sortedWith { a, b -> a.first.compareTo(b.first) }
             .forEachIndexed { i, (k, v) ->
                 if (i > 0) sb.append(',')
                 appendString(sb, k)
@@ -193,19 +193,6 @@ object CanonicalJson {
                 append(sb, v)
             }
         sb.append('}')
-    }
-
-    internal fun compareCodePoints(a: String, b: String): Int {
-        var i = 0
-        var j = 0
-        while (i < a.length && j < b.length) {
-            val ca = a.codePointAt(i)
-            val cb = b.codePointAt(j)
-            if (ca != cb) return ca.compareTo(cb)
-            i += Character.charCount(ca)
-            j += Character.charCount(cb)
-        }
-        return (a.length - i).compareTo(b.length - j)
     }
 
     private fun appendArray(sb: StringBuilder, items: Iterable<*>) {
