@@ -100,6 +100,26 @@ enum class PostingKind {
 /** Posts loan cash events to the ledger (via the outbox in the real adapter). */
 interface LedgerPostingPort {
     fun post(posting: LedgerPosting): Uni<Unit>
+
+    /**
+     * [post], also saying whether the ledger booked the journal or only replayed an idempotency key it
+     * had already posted (#10904). An implementation that cannot tell answers [LedgerPostResult.UNCONFIRMED],
+     * never POSTED: a replay reported as a posting is the defect this exists to remove.
+     */
+    fun postReportingReplay(posting: LedgerPosting): Uni<LedgerPostResult> =
+        post(posting).map { LedgerPostResult.UNCONFIRMED }
+}
+
+/** What the ledger did with one posting, from its `Idempotent-Replayed` response header (#10904). */
+enum class LedgerPostResult {
+    /** This call booked the journal. */
+    POSTED,
+
+    /** The reference had already been posted; the ledger booked nothing. */
+    REPLAYED,
+
+    /** Accepted, but the ledger did not say which (no header, e.g. a ledger older than API 1.20.0). */
+    UNCONFIRMED,
 }
 
 /** Creditworthiness signal from an external bureau / scoring source (EBA/GL/2020/06). */
