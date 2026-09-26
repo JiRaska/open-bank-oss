@@ -103,7 +103,7 @@ DPD is derived from the existing repayment schedule (`installment.due_date` / `p
 
 ### Scheduled provisioning cycle & ledger posting (ADR-0028 Phase 3)
 
-`ProvisioningCycleScheduler` re-buckets every ACTIVE loan monthly (`lending.provisioning.cycle.every`) and posts only the ECL **delta** versus the loan's prior period — never the full ECL again — as a `PROVISIONING` journal (DR Loan Loss Expense / CR Loan Loss Allowance on an increase; reversed on a decrease/release). History is persisted in `loan_provisioning` (one row per loan per `yyyy-MM` period), which is both the delta baseline and the idempotency guard for a re-run of an already-provisioned period.
+`ProvisioningCycleScheduler` re-buckets every eligible nonterminal exposure daily (`lending.provisioning.cycle.every`, default `24h`) and posts only the ECL **delta** versus the loan's latest record — never the full ECL again — as a `PROVISIONING` journal (DR Loan Loss Expense / CR Loan Loss Allowance on an increase; reversed on a decrease/release). History is persisted in `loan_provisioning` (one row per loan per reporting date, `yyyy-MM-dd`), which is both the delta baseline and the idempotency guard for a re-run of an already-provisioned date. A date interrupted across a restart after midnight requires historical-input-backed reconciliation; current mutable state is not a valid substitute.
 
 ### ⚠️ Explicit limitation — simplified, non-production PD/LGD/EAD
 
