@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.1...lending-service-v0.38.0) (2026-09-26)
+
+
+### Features
+
+* **lending:** four-eyes void of an executed backfill's synthetic loans ([#10972](https://github.com/JiRaska/open-bank-oss/issues/10972)) ([30e2049](https://github.com/JiRaska/open-bank-oss/commit/30e2049acc41af80bb3aa6857cb212b8f3f97490))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.0...lending-service-v0.37.1) (2026-09-26)
 
 

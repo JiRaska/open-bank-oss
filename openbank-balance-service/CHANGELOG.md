@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.2...balance-service-v1.17.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [1.17.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.1...balance-service-v1.17.2) (2026-09-13)
 
 
