@@ -5,6 +5,9 @@ environment with synthetic source-backed evidence and an active case assignment.
 `CONTEXT_PERF_*` variables described in that script from the test environment; never commit token
 values or result data containing real identifiers. The former local `context-graph-load.js` script
 was removed because a 200 with an empty projection could satisfy its thresholds.
+The workload emits `context_http_response_status` counts tagged only with `0`, `200`, `204`, `400`, `401`,
+`403`, `404`, `429`, `500`, `503` or `other`; `0` identifies requests with no HTTP response. The metric records
+status only and never captures response bodies.
 
 Set `CONTEXT_PERF_PROFILE=capacity` for the 100 authorized reads/s, five-minute profile with 50
 preallocated virtual users. It requires every sample to return valid, bounded, nonempty source

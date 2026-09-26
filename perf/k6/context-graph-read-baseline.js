@@ -12,7 +12,7 @@
 // the source-backed reversal edge and a posted reversal journal in every successful sample.
 import http from "k6/http";
 import { check, fail } from "k6";
-import { Trend } from "k6/metrics";
+import { Counter, Trend } from "k6/metrics";
 
 // Capacity setup deliberately probes a denied identity; a 403 there is expected.
 // The measured positive path still requires 200 through its explicit checks.
@@ -22,6 +22,8 @@ const lens = __ENV.CONTEXT_PERF_LENS;
 const profile = __ENV.CONTEXT_PERF_PROFILE || "smoke";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
+const responseStatuses = new Counter("context_http_response_status");
+const responseStatusBuckets = new Set([0, 200, 204, 400, 401, 403, 404, 429, 500, 503]);
 
 const scenarios = profile === "capacity" ? {
   authorized_graph_reads: {
@@ -159,6 +161,9 @@ export default function () {
     responseType: "binary",
     redirects: 0,
     timeout: "2s",
+  });
+  responseStatuses.add(1, {
+    status: responseStatusBuckets.has(response.status) ? String(response.status) : "other",
   });
   graphLatency.add(response.timings.duration);
 
