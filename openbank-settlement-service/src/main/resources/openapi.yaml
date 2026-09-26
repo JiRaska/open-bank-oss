@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Settlement Service
-  version: 1.9.0
+  version: 1.10.0
   description: Settlement orchestration service (ADR-0101 P3)
 paths:
   /api/v1/settlements:
@@ -57,6 +57,41 @@ paths:
           type: string
         description: Single-use maker/checker approval bound to the complete settlement
           instruction.
+  /api/v1/settlements/{id}:
+    get:
+      tags:
+      - Settlements
+      operationId: getSettlement
+      summary: Read persisted settlement state without executing a transfer
+      description: Approval EXECUTED is only an authorization claim. This endpoint returns
+        the stored financial state, including uncertainty and compensation failures.
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Persisted financial state. Responses are not cacheable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementDetails'
+        '400':
+          description: Malformed settlement UUID.
+        '401':
+          description: Unauthenticated.
+        '403':
+          description: Not an authorized human operator or administrator.
+        '404':
+          description: No persisted settlement with this UUID.
   /api/v1/settlements/approvals:
     get:
       tags:
@@ -129,6 +164,48 @@ paths:
         '403': *id002
 components:
   schemas:
+    SettlementDetails:
+      type: object
+      required: [id, payerAccountId, payeeAccountId, amount, currency, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        payerAccountId:
+          type: string
+          format: uuid
+        payeeAccountId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          description: Exact persisted decimal amount; preserve as text in clients.
+        currency:
+          type: string
+        status:
+          type: string
+          description: Actual stored state. Only BOOKED confirms settlement completion;
+            uncertainty and compensation states must not be treated as success.
+          enum:
+          - PENDING
+          - DEBITED
+          - CREDITED
+          - BOOKED
+          - REJECTED
+          - REVERSED
+          - CREDITED_REVERSED
+          - REVERSAL_FAILED
+          - BALANCE_STATE_UNKNOWN
+          - LEDGER_REVERSAL_UNSUPPORTED
+          - LEDGER_NOT_POSTED
+          - LEDGER_STATE_UNKNOWN
+          - LEDGER_REVERSED
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     CreateSettlementRequest:
       type: object
       required:

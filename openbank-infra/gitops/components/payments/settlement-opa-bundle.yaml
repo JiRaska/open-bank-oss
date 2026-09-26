@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: settlement-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "648fb3cf45352a8c"
+    openbank.tech/policy-checksum: "be01e99d6a874eea"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -612,6 +612,25 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action in {"settlement.proposal.create", "settlement.create", "settlement.approval.read", "settlement.approval.decide"}
+    	not startswith(input.principal.id, "service-account-")
+    }
+
+    # Reconciliation reads are human operator queries and cannot originate a workflow.
+    allowed_reasons contains "operator-settlement-read" if {
+    	input.action == "settlement.status.read"
+    	human_settlement_reader
+    }
+
+    # Shared read grants also match this action. A narrow allow alone cannot restrict them.
+    prohibited if {
+    	input.action == "settlement.status.read"
+    	not human_settlement_reader
+    }
+
+    human_settlement_reader if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
     	not startswith(input.principal.id, "service-account-")
     }
 

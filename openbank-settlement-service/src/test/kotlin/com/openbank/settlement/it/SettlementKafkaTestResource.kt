@@ -8,8 +8,11 @@ import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.apache.kafka.clients.admin.Admin
 import org.apache.kafka.clients.admin.NewTopic
+import org.jboss.logging.Logger
 import org.testcontainers.redpanda.RedpandaContainer
 import org.testcontainers.utility.DockerImageName
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 class SettlementKafkaTestResource : QuarkusTestResourceLifecycleManager {
@@ -50,6 +53,15 @@ class SettlementKafkaTestResource : QuarkusTestResourceLifecycleManager {
     override fun stop() {
         try {
             broker?.let {
+                // Retain broker-side evidence before Testcontainers removes a failed fixture.
+                runCatching {
+                    val target = Path.of("build", "test-results", "testcontainers", "settlement-kafka.log")
+                    Files.createDirectories(target.parent)
+                    Files.writeString(target, it.logs)
+                }.onFailure { failure ->
+                    Logger.getLogger(SettlementKafkaTestResource::class.java)
+                        .warn("Could not retain test broker diagnostics", failure)
+                }
                 it.stop()
                 if (started) TestInfrastructureEvidence.record("kafka", it.dockerImageName, "stopped")
             }

@@ -641,6 +641,9 @@ def main() -> None:
         },
         service_token,
     )
+    settlement_endpoint = f"http://127.0.0.1:{service_ports['settlement']}/api/v1/settlements"
+    expect_http_status(f"{settlement_endpoint}/{uuid.uuid4()}", 401)
+    expect_http_status(f"{settlement_endpoint}/{uuid.uuid4()}", 403, token=service_token)
     del service_token
     print("Confirmed unauthenticated read is 401 and unrelated ROLE_API hold attempt is 403", flush=True)
 
@@ -703,7 +706,6 @@ def main() -> None:
         "amount": 40,
         "currency": "CZK",
     }
-    settlement_endpoint = f"http://127.0.0.1:{service_ports['settlement']}/api/v1/settlements"
     approval_evidence = []
 
     def originate_with_approval(instruction: dict[str, Any]) -> dict[str, Any]:
@@ -806,10 +808,14 @@ def main() -> None:
                    f"WHERE aggregate_id='{settlement_id}' AND payload::jsonb->>'status'='BALANCE_STATE_UNKNOWN'") == "1"
         assert response_loss_proxy is not None
         evidence = response_loss_proxy.evidence(holds[0]["id"])
+        observed = request(f"{settlement_endpoint}/{settlement_id}", token=token)
+        assert observed["status"] == "BALANCE_STATE_UNKNOWN", observed
+        assert isinstance(observed["amount"], str) and Decimal(observed["amount"]) == Decimal("40")
         (OUT / "result.json").write_text(json.dumps({
             "status": "PASS", "settlementId": settlement_id, "settlementStatus": "BALANCE_STATE_UNKNOWN",
             "coverResponseLoss": evidence, "holds": holds, "journals": journals,
             "balances": balances, "scheduledActivities": scheduled, "source": source_metadata,
+            "operatorStatusRead": observed,
         }, indent=2))
         print("PASS lost cover replies", json.dumps(evidence), flush=True)
         return
@@ -1033,6 +1039,12 @@ def main() -> None:
             "unchangedBalanceVersions": [b["version"] for b in after],
         }
         print("Rejected cover", json.dumps(rejected_cover_evidence), flush=True)
+    observed = request(f"{settlement_endpoint}/{settlement_id}", token=token)
+    assert observed["id"] == settlement_id
+    assert observed["payerAccountId"] == payer and observed["payeeAccountId"] == payee
+    assert isinstance(observed["amount"], str) and Decimal(observed["amount"]) == Decimal("40")
+    assert observed["status"] == ("BOOKED" if recovery_evidence else expected_status), observed
+    assert observed["currency"] == "CZK"
     print("Fault injection", json.dumps(fault_evidence), flush=True)
     print("Journals response", json.dumps(journals), flush=True)
     print("Balances", json.dumps(final_balances), flush=True)
@@ -1051,6 +1063,7 @@ def main() -> None:
                 "recovery": recovery_evidence,
                 "audit": audit_evidence,
                 "operatorApprovals": approval_evidence,
+                "operatorStatusRead": observed,
             },
             indent=2,
         )

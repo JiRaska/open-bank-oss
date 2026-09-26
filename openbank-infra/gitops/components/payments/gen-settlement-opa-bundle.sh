@@ -46,6 +46,25 @@ allowed_reasons contains "operator-settlement-write" if {
 	not startswith(input.principal.id, "service-account-")
 }
 
+# Reconciliation reads are human operator queries and cannot originate a workflow.
+allowed_reasons contains "operator-settlement-read" if {
+	input.action == "settlement.status.read"
+	human_settlement_reader
+}
+
+# Shared read grants also match this action. A narrow allow alone cannot restrict them.
+prohibited if {
+	input.action == "settlement.status.read"
+	not human_settlement_reader
+}
+
+human_settlement_reader if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
+}
+
 # NO service-to-service (SERVICE/ROLE_SERVICE) allow rule exists here on purpose.
 # SettlementResource's own @RolesAllowed(SERVICE, OPERATOR, ADMIN) admits a SERVICE
 # principal at the coarse RBAC layer, but a fleet-wide audit of every service's

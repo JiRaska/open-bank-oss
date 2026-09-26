@@ -60,6 +60,8 @@ class SettlementService(
     // log line below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
     private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
 
+    override suspend fun findById(settlementId: UUID): Settlement? = settlementRepository.findById(settlementId)
+
     override suspend fun originate(command: OriginateSettlementCommand): Settlement {
         // Idempotency: derive the settlement id deterministically from the caller's key, so a
         // retried request resolves to the same row (the UUID primary key is the hard duplicate

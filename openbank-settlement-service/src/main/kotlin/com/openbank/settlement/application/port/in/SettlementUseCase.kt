@@ -29,6 +29,9 @@ data class OriginateSettlementCommand(
 }
 
 interface SettlementUseCase {
+    /** Read persisted financial state without starting or retrying a workflow. */
+    suspend fun findById(settlementId: UUID): Settlement?
+
     /**
      * Persist a new PENDING settlement and kick off its settlement (Temporal durable workflow
      * when enabled, else the legacy in-process saga). Returns the persisted settlement; the final

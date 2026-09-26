@@ -508,3 +508,10 @@ financial evidence is a separate activation condition; expiring authorization is
 erase evidence or retain all raw payloads indefinitely.
 
 Reviewable proposal amounts are transmitted as decimal text so a browser cannot round the approved instruction. Both REST decoding and application commands reject amounts that would round or overflow the settlement database column; trailing zeroes alone do not alter the numeric value. Reusing an idempotency key with another payer, payee, numeric amount or currency fails before workflow dispatch, including concurrent insert collisions.
+
+The financial-state query `settlement.status.read` is restricted to human operators and
+administrators. A service-local OPA prohibition applies to this exact action so a generic shared
+read grant cannot admit service-account or agent identities. The query invokes only repository
+lookup, preserves uncertainty states, and returns decimal text. The admin BFF uses only the
+session bearer, validates response identity and shape, suppresses upstream error details, and
+sets `Cache-Control: no-store`. A failed or missing query result does not authorize a money write.

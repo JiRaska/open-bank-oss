@@ -196,6 +196,7 @@ export default function ApprovalsPage() {
   return (
     <AuthGuard permission="approvals:view">
     <div>
+      <Link href="/settlements" className="btn btn-secondary">{t('Ověřit stav settlementu', 'Check settlement state')}</Link>
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
         icon={<ClipboardCheck size={18} aria-hidden="true" />}

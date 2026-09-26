@@ -164,3 +164,18 @@ those conditions. Do not enable the operator gate until they are established.
 A repeated origination key must carry the same payer, payee, numeric amount and currency. A mismatch returns HTTP 400 before workflow dispatch, including a concurrent insert collision. Do not change the key to retry an uncertain transfer; reconcile the original settlement first. Decimal scale alone (for example `10.0` versus `10.00`) does not change the instruction.
 
 The reviewable instruction returns `amount` as decimal text. Preserve it as text through the operator UI. Origination accepts up to 15 integer and 4 fractional digits, ignoring insignificant trailing zeroes; excess precision or range returns HTTP 400 before a proposal or settlement is created. This storage limit does not certify downstream rail or currency acceptance.
+
+### Read financial state before recovery
+
+An authenticated human operator or administrator can inspect `GET /api/v1/settlements/{id}`.
+It returns the persisted financial state, exact decimal-text amount, account references and
+record timestamps without starting a workflow or consuming an approval. `BALANCE_STATE_UNKNOWN`
+is returned explicitly here; the existing origination response keeps its v1 vocabulary.
+Only `BOOKED` records a completed booking. Compensation and uncertainty states require their
+corresponding reconciliation; a historical `LEDGER_REVERSED` value is not proof of a real reversal.
+
+The admin UI exposes `/settlements` and `/settlements/{id}` through an authenticated, role-checked
+BFF. Refresh performs one read; it never retries origination. An absent row or failed read is not
+evidence that a timed-out origination had no effect. Use the transfer ID from the origination
+response, not the approval ID. Completing the maker/checker UI hand-off remains a separate
+activation condition.
