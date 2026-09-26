@@ -3,6 +3,7 @@
 package com.openbank.settlement.infrastructure.approval
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.settlement.infrastructure.persistence.entity.SettlementOperatorApprovalEntity
 import com.openbank.settlement.infrastructure.persistence.entity.SettlementOperatorProposalEntity
 import com.openbank.settlement.infrastructure.rest.CreateSettlementRequest
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -46,6 +47,19 @@ class SettlementProposalStore(private val clock: Clock) :
     /** Called inside the approval transaction; the composite FK preserves maker + digest binding. */
     fun findForMaker(maker: String, fingerprint: String): Uni<SettlementOperatorProposalEntity?> =
         find("makerId = ?1 and fingerprint = ?2", maker, fingerprint).firstResult()
+
+    /** Binding validation shared by authorization and retained evidence reads. */
+    fun findBound(approval: SettlementOperatorApprovalEntity): Uni<SettlementOperatorProposalEntity?> {
+        val proposalId = approval.proposalId ?: return Uni.createFrom().nullItem()
+        return findById(proposalId).map { proposal ->
+            check(
+                proposal != null &&
+                    proposal.makerId == approval.makerId &&
+                    proposal.instruction().approvalFingerprint == approval.resourceId,
+            ) { "Proposal binding is invalid" }
+            proposal
+        }
+    }
 
     private companion object {
         const val INSERT = """

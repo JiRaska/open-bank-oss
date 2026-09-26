@@ -26,6 +26,15 @@ data class OriginateSettlementCommand(
     init {
         validateSettlementAmount(amount)
     }
+
+    /** Stable identity shared by origination and historical approval correlation. */
+    val settlementId: UUID
+        get() = UUID.nameUUIDFromBytes("settlement:$idempotencyKey".toByteArray(Charsets.UTF_8))
+
+    fun matches(settlement: Settlement): Boolean = settlement.payerAccountId == payerAccountId &&
+        settlement.payeeAccountId == payeeAccountId &&
+        settlement.amount.compareTo(amount) == 0 &&
+        settlement.currency == currency
 }
 
 interface SettlementUseCase {

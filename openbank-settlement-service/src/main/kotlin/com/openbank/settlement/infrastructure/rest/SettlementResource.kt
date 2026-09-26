@@ -71,13 +71,7 @@ class SettlementApprovedExecution(private val settlementUseCase: SettlementUseCa
     @Authorize(action = "settlement.create", resource = "#request.approvalFingerprint")
     suspend fun originate(request: CreateSettlementRequest): Response {
         val settlement = settlementUseCase.originate(
-            OriginateSettlementCommand(
-                idempotencyKey = request.idempotencyKey,
-                payerAccountId = request.payerAccountId,
-                payeeAccountId = request.payeeAccountId,
-                amount = request.amount,
-                currency = request.currency,
-            ),
+            request.toCommand(),
         )
         return Response.created(URI.create("/api/v1/settlements/${settlement.id}"))
             .entity(settlement.toResponse())
@@ -101,6 +95,8 @@ data class CreateSettlementRequest(
         require(CURRENCY_CODE.matches(currency)) { "currency must be an uppercase 3-letter ISO-4217 code" }
         require(payerAccountId != payeeAccountId) { "payer and payee accounts must differ" }
     }
+
+    fun toCommand() = OriginateSettlementCommand(idempotencyKey, payerAccountId, payeeAccountId, amount, currency)
 
     /** Versioned binding to every submitted money instruction; never a caller-supplied digest. */
     @get:JsonIgnore

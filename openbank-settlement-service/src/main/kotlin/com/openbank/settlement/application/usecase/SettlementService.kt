@@ -66,15 +66,12 @@ class SettlementService(
         // Idempotency: derive the settlement id deterministically from the caller's key, so a
         // retried request resolves to the same row (the UUID primary key is the hard duplicate
         // guard even under a concurrent double-submit).
-        val id = UUID.nameUUIDFromBytes("settlement:${command.idempotencyKey}".toByteArray())
+        val id = command.settlementId
         val existing = settlementRepository.findById(id)
         val settlement = existing ?: createPending(command, id)
         // Validate both an existing row and the winner of a concurrent insert before any dispatch.
         require(
-            settlement.payerAccountId == command.payerAccountId &&
-                settlement.payeeAccountId == command.payeeAccountId &&
-                settlement.amount.compareTo(command.amount) == 0 &&
-                settlement.currency == command.currency,
+            command.matches(settlement),
         ) { "Idempotency key is already bound to a different settlement instruction" }
         // `created` vs `replayed` on the ACCEPTANCE of a request — nothing has moved yet at this
         // point, so the metric deliberately does not claim a settlement.

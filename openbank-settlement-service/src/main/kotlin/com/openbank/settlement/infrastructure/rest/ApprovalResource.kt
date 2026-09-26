@@ -6,7 +6,9 @@ import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.infrastructure.approval.PostgresApprovalStore
+import com.openbank.settlement.infrastructure.approval.SettlementApprovalHistory
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -19,6 +21,7 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
 
 /** A distinct checker decides; the maker retries the bound operation with X-Approval-Id. */
 @Path("/api/v1/settlements/approvals")
@@ -28,6 +31,8 @@ class ApprovalResource(
     private val approvals: ApprovalStore,
     private val durableApprovals: PostgresApprovalStore,
     private val identity: SecurityIdentity,
+    private val settlements: SettlementUseCase,
+    private val history: SettlementApprovalHistory,
 ) {
     @GET
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
@@ -39,10 +44,28 @@ class ApprovalResource(
     @Path("/{id}")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "settlement.approval.read", resource = "#id")
-    suspend fun get(@PathParam("id") id: String): ApprovalResponse {
-        val approval = approvals.find(id) ?: throw NotFoundException("no approval with id=$id")
-        val proposal = durableApprovals.proposalForApproval(id)
-        return approval.toResponse().copy(proposalId = proposal?.id?.toString(), instruction = proposal?.instruction())
+    suspend fun get(@PathParam("id") id: String): Response {
+        val record = history.readRecord(id) ?: throw NotFoundException("Approval not found")
+        val instruction = record.proposal?.instruction()
+        val command = instruction?.toCommand()
+        val settlement = command?.let { settlements.findById(it.settlementId) }
+        val correlation = when {
+            command == null -> null
+            settlement == null -> SettlementCorrelation.NOT_OBSERVED
+            command.matches(settlement) -> SettlementCorrelation.MATCHED
+            else -> SettlementCorrelation.CONFLICT
+        }
+        val detail = record.approval.toResponse().copy(
+            proposalId = record.proposal?.id?.toString(),
+            instruction = instruction,
+            expiresAt = record.expiresAt.toString(),
+            expired = record.expired,
+            decidedAt = record.approval.decidedAt?.toString(),
+            claimedAt = record.claimedAt?.toString(),
+            settlementId = settlement?.id?.toString().takeIf { correlation == SettlementCorrelation.MATCHED },
+            settlementCorrelation = correlation,
+        )
+        return Response.ok(detail).header("Cache-Control", "no-store").build()
     }
 
     @PATCH
@@ -88,7 +111,16 @@ data class ApprovalResponse(
     val decidedBy: String?,
     val proposalId: String? = null,
     val instruction: CreateSettlementRequest? = null,
+    val expiresAt: String? = null,
+    val expired: Boolean? = null,
+    val decidedAt: String? = null,
+    val claimedAt: String? = null,
+    val settlementId: String? = null,
+    val settlementCorrelation: SettlementCorrelation? = null,
 )
+
+/** Correlation is not financial completion, nor proof that an unobserved request never ran. */
+enum class SettlementCorrelation { NOT_OBSERVED, MATCHED, CONFLICT }
 
 private fun PendingApproval.toResponse() = ApprovalResponse(
     id = id,

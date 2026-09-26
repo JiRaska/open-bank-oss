@@ -515,3 +515,10 @@ read grant cannot admit service-account or agent identities. The query invokes o
 lookup, preserves uncertainty states, and returns decimal text. The admin BFF uses only the
 session bearer, validates response identity and shape, suppresses upstream error details, and
 sets `Cache-Control: no-store`. A failed or missing query result does not authorize a money write.
+
+Historical approval reads preserve evidence beyond authorization expiry without changing
+`ApprovalStore.find`, pending selection, decision or one-use consumption. Shared generic read
+grants cannot admit a service identity to settlement or approval reads. A returned settlement
+link requires the existing row to match the complete stored instruction; an idempotency-key
+collision with a different instruction is reported as a conflict with no link. Expired,
+consumed and conflicting read paths must not start workflows or append decision events.

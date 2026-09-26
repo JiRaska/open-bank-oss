@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: settlement-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "be01e99d6a874eea"
+    openbank.tech/policy-checksum: "107a826113593b2b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -623,7 +623,7 @@ data:
 
     # Shared read grants also match this action. A narrow allow alone cannot restrict them.
     prohibited if {
-    	input.action == "settlement.status.read"
+    	input.action in {"settlement.status.read", "settlement.approval.read"}
     	not human_settlement_reader
     }
 

@@ -135,6 +135,12 @@ class SettlementOperatorApprovalDurabilityIT {
             "UPDATE settlement_operator_approvals SET created_at = now() - interval '2 days', " +
                 "expires_at = now() - interval '1 day' WHERE id = '${approval.id}'",
         )
+        val record = given().get("/api/v1/settlements/approvals/${approval.id}").then().statusCode(200)
+            .header("Cache-Control", "no-store").extract()
+        assertThat(record.path<Boolean>("expired")).isTrue()
+        assertThat(record.path<String>("instruction.idempotencyKey")).isEqualTo(instruction.idempotencyKey)
+        assertThat(record.path<String>("settlementCorrelation")).isEqualTo("NOT_OBSERVED")
+        assertThat(record.path<String?>("settlementId")).isNull()
         assertThat(onContext { store.find(approval.id) }).isNull()
         assertThat(onContext { store.findPending(200) }.map { it.id }).doesNotContain(approval.id)
         decide(approval.id, 404)
@@ -151,6 +157,12 @@ class SettlementOperatorApprovalDurabilityIT {
             "UPDATE settlement_operator_approvals SET created_at = now() - interval '2 days', " +
                 "expires_at = now() - interval '1 day' WHERE id = '${approval.id}'",
         )
+        val record = given().get("/api/v1/settlements/approvals/${approval.id}").then().statusCode(200)
+            .header("Cache-Control", "no-store").extract()
+        assertThat(record.path<Boolean>("expired")).isTrue()
+        assertThat(record.path<String>("instruction.idempotencyKey")).isEqualTo(instruction.idempotencyKey)
+        assertThat(record.path<String>("settlementCorrelation")).isEqualTo("NOT_OBSERVED")
+        assertThat(record.path<String?>("settlementId")).isNull()
         assertThat(onContext { store.find(approval.id) }).isNull()
         assertThat(onContext { store.markExecuted(approval.id) }).isNull()
         assertThat(status(approval.id)).isEqualTo("APPROVED")

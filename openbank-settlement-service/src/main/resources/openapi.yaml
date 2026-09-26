@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Settlement Service
-  version: 1.10.0
+  version: 1.11.0
   description: Settlement orchestration service (ADR-0101 P3)
 paths:
   /api/v1/settlements:
@@ -139,7 +139,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SettlementApproval'
         '404':
-          description: Not found or expired.
+          description: No retained approval record was found.
         '401': *id001
         '403': *id002
     patch:
@@ -351,6 +351,34 @@ components:
         decidedBy:
           type: string
           nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Authorization expiry returned on detail reads; retained evidence remains readable.
+        expired:
+          type: boolean
+          nullable: true
+          description: Server-observed authorization expiry. Does not change the recorded approval status.
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        claimedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Authorization consumption time, not financial completion time.
+        settlementId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Existing settlement whose complete instruction matches the stored proposal. Read its financial status separately.
+        settlementCorrelation:
+          type: string
+          nullable: true
+          enum: [NOT_OBSERVED, MATCHED, CONFLICT]
+          description: Detail-read correlation, absent for legacy approvals without a proposal. NOT_OBSERVED is not proof of non-execution; CONFLICT means the key resolves to a different instruction. MATCHED does not mean BOOKED.
     DecideSettlementApproval:
       type: object
       required:

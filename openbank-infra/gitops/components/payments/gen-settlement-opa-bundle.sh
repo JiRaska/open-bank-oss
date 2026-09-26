@@ -54,7 +54,7 @@ allowed_reasons contains "operator-settlement-read" if {
 
 # Shared read grants also match this action. A narrow allow alone cannot restrict them.
 prohibited if {
-	input.action == "settlement.status.read"
+	input.action in {"settlement.status.read", "settlement.approval.read"}
 	not human_settlement_reader
 }
 

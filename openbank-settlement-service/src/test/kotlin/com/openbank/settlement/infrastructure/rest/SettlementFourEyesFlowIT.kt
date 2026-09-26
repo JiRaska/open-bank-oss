@@ -73,6 +73,10 @@ class SettlementFourEyesFlowIT {
     fun `checker must supply the same complete instruction`() {
         val detail = given().get("$BASE/approvals/$approvalId").then().statusCode(200).extract()
         assertThat(detail.path<String>("proposalId")).isNotBlank()
+        assertThat(detail.path<Boolean>("expired")).isFalse()
+        assertThat(detail.path<String>("expiresAt")).isNotBlank()
+        assertThat(detail.path<String>("settlementCorrelation")).isEqualTo("NOT_OBSERVED")
+        assertThat(detail.path<String?>("settlementId")).isNull()
         assertThat(detail.path<String>("instruction.idempotencyKey")).isEqualTo(instruction["idempotencyKey"])
         assertThat(detail.path<String>("instruction.payerAccountId")).isEqualTo(instruction["payerAccountId"])
         assertThat(detail.path<String>("instruction.payeeAccountId")).isEqualTo(instruction["payeeAccountId"])
@@ -113,8 +117,14 @@ class SettlementFourEyesFlowIT {
     @Order(6)
     @TestSecurity(user = "settlement-maker", roles = ["ROLE_OPERATOR"])
     fun `maker spends approval once and retains the complete decision trail`() {
-        given().contentType("application/json").header("X-Approval-Id", approvalId)
-            .body(instruction).post(BASE).then().statusCode(201)
+        val settlementId = given().contentType("application/json").header("X-Approval-Id", approvalId)
+            .body(instruction).post(BASE).then().statusCode(201).extract().path<String>("id")
+        val record = given().get("$BASE/approvals/$approvalId").then().statusCode(200)
+            .header("Cache-Control", "no-store").extract()
+        assertThat(record.path<String>("settlementId")).isEqualTo(settlementId)
+        assertThat(record.path<String>("settlementCorrelation")).isEqualTo("MATCHED")
+        assertThat(record.path<String>("claimedAt")).isNotBlank()
+        assertThat(record.path<String>("decidedAt")).isNotBlank()
         assertThat(status()).isEqualTo("EXECUTED")
         assertThat(settlementCount()).isEqualTo(1)
         val states = dataSource.connection.use { connection ->
@@ -173,6 +183,9 @@ class SettlementFourEyesFlowIT {
             }
         }
         assertThat(persistedAmount).isEqualByComparingTo("40")
+        val record = given().get("$BASE/approvals/$conflictingApprovalId").then().statusCode(200).extract()
+        assertThat(record.path<String>("settlementCorrelation")).isEqualTo("CONFLICT")
+        assertThat(record.path<String?>("settlementId")).isNull()
     }
 
     @Test
@@ -189,6 +202,45 @@ class SettlementFourEyesFlowIT {
             .extract().path<String>("instruction.amount")
         assertThat(amount).isEqualTo("999999999999999.99")
         assertThat(settlementCount()).isEqualTo(1)
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "settlement-maker", roles = ["ROLE_OPERATOR"])
+    fun `expired consumed approval retains the reviewed instruction and correlated settlement`() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE settlement_operator_approvals SET created_at = now() - interval '2 days', " +
+                    "expires_at = now() - interval '1 day' WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, UUID.fromString(approvalId))
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        val before = approvalCount()
+        val record = given().get("$BASE/approvals/$approvalId").then().statusCode(200)
+            .header("Cache-Control", "no-store").extract()
+        assertThat(record.path<Boolean>("expired")).isTrue()
+        assertThat(record.path<String>("status")).isEqualTo("EXECUTED")
+        assertThat(record.path<String>("instruction.idempotencyKey")).isEqualTo(instruction["idempotencyKey"])
+        assertThat(record.path<String>("settlementCorrelation")).isEqualTo("MATCHED")
+        assertThat(record.path<String>("settlementId")).isNotBlank()
+        assertThat(approvalCount()).isEqualTo(before)
+        assertThat(settlementCount()).isEqualTo(1)
+    }
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])
+    fun `service identity cannot read historical approvals through a shared read grant`() {
+        given().get("$BASE/approvals/$approvalId").then().statusCode(403)
+        given().get("$BASE/approvals").then().statusCode(403)
+    }
+
+    @Test
+    @Order(14)
+    fun `historical approvals require authentication`() {
+        given().get("$BASE/approvals/$approvalId").then().statusCode(401)
     }
 
     private fun decide(reviewed: Map<String, Any>, expected: Int) {

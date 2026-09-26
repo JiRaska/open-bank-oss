@@ -720,6 +720,8 @@ def main() -> None:
         detail = request(decision_url, token=checker_token)
         proposal_id = str(uuid.UUID(detail["proposalId"]))
         assert detail["id"] == approval_id and detail["makerId"] == "proof-operator"
+        assert detail["expired"] is False and detail["expiresAt"]
+        assert detail["settlementCorrelation"] in {"NOT_OBSERVED", "MATCHED"}
         reviewed_instruction = detail["instruction"]
         assert isinstance(reviewed_instruction["amount"], str), "Reviewable amounts must be exact decimal text"
         assert Decimal(reviewed_instruction["amount"]) == Decimal(str(instruction["amount"]))
@@ -740,6 +742,10 @@ def main() -> None:
         states = json.loads(sql("settlement", "SELECT json_agg(payload::jsonb->>'status' ORDER BY id) "
                                f"FROM settlement_outbox WHERE aggregate_id='{approval_id}'"))
         assert states == ["PENDING", "APPROVED", "EXECUTED"], states
+        consumed = request(decision_url, token=token)
+        assert consumed["status"] == "EXECUTED" and consumed["claimedAt"] and consumed["decidedAt"]
+        assert consumed["settlementCorrelation"] == "MATCHED", consumed
+        assert consumed["settlementId"] == result["id"], consumed
         approval_evidence.append({"approvalId": approval_id, "proposalId": proposal_id,
                                   "settlementId": result["id"], "states": states})
         return result

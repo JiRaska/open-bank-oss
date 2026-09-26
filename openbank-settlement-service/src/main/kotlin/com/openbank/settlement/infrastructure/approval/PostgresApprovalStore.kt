@@ -71,16 +71,7 @@ class PostgresApprovalStore(
                 if (approval == null || proposalId == null || !approval.expiresAt.isAfter(OffsetDateTime.now(clock))) {
                     Uni.createFrom().nullItem<SettlementOperatorProposalEntity>()
                 } else {
-                    proposals.findById(proposalId).map { proposal ->
-                        check(
-                            proposal != null &&
-                                proposal.makerId == approval.makerId &&
-                                proposal.instruction().approvalFingerprint == approval.resourceId,
-                        ) {
-                            "Proposal binding is invalid"
-                        }
-                        proposal
-                    }
+                    proposals.findBound(approval)
                 }
             }
         }.awaitSuspending()

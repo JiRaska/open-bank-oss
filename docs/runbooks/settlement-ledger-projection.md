@@ -179,3 +179,22 @@ BFF. Refresh performs one read; it never retries origination. An absent row or f
 evidence that a timed-out origination had no effect. Use the transfer ID from the origination
 response, not the approval ID. Completing the maker/checker UI hand-off remains a separate
 activation condition.
+
+### Retained approval evidence and transfer correlation
+
+`GET /api/v1/settlements/approvals/{id}` remains readable by authorized human operators
+when authorization expires. The detail carries the original status, expiry, decision and
+claim times, and stored instruction. `expired` does not rewrite the recorded status and
+historical reading never renews an approval: pending listing, decision and consumption
+continue to enforce the original expiry.
+
+A detail's `settlementCorrelation` is `MATCHED` only when the existing settlement has the
+same payer, payee, numeric amount and currency under the original idempotency key. Only
+then is `settlementId` returned; use the financial-state endpoint to establish its outcome.
+`CONFLICT` requires reconciliation of the conflicting instruction. `NOT_OBSERVED` means no
+row was seen by this read, not that an in-flight request cannot commit later. Legacy records
+without a stored proposal have no correlation claim. Never derive success from `EXECUTED`
+or issue a new key simply because the detail has no settlement link.
+
+This read path preserves existing database evidence; it does not implement archival custody
+or a retention/purge policy. Those remain separate activation requirements.
