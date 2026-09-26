@@ -44,8 +44,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # M2M client for the ADR-0198 D4 consent gate (#2660): the MARKETING consent check fires from
   # a Kafka consumer with no inbound user token, so it needs its own client_credentials grant on
   # openbank-services (carries ROLE_OPERATOR, which consent-service's consent.validate accepts).
@@ -56,8 +54,6 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
-    tls:
-      verification: none
   rest-client:
     consent-service:
       url: ${CONSENT_SERVICE_URL:http://localhost:8106}
@@ -290,11 +286,16 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
     mailer:
       mock: true
