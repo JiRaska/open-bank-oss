@@ -141,7 +141,11 @@ class LedgerResource(
     }
 
     @POST
-    @RolesAllowed(Roles.OPERATOR)
+    // ROLE_API admits per-service M2M identities (#10486: interest-service's own client
+    // `openbank-interest` holds ROLE_API only). RBAC is the coarse gate; WHICH ROLE_API holder may
+    // post is decided by identity in ledger_rest_ext.rego, and any other ROLE_API principal is
+    // denied there (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "ledger.create", resource = "")
     @Operation(summary = "Post a balanced journal entry")
     suspend fun postJournal(
@@ -165,16 +169,23 @@ class LedgerResource(
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
             synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
         )
-        val entry = ledgerUseCase.postJournal(command)
+        val outcome = ledgerUseCase.postJournalWithOutcome(command)
+        val entry = outcome.entry
         return Response.created(URI.create("/api/v1/journals/${entry.id}"))
             .entity(entry.toResponse())
             .type(MediaType.APPLICATION_JSON)
+            // #10904: a replayed idempotency key answers with the same 201 and the same body as the
+            // original posting. This header is the only thing telling the caller nothing was posted.
+            .header(IDEMPOTENT_REPLAYED_HEADER, outcome.replayed.toString())
             .build()
     }
 
     @POST
     @Path("/{journalId}/reverse")
-    @RolesAllowed(Roles.OPERATOR)
+    // #10486 batch 2: ROLE_API admitted so transaction-service's own identity (ROLE_API only) reaches
+    // OPA; ledger_rest_ext.rego grants ledger.reverse to service-account-openbank-transaction ALONE
+    // and denies every other ROLE_API holder (test_other_role_api_sa_may_not_reverse_or_create).
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "ledger.reverse", resource = "#journalId")
     @Operation(summary = "Reverse a posted journal entry")
     suspend fun reverseJournal(@PathParam("journalId") journalId: UUID, request: ReverseJournalRequest): Response {
@@ -392,3 +403,9 @@ private fun ReplayBookedChangesResult.toResponse() = ReplayBookedChangesResponse
     accountsTouched = accountsTouched,
     netDeltaByCurrency = netDeltaByCurrency,
 )
+
+/**
+ * Response header on `POST /api/v1/journals`: `true` when the idempotency key had already been posted
+ * and the call only replayed it, `false` when this call posted the journal (#10904).
+ */
+const val IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"

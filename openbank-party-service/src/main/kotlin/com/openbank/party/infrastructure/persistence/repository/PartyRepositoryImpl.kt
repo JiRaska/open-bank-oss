@@ -9,9 +9,11 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.party.application.port.out.PartyDocumentFileRepository
 import com.openbank.party.application.port.out.PartyDocumentRepository
+import com.openbank.party.application.port.out.PartyModification
 import com.openbank.party.application.port.out.PartyOutboxRepository
 import com.openbank.party.application.port.out.PartyPayeeRepository
 import com.openbank.party.application.port.out.PartyRepository
+import com.openbank.party.application.port.out.PartyWrite
 import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.DocumentType
@@ -36,6 +38,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.LockModeType
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -119,63 +122,75 @@ class PartyRepositoryImpl(
         }.awaitSuspending()
     }
 
-    private fun applyAnonymize(id: UUID): Uni<Void> = find("partyId", id).firstResult().chain { e ->
-        if (e == null) return@chain io.smallrye.mutiny.Uni.createFrom().voidItem()
-        e.legalName = "ANONYMIZED"
-        // GDPR Art. 17 erasure: the tombstone email must stay unique (DB unique
-        // constraint) but must NOT be derivable from the data subject. A fresh
-        // random UUID satisfies uniqueness without re-encoding partyId, so the
-        // erased value can't be correlated back to the party (K5).
-        e.email = "erased-${Ids.randomId()}@erased.invalid"
-        e.phone = null
-        e.tradingName = null
-        e.dateOfBirth = null
-        e.nationality = null
-        e.taxId = null
-        e.registrationNumber = null
-        e.addressLine1 = null
-        e.addressLine2 = null
-        e.addressCity = null
-        e.addressPostalCode = null
-        e.addressCountryCode = null
-        e.status = "CLOSED"
-        e.updatedAt = java.time.Instant.now(clock)
-        io.smallrye.mutiny.Uni.createFrom().voidItem()
-    }
+    // Locked like modify(): erasure rewrites the whole row, so it must not race a concurrent writer.
+    private fun applyAnonymize(id: UUID): Uni<Void> =
+        find("partyId", id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().chain { e ->
+            if (e == null) return@chain io.smallrye.mutiny.Uni.createFrom().voidItem()
+            e.legalName = "ANONYMIZED"
+            // GDPR Art. 17 erasure: the tombstone email must stay unique (DB unique
+            // constraint) but must NOT be derivable from the data subject. A fresh
+            // random UUID satisfies uniqueness without re-encoding partyId, so the
+            // erased value can't be correlated back to the party (K5).
+            e.email = "erased-${Ids.randomId()}@erased.invalid"
+            e.phone = null
+            e.tradingName = null
+            e.dateOfBirth = null
+            e.nationality = null
+            e.taxId = null
+            e.registrationNumber = null
+            e.addressLine1 = null
+            e.addressLine2 = null
+            e.addressCity = null
+            e.addressPostalCode = null
+            e.addressCountryCode = null
+            e.status = "CLOSED"
+            e.updatedAt = java.time.Instant.now(clock)
+            io.smallrye.mutiny.Uni.createFrom().voidItem()
+        }
 
-    override suspend fun update(party: Party): Party = Panache.withTransaction { applyUpdate(party) }.awaitSuspending()
-
-    /** Transactional outbox (issue #4007) — the UPDATE and the event row share one transaction. */
-    override suspend fun update(party: Party, event: PartyEvent): Party = Panache.withTransaction {
-        applyUpdate(party).flatMap { updated ->
-            outboxRepository.persistInTransaction(event.toOutboxMessage()).replaceWith(updated)
+    // One transaction, one row lock (PESSIMISTIC_WRITE = `SELECT … FOR UPDATE`): a concurrent
+    // modify() of the same party blocks on the lock until this one commits, then reads the
+    // committed row — so neither writer can overwrite a field the other just set. Pessimistic, not
+    // an @Version column: the writers here are event consumers that would otherwise have to catch
+    // OptimisticLockException and re-run, and the lock makes the second writer simply wait a few
+    // milliseconds instead. The outbox row joins the same transaction (#4007), so the event always
+    // describes the state that was actually committed, derived status included.
+    override suspend fun modify(id: UUID, change: (Party) -> PartyWrite): PartyModification? = Panache.withTransaction {
+        find("partyId", id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { e ->
+            if (e == null) {
+                Uni.createFrom().nullItem()
+            } else {
+                val before = e.toDomain()
+                val write = change(before)
+                e.applyFrom(write.party)
+                outboxRepository.persistInTransaction(write.event.toOutboxMessage())
+                    .replaceWith(PartyModification(before, write.party))
+            }
         }
     }.awaitSuspending()
 
-    private fun applyUpdate(party: Party): Uni<Party> = find("partyId", party.id).firstResult().map { e ->
-        e?.also {
-            it.status = party.status.name
-            it.email = party.email
-            it.phone = party.phone
-            // The hash is derived state, never supplied by a caller — recomputing it here is
-            // what keeps it from drifting out of step with the number it indexes.
-            it.phoneHash = PhoneDirectory.hash(party.phone)
-            it.discoverable = party.discoverable
-            it.tradingName = party.tradingName
-            it.kycStatus = party.kycStatus.name
-            it.amlStatus = party.amlStatus.name
-            it.addressLine1 = party.address?.line1
-            it.addressLine2 = party.address?.line2
-            it.addressCity = party.address?.city
-            it.addressPostalCode = party.address?.postalCode
-            it.addressCountryCode = party.address?.countryCode
-            it.updatedAt = party.updatedAt
-            // Written in the same UPDATE as `status`: the DB enforces
-            // (status = 'MERGED') = (merged_into IS NOT NULL) as a CHECK, so setting one
-            // without the other fails the statement (ADR-0179).
-            it.mergedInto = party.mergedIntoPartyId
-        }
-    }.replaceWith(party)
+    private fun PartyEntity.applyFrom(party: Party) {
+        status = party.status.name
+        email = party.email
+        phone = party.phone
+        // The hash is derived state, never supplied by a caller — recomputing it here is
+        // what keeps it from drifting out of step with the number it indexes.
+        phoneHash = PhoneDirectory.hash(party.phone)
+        discoverable = party.discoverable
+        tradingName = party.tradingName
+        kycStatus = party.kycStatus.name
+        amlStatus = party.amlStatus.name
+        addressLine1 = party.address?.line1
+        addressLine2 = party.address?.line2
+        addressCity = party.address?.city
+        addressPostalCode = party.address?.postalCode
+        addressCountryCode = party.address?.countryCode
+        updatedAt = party.updatedAt
+        // Written in the same UPDATE as `status`: the DB enforces
+        // (status = 'MERGED') = (merged_into IS NOT NULL) as a CHECK, so setting one
+        // without the other fails the statement (ADR-0179).
+        mergedInto = party.mergedIntoPartyId
+    }
 
     /**
      * Discoverable parties whose phone hash is in [hashes]. Non-discoverable rows are excluded in
@@ -254,6 +269,10 @@ class PartyRepositoryImpl(
         it.consentCapturedAt = consentCapturedAt
         it.consentMarketingUpdatedAt = consentMarketingUpdatedAt
         it.mergedInto = mergedIntoPartyId
+        it.pepFlag = pepFlag
+        it.pepCategory = pepCategory
+        it.fatcaStatus = fatcaStatus
+        it.crsStatus = crsStatus
     }
 
     private fun PartyEntity.toDomain() = Party(
@@ -286,6 +305,10 @@ class PartyRepositoryImpl(
         consentCapturedAt = consentCapturedAt,
         consentMarketingUpdatedAt = consentMarketingUpdatedAt,
         mergedIntoPartyId = mergedInto,
+        pepFlag = pepFlag,
+        pepCategory = pepCategory,
+        fatcaStatus = fatcaStatus,
+        crsStatus = crsStatus,
     )
 }
 

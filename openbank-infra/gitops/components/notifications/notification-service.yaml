@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
-        openbank.tech/policy-checksum: "d915010f9dd809d4"
+        openbank.tech/policy-checksum: "8d6fca40a84c3a9f"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications
@@ -66,7 +66,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notification-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-7642a545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-dad4c4b2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -134,6 +134,16 @@ spec:
                   optional: false
             - name: CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
+            # EMAIL envelope-address resolution (#3581) reads party-service. Without this the app
+            # default (localhost:8111) was dialled inside this pod, every lookup was a connection
+            # refused, resolveEmailRecipient recovered to "" and the mail was recorded not
+            # deliverable — so the #3581 fix has never worked in the cluster. party-service's
+            # private-CA mTLS listener (8443, client auth REQUIRED, client cert
+            # notification-internal-tls, %prod bucket party-authority); GET /api/v1/parties/{id} is
+            # @RolesAllowed(... ROLE_API) with no @Authorize, and the shared openbank-services
+            # service account carries ROLE_API, so no policy change is needed.
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
             # No SMTP in the sandbox — mock the mailer so dispatch logs instead of
             # opening a dead localhost:1025 connection.
             - name: QUARKUS_MAILER_MOCK
@@ -240,6 +250,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: party-tls
+              mountPath: /mnt/party-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -346,6 +359,10 @@ spec:
             items:
               - key: ca.p12
                 path: ca.p12
+        - name: party-tls
+          secret:
+            secretName: notification-internal-tls
+            optional: false
         - name: msg-override
           configMap:
             name: notification-service-msg-override

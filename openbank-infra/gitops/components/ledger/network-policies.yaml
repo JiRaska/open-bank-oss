@@ -53,6 +53,9 @@ spec:
               kubernetes.io/metadata.name: finrep
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: interest
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
@@ -62,13 +65,21 @@ spec:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: risk
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: security-scanner
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
           port: 8101
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

@@ -94,7 +94,11 @@ object Ifrs9 {
 
     /** ECL = PD · LGD · EAD, with PD selected by stage horizon and the result rounded to the currency. */
     fun ecl(stage: Ifrs9Stage, inputs: EclInputs): EclResult {
-        val pd = if (stage.horizon == EclHorizon.TWELVE_MONTH) inputs.pd12Month else inputs.pdLifetime
+        val pd = when (stage) {
+            Ifrs9Stage.STAGE_1 -> inputs.pd12Month
+            Ifrs9Stage.STAGE_2 -> inputs.pdLifetime
+            Ifrs9Stage.STAGE_3 -> BigDecimal.ONE
+        }
         val raw = pd.multiply(inputs.lgd, MC).multiply(inputs.exposureAtDefault.amount, MC)
         val scale = inputs.exposureAtDefault.currency.defaultFractionDigits
         val ecl = Money(raw.setScale(scale, RoundingMode.HALF_EVEN), inputs.exposureAtDefault.currency)

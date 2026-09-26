@@ -1,6 +1,6 @@
 # Kafka mTLS identity + ACLs for openbank-fx-service (ADR-0137 Tier 2a, issue #2665).
 # fx-service is a pure Kafka producer: publishes openbank.fx.conversion.completed
-# (FX conversion event outbox). No topic ACLs needed for own domain-event topics
+# (FX conversion event outbox) and openbank.fx.fixing.published (ČNB fixings, ADR-0314). No topic ACLs needed for own domain-event topics
 # (allow.everyone.if.no.acl.found=true); KafkaUser provisions the mTLS client cert only.
 #
 # Keystores are projected from `messaging` into the `fx` namespace by ExternalSecrets
@@ -26,6 +26,12 @@ spec:
       - resource:
           type: topic
           name: openbank.fx.conversion.completed
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.fx.fixing.published
           patternType: literal
         operations: [Write, Describe]
         host: "*"

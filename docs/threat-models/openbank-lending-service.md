@@ -101,10 +101,13 @@
   - **Wrong-direction journal.** `LendingJournalFactory.buildProvisioningLines` is unit-tested for both
     signs explicitly (increase: DEBIT expense / CREDIT allowance; decrease: reversed) and asserts the
     loan principal GL (Loans Receivable) is never touched by a provisioning entry.
-  - **Roadmap gap, not yet mitigated:** the batch scan (`LoanRepository.findActive(limit)`) is a single
-    page with no continuation cursor — a book larger than `limit` silently leaves the tail unprovisioned
-    for that cycle with no alert. Acceptable for a first increment on a small loan book; needs a
-    pagination/completeness check before the book grows past one batch.
+  - **Batch completeness:** `findUnprovisioned` drains successive batches of every nonterminal exposure,
+    including defaulted loans. Daily immutable keys support current-date completeness checks.
+  - **Crash and concurrency integrity:** provisioning and terminal transitions lock and refresh the loan.
+    Snapshot/state changes and frozen allowance commands commit in one database transaction. The
+    outbox retries the same amount, accounting date and ledger idempotency reference; provisioning
+    evidence is published only after ledger acknowledgement. Pending/failed commands suppress UI ratios.
+    This is eventual accounting consistency, not a distributed transaction with the ledger.
 - **Disbursement customer-credit correctness (#3931, new this slice).** The new §2 items 7-8
   crossing carries its own specific risks and mitigations:
   - **Paying nobody.** Fixed by this PR — see item 8. Verified against a real customer: a
@@ -216,8 +219,11 @@
   provisioning cycle's ECL is only as good as `ConservativeRiskParameterSource`'s flat constants — a
   **model-risk gap**, not a security control gap, but load-bearing enough to call out here: do not treat
   the provisioning cycle's output as an examiner-ready capital number.
-- **Provisioning batch completeness** — `LoanRepository.findActive(limit)` has no pagination/continuation;
-  a book larger than one batch silently under-provisions the tail with no alert (see §3).
+- **Model validation and operations** — the demonstration parameter source fails closed unless explicitly
+  enabled. A reviewed model implementation, parameter provenance, calibration, forward-looking scenarios,
+  SICR/cure methodology and accounting reconciliation remain prerequisites for production use.
+  Operators must monitor and recover failed allowance commands; a committed assessment alone is not
+  proof that its ledger movement has completed.
 - **Impairment-movement immutability** — append-only / tamper-evident storage for IFRS 9 stage and ECL
   movements feeding FINREP F 12, to strengthen the tampering/repudiation posture at rest. `loan_provisioning`
   is insert-only from the application code today, but nothing at the DB level prevents an UPDATE/DELETE.
@@ -519,8 +525,36 @@ What that changes, and what it does not:
 | **D**oS / availability | A campaign sweep drives call volume into lending | Reduced, not solved: the check sits at DELIVERY rather than enrolment, so the volume is what is actually being sent today rather than everyone in a segment. Unit cost (one DB read + one analytics call per party) is unchanged and is recorded in #8918. |
 | **T**ampering | A lending outage is read by the caller as permission to market | campaign-service raises rather than answering "not allowed": an outage is retriable infrastructure state, never a customer-policy suppression, so nothing is sent AND nothing is recorded as a distress refusal. |
 
+## 9f. The risk engine's loan-book read (ADR-0314 D4) — STRIDE supplement
+
+`GET /api/v1/lending/loan-book?asOf=` is a NEW inbound REST surface on a money-path service,
+modelled here before any deployed caller exists (ADR-0030 D2). It moves a trust boundary: a
+machine can now read the WHOLE loan book in one call — every on-book loan's terms, remaining
+schedule, latest IFRS 9 stage and party id (as an opaque reference) — where before the only bulk
+reads were capped console views for staff.
+
+It is READ-ONLY BY CONSTRUCTION: one `GET` (`LendingSecurityTest` asserts no write verb exists on
+the resource), three repository reads, no posting, no event, no state change. Why it exists: the
+risk engine must tie every loan out to the ledger's Loans Receivable, and no event carries a
+loan's remaining schedule, so the engine pulls it at snapshot time.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **E**levation of privilege | The shared M2M identity reaches other lending actions through the door opened for this read | `@RolesAllowed` admits `ROLE_API` on this ONE endpoint only. OPA rule `service-risk-loan-book-read` is scoped to one action and one principal (`service-account-openbank-services`); rego tests assert that principal still cannot disburse, and that another `ROLE_API` service account is denied. |
+| **I**nformation disclosure | The whole book, with party references, leaves lending in one response | Callers are the credit desk, admins and the shared M2M client — the last is every backend service at once (ADR-0206 D5 limit, as for 9e). The edge proxy is explicitly vetoed (`prohibited`) because base `operator-read-any` would otherwise admit its `ROLE_OPERATOR`. No name, address or national id is returned — only the party UUID. No deployed caller yet: risk-engine runs with the read switched off until lending serves an mTLS listener, so there is no network-policy edge to review today. |
+| **T**ampering / misleading | A partial book is read as the whole book and the risk figures understate exposure | The book is returned whole or not at all: over 20 000 loans the call fails (`LoanBookTooLargeException`) rather than truncating. The outstanding is derived from the remaining installments, so the two cannot disagree in the response. |
+| **T**ampering / misleading | A past `asOf` is read as exact | As-of reconstruction is best effort and says so in the OpenAPI description: status has no history and a reschedule replaces the unpaid tail. The consumer ties every loan out against the ledger at the same date; where the reconstruction is wrong the run is UNTIED, not silently accepted. |
+| **D**oS / availability | A snapshot storm loads lending's database | Snapshots are operator-triggered and idempotent on their input; each read is three indexed queries. Not rate-limited beyond the fleet limiter — accepted for a single internal caller, revisit if the engine gains a scheduler. |
+| **R**epudiation | Which book did a risk run see | The risk engine hashes this response into its run's input hash (ADR-0314 D2), so a figure is tied to the exact book read. |
+
 ## 10. Change log
 
+- **2026-09-25** — Ledger-backfill request history for the admin console (#10618): READ-ONLY `GET /api/v1/lending/ledger-backfill/requests?limit=` (1..100) and `GET .../requests/{id}`, both on the existing action `lending.ledgerBackfill.read` (ROLE_FINANCE / ROLE_ADMIN humans; the service-account veto applies unchanged). `BackfillRequestView` additively exposes `proposedAt` / `decidedAt` / `executedAt`. **Information disclosure:** the rows carry maker/checker/executor principal names and plan hashes — already visible to the same roles through the write responses; no party data. No write path, posting, event or migration. Rollback: revert.
+- **2026-09-25** — **Privilege change: ROLE_FINANCE runs the ledger backfill (#10618).** `LedgerBackfillResource` `@RolesAllowed` widens from ROLE_ADMIN to ROLE_ADMIN + ROLE_FINANCE on all four actions (`lending.ledgerBackfill.read/propose/decide/execute`). OPA: new `finance-ledger-backfill` allow reason (HUMAN, not `service-account-*`, ROLE_FINANCE, backfill actions only); the role veto becomes "neither ROLE_ADMIN nor ROLE_FINANCE", and the service-account veto is unchanged, so no machine identity can reach the flow whatever roles it holds. **Elevation of privilege / repudiation:** maker != checker stays in `LedgerBackfillService` (`MakerCheckerViolation`, 422) and the approval stays bound to the plan hash re-checked at execution; execute is granted to FINANCE as well, because the control is the two-person approval and keeping execute ADMIN-only would make a platform administrator a party to every finance posting. ROLE_FINANCE gains no other lending action (rego test `test_finance_denied_other_lending_writes`). No new endpoint, posting shape, event or migration. Money-path: two approvals. Rollback: revert; the realm role can stay unassigned.
+- **2026-09-24** — New caller admitted: the `risk` namespace (openbank-risk-engine) on lending's ingress, via the regenerated NetworkPolicy. The generator admits a caller namespace on both the HTTP port (8126) and the mTLS listener (8443), as for every existing caller; risk-engine itself only dials 8443 with a client certificate from `openbank-ca`. The only operation it is authorised for is the read-only `lending.book.read` (#10729). No write path, no new endpoint. Rollback: revert; the caller side has its own switch.
+- **2026-09-24** — **Trust-boundary change: the risk engine's loan-book read (ADR-0314 D4, #10618).** New READ-ONLY `GET /api/v1/lending/loan-book?asOf=` (action `lending.book.read`, `@RolesAllowed` ROLE_API / ROLE_CREDIT_RISK / ROLE_ADMIN) returning every on-book loan with its Loans Receivable GL code, rate terms, remaining installments and latest IFRS 9 stage; see section 9f. OPA: new identity-scoped `service-risk-loan-book-read` for the shared M2M account, the action added to `credit-risk-desk`, and the edge vetoed in `prohibited`. Two new repository reads (`findOnBook`, `findByLoans`); `LendingGlChart` now also exposes the Loans Receivable CODE per currency (the UUID set is derived from it, unchanged values). No write, posting, event, migration or change to any amount. No deployed caller yet (risk-engine's read is off until lending has an mTLS listener), so no network-policy edge. Money-path: the PR needs two approvals. Rollback: revert the commit.
+
+- **2026-09-24** — Loan rate terms (ADR-0314 D5, #10618). `loan_application` and `loan` gain `rate_type` (FIXED default; every existing row is FIXED, which is true since nothing here has ever repriced), and the FLOATING terms `rate_index` (closed enum), `spread`, `reset_frequency_months` (1/3/6/12) and `next_reset_date`, under a V18 CHECK that permits exactly the two shapes. They are accepted on the existing `POST /applications` under unchanged authz, validated to 400 first, copied onto the loan at disbursement, and added to the existing `loan.disbursed` payload. No new caller, endpoint, topic or privilege. **Tampering / economic:** the schedule and every posting still use `nominalAnnualRate`; the terms change no amount. **FLOATING origination is OFF by default** (`lending.origination.floating-rate-enabled`), because no engine reprices a floating loan at its reset date yet, and a floating loan whose rate silently never moves would misstate both the customer contract and the risk engine's view. Catalog loans are FIXED-only. Rollback: revert; V18 is additive and its comment carries the down-migration.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-21** — Trust-boundary change (ADR-0269 rule 5): `GET /api/v1/lending/intake/financial-health`,
@@ -706,11 +740,28 @@ What that changes, and what it does not:
   pure computations with no persistence. The 17 lifecycle POSTs were re-verified as guarded by
   the aggregate state machine. No new caller, route or role; the optional key changes nothing
   for clients that do not send it. Rollback: revert the commit.
+- **2026-09-21** — **Own machine identity for disbursement / repayment (#10486 batch 1).** `TransactionServiceRestClient` (borrower credit/debit) and `LedgerRestClient` (loan journals) now mint their bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-lending` (`ROLE_API` only). transaction-service grants it `transaction.create` (`service-lending-transaction-create`) and ledger-service `ledger.create` (`service-lending-ledger-post`) — never `ledger.reverse`. **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/lending-service` (`client_secret`), projected by the `lending-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create` and `ledger.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
+- **2026-09-24** — **New inbound listener: east-west mTLS on 8443 (#10618).** lending-service gains a
+  parallel private-CA TLS listener on 8443 (server certificate `lending-service-internal-tls`, issued
+  by the `openbank-ca` ClusterIssuer for `lending-service.lending.svc[.cluster.local]`; TLSv1.3),
+  exposed on the `lending-service` and `lending-service-canary` Services. **Who may connect:**
+  `quarkus.http.ssl.client-auth: required` is baked into the image from `application.yaml` under
+  `%prod` (a build-time property, #10441), so a TLS handshake completes only for a caller presenting
+  a client certificate that chains to the same private `openbank-ca` trust bundle (`ca.crt` of the
+  mounted secret); the derived NetworkPolicy admits 8443 only from the namespaces already admitted
+  to 8126 (same namespace, campaign, customer-edge, admin-ui). A client certificate authenticates
+  the transport only — every request still needs a bearer token and passes the unchanged OPA/REST
+  authorization, so no action becomes reachable that was not before. **No existing edge changes:**
+  plain HTTP 8126 stays open (`insecure-requests: enabled`, #10505) for every current caller and for
+  the probes, and no caller is repointed in this change; risk-engine's move to 8443 (and its
+  namespace's NetworkPolicy admission) is a separate reviewed change. **STRIDE-S/I:** additive — a
+  second, strictly stronger path to the same surface. Rollback: revert the commit (remove the
+  listener env, port, volume and Certificate); 8126 is untouched throughout.
 
 ## 10. Credit-risk read surface (ADR-0230 D1, ADR-0213 D4) — STRIDE supplement
 
-`CreditRiskResource` adds four read-only endpoints under `/api/v1/lending/risk`
-(`decisions`, `decisions/summary`, `portfolio`, `policy`) for the admin-ui credit-risk console
+`CreditRiskResource` exposes five read-only endpoints under `/api/v1/lending/risk`
+(`decisions`, `decisions/summary`, `portfolio`, `portfolio/summary`, `policy`) for the admin-ui credit-risk console
 and notebook export. No mutation: the console renders decisions and never makes them
 (ADR-0227 D4 keeps disposal in the approval inbox). What changes the trust picture is the
 **breadth of one read**: a single call returns every evaluated applicant's affordability inputs
@@ -718,9 +769,40 @@ and notebook export. No mutation: the console renders decisions and never makes 
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **I**nfo disclosure | A role outside the credit desk reads every applicant's income and the whole book's impairment | Class-level `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_COMPLIANCE","ROLE_LENDING_OFFICER","ROLE_ADMIN")` — the same set that may read the ADR-0214 evidence bundle, narrower than the class-level roles on `LendingResource`'s `GET /loans/{id}`; OPA `@Authorize(lending.list / lending.read)` on every method; `LendingSecurityTest` asserts no `@PermitAll` on this class too. `CreditRiskConsoleIT` refuses `ROLE_CUSTOMER` on all four paths. |
+| **I**nfo disclosure | A role outside the credit desk reads every applicant's income and the whole book's impairment | Class-level `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_COMPLIANCE","ROLE_LENDING_OFFICER","ROLE_ADMIN")` — the same set that may read the ADR-0214 evidence bundle, narrower than the class-level roles on `LendingResource`'s `GET /loans/{id}`; OPA `@Authorize(lending.list / lending.read)` on every method; `LendingSecurityTest` asserts no `@PermitAll` on this class too. `CreditRiskConsoleIT` refuses `ROLE_CUSTOMER` on all five paths. |
 | **I**nfo disclosure | Bulk export of PII via `limit` | Clamped server-side to 1..1000 (`CreditRiskInsightService.MAX_LIMIT`); the endpoint is a console read, not a data feed — the warehouse (ADR-0022) is the sanctioned bulk path once the lending topic is wired to the sink (tracked). |
-| **T**ampering | The console shows a ratio or outcome the engine did not evaluate | Views are decoded from the pinned evidence columns (`decision_*`, `policy_versions`, `decision_input_hash`) and from `loan_provisioning`, never recomputed; the affordability ratios call the ASSESSMENT leg's own `OriginationDecisionService.affordabilityRatios`, so a console figure and an engine figure cannot diverge. The total-DSTI figure (`dstiIncludingExistingDebt`) is labelled as **not** what the engine reads. |
+| **T**ampering | The console shows a ratio or outcome the engine did not evaluate | Views are decoded from the pinned evidence columns (`decision_*`, `policy_versions`, `decision_input_hash`) and from `loan_provisioning`, never recomputed; DSTI and DTI are persisted at evaluation, including existing debt service and outstanding debt. Historical missing ratios remain unknown rather than being recomputed under a different formula. |
 | **R**epudiation | "Which policy produced this?" | Every row carries the pinned table versions and input hash; `/policy` reports `codeSeeded=true` while `StarterCreditPolicy` is the binding, so a reader knows the tables cannot have been changed without a reviewed commit. |
 | **D**oS | Repeated book-wide reads | Two `GROUP BY` aggregates and two capped, indexed reads (`decided_engine_at`, `disbursed_at`, `(loan_id, period)`); no joins over installments. Same rate-limit posture as the other reads. |
 | **S**poofing / **E**oP | n/a | No write path; no identity is taken from the request. |
+
+### Credit-risk integrity controls (2026-09-09)
+
+The portfolio summary aggregates the entire nonterminal book per currency. Missing, stale,
+demonstration-model and pending-ledger records are counted explicitly and prevent a green ratio
+in the admin UI. The capped detail endpoint is diagnostic only. API errors and invalid response
+contracts render an error rather than a zero exposure. Override rates require a recorded human
+actor and decision time. Stage 3 uses conditional default probability one; this correction does
+not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).
+
+- **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `RestCatalogLoanProfilePort`
+  now reaches `product-catalog.accounts.svc:8443` with the client certificate `lending-internal-tls`
+  (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in
+  gitops and the client dialled `localhost:8104` inside this pod, so every loan-profile read failed (#10383).
+  The calls are reads of the `/api/v2` catalog surface only; no mutation, no new principal, no money
+  movement. **Risk class:** confidentiality and integrity of product/offering data in transit, now
+  protected by mutual TLS rather than plaintext. Rollback: drop `PRODUCT_CATALOG_URL` and the
+  `catalog-tls` volume.
+
+- **2026-09-20** — **New outbound edge: consent-service over private-CA mTLS (8443).** `RestCreditOffersConsentAdapter`
+  now reaches `consent-service.consent.svc:8443` with the client certificate `lending-internal-tls` (`%prod` TLS
+  bucket `consent-authority`, TLSv1.3). Previously `CONSENT_SERVICE_URL` was unset in gitops and the
+  client dialled `localhost:8107` inside this pod, so the consent check never left the process
+  (#10383). The call is a read of `consent.validate` state only; no mutation, no new principal,
+  no money movement. **Risk class:** confidentiality of consent state in transit, now protected by
+  mutual TLS rather than plaintext. Rollback: drop `CONSENT_SERVICE_URL` and the `consent-tls` volume.
+- **2026-09-21** — **Credit-offer eligibility admits ROLE_API at the RBAC gate (#10486 batch 4).** `GET /api/v1/lending/credit-offers/eligibility/{partyId}` gains method-level `@RolesAllowed(OPERATOR, ADMIN, API)` so campaign-service keeps asking once the shared client loses `ROLE_OPERATOR`. OPA is unchanged: only `service-account-openbank-services` is admitted (`service-credit-offer-eligibility`, lending enforces), so no other `ROLE_API` principal gains the read. It returns a yes/no decision and exposes no loan data. Rollback: revert the commit.
+- **2026-09-21** — **Borrower account lookup moves to the service's own machine identity (#10486 batch 5).** `AccountServiceRestClient` (`GET /api/v1/accounts`, `account.list`) now mints its bearer from the NAMED oidc-client `m2m` the service already has for its ledger and transaction legs, Keycloak client `openbank-lending` (`ROLE_API` only), instead of the shared `openbank-services` client. account-service grants it exactly `account.list` (`service-lending-account-read`). **STRIDE-S/E:** no new credential; the existing `m2m` secret now also reaches `account.list`. **Repudiation improves:** the read names this service. Rollback: revert the commit (the client returns to the shared token).
+- **2026-09-21** — **Credit-profile read moves to the service's own machine identity (#10486 batch 6).** `CreditProfileClient` (`GET /api/v1/analytics/credit-profile/{partyId}`) now mints its bearer from the NAMED oidc-client `m2m` the service already has, Keycloak client `openbank-lending` (`ROLE_API` only), instead of the shared `openbank-services` client. analytics-sink admits `ROLE_API` on that endpoint and narrows it with a Kotlin named-caller check (`requireNamedCreditProfileCaller`: copilot and lending only), because analytics-sink runs no OPA sidecar. **STRIDE-S/E:** no new credential; the existing `m2m` secret now also reaches the credit profile. **Repudiation improves:** the read names this service. Rollback: revert the commit (the client returns to the shared token).
+- **2026-09-24** — **One-off four-eyes ledger backfill (#10746, root cause #6057).** New endpoints under `/api/v1/lending/ledger-backfill` re-post the GL history of loans whose journals never reached the ledger (disbursement, interest accrual, principal repayment, interest settlement/recognition, provisioning deltas). **Threats and controls:** (1) *Double posting* — every journal reuses the exact live idempotency reference (`loan:<id>:disbursement`, `loan:<id>:inst:<n>:accrual|principal|interest`, `loan:<id>:provisioning:<period>`), so a re-run or a later live posting of the same event replays to the one journal in ledger; proven by `LedgerBackfillIT` with a sabotage (a non-deterministic reference produced 19 journals for 13 legs). (2) *Moving customer money* — the backfill depends only on `LedgerPostingPort`; the borrower-credit port is never injected or called (asserted in the IT). The disbursement's cash leg stays on Customer Cash Clearing, exactly as the live posting books it, and no deposit-control or customer balance is created. (3) *Single-actor execution* — propose/decide/execute with `Proposal.approve` refusing checker == maker (`MakerCheckerViolation`, 422); the approval binds a SHA-256 plan hash, and execution refuses if the book moved since. (4) *Rewriting closed history* — journals are booked on a cut-over date that must be today or later (the open accounting day) and carry the original business date as `valueDate`; nothing is back-dated into TIED_OUT days or a drafted period. (5) *Privilege* — `@RolesAllowed("ROLE_ADMIN")`; `lending_rest_ext.rego` vetoes every `lending.ledgerBackfill.*` for any `service-account-*` and for any principal without ROLE_ADMIN (rego tests). (6) *Concurrent execution* — a conditional DB lease (`claimExecution`) admits one run at a time. Audit: `lending.ledger_backfill.transition` outbox events (proposed/decided/started/executed/partial) and the `ledger_backfill_request` row. Unsupported loan shapes (non-ACTIVE, rescheduled, restructured) refuse the whole plan rather than approximate it. Rollback: stop using the endpoints; per-journal reversal via ledger `reverseJournal`.
+- **2026-09-26** — **Ledger backfill reports idempotent replays instead of counting them as posted (#10904).** A second request for an already-executed plan replayed all 352 legs on the sandbox, booked nothing, and still reported `loansPosted: 44`. The ledger client edge gains `postJournalWithHeaders` (same `POST /api/v1/journals`, same m2m OIDC filter, same retry/timeout/circuit-breaker guard) to read ledger-service's `Idempotent-Replayed` header (#10906). Each loan is POSTED, ALREADY_POSTED, UNCONFIRMED (no header, e.g. an older ledger) or FAILED, and an implementation that cannot tell answers UNCONFIRMED, never POSTED. `propose` also refuses (409) a plan another request already APPROVED or EXECUTED. **STRIDE-R:** the audit record can now tell a posting from a no-op. **STRIDE-T:** no journal content, key or amount changes, and the request body is the one `post` sends. A retry after a lost response reads as ALREADY_POSTED for a journal the first attempt booked; that is "the ledger held it when asked", which is what the operator needs. Rollback: revert; the ledger header is additive and harmless unread.

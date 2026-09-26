@@ -11,6 +11,8 @@ import { ArrowLeft, CheckCircle2, Clock3, FileCheck2, RefreshCw, ShieldCheck, XC
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import type { Tone } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 
@@ -29,10 +31,10 @@ type LifecycleApproval = {
 }
 
 const STATUS = {
-  PROPOSED: { color: '#b45309', bg: '#fffbeb', border: '#fcd34d', Icon: Clock3, cs: 'Čeká', en: 'Pending' },
-  REJECTED: { color: '#b91c1c', bg: '#fef2f2', border: '#fecaca', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
-  EXECUTED: { color: '#047857', bg: '#ecfdf5', border: '#a7f3d0', Icon: CheckCircle2, cs: 'Provedeno', en: 'Executed' },
-} as const
+  PROPOSED: { tone: 'warning', Icon: Clock3, cs: 'Čeká', en: 'Pending' },
+  REJECTED: { tone: 'danger', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
+  EXECUTED: { tone: 'success', Icon: CheckCircle2, cs: 'Provedeno', en: 'Executed' },
+} satisfies Record<LifecycleApproval['state'], { tone: Tone; Icon: typeof Clock3; cs: string; en: string }>
 
 export default function DelegationApprovalDetailPage() {
   const { t, language } = useLanguage()
@@ -110,7 +112,7 @@ export default function DelegationApprovalDetailPage() {
               <h2 id="approval-summary" style={{ fontSize: 16, margin: 0 }}>{operationLabel(approval.operation, language)}</h2>
               <div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{approval.id}</div>
             </div>
-            <StatusBadge state={approval.state} lang={language} />
+            <ApprovalStatusBadge state={approval.state} lang={language} />
           </div>
           <p style={{ margin: '14px 0 0', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
             {t(
@@ -168,11 +170,9 @@ export default function DelegationApprovalDetailPage() {
   </AuthGuard>
 }
 
-function StatusBadge({ state, lang }: { state: LifecycleApproval['state']; lang: 'cs' | 'en' }) {
+function ApprovalStatusBadge({ state, lang }: { state: LifecycleApproval['state']; lang: 'cs' | 'en' }) {
   const meta = STATUS[state]
-  return <span style={{ color: meta.color, background: meta.bg, border: `1px solid ${meta.border}`, borderRadius: 999, padding: '4px 9px', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 750 }}>
-    <meta.Icon size={12} aria-hidden="true" />{lang === 'cs' ? meta.cs : meta.en}
-  </span>
+  return <StatusBadge status={state} tone={meta.tone} leading={<meta.Icon size={12} />} label={lang === 'cs' ? meta.cs : meta.en} />
 }
 
 function TimelineItem({ title, actor, at, format, pending = false }: {

@@ -109,6 +109,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: context
+            cluster: context-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: control-liveness-sentinel
             cluster: liveness-db
             origin: manifest
@@ -219,6 +225,12 @@ spec:
           labels:
             namespace: lending
             cluster: lending-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: loyalty
+            cluster: loyalty-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
@@ -373,6 +385,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: risk
+            cluster: risk-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: sanctions
             cluster: sanctions-db
             origin: manifest
@@ -411,6 +429,12 @@ spec:
           labels:
             namespace: tpp-registry
             cluster: tpp-registry-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: treasury
+            cluster: treasury-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)

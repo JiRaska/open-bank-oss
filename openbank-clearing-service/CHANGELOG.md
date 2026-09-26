@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.1...clearing-service-v0.11.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.0...clearing-service-v0.11.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **ledger:** give ledger an mTLS listener and point clearing + interest at it ([#10397](https://github.com/JiRaska/open-bank-oss/issues/10397)) ([4e21311](https://github.com/JiRaska/open-bank-oss/commit/4e21311eac1a431c3670d0f4c86ccb38d762e3ba))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.1...clearing-service-v0.11.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.0...clearing-service-v0.10.1) (2026-09-13)
 
 

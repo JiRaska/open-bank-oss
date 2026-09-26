@@ -26,6 +26,8 @@ data class TransactionInitiatedEvent(
     val scaExemption: String? = null,
     val rail: PaymentRail = PaymentRail.UNKNOWN,
     val instructionType: InstructionType = InstructionType.UNKNOWN,
+    /** Rail payment that caused this booking; absent for operator and internal postings. */
+    val originatingPaymentId: UUID? = null,
     override val occurredAt: Instant,
     /**
      * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest

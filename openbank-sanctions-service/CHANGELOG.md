@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.2...sanctions-service-v0.14.0) (2026-09-24)
+
+
+### Features
+
+* **sanctions:** import the Czech national sanctions list (MZV) ([#10759](https://github.com/JiRaska/open-bank-oss/issues/10759)) ([b2f95c3](https://github.com/JiRaska/open-bank-oss/commit/b2f95c3556ff8eb5d7941c82a1612998ffce78c6)), closes [#10757](https://github.com/JiRaska/open-bank-oss/issues/10757)
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.1...sanctions-service-v0.13.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **sanctions:** keep multi-line quoted CSV fields in one record ([#10735](https://github.com/JiRaska/open-bank-oss/issues/10735)) ([b810036](https://github.com/JiRaska/open-bank-oss/commit/b8100369f96e18a1a86bc6525654316723bcef1f)), closes [#10734](https://github.com/JiRaska/open-bank-oss/issues/10734)
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.0...sanctions-service-v0.13.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **sanctions:** report list size, not upserted-row delta, as entry count ([#10722](https://github.com/JiRaska/open-bank-oss/issues/10722)) ([550a6d6](https://github.com/JiRaska/open-bank-oss/commit/550a6d6c74c876bbc139837cfa44fefb0e1901fd)), closes [#10721](https://github.com/JiRaska/open-bank-oss/issues/10721)
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.12.0...sanctions-service-v0.13.0) (2026-09-13)
 
 

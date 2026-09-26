@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
@@ -162,7 +163,11 @@ export default function ClusterDossierPage() {
     setLoading(true)
     try {
       const r = await fetch('/api/cluster/topology', { cache: 'no-store' })
-      const d = await r.json()
+      if (!r.ok) throw new Error('Cluster topology is unavailable')
+      const d = await r.json() as Topology & { source?: string }
+      if (d.source === 'unavailable' || !Array.isArray(d.groups) || !Array.isArray(d.namespaces)
+        || !Array.isArray(d.securityLayers) || !Array.isArray(d.imageAnatomy?.steps)
+        || !Array.isArray(d.planVsReality)) throw new Error('Invalid cluster topology')
       setTopo(d)
       setActiveLayer(d.securityLayers?.[0]?.id ?? null)
     } catch { setTopo(null) } finally { setLoading(false) }
@@ -198,6 +203,8 @@ export default function ClusterDossierPage() {
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
+
+      {!loading && !topo && <DataUnavailable kind="error" feature={t('topologie clusteru', 'cluster topology')} lang={language} />}
 
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>

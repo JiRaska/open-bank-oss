@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Account, AccountStatus, AccountType } from '@/types'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 
 export const CUSTOMER_ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'TERM_DEPOSIT'] as const
 const CUSTOMER_ACCOUNT_TYPE_SET: ReadonlySet<string> = new Set(CUSTOMER_ACCOUNT_TYPES)
@@ -77,16 +78,8 @@ function localDate(value: unknown, field: string): string {
 }
 
 function webUrl(value: unknown, field: string): string {
-  const parsed = text(value, field)
-  let url: URL
-  try {
-    url = new URL(parsed)
-  } catch {
-    throw new AccountOpeningContractError(`invalid ${field}`)
-  }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new AccountOpeningContractError(`invalid ${field}`)
-  }
+  const parsed = trustedHttpsUrl(text(value, field))
+  if (!parsed) throw new AccountOpeningContractError(`invalid ${field}`)
   return parsed
 }
 

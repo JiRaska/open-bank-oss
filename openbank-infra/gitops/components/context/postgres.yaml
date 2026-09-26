@@ -1,0 +1,42 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: context-db
+  namespace: context
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage: { storageClass: gp3, size: 5Gi }
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi }
+  postgresql:
+    parameters:
+      max_connections: "100"
+      statement_timeout: "750ms"
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/context-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb: { database: openbank_context, owner: openbank }
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: context-db-daily
+  namespace: context
+spec:
+  immediate: true
+  schedule: "0 45 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: context-db

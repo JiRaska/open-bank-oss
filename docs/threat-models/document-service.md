@@ -82,3 +82,33 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   named in the same sentence, `AnnualFeeSummaryReadyConsumer`, does exist and is unchanged. Only
   the topic name in this document was wrong; nothing about the PAD Art. 5 push duty, the
   poison-pill posture or the trust boundary changes.
+
+- **2026-09-20** — **New inbound edge: a parallel private-CA mTLS listener (8443, client auth REQUIRED,
+  TLSv1.3; server cert `document-service-internal-tls`), the same shape as party-service's and
+  account-service's.** HTTP/8143 stays for existing callers. The callers on 8443 are
+  domestic-payment (`PaymentConfirmationRenderAdapter`), sepa-payment (`DocumentPreviewAdapter`) and
+  statement-service (`DocumentTemplateRestAdapter`), all reading
+  `GET /api/v1/documents/templates` and `POST /api/v1/documents/templates/preview` as the shared
+  `service-account-openbank-services`. Both methods are `@RolesAllowed("ROLE_API","ROLE_OPERATOR",
+  "ROLE_ADMIN")` with **no** `@Authorize`, so no OPA action and no policy change; `document_rest_ext.rego`
+  covers only `document.business-agreement.*` and is untouched. Before this none of the three had a
+  `DOCUMENT_SERVICE_URL` in gitops, so each dialled `localhost:8143` inside its own pod and the edge
+  existed in code but never reached this service (#10383). **Risk class:** confidentiality of template
+  metadata and rendered previews to three payment/statement services; no mutation, no new action.
+  Rollback: drop the listener env and the three caller env vars.
+
+- **2026-09-20** — **Correction, and the fix: the 8443 listener's client-certificate validation was
+  declared but not in effect.** Earlier entries describe this listener as "client auth REQUIRED".
+  That posture was expressed only as the container env `QUARKUS_HTTP_SSL_CLIENT_AUTH`, and
+  `quarkus.http.ssl.client-auth` is a **build-time** property: Quarkus fixes it into the image at
+  build time and ignores a differing runtime value (it says so in the boot log). The deployed
+  listener therefore ran with the default, `none` — server-authenticated TLS, encrypted in transit,
+  but the caller's certificate was not demanded or validated. The transport-confidentiality claims in
+  the earlier entries hold; the caller-authentication half did not, and those entries should be read
+  with this one. Completed here by setting `quarkus.http.ssl.client-auth: required` in this service's
+  `application.yaml`, the file the image is built from, so the value is baked rather than injected;
+  the gitops env is kept in the same spelling so manifest and image cannot disagree. Every declared
+  caller of this listener already mounts a private-CA client certificate and names it on its
+  rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
+  restored to what the design always stated. Rollback: revert the property (and expect the listener
+  to return to server-only TLS).

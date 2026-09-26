@@ -86,6 +86,10 @@ def classify(agent):
     for needle, (point, why) in HIGH_RISK_TRIGGERS.items():
         if needle in hay:
             return ("HIGH-RISK", point, why)
+    if agent.get("id") == "rca-investigator" and agent.get("case_capabilities"):
+        return ("Limited / minimal risk", "—",
+                "an authorized human may persist its finding only to an incident-response SHADOW case; "
+                "no autonomous remediation or banking-state effect.")
     return ("Limited / minimal risk", "—",
             "produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person).")
 

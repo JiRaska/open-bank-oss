@@ -178,7 +178,7 @@ locals {
     # no backups at all — sdd-db for three days, alerting the whole time. The comment above
     # claiming "all remaining clusters" was simply untrue; check-db-backup-associations.py now
     # asserts it instead of trusting it.
-    sdd          = { namespace = "sdd", sa = "sdd-db" }
+    sdd = { namespace = "sdd", sa = "sdd-db" }
     # ADR-0301. Declared from the first commit rather than after the fact: a CNPG cluster whose
     # barmanObjectStore has no matching association archives to NOWHERE and says it succeeded —
     # archived_count rises, failed_count stays 0, ContinuousArchiving reads True, and the bucket
@@ -276,6 +276,16 @@ locals {
     # The future Cluster uses barmanObjectStore under incentive-db; declaring its service account
     # here prevents the otherwise silent "Ready but no WAL archive credentials" failure at first boot.
     incentive = { namespace = "incentive", sa = "incentive-db" }
+    context   = { namespace = "context", sa = "context-db" }
+    # ADR-0314. Declared with the cluster, never after: a barmanObjectStore with no association
+    # archives to NOWHERE and reports success (only `aws s3 ls` tells the two apart).
+    risk = { namespace = "risk", sa = "risk-db" }
+    # #9800. Declared with the cluster, never after: a barmanObjectStore with no association
+    # archives to NOWHERE and reports success (only `aws s3 ls` tells the two apart).
+    loyalty = { namespace = "loyalty", sa = "loyalty-db" }
+    # ADR-0315 (money-path). Declared with the cluster, never after: a barmanObjectStore with no
+    # association archives to NOWHERE and reports success (only `aws s3 ls` tells the two apart).
+    treasury = { namespace = "treasury", sa = "treasury-db" }
   }
 }
 

@@ -130,7 +130,7 @@ class LendingPrimitivesTest {
     }
 
     @Test
-    fun `ifrs9 ECL uses 12-month PD in stage 1 and lifetime PD in stages 2 and 3`() {
+    fun `ifrs9 ECL uses stage horizons and certain default in stage 3`() {
         val inputs = EclInputs(
             pd12Month = BigDecimal("0.02"),
             pdLifetime = BigDecimal("0.20"),
@@ -144,8 +144,7 @@ class LendingPrimitivesTest {
         assertThat(Ifrs9.ecl(Ifrs9Stage.STAGE_2, inputs).expectedCreditLoss).isEqualTo(eur("900.00"))
 
         // Defaulted (Stage 3) at PD = 1: lifetime ECL = LGD * EAD = 4500.00
-        val defaulted = inputs.copy(pdLifetime = BigDecimal.ONE)
-        val result = Ifrs9.assess(daysPastDue = 100, inputs = defaulted)
+        val result = Ifrs9.assess(daysPastDue = 100, inputs = inputs)
         assertThat(result.stage).isEqualTo(Ifrs9Stage.STAGE_3)
         assertThat(result.horizon).isEqualTo(EclHorizon.LIFETIME)
         assertThat(result.expectedCreditLoss).isEqualTo(eur("4500.00"))

@@ -41,6 +41,8 @@ data class Representative(
     /** The function inside the body, as the register names it — `jednatel`, `předseda představenstva`, `director`. */
     val role: String?,
     val since: LocalDate?,
+    /** The person's own address as the register lists it; compared with the initiator's verified address. */
+    val address: RegisteredAddress? = null,
 )
 
 enum class RepresentationMode {
@@ -122,4 +124,9 @@ data class RegistryExtract(
     val fetchedAt: Instant,
 ) {
     val isSoleTrader: Boolean get() = legalFormClass == LegalFormClass.SOLE_TRADER
+
+    companion object {
+        /** `source` of the sandbox-only fictitious entity. Never cached, never a real register record. */
+        const val SANDBOX_DEMO_SOURCE = "sandbox-demo"
+    }
 }

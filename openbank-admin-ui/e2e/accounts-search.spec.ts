@@ -40,6 +40,7 @@ test('never lets a superseded account search overwrite the current query', async
   await page.goto('/accounts')
   const input = page.locator('#accounts-query')
   const search = page.getByRole('button', { name: /Vyhledat účty|Search accounts/ })
+  await expect(input).toHaveCount(1)
 
   await input.fill('old')
   await search.click()

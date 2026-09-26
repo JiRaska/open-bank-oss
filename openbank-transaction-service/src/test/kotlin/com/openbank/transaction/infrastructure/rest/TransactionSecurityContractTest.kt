@@ -60,9 +60,11 @@ class TransactionSecurityContractTest {
     }
 
     @Test
-    fun `initiating a transaction is restricted to operator`() {
+    fun `initiating a transaction is restricted to operator and identity-gated API callers`() {
+        // #10486: ROLE_API reaches OPA, where only the per-service identities in
+        // transaction_rest_ext.rego are granted transaction.create. No viewer, no admin widening.
         assertThat(rolesOf("initiateTransaction"))
             .describedAs("initiateTransaction roles")
-            .containsExactlyInAnyOrder("ROLE_OPERATOR")
+            .containsExactlyInAnyOrder("ROLE_API", "ROLE_OPERATOR")
     }
 }

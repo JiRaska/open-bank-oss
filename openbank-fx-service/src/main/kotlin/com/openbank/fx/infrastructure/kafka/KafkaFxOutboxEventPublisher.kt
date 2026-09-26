@@ -14,9 +14,16 @@ import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 
+/**
+ * Routes each outbox row to its topic by event type: fixings to `fx-fixing-out`
+ * (`openbank.fx.fixing.published`), everything else to `fx-events-out`
+ * (`openbank.fx.conversion.completed`). The outbox is shared; the topics are not.
+ */
 @ApplicationScoped
-class KafkaFxOutboxEventPublisher(@Channel("fx-events-out") private val emitter: MutinyEmitter<String>) :
-    OutboxEventPublisher {
+class KafkaFxOutboxEventPublisher(
+    @Channel("fx-events-out") private val emitter: MutinyEmitter<String>,
+    @Channel("fx-fixing-out") private val fixingEmitter: MutinyEmitter<String>,
+) : OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()
@@ -25,6 +32,11 @@ class KafkaFxOutboxEventPublisher(@Channel("fx-events-out") private val emitter:
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        emitter.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+        val target = if (entry.eventType.startsWith(FIXING_EVENT_PREFIX)) fixingEmitter else emitter
+        target.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+    }
+
+    private companion object {
+        const val FIXING_EVENT_PREFIX = "fx.fixing."
     }
 }

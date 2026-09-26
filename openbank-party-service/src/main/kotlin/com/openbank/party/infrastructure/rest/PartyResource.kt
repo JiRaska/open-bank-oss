@@ -198,13 +198,20 @@ class PartyResource {
     }
 
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
+    // #10486 batch 3: ROLE_API admits kyb-service's OWN machine principal, which creates the
+    // entity party for a business onboarding case. ROLE_API is held by every service account, so
+    // it is narrowed twice: by identity in party_rest_ext.rego (`service-kyb-party-m2m`) and,
+    // because party-service still runs AUTHZ_ENFORCE=false (advisory), by
+    // [requireNamedPartyCreateCaller] here.
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
+    @Authorize(action = "party.create")
     @Operation(summary = "Create a new party (customer or company)")
     suspend fun createParty(
         req: CreatePartyRequest,
         // Nullable by necessity — JAX-RS injects null for an absent header (#526, #3624).
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
+        requireNamedPartyCreateCaller(securityIdentity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         val classification = req.classification()
         require(classification != PartyClassification.SYNTHETIC || securityIdentity.hasRole("ROLE_ADMIN")) {
@@ -855,6 +862,12 @@ fun Party.toResponse() = mapOf(
     // ADR-0179: non-null only on a MERGED party — tells a consumer holding a stale id which
     // party to follow instead.
     "mergedIntoPartyId" to mergedIntoPartyId,
+    // Derived from the personal AML profile — the source of truth kyb and other readers use for
+    // these four facts. null means UNKNOWN (never declared); pepFlag is never a defaulted false.
+    "pepFlag" to knownPepFlag,
+    "pepCategory" to pepCategory.takeIf { knownPepFlag == true },
+    "fatcaStatus" to fatcaStatus,
+    "crsStatus" to crsStatus.takeIf { amlProfileDeclared },
 )
 
 fun PartyGdprExport.toResponse() = mapOf(

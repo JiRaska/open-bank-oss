@@ -5,7 +5,7 @@
 package com.openbank.sdd.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -18,14 +18,16 @@ import java.util.UUID
 /**
  * REST client for `openbank-transaction-service` — books the debtor-side debit for an authorised
  * SEPA Direct Debit collection (#1000). OIDC service-to-service auth is propagated by
- * [OidcClientRequestReactiveFilter]; this consumer runs on a plain `@Incoming` suspend handler
+ * the named oidc-client `m2m`; this consumer runs on a plain `@Incoming` suspend handler
  * (not a Temporal activity), so the filter-based token attachment is safe here — unlike
  * domestic-payment's `SettlementAdapter`, which needs an explicit-token workaround specifically
  * because a Temporal activity thread loses the Vert.x context the filter relies on.
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-sdd` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/transactions")
 interface TransactionServiceClient {
 
