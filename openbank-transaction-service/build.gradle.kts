@@ -49,6 +49,7 @@ dependencies {
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)

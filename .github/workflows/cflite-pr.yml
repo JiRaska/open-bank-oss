@@ -21,6 +21,7 @@ on:
   pull_request:
     paths:
       - "openbank-libs-domain/**"
+      - "openbank-libs-iso20022/**"
       - "fuzz/**"
       - ".clusterfuzzlite/**"
       - ".github/workflows/cflite-pr.yml"

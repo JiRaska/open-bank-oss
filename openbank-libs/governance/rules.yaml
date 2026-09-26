@@ -1755,7 +1755,8 @@ architecture:
   # ENFORCED by .github/scripts/check-domain-purity.py (Validate manifests job):
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
-  # the whole openbank-libs-domain module; openbank-libs-runtime is module-exempt
+  # the whole openbank-libs-domain module and its ADR-0317 context modules
+  # (openbank-libs-iso20022); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,

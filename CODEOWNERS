@@ -53,6 +53,7 @@
 /openbank-infra/                        @JiRaska
 /openbank-libs/                         @JiRaska
 /openbank-libs-domain/                  @JiRaska
+/openbank-libs-iso20022/                @JiRaska
 /openbank-libs-runtime/                 @JiRaska
 
 # --- CI / security tooling ---

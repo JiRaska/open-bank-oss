@@ -36,7 +36,7 @@ import sys
 import gatelib
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-SKIP_DIRS = {"openbank-libs", "openbank-libs-domain", "openbank-libs-runtime",
+SKIP_DIRS = {"openbank-libs", "openbank-libs-domain", "openbank-libs-iso20022", "openbank-libs-runtime",
              "openbank-admin-ui", "openbank-infra"}
 
 

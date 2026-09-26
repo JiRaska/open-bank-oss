@@ -27,6 +27,9 @@ dependencies {
     // messages of its own — it reuses the shared library so the wire format is identical to the
     // rail's (ADR-0104). No database: the simulator is a stateless, deterministic counterparty.
     implementation(project(":openbank-libs"))
+    // iso20022 left openbank-libs-domain for its own module (ADR-0317 phase 1); the aggregator
+    // above deliberately does not re-export it.
+    implementation(project(":openbank-libs-iso20022"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
