@@ -96,9 +96,13 @@ describe('Customer context graph', () => {
   })
 
   it('hides projected graph evidence when the live authorization check is denied', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403 } as Response)))
+    let deny!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { deny = resolve })))
     graph()
 
+    expect(screen.getByRole('status')).toHaveTextContent('Checking graph access…')
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+    deny({ ok: false, status: 403 } as Response)
     expect(await screen.findByRole('alert')).toHaveTextContent('Access to the context graph was denied.')
     expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Customer: Oldřich Vaněk' })).not.toBeInTheDocument()
