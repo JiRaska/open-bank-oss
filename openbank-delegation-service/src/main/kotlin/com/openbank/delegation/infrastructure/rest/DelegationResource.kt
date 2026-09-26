@@ -4,7 +4,9 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.CheckDelegationUseCase
 import com.openbank.delegation.application.port.`in`.DelegationRecertificationUseCase
@@ -28,6 +30,7 @@ import com.openbank.delegation.infrastructure.rest.dto.RevokeDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.SuspendDelegationRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprint
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -48,6 +51,16 @@ import jakarta.ws.rs.core.UriInfo
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
+
+// Canonicalises a request body so whitespace / key order in the raw JSON never changes the
+// fingerprint: sorted object keys + sorted map entries, derived from the service's own
+// ObjectMapper so custom (de)serializers still apply.
+fun ObjectMapper.canonicalFingerprint(method: String, path: String, body: Any?): String {
+    val canonical = copy()
+        .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+        .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+    return RequestFingerprint.of(method, path, body?.let { canonical.writeValueAsString(it) })
+}
 
 @Tag(name = "Delegations", description = "Customer-to-party delegated access lifecycle (ADR-0232)")
 @Path("/api/v1/delegations")
@@ -128,9 +141,10 @@ class DelegationResource(
     ): Response {
         requireNotNull(request) { "request body is required" }
         val idempotencyKey = xRequestId?.takeIf { it.isNotBlank() }
+        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/delegations", request)
 
         idempotencyKey?.let { key ->
-            idempotencyStore.get(offerKey(request.grantorPartyId, key))?.let { cached ->
+            idempotencyStore.lookup(offerKey(request.grantorPartyId, key), hash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -164,6 +178,7 @@ class DelegationResource(
         idempotencyKey?.let { key ->
             idempotencyStore.save(
                 offerKey(request.grantorPartyId, key),
+                hash,
                 201,
                 objectMapper.writeValueAsString(responseBody),
             )
@@ -229,13 +244,23 @@ class DelegationResource(
             throw ForbiddenException("recertification confirmation requires the grantor's customer session")
         }
         val cacheKey = recertificationConfirmKey(id, grantorPartyId, idempotencyKey)
-        idempotencyStore.get(cacheKey)?.let { cached ->
+        val hash = objectMapper.canonicalFingerprint(
+            "POST",
+            "/api/v1/delegations/recertifications/$id/confirm?grantorPartyId=$grantorPartyId",
+            null,
+        )
+        idempotencyStore.lookup(cacheKey, hash)?.let { cached ->
             return objectMapper.readValue(cached.responseBody, DelegationRecertificationResponse::class.java)
         }
         val response = DelegationRecertificationResponse.from(
             recertification.confirm(id, grantorPartyId, customerPartyId),
         )
-        idempotencyStore.save(cacheKey, Response.Status.OK.statusCode, objectMapper.writeValueAsString(response))
+        idempotencyStore.save(
+            cacheKey,
+            hash,
+            Response.Status.OK.statusCode,
+            objectMapper.writeValueAsString(response),
+        )
         return response
     }
 

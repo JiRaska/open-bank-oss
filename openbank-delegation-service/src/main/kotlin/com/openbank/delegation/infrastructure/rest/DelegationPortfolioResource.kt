@@ -69,7 +69,8 @@ class DelegationPortfolioResource(
         val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) { "Idempotency-Key header is required" }
         val ownerPartyId = requireNotNull(request.ownerPartyId) { "ownerPartyId is required" }
         if (customerPartyId != ownerPartyId) throw DelegationPortfolioAccessDenied()
-        idempotencyStore.get(createKey(ownerPartyId, key))?.let { cached ->
+        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/delegation-portfolios", request)
+        idempotencyStore.lookup(createKey(ownerPartyId, key), hash)?.let { cached ->
             return Response.status(cached.statusCode)
                 .entity(cached.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -85,6 +86,7 @@ class DelegationPortfolioResource(
         val response = DelegationPortfolioResponse.from(created)
         idempotencyStore.save(
             createKey(ownerPartyId, key),
+            hash,
             Response.Status.CREATED.statusCode,
             objectMapper.writeValueAsString(response),
         )

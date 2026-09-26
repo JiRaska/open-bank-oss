@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive ADR-0312 business-signing routes (entity signing policy, trusted payees, approvals).
-  version: 1.20.0
+  version: 1.21.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -43,7 +43,7 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
         '400': { description: Missing idempotency key, name, or account scope }
         '403': { description: Authenticated active profile does not equal ownerPartyId }
-        '422': { description: An account is not owned by the active profile }
+        '422': { description: An account is not owned by the active profile, or the Idempotency-Key was already used for a different request (code IDEMPOTENCY_KEY_REUSED) }
         '503':
           description: Authoritative account ownership cannot currently be established; safe to retry
           headers:
@@ -160,7 +160,7 @@ paths:
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
-        '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
+        '422': { description: Eligibility gate, the grantor does not own the resource (ADR-0232 D5, threat model T1), or the Idempotency-Key was already used for a different request (code IDEMPOTENCY_KEY_REUSED) }
         '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
   /api/v1/delegations/preview:
     post:
@@ -235,6 +235,7 @@ paths:
         '403': { description: Caller is not the issuing party }
         '404': { description: Unknown task }
         '409': { description: Task was already confirmed or the grant lifecycle changed }
+        '422': { description: The Idempotency-Key was already used for a different request (code IDEMPOTENCY_KEY_REUSED) }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
