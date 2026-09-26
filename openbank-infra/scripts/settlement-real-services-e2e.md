@@ -49,6 +49,9 @@ fast-jar runtimes (application, launcher and libraries). This is provenance meta
 that checkout. Service JVMs inherit only `PATH`, `HOME`, `TMPDIR`, `LANG`, and `TZ` before the
 explicit local proof configuration is applied.
 
+Operator sessions obtain tokens on first use and renew before the issuer's reported expiry.
+An HTTP 401 still fails the proof; the client never automatically replays a business write.
+
 ## Lost response after ledger commit
 
 ```sh
@@ -146,3 +149,15 @@ All other process and container health checks remain active. Recovery must finis
 Temporal run without reset, with journal activity attempt 2 and a recorded 60-second
 Start-To-Close timeout. The normal one-journal, two-leg, 60/40 balances and released-cover
 assertions still apply. Original and recovered histories are retained separately.
+
+`--with-operator-approval` enables the settlement origination four-eyes gate and uses two
+separate, real OIDC operator sessions. Each origination checks that no settlement was inserted
+while approval is pending, refuses self-approval and a checker-supplied changed amount, then
+approves and executes the unchanged instruction. The proof requires the three durable approval
+transitions and retains their IDs. Idempotency replays use fresh approvals and must return the
+same settlement; consuming one approval does not authorize another execution.
+
+Combine it with `--with-audit` to compare the complete maker/checker event payloads from the
+settlement outbox to independently ingested audit rows. This mode gates settlement origination;
+it does not claim that the ledger funding fixture has its separate human four-eyes gate enabled,
+or that the deployed operator UI has been accepted.

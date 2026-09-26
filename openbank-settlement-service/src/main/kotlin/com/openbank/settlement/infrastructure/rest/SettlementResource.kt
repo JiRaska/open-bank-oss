@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
@@ -11,7 +12,6 @@ import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
 import jakarta.annotation.security.RolesAllowed
-import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -22,7 +22,10 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.net.URI
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 /**
@@ -41,10 +44,10 @@ class SettlementResource(private val settlementUseCase: SettlementUseCase) {
 
     @POST
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "settlement.create", resource = "")
+    @Authorize(action = "settlement.create", resource = "#request.approvalFingerprint")
     @Operation(summary = "Originate a settlement and start its workflow")
-    suspend fun originate(request: CreateSettlementRequest): Response {
-        validate(request)
+    suspend fun originate(request: CreateSettlementRequest?): Response {
+        requireNotNull(request) { "a request body is required" }
         val settlement = settlementUseCase.originate(
             OriginateSettlementCommand(
                 idempotencyKey = request.idempotencyKey,
@@ -58,23 +61,6 @@ class SettlementResource(private val settlementUseCase: SettlementUseCase) {
             .entity(settlement.toResponse())
             .build()
     }
-
-    /** Reject malformed money-path input with 400 before any settlement is created. */
-    private fun validate(request: CreateSettlementRequest) {
-        val errors = buildList {
-            if (request.idempotencyKey.isBlank()) add("idempotencyKey must not be blank")
-            if (request.amount <= BigDecimal.ZERO) add("amount must be positive")
-            if (!CURRENCY_CODE.matches(request.currency)) add("currency must be an uppercase 3-letter ISO-4217 code")
-            if (request.payerAccountId == request.payeeAccountId) add("payer and payee accounts must differ")
-        }
-        if (errors.isNotEmpty()) {
-            throw BadRequestException(errors.joinToString("; "))
-        }
-    }
-
-    private companion object {
-        val CURRENCY_CODE = Regex("[A-Z]{3}")
-    }
 }
 
 data class CreateSettlementRequest(
@@ -83,7 +69,41 @@ data class CreateSettlementRequest(
     val payeeAccountId: UUID,
     val amount: BigDecimal,
     val currency: String,
-)
+) {
+    // Jackson constructs this value before the authorization interceptor runs. An invalid
+    // instruction must neither create a pending approval nor consume an approved one.
+    init {
+        require(idempotencyKey.isNotBlank()) { "idempotencyKey must not be blank" }
+        require(amount > BigDecimal.ZERO) { "amount must be positive" }
+        require(CURRENCY_CODE.matches(currency)) { "currency must be an uppercase 3-letter ISO-4217 code" }
+        require(payerAccountId != payeeAccountId) { "payer and payee accounts must differ" }
+    }
+
+    /** Versioned binding to every submitted money instruction; never a caller-supplied digest. */
+    @get:JsonIgnore
+    val approvalFingerprint: String
+        get() {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val fields = listOf(
+                "settlement.create.v1",
+                idempotencyKey,
+                payerAccountId.toString(),
+                payeeAccountId.toString(),
+                amount.stripTrailingZeros().toString(),
+                currency,
+            )
+            for (value in fields) {
+                val bytes = value.toByteArray(Charsets.UTF_8)
+                digest.update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(bytes.size).array())
+                digest.update(bytes)
+            }
+            return HexFormat.of().formatHex(digest.digest())
+        }
+
+    private companion object {
+        val CURRENCY_CODE = Regex("[A-Z]{3}")
+    }
+}
 
 data class SettlementResponse(
     val id: UUID,

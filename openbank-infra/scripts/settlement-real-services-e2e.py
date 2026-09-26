@@ -22,6 +22,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from decimal import Decimal
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -183,13 +184,17 @@ def docker(
 def request(
     url: str,
     body: dict[str, Any] | None = None,
-    token: str | None = None,
+    token: str | Callable[[], str] | None = None,
     *,
     form: bool = False,
+    method: str | None = None,
+    approval_id: str | None = None,
 ) -> Any:
     headers: dict[str, str] = {}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers["Authorization"] = f"Bearer {token() if callable(token) else token}"
+    if approval_id:
+        headers["X-Approval-Id"] = approval_id
     payload = None
     if body is not None:
         payload = (
@@ -200,7 +205,7 @@ def request(
         )
     try:
         with urllib.request.urlopen(
-            urllib.request.Request(url, data=payload, headers=headers),
+            urllib.request.Request(url, data=payload, headers=headers, method=method),
             timeout=REQUEST_TIMEOUT_SECONDS,
         ) as response:
             return json.load(response)
@@ -209,14 +214,40 @@ def request(
         raise RuntimeError(f"HTTP {error.code} {url}: {detail}") from None
 
 
+def operator_session(issuer: str, username: str, password: str) -> Callable[[], str]:
+    """Obtain/renew before a request; never replay a business request after a 401."""
+    access_token = ""
+    renew_at = 0.0
+
+    def current_token() -> str:
+        nonlocal access_token, renew_at
+        if not access_token or time.monotonic() >= renew_at:
+            started = time.monotonic()
+            response = request(
+                f"{issuer}/protocol/openid-connect/token",
+                {"grant_type": "password", "client_id": "proof-browser", "username": username, "password": password},
+                form=True,
+            )
+            lifetime = float(response["expires_in"])
+            if lifetime <= 0:
+                raise RuntimeError("OIDC returned a non-positive token lifetime")
+            access_token = response["access_token"]
+            renew_at = started + lifetime - min(30.0, lifetime / 2)
+        return access_token
+
+    return current_token
+
+
 def expect_http_status(
     url: str,
     expected_status: int,
     body: dict[str, Any] | None = None,
-    token: str | None = None,
+    token: str | Callable[[], str] | None = None,
+    *,
+    method: str | None = None,
 ) -> None:
     try:
-        request(url, body, token)
+        request(url, body, token, method=method)
     except RuntimeError as error:
         assert f"HTTP {expected_status} " in str(error), str(error)
         return
@@ -330,6 +361,7 @@ def create_realm(secret: str, password: str, with_audit: bool = False) -> Path:
             }
         ],
     }
+    realm["users"].append(dict(realm["users"][0], username="proof-checker", email="checker@example.invalid"))
     for client_id in ["openbank-services", "openbank-settlement", "proof-unrelated"]:
         realm["clients"].append(
             {
@@ -400,6 +432,7 @@ def main() -> None:
     parser.add_argument("--reject-cover", action="store_true", help="Verify insufficient cover never reaches ledger booking")
     parser.add_argument("--drop-cover-responses", action="store_true", help="Lose all five committed cover replies and verify safe uncertainty")
     parser.add_argument("--crash-worker-after-ledger-commit", action="store_true", help="Kill and restart the settlement JVM after confirmed journal commit")
+    parser.add_argument("--with-operator-approval", action="store_true", help="Enforce settlement maker/checker approval using two real OIDC principals")
     args = parser.parse_args()
     if args.crash_worker_after_ledger_commit:
         if args.drop_ledger_response or args.drop_cover_responses or args.recover_after_loss:
@@ -516,17 +549,11 @@ def main() -> None:
     )
     issuer = f"http://127.0.0.1:{keycloak_port}/realms/settlement-proof"
     until(lambda: request(f"{issuer}/.well-known/openid-configuration"), "Keycloak")
-    token = request(
-        f"{issuer}/protocol/openid-connect/token",
-        {
-            "grant_type": "password",
-            "client_id": "proof-browser",
-            "username": "proof-operator",
-            "password": password,
-        },
-        form=True,
-    )["access_token"]
-    print("Local infrastructure ready; synthetic OIDC operator token issued", flush=True)
+    token = operator_session(issuer, "proof-operator", password)
+    checker_token = None
+    if args.with_operator_approval:
+        checker_token = operator_session(issuer, "proof-checker", password)
+    print("Local infrastructure ready; synthetic OIDC sessions configured", flush=True)
 
     service_ports = {name: port() for name in service_names}
     ledger_client_port = service_ports["ledger"]
@@ -563,6 +590,7 @@ def main() -> None:
                 "QUARKUS_REDIS_HOSTS": f"redis://127.0.0.1:{redis_port}",
                 "KAFKA_BOOTSTRAP_SERVERS": f"127.0.0.1:{kafka_port}",
                 "AUTHZ_ENFORCE": "true",
+                "AUTHZ_FOUR_EYES_ENFORCE": "true" if name == "settlement" and args.with_operator_approval else "false",
                 "OPA_URL": f"http://127.0.0.1:{opa_ports[name]}",
                 "OPA_TIMEOUT_MS": "5000",
                 "OPENBANK_TEMPORAL_SERVER_URL": f"127.0.0.1:{temporal_port}",
@@ -676,6 +704,34 @@ def main() -> None:
         "currency": "CZK",
     }
     settlement_endpoint = f"http://127.0.0.1:{service_ports['settlement']}/api/v1/settlements"
+    approval_evidence = []
+
+    def originate_with_approval(instruction: dict[str, Any]) -> dict[str, Any]:
+        if not args.with_operator_approval:
+            return request(settlement_endpoint, instruction, token)
+        before = sql("settlement", "SELECT count(*) FROM settlements")
+        pending = request(settlement_endpoint, instruction, token)
+        assert pending["status"] == "PENDING_APPROVAL", pending
+        approval_id = str(uuid.UUID(pending["approvalId"]))
+        assert sql("settlement", "SELECT count(*) FROM settlements") == before
+        decision_url = f"{settlement_endpoint}/approvals/{approval_id}"
+        expect_http_status(decision_url, 400, {}, checker_token, method="PATCH")
+        expect_http_status(decision_url, 400, {"approve": None}, checker_token, method="PATCH")
+        decision = {"approve": True, "instruction": instruction}
+        expect_http_status(decision_url, 403, decision, token, method="PATCH")
+        changed = {"approve": True, "instruction": dict(instruction, amount=instruction["amount"] + 1)}
+        expect_http_status(decision_url, 400, changed, checker_token, method="PATCH")
+        approved = request(decision_url, decision, checker_token, method="PATCH")
+        assert approved["status"] == "APPROVED" and approved["makerId"] == "proof-operator"
+        assert approved["decidedBy"] == "proof-checker", approved
+        result = request(settlement_endpoint, instruction, token, approval_id=approval_id)
+        assert sql("settlement", f"SELECT status FROM settlement_operator_approvals WHERE id='{approval_id}'") == "EXECUTED"
+        states = json.loads(sql("settlement", "SELECT json_agg(payload::jsonb->>'status' ORDER BY id) "
+                               f"FROM settlement_outbox WHERE aggregate_id='{approval_id}'"))
+        assert states == ["PENDING", "APPROVED", "EXECUTED"], states
+        approval_evidence.append({"approvalId": approval_id, "settlementId": result["id"], "states": states})
+        return result
+
     crash_evidence = None
     worker_killed = threading.Event()
     if args.crash_worker_after_ledger_commit:
@@ -689,7 +745,7 @@ def main() -> None:
             worker_killed.set()
 
         response_loss_proxy.on_drop = kill_worker
-    created = request(settlement_endpoint, settlement_body, token)
+    created = originate_with_approval(settlement_body)
     settlement_id = created["id"]
     print(f"Originated settlement {settlement_id}", flush=True)
     if args.crash_worker_after_ledger_commit:
@@ -733,7 +789,7 @@ def main() -> None:
         balances = [request(f"{balance}/{account}/CZK", token=token) for account in (payer, payee)]
         for observed, expected in zip(balances, [(100, 40, 60), (0, 0, 0)], strict=True):
             assert tuple(Decimal(str(observed[k])) for k in ("bookedAmount", "reservedAmount", "availableAmount")) == expected
-        assert request(settlement_endpoint, settlement_body, token)["id"] == settlement_id
+        assert originate_with_approval(settlement_body)["id"] == settlement_id
         replayed = [request(f"{balance}/{account}/CZK", token=token) for account in (payer, payee)]
         assert [b["version"] for b in replayed] == [b["version"] for b in balances]
         assert sql("settlement", "SELECT count(*) FROM settlement_outbox "
@@ -779,7 +835,7 @@ def main() -> None:
         "AND amount=40 AND released_at IS NOT NULL",
     ) == "1"
 
-    duplicate = request(settlement_endpoint, settlement_body, token)
+    duplicate = originate_with_approval(settlement_body)
     assert duplicate["id"] == settlement_id
     journals = request(
         f"http://127.0.0.1:{service_ports['ledger']}/api/v1/journals/transaction/{settlement_id}",
@@ -903,17 +959,34 @@ def main() -> None:
             return stored if sorted(stored, key=order) == sorted(expected_events, key=order) else None
 
         ingested_events = until(audit_matches, "exact settlement audit ingestion", 60)
+        matched_approval_events = []
+        if approval_evidence:
+            ids = ",".join("'" + str(uuid.UUID(item["approvalId"])) + "'" for item in approval_evidence)
+            expected_approvals = json.loads(sql(
+                "settlement", f"SELECT json_agg(payload::jsonb) FROM settlement_outbox WHERE aggregate_id IN ({ids})",
+            ))
+
+            def approvals_match() -> list[dict[str, Any]] | None:
+                stored = json.loads(sql(
+                    "audit", "SELECT coalesce(json_agg(payload::jsonb), '[]'::json) FROM audit_entries "
+                    f"WHERE aggregate_id IN ({ids}) AND event_type='SETTLEMENT_OPERATOR_APPROVAL_CHANGED'",
+                ))
+                order = lambda event: event["eventId"]
+                return stored if sorted(stored, key=order) == sorted(expected_approvals, key=order) else None
+
+            matched_approval_events = until(approvals_match, "exact maker/checker audit ingestion", 60)
         integrity = request(f"http://127.0.0.1:{service_ports['audit']}/api/v1/audit/integrity", token=token)
         assert integrity["chainStatus"] == "INTACT" and integrity["unchainedCount"] == 0, integrity
         assert integrity["checkedCount"] >= len(ingested_events), integrity
-        audit_evidence = {"matchedSettlementEvents": len(ingested_events), "integrity": integrity}
+        audit_evidence = {"matchedSettlementEvents": len(ingested_events),
+                          "matchedApprovalEvents": len(matched_approval_events), "integrity": integrity}
         print("Audit", json.dumps(audit_evidence), flush=True)
     rejected_cover_evidence = None
     if args.reject_cover:
         before = balances_correct()
         assert before
         rejected_body = dict(settlement_body, idempotencyKey="no-cover-" + uuid.uuid4().hex, amount=61)
-        rejected_id = request(settlement_endpoint, rejected_body, token)["id"]
+        rejected_id = originate_with_approval(rejected_body)["id"]
         until(
             lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{rejected_id}'") == "BALANCE_STATE_UNKNOWN",
             "insufficient-cover outcome", 90,
@@ -937,7 +1010,7 @@ def main() -> None:
         rejected_journals = request(f"{ledger_endpoint}/transaction/{rejected_id}", token=token)
         assert rejected_journals == [], rejected_journals
         assert sql("balance", f"SELECT count(*) FROM balance_holds WHERE reference_id='{rejected_id}'") == "0"
-        assert request(settlement_endpoint, rejected_body, token)["id"] == rejected_id
+        assert originate_with_approval(rejected_body)["id"] == rejected_id
         after = balances_correct()
         assert after and [b["version"] for b in after] == [b["version"] for b in before]
         assert sql(
@@ -967,6 +1040,7 @@ def main() -> None:
                 "settlementStatus": "BOOKED" if recovery_evidence else expected_status,
                 "recovery": recovery_evidence,
                 "audit": audit_evidence,
+                "operatorApprovals": approval_evidence,
             },
             indent=2,
         )

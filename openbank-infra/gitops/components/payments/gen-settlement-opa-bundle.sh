@@ -21,7 +21,7 @@ SETTLEMENT_REST_EXT=$(cat << 'REGO'
 #                        workflow (POST /api/v1/settlements). debit -> credit ->
 #                        ledger-booking runs entirely inside the Temporal worker
 #                        (activities, not REST) once originated, so this is the
-#                        ONLY REST action this service exposes.
+#                        origination action. Separate approval endpoints serve human checkers.
 #
 # openbank-settlement-service -> money_path_services derived scope is "settlement"
 # (strip openbank- / -service) which already equals the real @Authorize prefix — no
@@ -42,7 +42,8 @@ allowed_reasons contains "operator-settlement-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action == "settlement.create"
+	input.action in {"settlement.create", "settlement.approval.read", "settlement.approval.decide"}
+	not startswith(input.principal.id, "service-account-")
 }
 
 # NO service-to-service (SERVICE/ROLE_SERVICE) allow rule exists here on purpose.

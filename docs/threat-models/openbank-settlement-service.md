@@ -471,3 +471,23 @@ retain the same settlement, hold reference and journal idempotency key. Never co
 release cover based only on timeout. Already scheduled activities keep their recorded deadlines;
 legacy saga timing is unchanged. The local crash proof kills only its owned worker after a real
 POSTED reply and requires one journal and same-run completion after restart.
+
+## Human origination approval binding
+
+The operator gate binds authorization to a versioned, length-prefixed SHA-256 digest of the full
+instruction, including idempotency key and both accounts. The server derives the binding; clients
+cannot supply it as an instruction field. A checker must submit the independently reviewed full
+instruction, whose binding must match before the decision. Authenticated maker/checker identities
+must differ. Request invariants are checked during deserialization, before authorization can create
+or consume an approval; the approval store rejects an absent or malformed binding.
+
+PostgreSQL locks serialize decisions and claims, while each transition and its outbox event commit
+in one transaction. Expiry limits authorization, not evidence retention. The common delivery queue
+uses generated aggregate references and separate foreign keys, so approval facts cannot point at
+settlement rows and settlement facts cannot point at approvals. A claimed authorization is not
+proof that a later financial operation committed. In particular, a lost reply must be reconciled
+against the original idempotency key; it never justifies a new key or a blind money correction.
+
+The operator gate covers origination. It does not add exemptions or broader grants to automated
+ledger posting, and it remains separately activated after target-environment acceptance. Local HTTP
+policy tests with test identities are not evidence of deployed OIDC, BFF or reviewer UX acceptance.

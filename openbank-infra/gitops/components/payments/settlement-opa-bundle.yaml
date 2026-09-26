@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: settlement-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "195a94c6b341943b"
+    openbank.tech/policy-checksum: "a5c353af6a614854"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -590,7 +590,7 @@ data:
     #                        workflow (POST /api/v1/settlements). debit -> credit ->
     #                        ledger-booking runs entirely inside the Temporal worker
     #                        (activities, not REST) once originated, so this is the
-    #                        ONLY REST action this service exposes.
+    #                        origination action. Separate approval endpoints serve human checkers.
     #
     # openbank-settlement-service -> money_path_services derived scope is "settlement"
     # (strip openbank- / -service) which already equals the real @Authorize prefix — no
@@ -611,7 +611,8 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	input.action == "settlement.create"
+    	input.action in {"settlement.create", "settlement.approval.read", "settlement.approval.decide"}
+    	not startswith(input.principal.id, "service-account-")
     }
 
     # NO service-to-service (SERVICE/ROLE_SERVICE) allow rule exists here on purpose.
@@ -1401,6 +1402,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller.
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1816,7 +1818,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only instruction-bound origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"

@@ -113,3 +113,34 @@ once the ledger confirms POSTED but before its reply reaches settlement. This ex
 new workflow only. Already scheduled activities retain the timeouts in their Temporal history;
 upgrading a worker does not shorten those timers or repair a legacy saga. Inspect the recorded
 activity deadlines and preserve the existing reconciliation procedure for those histories.
+
+## Operator approval before origination
+
+With `AUTHZ_FOUR_EYES_ENFORCE=true`, a human origination first returns `202` with an
+`approvalId`. No settlement exists yet. The server binds the approval to all five request fields:
+idempotency key, payer, payee, amount and currency. Equivalent decimal representations bind to the
+same amount. Changing any business instruction requires a new approval.
+
+A different authenticated operator reviews the full proposed instruction and submits it with
+`approve: true` in `PATCH /api/v1/settlements/approvals/{id}` as the `instruction` object.
+The server compares its binding to the maker's pending request. The checker must obtain and review
+that complete instruction through the operator workflow; the queue's opaque `resourceId` hash alone
+is insufficient to decide. Rejection uses `approve: false` and may omit the instruction.
+`GET /api/v1/settlements/approvals` lists pending approvals; `GET .../{id}` reads one unexpired record.
+Neither read grants authorization to execute it.
+
+After approval, the original maker retries the unchanged origination with `X-Approval-Id`.
+The authorization claim and its audit event commit together, and one claim can succeed. A consumed,
+expired or mismatched approval cannot authorize another execution. `EXECUTED` records that claim,
+not completion of the settlement or even successful creation of its row. If the subsequent business
+operation fails or its reply is lost, reconcile the original idempotency key and retained records
+before any retry or correction; never infer non-execution from a missing response.
+
+Before V6, pause outbox dispatch on old binaries, retaining pending records. Their native
+`RETURNING *` mapping does not support the new generated reference columns. Upgrade every
+dispatcher to the explicit result projection before resuming dispatch; do not roll back to a
+wildcard-query binary while V6 is present. Apply settlement V6 before enabling the approval gate. It retains approval history and uses generated foreign
+keys to bind state events to settlements and approval events to approval records in the same durable
+outbox. Keep new origination enforcement disabled until the target maker/checker, expiry, concurrent
+claim, audit rollback and real OIDC tests pass. Activation of this operator gate does not require
+adding a four-eyes exemption to the settlement worker's downstream journal calls.

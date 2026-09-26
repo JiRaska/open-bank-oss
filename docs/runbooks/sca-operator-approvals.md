@@ -61,7 +61,7 @@ a mocked service response. These checks do not prove production identity wiring 
 ## PostgreSQL approval-store cutover
 
 Pause governed operator mutations and let every live Redis approval finish or expire before
-replacing the writers. Apply V14, deploy every SCA writer using the PostgreSQL store, then
+replacing the writers. Apply V15, deploy every SCA writer using the PostgreSQL store, then
 exercise the enforced maker/checker flow before reopening traffic. Do not mix store versions:
 a Redis approval has no PostgreSQL row and must not silently authorize a request there.
 If a prior record must be investigated, retain its available audit evidence separately; do not

@@ -120,7 +120,8 @@ class SettlementOutboxRepositoryImpl(private val clock: Clock) :
                 LIMIT :claimLimit
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING *
+            RETURNING id, event_id, aggregate_id, event_type, payload, status, attempt_count,
+                      claimed_at, sent_at, last_error, created_at, updated_at, synthetic
         """
     }
 }

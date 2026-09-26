@@ -103,3 +103,16 @@ kover {
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
 }
+
+// Policy changes must invalidate the real HTTP approval proof, even without Kotlin changes.
+tasks.withType<Test>().configureEach {
+    val opaBundle = rootProject.file("openbank-infra/gitops/components/payments/settlement-opa-bundle.yaml")
+    val deployment = rootProject.file("openbank-infra/gitops/components/payments/payments-services.yaml")
+    inputs.file(opaBundle).withPropertyName("settlementOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(deployment).withPropertyName("settlementDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    val contract = rootProject.file("openbank-contracts/openbank-settlement-service/asyncapi.yaml")
+    inputs.file(contract).withPropertyName("settlementApprovalContract").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.settlement-contract", contract.absolutePath)
+    systemProperty("openbank.test.opa-bundle", opaBundle.absolutePath)
+    systemProperty("openbank.test.settlement-deployment", deployment.absolutePath)
+}
