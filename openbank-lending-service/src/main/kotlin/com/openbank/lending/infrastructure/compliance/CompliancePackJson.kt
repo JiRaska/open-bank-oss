@@ -7,8 +7,10 @@ package com.openbank.lending.infrastructure.compliance
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.lending.application.port.out.CompliancePackCodec
 import com.openbank.libs.lending.compliance.CompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackParser
+import jakarta.enterprise.context.ApplicationScoped
 
 /**
  * JSON front-end for [CompliancePackParser] — the adapter half of the port/adapter split
@@ -23,11 +25,26 @@ import com.openbank.libs.lending.compliance.CompliancePackParser
  *
  * It lived in openbank-libs-runtime until ADR-0317 phase 1; lending-service is its only
  * consumer, so it moved here rather than keep libs-runtime depending on the lending module.
+ *
+ * Implements the [CompliancePackCodec] outbound port (ADR-0002) so the application layer
+ * (`CompliancePackActivationService`) can depend on the interface instead of this concrete
+ * infrastructure class. A CDI bean, injected wherever the port is needed; the companion's
+ * static `fromJson` remains for the callers already inside this infrastructure package
+ * (`CompliancePackRefresher`) and tests, where depending on the concrete adapter directly is
+ * not a layering violation.
  */
-object CompliancePackJson {
+@ApplicationScoped
+class CompliancePackJson : CompliancePackCodec {
 
     private val mapper: ObjectMapper = ObjectMapper().registerKotlinModule()
 
     /** Strict, fail-closed: a malformed document or an unknown key rejects the pack whole. */
-    fun fromJson(json: String): CompliancePack = CompliancePackParser.fromMap(mapper.readValue(json))
+    override fun fromJson(json: String): CompliancePack = CompliancePackParser.fromMap(mapper.readValue(json))
+
+    companion object {
+        private val default = CompliancePackJson()
+
+        /** Static convenience for infrastructure-internal callers; identical decoding logic. */
+        fun fromJson(json: String): CompliancePack = default.fromJson(json)
+    }
 }

@@ -5,7 +5,7 @@
 package com.openbank.lending.application.usecase
 
 import com.openbank.lending.application.port.out.CompliancePackActivationRepository
-import com.openbank.lending.infrastructure.compliance.CompliancePackJson
+import com.openbank.lending.application.port.out.CompliancePackCodec
 import com.openbank.lending.infrastructure.persistence.entity.CompliancePackActivationEntity
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
@@ -48,10 +48,11 @@ class CompliancePackActivationService(
     private val activations: CompliancePackActivationRepository,
     private val registry: CompliancePackRegistry,
     private val clock: Clock,
+    private val compliancePackCodec: CompliancePackCodec,
 ) {
     fun propose(packJson: String, maker: String): Uni<PackActivationView> {
         require(maker.isNotBlank()) { "Proposer identity is required" }
-        val compiled = CompliancePackCompiler.compile(CompliancePackJson.fromJson(packJson))
+        val compiled = CompliancePackCompiler.compile(compliancePackCodec.fromJson(packJson))
         val now = OffsetDateTime.now(clock)
         // Idempotent replay (ADR-0297, #8351): a pack proposal is content-addressed — the
         // contentHash IS its natural key. A retried propose with the identical payload while the
@@ -154,7 +155,7 @@ class CompliancePackActivationService(
 
     private fun CompliancePackActivationEntity.toProposal(): Proposal<CompiledCompliancePack> = Proposal(
         id = id.toString(),
-        action = CompliancePackCompiler.compile(CompliancePackJson.fromJson(payload)),
+        action = CompliancePackCompiler.compile(compliancePackCodec.fromJson(payload)),
         proposedBy = proposedBy,
         proposedAt = proposedAt.toInstant(),
         state = state,
@@ -176,6 +177,6 @@ class CompliancePackActivationService(
         decidedAt = decidedAt?.toString(),
         proposedAt = proposedAt.toString(),
         decisionReason = decisionReason,
-        pack = CompliancePackJson.fromJson(payload),
+        pack = compliancePackCodec.fromJson(payload),
     )
 }

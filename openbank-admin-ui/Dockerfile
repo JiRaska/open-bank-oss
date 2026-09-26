@@ -186,8 +186,13 @@ COPY . /repo
 RUN set -e; \
     mkdir -p /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination; \
     cp /repo/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination/*.kt \
-       /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination/ 2>/dev/null || true; \
-    echo "── origination sources: $(ls /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination | wc -l) file(s) ──"; \
+       /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination/; \
+    count=$(ls /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination | wc -l); \
+    echo "── origination sources: ${count} file(s) ──"; \
+    if [ "$count" -eq 0 ]; then \
+        echo "ERROR: zero origination *.kt files copied — the source package moved or was renamed (ADR-0317); fix this collector stage's path, don't silently ship an empty graph" >&2; \
+        exit 1; \
+    fi; \
     ls /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination
 
 FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS deps
