@@ -5,31 +5,25 @@
 package com.openbank.securityscanner.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.security.application.port.out.IctIncidentRepository
 import com.openbank.securityscanner.domain.IncidentCategory
 import com.openbank.securityscanner.domain.IncidentSeverity
 import com.openbank.securityscanner.domain.IncidentStatus
 import io.mockk.coEvery
-import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import io.smallrye.reactive.messaging.kafka.Record
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
-import org.eclipse.microprofile.reactive.messaging.Emitter
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
 
 /**
  * Issue #3994/#5256: `IctIncidentService` is security-scanner's only live event producer (its
- * outbox apparatus was deleted entirely by #4709/#4940 — `V4__drop_security_outbox.sql`). It
- * publishes a hand-built map, not a serialised data class, straight to
- * `ict-incident-events-out` (`openbank.security.ict.incident`), so `sourceService` has to be
- * added at the map-construction call site rather than on a domain event type.
+ * lifecycle event is now handed to the broker through the transactional ICT incident outbox.
  *
  * `TopicAttribution` already resolves `openbank.security.ict.incident` -> `security-scanner`
  * correctly, but only as TOPIC-sourced — and audit-service DOES subscribe to this topic today
@@ -42,18 +36,11 @@ class IctIncidentServiceTest {
     private val objectMapper = ObjectMapper().findAndRegisterModules()
     private val repository = mockk<IctIncidentRepository>()
 
-    @Suppress("UNCHECKED_CAST")
-    private fun mockEmitter(): Emitter<Record<String, String>> = mockk<Emitter<Record<String, String>>> {
-        every { send(any()) } returns CompletableFuture.completedFuture(null)
-    }
-
     @Test
-    fun `reportIncident publishes sourceService on the ICT_INCIDENT_REPORTED event`(): Unit = runBlocking {
-        val emitter = mockEmitter()
-        val recordSlot = slot<Record<String, String>>()
-        every { emitter.send(capture(recordSlot)) } returns CompletableFuture.completedFuture(null)
-        coEvery { repository.save(any()) } answers { firstArg() }
-        val service = IctIncidentService(emitter, objectMapper, fixedClock, repository)
+    fun `reportIncident persists a strictly ordered ICT_INCIDENT_REPORTED event`(): Unit = runBlocking {
+        val eventSlot = slot<OutboxMessage>()
+        coEvery { repository.save(any(), capture(eventSlot)) } answers { firstArg() }
+        val service = IctIncidentService(objectMapper, fixedClock, repository)
 
         service.reportIncident(
             ReportIncidentCommand(
@@ -67,21 +54,23 @@ class IctIncidentServiceTest {
             ),
         )
 
-        val payload = objectMapper.readTree(recordSlot.captured.value())
+        val payload = objectMapper.readTree(eventSlot.captured.payload)
         assertThat(payload.get("eventType").asText()).isEqualTo("ICT_INCIDENT_REPORTED")
         assertThat(payload.get("sourceService").asText()).isEqualTo("security-scanner")
+        assertThat(payload.get("schemaVersion").asInt()).isEqualTo(1)
+        assertThat(payload.get("sourceVersion").asLong()).isPositive()
+        assertThat(payload.get("aggregateRevision").asLong()).isEqualTo(1)
+        assertThat(eventSlot.captured.createdAt).isEqualTo(fixedClock.instant())
     }
 
     @Test
     fun `updateStatus publishes sourceService on the ICT_INCIDENT_STATUS_CHANGED event`(): Unit = runBlocking {
-        val emitter = mockEmitter()
-        val recordSlot = slot<Record<String, String>>()
-        every { emitter.send(capture(recordSlot)) } returns CompletableFuture.completedFuture(null)
+        val eventSlot = slot<OutboxMessage>()
         val incidentId = UUID.randomUUID()
         val existing = existingIncident(incidentId)
         coEvery { repository.findIncident(incidentId) } returns existing
-        coEvery { repository.save(any()) } answers { firstArg() }
-        val service = IctIncidentService(emitter, objectMapper, fixedClock, repository)
+        coEvery { repository.save(any(), capture(eventSlot)) } answers { firstArg() }
+        val service = IctIncidentService(objectMapper, fixedClock, repository)
 
         service.updateStatus(
             id = incidentId,
@@ -92,9 +81,10 @@ class IctIncidentServiceTest {
             rpoMinutes = null,
         )
 
-        val payload = objectMapper.readTree(recordSlot.captured.value())
+        val payload = objectMapper.readTree(eventSlot.captured.payload)
         assertThat(payload.get("eventType").asText()).isEqualTo("ICT_INCIDENT_STATUS_CHANGED")
         assertThat(payload.get("sourceService").asText()).isEqualTo("security-scanner")
+        assertThat(payload.get("aggregateRevision").asLong()).isEqualTo(8)
     }
 
     private fun existingIncident(id: UUID) = com.openbank.securityscanner.domain.IctIncident(
@@ -116,5 +106,6 @@ class IctIncidentServiceTest {
         assignedTo = null,
         createdAt = Instant.now(fixedClock),
         updatedAt = Instant.now(fixedClock),
+        aggregateRevision = 7,
     )
 }

@@ -69,6 +69,10 @@ metadata:
   name: kyc-db-daily
   namespace: kyc
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 26 2 * * *"
   backupOwnerReference: self
   cluster:

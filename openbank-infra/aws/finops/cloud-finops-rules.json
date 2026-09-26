@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "description": "FinOps best-practice rules evaluated over `infracost breakdown --format json` by openbank-infra/scripts/cloud-finops-collect.py (ADR-0316). Every finding row in ClickHouse carries `rules_version`, so a change to this file is visible as a step in the compliance trend rather than read as the estate improving or regressing.",
+    "savings_note": "est_saving_ratio is a deliberately conservative fraction of the matched cost component's monthly cost, from AWS list-price deltas (gp2->gp3 is ~20% per GB; Graviton is ~20% per vCPU-hour; current-gen x86 over previous-gen is ~10%). They are estimates for ranking, not quotes.",
+    "refresh": "Edit in a PR; bump `version`. The unit tests in openbank-infra/scripts/cloud_finops_collect_test.py hold a known-positive and a known-negative fixture for every rule."
+  },
+  "version": "2026-09-25.1",
+  "environments": ["sandbox-platform", "sandbox-substrate", "web-prod"],
+  "required_tags": ["Project", "ManagedBy", "Env"],
+  "rules": {
+    "ebs-gp2-to-gp3": {
+      "severity": "medium",
+      "description": "gp2 EBS/RDS storage: gp3 is cheaper per GB with a higher baseline IOPS.",
+      "component_pattern": "\\bgp2\\b",
+      "est_saving_ratio": 0.2
+    },
+    "previous-generation-instance": {
+      "severity": "medium",
+      "description": "Previous-generation instance family: current generation is cheaper per unit of work.",
+      "families": ["t1", "t2", "m1", "m2", "m3", "m4", "c1", "c3", "c4", "r3", "r4", "i2", "d2", "g2", "p2", "x1"],
+      "est_saving_ratio": 0.1
+    },
+    "non-graviton-instance": {
+      "severity": "low",
+      "description": "x86 instance family with a Graviton (arm64) equivalent.",
+      "families": {
+        "t3": "t4g", "t3a": "t4g", "m5": "m7g", "m5a": "m7g", "m6i": "m7g", "m6a": "m7g", "m7i": "m7g", "m7a": "m7g",
+        "c5": "c7g", "c5a": "c7g", "c6i": "c7g", "c6a": "c7g", "c7i": "c7g", "c7a": "c7g",
+        "r5": "r7g", "r5a": "r7g", "r6i": "r7g", "r6a": "r7g", "r7i": "r7g", "r7a": "r7g"
+      },
+      "est_saving_ratio": 0.2
+    },
+    "missing-required-tags": {
+      "severity": "low",
+      "description": "Taggable resource missing a required cost-allocation tag (see required_tags).",
+      "est_saving_ratio": 0.0
+    },
+    "nat-gateway-per-az": {
+      "severity": "high",
+      "description": "More than one managed NAT Gateway in one project: each carries a fixed hourly charge; a single NAT (or fck-nat, ADR-0058) serves a non-production environment.",
+      "resource_type": "aws_nat_gateway",
+      "max_per_project": 1
+    }
+  }
+}

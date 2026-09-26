@@ -77,4 +77,7 @@ class SepaPaymentEntity : PanacheEntity() {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    @Column(name = "aggregate_revision", nullable = false)
+    var revision: Long = 0
 }

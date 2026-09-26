@@ -120,6 +120,84 @@ class PartyEntity : PanacheEntity() {
     /** ADR-0179: surviving party id — non-null iff [status] is MERGED. */
     @Column(name = "merged_into")
     var mergedInto: UUID? = null
+
+    /** Derived from the current `party_aml_profiles` row (V2 columns, first written by V25's feature). */
+    @Column(name = "pep_flag", nullable = false)
+    var pepFlag: Boolean = false
+
+    @Column(name = "pep_category")
+    var pepCategory: String? = null
+
+    @Column(name = "fatca_status")
+    var fatcaStatus: String? = null
+
+    @Column(name = "crs_status")
+    var crsStatus: String? = null
+}
+
+/** One declared version of a person's AML profile (V25). The newest row per party is [isCurrent]. */
+@Entity
+@Table(name = "party_aml_profiles")
+class PartyAmlProfileEntity : PanacheEntity() {
+    @Column(name = "party_id", nullable = false)
+    lateinit var partyId: UUID
+
+    @Column(name = "version", nullable = false)
+    var version: Int = 0
+
+    @Column(name = "is_current", nullable = false)
+    var isCurrent: Boolean = false
+
+    @Column(name = "purposes", nullable = false)
+    lateinit var purposes: String
+
+    @Column(name = "purpose_note")
+    var purposeNote: String? = null
+
+    @Column(name = "income_sources", nullable = false)
+    lateinit var incomeSources: String
+
+    @Column(name = "income_note")
+    var incomeNote: String? = null
+
+    @Column(name = "occupation", nullable = false)
+    lateinit var occupation: String
+
+    @Column(name = "occupation_note")
+    var occupationNote: String? = null
+
+    @Column(name = "expected_monthly_turnover", nullable = false)
+    lateinit var expectedMonthlyTurnover: String
+
+    @Column(name = "cash_intensive", nullable = false)
+    var cashIntensive: Boolean = false
+
+    @Column(name = "is_pep", nullable = false)
+    var isPep: Boolean = false
+
+    @Column(name = "pep_category")
+    var pepCategory: String? = null
+
+    @Column(name = "pep_detail")
+    var pepDetail: String? = null
+
+    @Column(name = "tax_residencies", nullable = false, columnDefinition = "TEXT")
+    lateinit var taxResidencies: String
+
+    @Column(name = "us_person", nullable = false)
+    var usPerson: Boolean = false
+
+    @Column(name = "truthful", nullable = false)
+    var truthful: Boolean = false
+
+    @Column(name = "risk_factors", nullable = false)
+    lateinit var riskFactors: String
+
+    @Column(name = "declared_at", nullable = false)
+    lateinit var declaredAt: Instant
+
+    @Column(name = "declared_by", nullable = false)
+    lateinit var declaredBy: String
 }
 
 @Entity

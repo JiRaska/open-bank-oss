@@ -158,7 +158,12 @@ class ClearingService(
                 )
                 batchRepo.save(batch).flatMap { savedBatch ->
                     val updatedItems = items.map {
-                        it.copy(batchId = savedBatch.id, status = ClearingStatus.IN_CLEARING)
+                        it.copy(
+                            batchId = savedBatch.id,
+                            status = ClearingStatus.IN_CLEARING,
+                            revision = it.revision + 1,
+                            updatedAt = now,
+                        )
                     }
                     itemRepo.saveAll(updatedItems).map { savedBatch }
                 }
@@ -188,14 +193,16 @@ class ClearingService(
             // SETTLED batch always has its settlement-leg intent durable; the actual journal
             // posting is the consumer's idempotent job.
             itemRepo.findByBatchId(batchId).flatMap { items ->
-                val updatedItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
+                val updatedItems = items.map {
+                    it.copy(status = ClearingStatus.SETTLED, revision = it.revision + 1, updatedAt = now)
+                }
                 batchRepo.settleWithEvents(
                     settled,
                     updatedItems,
                     listOf(
                         eventPublisher.batchSettledMessage(settled),
                         eventPublisher.netSettlementPostMessage(settled),
-                    ),
+                    ) + updatedItems.map(eventPublisher::itemClearedMessage),
                 )
             }
         }

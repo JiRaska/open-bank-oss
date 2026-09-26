@@ -33,6 +33,7 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { STATE_LABELS } from '@/components/lending/OriginationFlow'
 import { OriginationPipeline, type PipelineItem } from '@/components/lending/OriginationPipeline'
+import { currencyCode, formatMoney, type WireMoney } from '@/lib/lending/money'
 
 type Application = PipelineItem & { partyId: string }
 
@@ -51,7 +52,7 @@ type Loan = {
   id: string
   partyId: string
   status: string
-  principal?: { amount: number; currency: string }
+  principal?: WireMoney
   disbursedAt?: string
 }
 
@@ -65,6 +66,26 @@ const TERMINAL = new Set(['DISBURSED', 'WITHDRAWN', 'DECLINED', 'EXPIRED'])
 /** Loan states that are a problem rather than a stage. Kept small on purpose — a console that
  *  tints everything tints nothing. */
 const LOAN_TROUBLE = new Set(['DELINQUENT', 'DEFAULTED', 'WRITTEN_OFF'])
+
+/** Loans no longer on the book. The summary aggregates EVERY status, so without this a repaid or
+ *  written-off loan would still count as active and its principal as money lent out. */
+const LOAN_OFF_BOOK = new Set(['SETTLED', 'WITHDRAWN', 'UNWOUND', 'CLOSED', 'WRITTEN_OFF'])
+
+const LOAN_STATUS_LABELS: Record<string, { cs: string; en: string }> = {
+  ACTIVE: { cs: 'Aktivní', en: 'Active' },
+  DELINQUENT: { cs: 'Po splatnosti', en: 'Delinquent' },
+  DEFAULTED: { cs: 'V selhání', en: 'Defaulted' },
+  FORBEARANCE_ASSESSED: { cs: 'Úleva posouzena', en: 'Forbearance assessed' },
+  TERMINATION_NOTICED: { cs: 'Vypovězeno', en: 'Termination noticed' },
+  ACCELERATED: { cs: 'Zesplatněno', en: 'Accelerated' },
+  EARLY_REPAYMENT_REQUESTED: { cs: 'Žádost o předčasné splacení', en: 'Early repayment requested' },
+  SETTLEMENT_QUOTED: { cs: 'Vyčíslení doplatku', en: 'Settlement quoted' },
+  SETTLED: { cs: 'Splaceno', en: 'Settled' },
+  WITHDRAWN: { cs: 'Odstoupeno', en: 'Withdrawn' },
+  UNWOUND: { cs: 'Zrušeno', en: 'Unwound' },
+  CLOSED: { cs: 'Uzavřeno', en: 'Closed' },
+  WRITTEN_OFF: { cs: 'Odepsáno', en: 'Written off' },
+}
 
 const STALE_HOURS = 72
 
@@ -152,14 +173,18 @@ export default function LendingPage() {
     return l ? (language === 'cs' ? l.cs : l.en) : s
   }
 
-  const fmt = (m?: { amount: number; currency: string }) =>
-    m ? `${m.amount.toLocaleString(numberLocale)} ${m.currency}` : '—'
+  const loanLabel = (s: string) => {
+    const l = LOAN_STATUS_LABELS[s]
+    return l ? (language === 'cs' ? l.cs : l.en) : s
+  }
+
+  const fmt = (m?: WireMoney) => (m ? formatMoney(m.amount, currencyCode(m.currency), numberLocale) : '—')
 
   const unknownHint = error
     ? t('nedostupné', 'unavailable')
     : t('načítá se…', 'loading…')
 
-  const money = (n: number, ccy: string) => `${Math.round(n).toLocaleString(numberLocale)} ${ccy}`
+  const money = (n: number, ccy: string) => formatMoney(n, ccy, numberLocale)
 
   /** Headline figures, all computed from the SAME capped lists the tables show — so the page can
    *  never claim more than it fetched. */
@@ -168,9 +193,9 @@ export default function LendingPage() {
    *  half-real total is worse than an honestly capped one, because nothing on screen distinguishes
    *  them. */
   const kpi = useMemo(() => {
-    const ccy = loans[0]?.principal?.currency ?? applications[0]?.requestedAmount?.currency ?? 'CZK'
+    const ccy = currencyCode(loans[0]?.principal?.currency) ?? currencyCode(applications[0]?.requestedAmount?.currency) ?? 'CZK'
     const sumFor = (rows: StateSummary[], pick: (r: StateSummary) => MoneyTotal[] | undefined) =>
-      rows.flatMap(r => pick(r) ?? []).filter(m => m.currency === ccy).reduce((s, m) => s + m.amount, 0)
+      rows.flatMap(r => pick(r) ?? []).filter(m => currencyCode(m.currency) === ccy).reduce((s, m) => s + m.amount, 0)
 
     if (appSummary && loanSummary) {
       const openStates = appSummary.filter(r => !TERMINAL.has(r.status))
@@ -183,9 +208,12 @@ export default function LendingPage() {
         // The label says "active", so count ACTIVE — the aggregate carries every status, and
         // silently folding delinquent and defaulted loans in here would both change what the tile
         // means and double-count them against the "in trouble" tile beside it.
-        loanCount: loanSummary.filter(r => !LOAN_TROUBLE.has(r.status)).reduce((s, r) => s + r.count, 0),
-          // Exposure, in contrast, IS the whole book: a delinquent loan is still money lent out.
-      book: sumFor(loanSummary, r => r.principal),
+        loanCount: loanSummary
+          .filter(r => !LOAN_TROUBLE.has(r.status) && !LOAN_OFF_BOOK.has(r.status))
+          .reduce((s, r) => s + r.count, 0),
+        // Originated principal of every loan still on the book, troubled ones included. It is NOT the
+        // outstanding balance — this endpoint has no repayments — so the tile says "originally lent".
+        book: sumFor(loanSummary.filter(r => !LOAN_OFF_BOOK.has(r.status)), r => r.principal),
         openCount: openStates.reduce((s, r) => s + r.count, 0),
         requested: sumFor(openStates, r => r.requested),
         // Aging is per STATE here, not per application: the aggregate carries the oldest timestamp
@@ -257,7 +285,7 @@ export default function LendingPage() {
           label={t('Aktivní úvěry', 'Active loans')}
           value={kpi.confirmed ? kpi.loanCount : UNKNOWN}
           hint={kpi.confirmed
-            ? t(`jistina ${money(kpi.book, kpi.ccy)}`, `principal ${money(kpi.book, kpi.ccy)}`)
+            ? t(`původně půjčeno ${money(kpi.book, kpi.ccy)}`, `originally lent ${money(kpi.book, kpi.ccy)}`)
             : unknownHint}
           icon={<Wallet size={13} />}
         />
@@ -360,7 +388,7 @@ export default function LendingPage() {
                 <td style={td}><EntityChip type="party" id={l.partyId} /></td>
                 <td style={{ ...td, fontWeight: 600 }}>{fmt(l.principal)}</td>
                 <td style={td}>
-                  <StatusBadge status={l.status} tone={LOAN_TROUBLE.has(l.status) ? 'danger' : undefined} />
+                  <span title={l.status}><StatusBadge status={l.status} label={loanLabel(l.status)} tone={LOAN_TROUBLE.has(l.status) ? 'danger' : undefined} /></span>
                 </td>
                 <td style={{ ...td, color: 'var(--text-tertiary)', fontSize: 12 }}>
                   {l.disbursedAt ? new Date(l.disbursedAt).toLocaleString(dateLocale) : '—'}

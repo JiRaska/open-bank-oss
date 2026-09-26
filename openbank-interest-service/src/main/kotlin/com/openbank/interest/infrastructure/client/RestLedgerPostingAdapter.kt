@@ -8,6 +8,8 @@ import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.LedgerPostingPort
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
+import java.time.LocalDate
 
 /**
  * Binds [LedgerPostingPort] to `openbank-ledger-service` over REST (ADR-0033 §D): builds the
@@ -20,11 +22,21 @@ import jakarta.enterprise.context.ApplicationScoped
  * it, and never crediting the customer. Interest-service already carries a hard REST dependency on
  * transaction-service for the remittance leg, so there is no offline-build story to protect; the
  * rest-client is lazy and the service still boots with the ledger unreachable.
+ *
+ * The booking date is today's ledger business date ([CapitalizationJournalFactory.LEDGER_ZONE]),
+ * read at post time, so a capitalization completed late books forward into the open day instead of
+ * back into a closed one — see [CapitalizationJournalFactory.buildRequest].
  */
 @ApplicationScoped
 class RestLedgerPostingAdapter(private val guard: LedgerCallGuard, private val config: InterestLedgerConfig) :
     LedgerPostingPort {
 
-    override fun post(posting: CapitalizationPosting): Uni<Unit> =
-        guard.postJournal(CapitalizationJournalFactory.buildRequest(posting, config)).replaceWith(Unit)
+    /** Overridable only so a test can pin "today"; production reads the system clock. */
+    internal var clock: Clock = Clock.systemUTC()
+
+    override fun post(posting: CapitalizationPosting): Uni<Unit> {
+        val bookingDate = LocalDate.now(clock.withZone(CapitalizationJournalFactory.LEDGER_ZONE))
+        return guard.postJournal(CapitalizationJournalFactory.buildRequest(posting, config, bookingDate))
+            .replaceWith(Unit)
+    }
 }

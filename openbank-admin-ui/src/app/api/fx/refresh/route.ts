@@ -3,12 +3,23 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/auth'
+import { hasPermission } from '@/lib/auth/roles'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
+  if (!hasPermission(session.user.roles ?? [], 'payments:view')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const body = await req.json().catch(() => ({}))
-  const source: 'cnb' | 'ecb' | 'all' = body?.source ?? 'all'
+  const source = body?.source ?? 'all'
+  if (source !== 'cnb' && source !== 'ecb' && source !== 'all') {
+    return NextResponse.json({ error: 'Invalid source' }, { status: 400 })
+  }
 
   const results: Record<string, { ok: boolean; count?: number; error?: string; syncedAt: string }> = {}
   const now = new Date().toISOString()

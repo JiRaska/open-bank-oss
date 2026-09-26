@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.14.0...sanctions-service-v0.14.1) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.2...sanctions-service-v0.14.0) (2026-09-24)
+
+
+### Features
+
+* **sanctions:** import the Czech national sanctions list (MZV) ([#10759](https://github.com/JiRaska/open-bank-oss/issues/10759)) ([b2f95c3](https://github.com/JiRaska/open-bank-oss/commit/b2f95c3556ff8eb5d7941c82a1612998ffce78c6)), closes [#10757](https://github.com/JiRaska/open-bank-oss/issues/10757)
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.1...sanctions-service-v0.13.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **sanctions:** keep multi-line quoted CSV fields in one record ([#10735](https://github.com/JiRaska/open-bank-oss/issues/10735)) ([b810036](https://github.com/JiRaska/open-bank-oss/commit/b8100369f96e18a1a86bc6525654316723bcef1f)), closes [#10734](https://github.com/JiRaska/open-bank-oss/issues/10734)
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.13.0...sanctions-service-v0.13.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **sanctions:** report list size, not upserted-row delta, as entry count ([#10722](https://github.com/JiRaska/open-bank-oss/issues/10722)) ([550a6d6](https://github.com/JiRaska/open-bank-oss/commit/550a6d6c74c876bbc139837cfa44fefb0e1901fd)), closes [#10721](https://github.com/JiRaska/open-bank-oss/issues/10721)
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.12.0...sanctions-service-v0.13.0) (2026-09-13)
+
+
+### Features
+
+* **sanctions:** answer 202 on refresh-all and defer imports to the scheduler ([#9184](https://github.com/JiRaska/open-bank-oss/issues/9184)) ([056d5e7](https://github.com/JiRaska/open-bank-oss/commit/056d5e774a16702e590030c6d6b74295b9920c15))
+
+
+### Bug Fixes
+
+* **sanctions:** guard sanctions_outbox created_at plausibility at INSERT ([#9319](https://github.com/JiRaska/open-bank-oss/issues/9319)) ([33d0d87](https://github.com/JiRaska/open-bank-oss/commit/33d0d87f81cf5434db710f3c7374b189b8385ec6))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.2...sanctions-service-v0.12.0) (2026-09-08)
 
 

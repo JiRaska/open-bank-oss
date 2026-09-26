@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from weasyprint import HTML, default_url_fetcher
 
-HOST = "0.0.0.0"  # noqa: S104 - deliberate: this is a containerized sidecar, bound per-pod
+HOST = "0.0.0.0"  # deliberate: this is a containerized sidecar, bound per-pod
 PORT = 8200
 
 # Deliberate, documented bound (ADR-0162 "new template content is a new
@@ -75,7 +75,7 @@ def restricted_url_fetcher(url: str, timeout: int = 10, ssl_context: object = No
 class RenderHandler(BaseHTTPRequestHandler):
     server_version = "openbank-document-renderer/1.0"
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:
         # Silence BaseHTTPRequestHandler's default stderr access log — we
         # emit our own structured JSON line per request instead (_log_json).
         pass

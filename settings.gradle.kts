@@ -87,3 +87,15 @@ rootDir.listFiles { f ->
     .map { it.name }
     .sorted()
     .forEach { include(":$it") }
+
+// FreeMarker floor on every project's BUILDSCRIPT classpath (GHSA-27j2-h3m2-8237, CVE-2026-84939:
+// template-loading path traversal, fixed in 2.3.35). The Kover Gradle plugin, applied through
+// build-logic's convention plugin, drags FreeMarker 2.3.32 onto each service's `classpath`
+// configuration. The force() in build-logic/build.gradle.kts only covers build-logic's own
+// compile classpath; it does not reach the classpath a service's buildscript resolves, so the
+// floor has to be applied here as well. Build-time only: no service ships FreeMarker.
+gradle.beforeProject {
+    buildscript.configurations.configureEach {
+        resolutionStrategy.force("org.freemarker:freemarker:2.3.35")
+    }
+}

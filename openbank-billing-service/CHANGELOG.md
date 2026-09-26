@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.2...billing-service-v0.13.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.1...billing-service-v0.13.2) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.0...billing-service-v0.13.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **billing:** guard billing_outbox created_at plausibility at INSERT ([#9300](https://github.com/JiRaska/open-bank-oss/issues/9300)) ([fa44aa2](https://github.com/JiRaska/open-bank-oss/commit/fa44aa2ad8483db20cf4dc68b7a4c54207332857))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.12.0...billing-service-v0.13.0) (2026-09-01)
 
 

@@ -45,6 +45,16 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    # #10486 batch 6: the incentive offer read no longer rides the shared openbank-services principal.
+    # IncentiveServiceClient selects this NAMED client (@OidcClientFilter("m2m")), so its principal is
+    # service-account-openbank-campaign (ROLE_API only), admitted by incentive-service's named-caller check.
+    m2m:
+      auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
+      client-id: openbank-campaign
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   # REST clients. The URL MUST live under `quarkus.rest-client.<configKey>.url` — this is the
   # only key `@RegisterRestClient(configKey = ...)` reads.

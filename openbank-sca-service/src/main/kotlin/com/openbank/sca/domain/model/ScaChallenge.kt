@@ -52,6 +52,14 @@ enum class ScaPurpose {
      * states no operation is what authorises it; binding it to the proposal's amount and
      * account needs a proposal-shaped [DynamicLinkingData] and is tracked separately. */
     SAVINGS_WITHDRAW_APPROVAL,
+
+    /** A co-signature on a business approval request (multi-signature payments, trusted payees,
+     * signing-policy changes — #10281 item 2). Dynamic-linked to the approval request AND the
+     * SHA-256 of its frozen payload ([DynamicLinkingData.approvalRequestId] /
+     * [DynamicLinkingData.payloadSha256]); for a PAYMENT approval also to amount, currency and
+     * creditor. The evidence therefore says "I signed THIS frozen instruction", and a signature
+     * collected for one approval can never be spent on another or on an edited payload. */
+    APPROVAL,
 }
 
 enum class ScaStatus {
@@ -83,6 +91,19 @@ data class ScaChallenge(
      */
     val consumedAt: OffsetDateTime? = null,
     val createdAt: OffsetDateTime,
+    /**
+     * The entity the human acts for (`X-Acting-For` at the edge), when any. Context only: the
+     * challenge still belongs to [partyId], the human, and only that human's device can decide it.
+     */
+    val onBehalfOfPartyId: UUID? = null,
+    /**
+     * Who decided, read from the enrolled device that signed the decision (#10281 item 3). Written
+     * when the decision resolves the challenge, so the challenge row alone answers "who approved"
+     * without joining the transient decision store or the device table.
+     */
+    val decidedByPartyId: UUID? = null,
+    /** The credential that signed the decision; paired with [decidedByPartyId]. */
+    val decidedByCredentialId: String? = null,
 ) {
     fun isExpired(now: OffsetDateTime): Boolean = now.isAfter(expiresAt)
     fun isCompleted(): Boolean = status == ScaStatus.COMPLETED
@@ -127,6 +148,10 @@ data class DynamicLinkingData(
      * lock-step deployment of two services. It is opaque here and compared byte-for-byte.
      */
     val cardAction: String? = null,
+    /** The business approval request this challenge co-signs, for [ScaPurpose.APPROVAL]. Opaque, compared byte-for-byte. */
+    val approvalRequestId: String? = null,
+    /** SHA-256 (hex) of the approval request's frozen payload, for [ScaPurpose.APPROVAL]. Compared case-insensitively. */
+    val payloadSha256: String? = null,
 ) {
     /**
      * Does this signed linking data authorise exactly the operation the caller is about to
@@ -154,6 +179,8 @@ data class DynamicLinkingData(
         ceremonyId: String? = null,
         cardId: String? = null,
         cardAction: String? = null,
+        approvalRequestId: String? = null,
+        payloadSha256: String? = null,
     ): Boolean {
         if (!amountEq(this.amount, amount)) return false
         if (!normEq(this.currency, currency)) return false
@@ -162,6 +189,8 @@ data class DynamicLinkingData(
         if (this.ceremonyId != ceremonyId) return false
         if (!normEq(this.cardId, cardId)) return false
         if (this.cardAction != cardAction) return false
+        if (this.approvalRequestId != approvalRequestId) return false
+        if (!normEq(this.payloadSha256, payloadSha256)) return false
         return true
     }
 }

@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.rest.dto
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
@@ -40,6 +41,16 @@ class DelegationDtosTest {
         assertThat(response.exposure?.maxViews).isEqualTo(1)
         assertThat(response.exposure?.redactionRules).containsExactly("credits-only")
         assertThat(response.status).isEqualTo(DelegationStatus.ACTIVE)
+    }
+
+    @Test
+    fun `DelegationResponse carries a review audience without turning it into an access right`() {
+        val response = DelegationResponse.from(
+            grant().copy(recertificationAudience = DelegationRecertificationAudience.FOP),
+        )
+
+        assertThat(response.recertificationAudience).isEqualTo(DelegationRecertificationAudience.FOP)
+        assertThat(response.capabilities).containsExactly(DelegationCapability.OBJECT_READ)
     }
 
     /**

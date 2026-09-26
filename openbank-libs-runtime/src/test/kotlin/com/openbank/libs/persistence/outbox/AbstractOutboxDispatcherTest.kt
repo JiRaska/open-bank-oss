@@ -19,7 +19,11 @@ class AbstractOutboxDispatcherTest {
     private class FakeRepo(private val rows: List<OutboxEntry>) : OutboxRepository {
         val sent = mutableListOf<UUID>()
         val failed = mutableListOf<Pair<UUID, String>>()
-        override suspend fun listProcessable(limit: Int): List<OutboxEntry> = rows.take(limit)
+        val requestedLimits = mutableListOf<Int>()
+        override suspend fun listProcessable(limit: Int): List<OutboxEntry> {
+            requestedLimits += limit
+            return rows.take(limit)
+        }
         override suspend fun markSent(eventId: UUID, sentAt: Instant) {
             sent += eventId
         }
@@ -54,6 +58,7 @@ class AbstractOutboxDispatcherTest {
         override val outboxEventPublisher: OutboxEventPublisher,
         service: String? = null,
         metrics: DomainMetrics = mockk(relaxed = true),
+        override val dispatchBatchSize: Int = DEFAULT_BATCH_SIZE,
     ) : AbstractOutboxDispatcher(metrics) {
         override val service: String = service ?: super.service
         suspend fun runBatch() = dispatchScheduledBatch()
@@ -88,6 +93,41 @@ class AbstractOutboxDispatcherTest {
         // repo marks sent after successful publish
         assertThat(repo.sent).containsExactly(rows[0].eventId, rows[1].eventId)
         assertThat(repo.failed).isEmpty()
+    }
+
+    @Test
+    fun `dispatchScheduledBatch forwards a service-specific claim limit`() {
+        val rows = (1..300).map { entry("clearing.item.$it") }
+        val repo = FakeRepo(rows)
+        val dispatcher = TestOutboxDispatcher(
+            repo,
+            FakePublisher(),
+            dispatchBatchSize = 250,
+        )
+
+        runBlocking { dispatcher.runBatch() }
+
+        assertThat(repo.requestedLimits).containsExactly(250)
+        assertThat(repo.sent).hasSize(250)
+    }
+
+    @Test
+    fun `dispatchScheduledBatch rejects unsafe claim limits before reading the repository`() {
+        for (unsafeLimit in listOf(0, AbstractOutboxDispatcher.MAX_BATCH_SIZE + 1)) {
+            val repo = FakeRepo(listOf(entry("clearing.item.cleared")))
+            val dispatcher = TestOutboxDispatcher(
+                repo,
+                FakePublisher(),
+                dispatchBatchSize = unsafeLimit,
+            )
+
+            val error = org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
+                runBlocking { dispatcher.runBatch() }
+            }
+
+            assertThat(error.message).isEqualTo("outbox dispatch batch size must be between 1 and 1000")
+            assertThat(repo.requestedLimits).isEmpty()
+        }
     }
 
     @Test

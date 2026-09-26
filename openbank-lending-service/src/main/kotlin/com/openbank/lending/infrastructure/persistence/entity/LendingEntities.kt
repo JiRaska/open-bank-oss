@@ -6,6 +6,8 @@ package com.openbank.lending.infrastructure.persistence.entity
 
 import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
+import com.openbank.lending.domain.model.LoanRateIndex
+import com.openbank.lending.domain.model.LoanRateType
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.lending.AmortizationMethod
@@ -52,6 +54,23 @@ class LoanApplicationEntity : PanacheEntityBase() {
     @Column(name = "nominal_annual_rate", precision = 10, scale = 6)
     var nominalAnnualRate: BigDecimal = BigDecimal.ZERO
 
+    @Column(name = "rate_type", length = 8)
+    @Enumerated(EnumType.STRING)
+    var rateType: LoanRateType = LoanRateType.FIXED
+
+    @Column(name = "rate_index", length = 16)
+    @Enumerated(EnumType.STRING)
+    var rateIndex: LoanRateIndex? = null
+
+    @Column(name = "spread", precision = 10, scale = 6)
+    var spread: BigDecimal? = null
+
+    @Column(name = "reset_frequency_months")
+    var resetFrequencyMonths: Int? = null
+
+    @Column(name = "next_reset_date")
+    var nextResetDate: LocalDate? = null
+
     @Column(name = "term_periods")
     var termPeriods: Int = 0
 
@@ -93,6 +112,15 @@ class LoanApplicationEntity : PanacheEntityBase() {
 
     @Column(name = "existing_debt_service_monthly", precision = 20, scale = 2)
     var existingDebtServiceMonthly: BigDecimal? = null
+
+    @Column(name = "existing_debt_outstanding", precision = 20, scale = 2)
+    var existingDebtOutstanding: BigDecimal? = null
+
+    @Column(name = "decision_dsti", precision = 38, scale = 18)
+    var decisionDsti: BigDecimal? = null
+
+    @Column(name = "decision_dti", precision = 38, scale = 18)
+    var decisionDti: BigDecimal? = null
 
     @Column(name = "age_years")
     var ageYears: Int? = null
@@ -173,6 +201,23 @@ class LoanEntity : PanacheEntityBase() {
 
     @Column(name = "nominal_annual_rate", precision = 10, scale = 6)
     var nominalAnnualRate: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "rate_type", length = 8)
+    @Enumerated(EnumType.STRING)
+    var rateType: LoanRateType = LoanRateType.FIXED
+
+    @Column(name = "rate_index", length = 16)
+    @Enumerated(EnumType.STRING)
+    var rateIndex: LoanRateIndex? = null
+
+    @Column(name = "spread", precision = 10, scale = 6)
+    var spread: BigDecimal? = null
+
+    @Column(name = "reset_frequency_months")
+    var resetFrequencyMonths: Int? = null
+
+    @Column(name = "next_reset_date")
+    var nextResetDate: LocalDate? = null
 
     @Column(name = "term_periods")
     var termPeriods: Int = 0
@@ -326,7 +371,7 @@ class LoanProvisioningEntity : PanacheEntityBase() {
     @Column(name = "loan_id", columnDefinition = "uuid")
     var loanId: UUID = Ids.newId()
 
-    @Column(name = "period", length = 7)
+    @Column(name = "period", length = 10)
     var period: String = ""
 
     @Column(name = "as_of")

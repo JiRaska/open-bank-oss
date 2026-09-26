@@ -63,6 +63,15 @@ const BUNDLE_ONLY_DOCS_IDS = new Set(['libs'])
 // which is honest. Remove an id from here once its Deployment lands.
 const NOT_YET_DEPLOYED = new Set(['openbank-analytics-sink'])
 
+// BFF SERVICE_MAP keys for a service whose gitops workload has not landed yet. Off-cluster the
+// entry already routes; in-cluster the key resolves to nothing and the page degrades to
+// "not deployed", which is honest. Each key must still name a real module directory. Remove a
+// key once its workload lands (deliberately not asserted: the gitops PR may not run this suite,
+// and a stale-exemption failure would then redden main unseen).
+// Empty: treasury-service (ADR-0315) was the bridged key until its workload landed with the
+// service's own gitops component (#10618).
+const SERVICE_MAP_NOT_YET_DEPLOYED = new Set<string>()
+
 // ── Truth sources, re-derived from the repo ────────────────────────────────
 
 /** Every `openbank-*` module directory that actually exists in the monorepo. */
@@ -314,7 +323,7 @@ describe('service registry drift guard', () => {
     // workload name, so a key that matches nothing 404s no matter what the
     // off-cluster container/port say.
     const workloads = gitopsWorkloadNames()
-    const bogus = serviceMapKeys().filter(k => !workloads.has(k))
+    const bogus = serviceMapKeys().filter(k => !workloads.has(k) && !SERVICE_MAP_NOT_YET_DEPLOYED.has(k))
     expect(
       bogus,
       `SERVICE_MAP keys matching no Deployment/Service/Rollout in openbank-infra/gitops. `
@@ -322,6 +331,15 @@ describe('service registry drift guard', () => {
       + `"Unknown service" and every caller of /api/svc/<key> degrades to "not deployed": `
       + `${bogus.join(', ')}`,
     ).toEqual([])
+  })
+
+  it('a not-yet-deployed SERVICE_MAP exemption names a real module and a real SERVICE_MAP key', () => {
+    const dirs = moduleDirs()
+    const keys = new Set(serviceMapKeys())
+    for (const key of SERVICE_MAP_NOT_YET_DEPLOYED) {
+      expect(keys.has(key), `${key} is exempted but not in SERVICE_MAP — drop the exemption`).toBe(true)
+      expect(dirs.has(`openbank-${key}`), `${key} names no openbank-* module directory`).toBe(true)
+    }
   })
 
   it('every svcUrl() key exists in SERVICE_MAP (no caller pointing at an unknown service)', () => {
@@ -540,6 +558,10 @@ describe('service registry drift guard', () => {
     expect(
       NOT_YET_DEPLOYED.size,
       'NOT_YET_DEPLOYED should shrink as services onboard to GitOps, never grow casually',
+    ).toBeLessThanOrEqual(1)
+    expect(
+      SERVICE_MAP_NOT_YET_DEPLOYED.size,
+      'SERVICE_MAP_NOT_YET_DEPLOYED is a bridge for one service whose workload is in flight, not a parking lot',
     ).toBeLessThanOrEqual(1)
     for (const container of NOT_YET_DEPLOYED) {
       expect(existsSync(path.join(REPO, container)), `${container} must still be a real module`).toBe(true)

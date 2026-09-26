@@ -15,6 +15,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import java.math.BigDecimal
 
 /**
  * RestClient binding to `openbank-product-catalog`'s product read endpoint — narrow, mirroring
@@ -38,7 +39,20 @@ data class ProductClientResponse(
     val id: String,
     val code: String,
     val name: String? = null,
+    val currency: String? = null,
     val termsAndConditions: List<TermsAndConditionsClientResponse> = emptyList(),
+    // The business fee schedule (SAZEBNIK_PO) renders these rows verbatim.
+    val fees: List<FeeClientResponse> = emptyList(),
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class FeeClientResponse(
+    val name: String,
+    val amount: BigDecimal,
+    val currency: String,
+    val frequency: String,
+    val description: String? = null,
+    val waiveCondition: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

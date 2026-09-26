@@ -49,7 +49,13 @@ function midOf(bid: number | null, ask: number | null): number | null {
 /** Three calendar months before `to` (by DATE, not a row-count approximation), through `to`. */
 export function defaultTrendWindow(to: Date = new Date()): { from: string; to: string } {
   const from = new Date(to)
+  const dayOfMonth = from.getUTCDate()
+  // Move from day 1 before changing months: Date.setUTCMonth otherwise overflows
+  // May 31 -> March 3 instead of clamping to February 28 like java.time.minusMonths.
+  from.setUTCDate(1)
   from.setUTCMonth(from.getUTCMonth() - 3)
+  const lastDayOfTargetMonth = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0)).getUTCDate()
+  from.setUTCDate(Math.min(dayOfMonth, lastDayOfTargetMonth))
   return { from: from.toISOString(), to: to.toISOString() }
 }
 

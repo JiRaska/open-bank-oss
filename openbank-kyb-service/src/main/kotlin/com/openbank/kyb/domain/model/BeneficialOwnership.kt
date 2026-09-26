@@ -64,6 +64,12 @@ data class BeneficialOwner(
     val notifiedOn: LocalDate?,
     /** True when the "owner" is itself a company or a legal person, so the chain does not end here. */
     val corporate: Boolean,
+    /** Register record path within the queried company; never a cross-company person identity. */
+    val sourceRecordRef: String? = null,
+    /** Corporate registration number as filed; insufficient alone to identify a company globally. */
+    val registrationNumber: String? = null,
+    /** Filing jurisdiction as published; preserve it with the number for later reviewed resolution. */
+    val countryRegistered: String? = null,
 )
 
 /**

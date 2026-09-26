@@ -1,8 +1,9 @@
 # Kyverno ClusterPolicies (ADR-0029/0030 D4). Separate from the `kyverno` app
 # (the Helm chart / engine) so the policy manifests under gitops/components/
 # kyverno/ are GitOps-owned instead of applied out-of-band with kubectl. Holds
-# the `verify-openbank-image-signatures` policy that verifies every openbank-*
-# image against the Cosign KMS public key at admission.
+# the `verify-openbank-image-sbom-attestation` policy that verifies every openbank-*
+# image's Cosign signature and CycloneDX attestation against the KMS public key
+# at admission.
 #
 # Namespace is nominal (ClusterPolicy is cluster-scoped); the kyverno ns already
 # exists from the `kyverno` app. The retry backoff rides out the brief window

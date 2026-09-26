@@ -75,6 +75,12 @@ data class BusinessOnboardingCase(
     val reviewReason: String?,
     /** The entity party has passed the KYC + AML gate (ADR-0267) — may arrive before or after the last signature. */
     val entityPartyActive: Boolean = false,
+    /** AML / FATCA / CRS answers; null until the customer answered them. */
+    val questionnaire: Questionnaire? = null,
+    /** UBO confirmation, PEP and truthfulness declarations; null until made. */
+    val declarations: Declarations? = null,
+    /** The rendered framework agreement and its signature ceremony; null until prepared. */
+    val agreement: AgreementRecord? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -90,8 +96,10 @@ data class BusinessOnboardingCase(
      *
      * [decision] is what the attestation store says about THIS entity's current rule text (#9711).
      * The parser's own verdict never reaches [requiredSignatures] any more: it is a suggestion the
-     * operator sees, and only [RepresentationDecision.Attested] — a human's confirmation of this
-     * exact text — lets a case proceed automatically. Everything else reviews.
+     * operator sees, and only [RepresentationDecision.Attested] — a confirmation of this exact text —
+     * lets a case proceed automatically. That confirmation is a human's, except for the one case no
+     * text can make ambiguous (a single statutory member with a SOLE rule), which the attestation
+     * service confirms itself. Everything else reviews.
      */
     fun registryVerified(
         extract: RegistryExtract,
@@ -258,30 +266,47 @@ data class BusinessOnboardingCase(
         copy(entityPartyId = partyId, updatedAt = at)
 
     /**
-     * The initiator claims to be the listed representative at [representativeIndex]. A sole
-     * trader is always their own (and only) representative. A claim that does not match a
-     * listed person is not refused — it is a power-of-attorney situation and goes to review.
+     * The initiator says which listed representative they are, and party-service's VERIFIED record of
+     * who they are decides whether that is true — the request's claimed name is never trusted for it.
+     * Deliberately asymmetric outcomes:
+     *
+     *  - identity not verified, not a listed representative, or the name does not match → refused
+     *    ([InitiatorIdentityMismatchException]). Opening an entity's account on someone else's behalf
+     *    is not a review case; it is not allowed.
+     *  - the name matches but the register's address for that person and the verified address
+     *    disagree → MANUAL_REVIEW. People move and registers lag; a human looks, nobody is refused.
+     *  - both agree → the signing mechanics below.
      */
-    fun initiatorMatched(
-        representativeIndex: Int?,
-        claimedName: String,
-        dateOfBirth: LocalDate?,
-        at: Instant,
-    ): BusinessOnboardingCase {
+    fun initiatorMatched(representativeIndex: Int?, identity: InitiatorIdentity, at: Instant): BusinessOnboardingCase {
         require(status == CaseStatus.REGISTRY_VERIFIED) { "initiator can only be matched after registry verification" }
         val ex = requireNotNull(extract)
-        val rep = representativeIndex?.let { ex.representatives.getOrNull(it) }
-        if (!ex.isSoleTrader && rep == null) {
-            return copy(
+        if (!identity.verified) {
+            throw InitiatorIdentityMismatchException("complete identity verification before onboarding a company")
+        }
+        // A sole trader IS the single listed representative, whatever index the client sent.
+        val rep = if (ex.isSoleTrader) {
+            ex.representatives.firstOrNull()
+        } else {
+            representativeIndex?.let(
+                ex.representatives::getOrNull,
+            )
+        }
+        if (rep == null || !isVerifiedAs(ex, rep, identity)) {
+            throw InitiatorIdentityMismatchException(
+                "the verified identity does not match a listed representative of ${ex.legalName} — an account " +
+                    "can only be opened by a person the register lists as able to act for the entity",
+            )
+        }
+        val signer = initiatorSigner(representativeIndex, rep.fullName, rep.dateOfBirth, at)
+        val next = copy(status = CaseStatus.INITIATOR_MATCHED, signers = listOf(signer), updatedAt = at)
+        if (IdentityMatch.addressConflicts(rep.address, identity.address)) {
+            return next.copy(
                 status = CaseStatus.MANUAL_REVIEW,
-                reviewReason = "initiator '$claimedName' is not a listed representative — power of attorney required",
-                signers = listOf(initiatorSigner(null, claimedName, dateOfBirth, at)),
+                reviewReason = "the initiator matches ${rep.fullName} by name, but the register's address for that " +
+                    "person differs from the verified address — confirm it is the same person",
                 updatedAt = at,
             )
         }
-        val signer =
-            initiatorSigner(representativeIndex, rep?.fullName ?: claimedName, rep?.dateOfBirth ?: dateOfBirth, at)
-        val next = copy(status = CaseStatus.INITIATOR_MATCHED, signers = listOf(signer), updatedAt = at)
         // A one-signature rule is ready immediately — unless it NAMES the office, in which case the
         // initiator has to actually hold it. Without this clause a single-office rule would skip
         // the check in `cosignersInvited` entirely, because it never invites anyone.
@@ -294,6 +319,13 @@ data class BusinessOnboardingCase(
             next.copy(status = CaseStatus.MANUAL_REVIEW, reviewReason = e.message, updatedAt = at)
         }
     }
+
+    private fun isVerifiedAs(ex: RegistryExtract, rep: Representative, identity: InitiatorIdentity): Boolean =
+        if (ex.isSoleTrader) {
+            IdentityMatch.soleTraderIs(rep.fullName, identity.legalName)
+        } else {
+            IdentityMatch.samePerson(rep.fullName, identity.legalName)
+        }
 
     private fun initiatorSigner(index: Int?, name: String, dob: LocalDate?, at: Instant) = Signer(
         id = Ids.newId(),
@@ -372,8 +404,13 @@ data class BusinessOnboardingCase(
         return copy(signers = updated, updatedAt = at).recomputeReadiness(at)
     }
 
-    /** One identified signer has completed the signature ceremony. */
-    fun signed(partyId: UUID, signatureRef: String, at: Instant): BusinessOnboardingCase {
+    /**
+     * The checks that must hold before anyone asks document-service about the ceremony: signing is
+     * open, [partyId] is an identified signer, the agreement exists, THIS signer accepted its
+     * annexes, and [signatureRef] names the case's own ceremony — never an arbitrary string.
+     */
+    @Suppress("ThrowsCount") // one distinct, client-visible refusal per precondition
+    fun requireSignable(partyId: UUID, signatureRef: String): Signer {
         require(status == CaseStatus.READY_TO_SIGN || status == CaseStatus.AWAITING_COSIGNERS) {
             "signing is not open in status $status"
         }
@@ -384,6 +421,37 @@ data class BusinessOnboardingCase(
         ) {
             throw CaseTransitionException("signer is ${signer.status}, expected IDENTIFIED")
         }
+        val a = agreement ?: throw AgreementConflictException(
+            AgreementConflictException.NOT_PREPARED,
+            "the business agreement has not been prepared for this case",
+        )
+        if (!a.acceptedByParty(partyId)) {
+            throw AgreementConflictException(
+                AgreementConflictException.DISCLOSURES_NOT_ACCEPTED,
+                "accept the agreement's disclosure documents before signing",
+            )
+        }
+        if (signatureRef != a.ceremonyId.toString()) {
+            throw AgreementConflictException(
+                AgreementConflictException.SIGNATURE_REF_MISMATCH,
+                "signatureRef must be this case's signature ceremony id",
+            )
+        }
+        return signer
+    }
+
+    /**
+     * One identified signer has completed the signature ceremony. After the LAST required signature
+     * the AML risk flags decide: any flag sends the case to MANUAL_REVIEW naming every flag
+     * (the signatures stay valid; activation waits for the reviewer), otherwise the existing path.
+     */
+    fun signed(
+        partyId: UUID,
+        signatureRef: String,
+        at: Instant,
+        highRiskCountries: Set<String> = emptySet(),
+    ): BusinessOnboardingCase {
+        val signer = requireSignable(partyId, signatureRef)
         val updated = signers.map {
             if (it.id ==
                 signer.id
@@ -409,8 +477,134 @@ data class BusinessOnboardingCase(
                 updatedAt = at,
             )
         }
+        val flags = next.riskFlags(highRiskCountries)
+        if (flags.isNotEmpty()) {
+            return next.copy(
+                status = CaseStatus.MANUAL_REVIEW,
+                reviewReason = "AML risk review before activation: ${flags.joinToString("; ")}",
+                updatedAt = at,
+            )
+        }
         return if (entityPartyActive) next.copy(status = CaseStatus.ACTIVE) else next.copy(status = CaseStatus.SIGNED)
     }
+
+    fun riskFlags(highRiskCountries: Set<String>): List<String> = AmlRiskFlags.of(
+        questionnaire,
+        declarations,
+        identifier.country ?: extract?.registeredAddress?.countryCode,
+        highRiskCountries,
+    )
+
+    private fun requireCollecting(what: String) {
+        if (status != CaseStatus.INITIATOR_MATCHED &&
+            status != CaseStatus.READY_TO_SIGN &&
+            status != CaseStatus.AWAITING_COSIGNERS
+        ) {
+            throw CaseTransitionException("$what cannot be changed in status $status")
+        }
+        if (signedCount > 0) throw CaseTransitionException("$what cannot be changed after a signature was given")
+    }
+
+    /** The AML questionnaire (AML Act §9, FATCA/CRS). Re-answering replaces the previous answers. */
+    fun questionnaireAnswered(q: Questionnaire, by: UUID, at: Instant): BusinessOnboardingCase {
+        requireCollecting("the questionnaire")
+        val valid = q.validated()
+        return copy(questionnaire = valid.copy(answeredAt = at, answeredBy = by), updatedAt = at)
+    }
+
+    /**
+     * The declarations. [uboNames] are the beneficial owners the register reports for the entity;
+     * together with the listed representatives they are the people a PEP status must cover — from
+     * the person's customer profile where [known] has one, declared otherwise.
+     */
+    fun declarationsMade(
+        d: Declarations,
+        uboNames: List<String>,
+        known: List<KnownPerson>,
+        by: UUID,
+        at: Instant,
+    ): BusinessOnboardingCase {
+        requireCollecting("the declarations")
+        val required = uboNames + extract?.representatives.orEmpty().map { it.fullName }
+        val valid = d.validated(required, known)
+        return copy(declarations = valid.copy(declaredAt = at, declaredBy = by), updatedAt = at)
+    }
+
+    /**
+     * Whether the agreement may be rendered: the answers are given and every required signer is
+     * identified — the ceremony is created over the signers' parties, so an unidentified co-signer
+     * could never sign it.
+     */
+    fun requireAgreementPreparable() {
+        if (questionnaire == null || declarations == null) {
+            throw AgreementConflictException(
+                AgreementConflictException.PREREQUISITES_MISSING,
+                "answer the questionnaire and make the declarations before the agreement is prepared",
+            )
+        }
+        if (status != CaseStatus.READY_TO_SIGN) {
+            throw CaseTransitionException(
+                "the agreement can be prepared once every required signer is identified (status $status)",
+            )
+        }
+    }
+
+    /**
+     * document-service rendered (or returned the existing) agreement. The same document and
+     * ceremony keep their acceptances; anything else starts acceptance over, and once someone has
+     * signed, the ceremony can no longer change.
+     */
+    fun agreementPrepared(record: AgreementRecord, at: Instant): BusinessOnboardingCase {
+        requireAgreementPreparable()
+        val current = agreement
+        if (current != null && current.sameDocumentAs(record)) {
+            return copy(
+                agreement = current.copy(templateCode = record.templateCode, lang = record.lang),
+                updatedAt = at,
+            )
+        }
+        if (signedCount > 0) {
+            throw AgreementConflictException(
+                AgreementConflictException.AGREEMENT_LOCKED,
+                "the agreement has already been signed and cannot be replaced",
+            )
+        }
+        return copy(agreement = record.copy(acceptances = emptyList()), updatedAt = at)
+    }
+
+    /**
+     * [accepted] must be EXACTLY the disclosure set document-service currently lists for the
+     * agreement ([current]) — code, version and hash. Anything else is a stale screen: 409.
+     */
+    fun disclosuresAccepted(
+        accepted: List<AcceptedDisclosure>,
+        current: List<AcceptedDisclosure>,
+        by: UUID,
+        at: Instant,
+    ): BusinessOnboardingCase {
+        val a = agreement ?: throw AgreementConflictException(
+            AgreementConflictException.NOT_PREPARED,
+            "the business agreement has not been prepared for this case",
+        )
+        if (accepted.size != accepted.toSet().size || accepted.toSet() != current.toSet()) {
+            throw AgreementConflictException(
+                AgreementConflictException.DISCLOSURES_STALE,
+                "the accepted documents do not match the current disclosure set — reload and accept again",
+            )
+        }
+        return copy(
+            agreement = a.copy(
+                acceptedDisclosures = current,
+                acceptedAt = at,
+                acceptedBy = by,
+                acceptances = a.acceptances.filter { it.partyId != by } + DisclosureAcceptance(by, at),
+            ),
+            updatedAt = at,
+        )
+    }
+
+    /** The initiator or an identified signer — the people who may answer and sign for the entity. */
+    fun isParticipant(partyId: UUID): Boolean = initiatorPartyId == partyId || signers.any { it.partyId == partyId }
 
     /** The entity party passed the KYC + AML activation gate (ADR-0267); the relationship is live. */
     fun entityPartyActivated(at: Instant): BusinessOnboardingCase {

@@ -30,6 +30,7 @@ class DelegationNotificationConsumerTest {
     private val grantId = UUID.randomUUID()
     private val grantorPartyId = UUID.randomUUID()
     private val granteePartyId = UUID.randomUUID()
+    private val recertificationId = UUID.randomUUID()
 
     @BeforeEach
     fun setUp() {
@@ -128,6 +129,41 @@ class DelegationNotificationConsumerTest {
         assertThat(req.variables).isEmpty()
         assertThat(req.correlationId).isEqualTo(grantId)
         assertThat(req.deduplicationKey).isEqualTo(grantId)
+    }
+
+    @Test
+    fun `due recertification notifies only the grantor and never requires a grantee id`() {
+        consumer.consume(
+            eventPayload("DelegationRecertificationDue", grantee = null).dropLast(1) +
+                ",\"recertificationId\":\"$recertificationId\",\"audience\":\"CORPORATE\"}",
+        ).subscribe().with({}, {})
+
+        val request = capturedRequests().single()
+        assertThat(request.partyId).isEqualTo(grantorPartyId)
+        assertThat(request.template).isEqualTo(NotificationTemplate.DELEGATION_RECERTIFICATION_DUE)
+        assertThat(request.variables).isEqualTo(mapOf("audience" to "CORPORATE"))
+        assertThat(request.deepLink).isEqualTo("openbank://delegations/$grantId")
+        assertThat(request.deduplicationKey).isEqualTo(recertificationId)
+    }
+
+    @Test
+    fun `due recertification with an unknown audience is dropped fail closed`() {
+        consumer.consume(
+            eventPayload("DelegationRecertificationDue", grantee = null).dropLast(1) +
+                ",\"recertificationId\":\"$recertificationId\",\"audience\":\"UNKNOWN\"}",
+        ).subscribe().with({}, {})
+
+        verify(exactly = 0) { notificationConsumer.consume(any()) }
+    }
+
+    @Test
+    fun `due recertification without a stable cycle id is dropped fail closed`() {
+        consumer.consume(
+            eventPayload("DelegationRecertificationDue", grantee = null).dropLast(1) +
+                ",\"audience\":\"FOP\"}",
+        ).subscribe().with({}, {})
+
+        verify(exactly = 0) { notificationConsumer.consume(any()) }
     }
 
     @Test

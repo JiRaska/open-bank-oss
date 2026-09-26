@@ -15,6 +15,26 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# Multi-signature approval lifecycle (#10281) — APPROVAL_REQUESTED / SIGNED / COMPLETED /
+# REJECTED / EXPIRED, PAYMENT_RELEASED / PAYMENT_RELEASE_FAILED, published by delegation-service
+# through its transactional outbox. Consumer: notification-service (ApprovalNotificationConsumer,
+# Read ACL in components/notifications/kafka-notification-mtls.yaml). Declared by the consumer's
+# PR so the channel never subscribes to a topic that does not exist (#2598); the producer's PR
+# owns the KafkaUser Write grant and the event contract.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.delegation.approval-events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # Durable bootstrap state for delegated domestic-payment reservations. Separate bounded keys for
 # v1/v2 prevent a delayed ambiguous RESERVED publish from compacting away terminal evidence.
 apiVersion: kafka.strimzi.io/v1

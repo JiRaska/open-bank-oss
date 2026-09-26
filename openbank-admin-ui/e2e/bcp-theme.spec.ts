@@ -47,15 +47,22 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 for (const theme of ['light', 'dark'] as const) {
   test(`keeps degraded compliance evidence readable and accessible in ${theme} theme`, async ({ page }) => {
     await page.goto('/docs/bcp')
+    await expect(page.getByRole('heading', { level: 1, name: /Plán kontinuity provozu|Business Continuity Plan/ })).toBeVisible()
     if (theme === 'dark') {
-      await page.locator('html').evaluate(element => element.classList.add('dark'))
+      await page.getByRole('button', { name: /Switch to the dark theme|Přepnout na tmavý motiv/ }).click()
       await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     }
 
-    await expect(page.getByRole('heading', { level: 1, name: /Plán kontinuity provozu|Business Continuity Plan/ })).toBeVisible()
     await expect(page.getByText(/Compliance gate failed — payment processing BLOCKED|Compliance gate selhala — platební zpracování BLOKOVÁNO/)).toBeVisible()
     await expect(page.getByText(/BLOCKED|BLOKOVÁNO/, { exact: true }).first()).toBeVisible()
     await expect(page.getByText('1/6', { exact: true }).or(page.getByText('5/6', { exact: true }))).toBeVisible()
+    const firstTier = page.getByRole('button', { name: /Tier 0|Compliance Gate/ }).first()
+    await expect(firstTier).toHaveAttribute('aria-expanded', 'true')
+    await firstTier.focus()
+    await page.keyboard.press('Enter')
+    await expect(firstTier).toHaveAttribute('aria-expanded', 'false')
+    await page.keyboard.press('Space')
+    await expect(firstTier).toHaveAttribute('aria-expanded', 'true')
     await page.waitForTimeout(300)
 
     const scan = await new AxeBuilder({ page })

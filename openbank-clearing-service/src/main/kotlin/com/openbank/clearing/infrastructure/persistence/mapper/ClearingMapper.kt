@@ -47,6 +47,7 @@ class ClearingMapper {
         it.amount = i.amount
         it.currency = i.currency
         it.status = i.status
+        it.revision = i.revision
         it.valueDate = i.valueDate
         it.endToEndId = i.endToEndId
         it.remittanceInfo = i.remittanceInfo
@@ -59,7 +60,7 @@ class ClearingMapper {
         id = e.id, batchId = e.batchId, paymentId = e.paymentId,
         paymentReference = e.paymentReference, debtorIban = e.debtorIban,
         creditorIban = e.creditorIban, debtorBic = e.debtorBic, creditorBic = e.creditorBic,
-        amount = e.amount, currency = e.currency, status = e.status,
+        amount = e.amount, currency = e.currency, status = e.status, revision = e.revision,
         valueDate = e.valueDate, endToEndId = e.endToEndId, remittanceInfo = e.remittanceInfo,
         errorCode = e.errorCode, errorMessage = e.errorMessage,
         createdAt = e.createdAt, updatedAt = e.updatedAt,

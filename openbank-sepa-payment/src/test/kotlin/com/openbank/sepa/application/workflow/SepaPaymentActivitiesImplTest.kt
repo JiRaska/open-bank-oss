@@ -380,6 +380,8 @@ class SepaPaymentActivitiesImplTest {
         assertThat(outboxes).hasSize(2)
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("status").asText() })
             .containsExactly("PROCESSING", "COMPLETED")
+        assertThat(outboxes.map { objectMapper.readTree(it.payload).get("version").asLong() })
+            .containsExactly(1, 2)
         outboxes.forEach {
             assertThat(Instant.parse(objectMapper.readTree(it.payload).get("occurredAt").asText()))
                 .isEqualTo(fixedInstant)
@@ -418,6 +420,8 @@ class SepaPaymentActivitiesImplTest {
         assertThat(outboxes).hasSize(EXPECTED_TEMPORAL_PAYLOADS)
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("status").asText() })
             .containsExactly("VALIDATED", "REJECTED", "PROCESSING", "COMPLETED", "REJECTED")
+        assertThat(outboxes.map { objectMapper.readTree(it.payload).get("version").asLong() })
+            .containsExactly(1, 1, 1, 2, 1)
         // Read the parsed JSON, not a substring: a `contains` would also pass on a key that is
         // present but nested, or on a value that merely starts with the expected text.
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("sourceService")?.asText() })

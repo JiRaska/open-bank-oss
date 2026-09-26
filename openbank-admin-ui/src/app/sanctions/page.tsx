@@ -29,6 +29,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { readApprovalId } from '@/lib/approvals/triage'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -113,7 +114,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
       </div>
       <button type="button" onClick={save} disabled={saving}
         style={{ alignSelf: 'flex-start', padding: '5px 12px', borderRadius: '5px', fontSize: '12px', fontWeight: 600,
-          background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+          background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
           display: 'flex', alignItems: 'center', gap: '5px' }}>
         {saving ? <Loader2 size={11} style={{ animation: 'spin 0.8s linear infinite' }} /> : null}
         {t('Uložit plán', 'Save schedule')}
@@ -133,6 +134,7 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   const dateLocale = numberLocale
   const [expanded, setExpanded] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const sourceUrl = trustedHttpsUrl(list.sourceUrl)
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -188,8 +190,9 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
             <ExternalLink size={11} />
-            <a href={list.sourceUrl} target="_blank" rel="noreferrer"
-              style={{ color: 'var(--accent)', textDecoration: 'none', wordBreak: 'break-all' }}>{list.sourceUrl}</a>
+            {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer"
+              style={{ color: 'var(--accent)', textDecoration: 'none', wordBreak: 'break-all' }}>{sourceUrl}</a>
+              : <span role="status" style={{ color: 'var(--warning-text)' }}>{t('Zdrojový odkaz není bezpečně dostupný', 'Source link is not safely available')}</span>}
           </div>
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '2px' }}>{t('Plán stahování', 'Download schedule')}</div>
           <Can permission="sanctions:manage"><CronEditor key={`${list.id}-${list.cronDays}-${list.cronHour}-${list.cronMinute}`} list={list} onSave={onSave} /></Can>
@@ -798,7 +801,7 @@ export default function SanctionsPage() {
                                   </code>
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy}
-                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                                       {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Zopakovat po schválení', 'Retry once approved')}
                                     </button>
                                     <button onClick={() => { setReviewFor(null); setPendingApproval(null) }}
@@ -836,7 +839,7 @@ export default function SanctionsPage() {
                                   )}
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id)} disabled={reviewBusy}
-                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
+                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
                                       {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Odeslat rozhodnutí', 'Submit decision')}
                                     </button>
                                     <button onClick={() => setReviewFor(null)}
@@ -1001,8 +1004,8 @@ export default function SanctionsPage() {
                               <div style={{ fontSize: '12px', fontWeight: 600, color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', lineHeight: 1.3 }}>
                                 {lst.displayName}
-                                {isPep && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
-                                {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
+                                {isPep && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
+                                {!lst.enabled && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
                               {/* A checked row paints --accent-bg (#eef2ff) behind this line, and
                                   --text-tertiary (#64748b) on it measures 4.26:1 — under the 4.5:1
@@ -1031,7 +1034,7 @@ export default function SanctionsPage() {
 
                 <button type="button" aria-busy={screening} aria-label={screening ? t('Prověřování probíhá', 'Screening in progress') : t('Spustit prověření sankcí', 'Run sanctions screening')} onClick={handleScreen} disabled={screening || !searchName.trim() || selectedListTypes.length === 0}
                   style={{ padding: '10px 20px', borderRadius: '7px', fontSize: '13px', fontWeight: 700,
-                    background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none',
+                    background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none',
                     cursor: screening || !searchName.trim() || selectedListTypes.length === 0 ? 'not-allowed' : 'pointer',
                     opacity: screening || !searchName.trim() || selectedListTypes.length === 0 ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' }}>
@@ -1122,7 +1125,7 @@ export default function SanctionsPage() {
                   <Can permission="sanctions:manage">
                   <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
                     style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
-                      background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none',
+                      background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none',
                       cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
                       display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={12} aria-hidden="true" />}

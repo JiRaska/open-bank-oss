@@ -4,15 +4,21 @@
 
 package com.openbank.customeredge
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.rest.ActingForResolver
 import com.openbank.customeredge.infrastructure.rest.CustomerDocumentResource
 import com.openbank.customeredge.infrastructure.rest.DelegationGrants
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.util.UUID
 
 /**
@@ -200,6 +206,96 @@ class CustomerDocumentResourceTest {
         val resp = resource(upstream).recordDecision(CEREMONY_ID, """{"evidenceRef":"x"}""")
 
         assertThat(resp.status).isEqualTo(400)
+    }
+
+    // ── Business profile (X-Acting-For) ─────────────────────────────────────────────────────
+
+    private val entity: UUID = UUID.randomUUID()
+    private val partyBase = "http://party-service.party.svc:8111"
+
+    /** A resource whose request carries `X-Acting-For: [header]`; party-service lists [mandates] for the caller. */
+    private fun actingResource(upstream: UpstreamClient, header: String, vararg mandates: UUID) =
+        resource(upstream).apply {
+            every { upstream.get("$partyBase/api/v1/parties/$caller/acting-for", any()) } returns Response.ok(
+                mandates.joinToString(",", "[", "]") { """{"partyId":"$it","partyType":"COMPANY"}""" },
+            ).build()
+            actingForResolver = ActingForResolver(upstream, ObjectMapper(), Clock.systemUTC(), partyBase, true)
+            requestHeaders = mockk<HttpHeaders> { every { getHeaderString("X-Acting-For") } returns header }
+        }
+
+    @Test
+    fun `under an active mandate the entity's documents are listed and served`() {
+        val upstream = mockk<UpstreamClient>()
+        val urls = mutableListOf<String>()
+        every { upstream.get(capture(urls), any()) } answers {
+            Response.ok(
+                """[{"id":"$DOC_ID","partyRef":"$entity","templateCode":"RAMCOVA_SMLOUVA_PO_CS","status":"PENDING_SIGNATURE"}]""",
+            ).build()
+        }
+        val r = actingResource(upstream, entity.toString(), entity)
+        every { upstream.get(match { it.endsWith("/documents/$DOC_ID") }, any()) } returns
+            Response.ok("""{"id":"$DOC_ID","partyRef":"$entity"}""").build()
+        every { upstream.getRaw(match { it.endsWith("/documents/$DOC_ID/content") }, entity.toString(), any()) } returns
+            Response.ok(byteArrayOf(1)).type("application/pdf").build()
+
+        val body = r.listDocuments().entity as String
+
+        assertThat(urls).contains("$docSvc/api/v1/documents?partyRef=$entity")
+        assertThat(body).contains("RAMCOVA_SMLOUVA_PO_CS")
+        assertThat(r.documentContent(DOC_ID).status).isEqualTo(200)
+    }
+
+    @Test
+    fun `without a mandate for that entity nothing of it is listed or served`() {
+        val upstream = mockk<UpstreamClient>()
+        val other = UUID.randomUUID()
+        // The caller holds a mandate, but for a DIFFERENT company.
+        val r = actingResource(upstream, entity.toString(), other)
+
+        assertThatThrownBy { r.listDocuments() }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { r.documentContent(DOC_ID) }.isInstanceOf(ForbiddenException::class.java)
+        io.mockk.verify(exactly = 0) { upstream.get(match { it.startsWith(docSvc) }, any()) }
+        io.mockk.verify(exactly = 0) { upstream.getRaw(any(), any(), any()) }
+    }
+
+    @Test
+    fun `without the header an entity-owned document stays invisible to the human`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/documents/$DOC_ID") }, any()) } returns
+            Response.ok("""{"id":"$DOC_ID","partyRef":"$entity"}""").build()
+
+        assertThat(resource(upstream).documentContent(DOC_ID).status).isEqualTo(404)
+        io.mockk.verify(exactly = 0) { upstream.getRaw(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a human signer decides on the entity's ceremony as himself, even while acting for it`() {
+        val upstream = mockk<UpstreamClient>()
+        val r = actingResource(upstream, entity.toString(), entity)
+        every { upstream.get(match { it.contains("/signature-ceremonies/$CEREMONY_ID") }, any()) } returns
+            Response.ok("""{"id":"$CEREMONY_ID","documentId":"$DOC_ID","signers":[{"partyRef":"$caller"}]}""").build()
+        val bodySlot = slot<String>()
+        val partySlot = slot<String>()
+        every {
+            upstream.post(match { it.endsWith("/decisions") }, capture(partySlot), capture(bodySlot), any())
+        } returns Response.ok("{}").build()
+
+        val resp = r.recordDecision(CEREMONY_ID, """{"partyRef":"$entity","decision":"SIGNED","evidenceRef":"ch-1"}""")
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(bodySlot.captured).contains("\"partyRef\":\"$caller\"").doesNotContain(entity.toString())
+        assertThat(partySlot.captured).isEqualTo(caller.toString())
+        assertThat(r.ceremony(CEREMONY_ID).status).isEqualTo(200)
+    }
+
+    @Test
+    fun `a ceremony decision under an unmandated X-Acting-For is refused before upstream`() {
+        val upstream = mockk<UpstreamClient>()
+        val r = actingResource(upstream, entity.toString())
+
+        assertThatThrownBy { r.recordDecision(CEREMONY_ID, """{"decision":"SIGNED"}""") }
+            .isInstanceOf(ForbiddenException::class.java)
+        io.mockk.verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
     }
 
     private companion object {

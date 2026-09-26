@@ -5,6 +5,8 @@
 package com.openbank.document.infrastructure.client
 
 import com.openbank.document.application.port.out.ProductCatalogPort
+import com.openbank.document.application.port.out.ProductFee
+import com.openbank.document.application.port.out.ProductFeeSchedule
 import com.openbank.document.application.port.out.ProductInfo
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -42,6 +44,23 @@ class ProductCatalogAdapter : ProductCatalogPort {
         client.getById(productId.toString()).awaitSuspending().let { ProductInfo(name = it.name, code = it.code) }
     } catch (e: Exception) {
         log.warnf("product-catalog unavailable for %s; contract will omit product details: %s", productId, e.message)
+        null
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun findFeeSchedule(productRef: String): ProductFeeSchedule? = try {
+        client.getById(productRef).awaitSuspending().let { p ->
+            ProductFeeSchedule(
+                name = p.name,
+                code = p.code,
+                currency = p.currency,
+                fees = p.fees.map {
+                    ProductFee(it.name, it.amount, it.currency, it.frequency, it.description, it.waiveCondition)
+                },
+            )
+        }
+    } catch (e: Exception) {
+        log.warnf("product-catalog could not supply the fee schedule: %s", e.javaClass.simpleName)
         null
     }
 }

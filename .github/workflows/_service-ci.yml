@@ -153,7 +153,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: |
@@ -286,9 +286,6 @@ jobs:
       # untrusted PR-code execution job.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
       #
-      # No -D pact flags to mirror here (unlike the pre-split single job's #1009 workaround):
-      # `test` above never touched pactbroker.* either, so this is a plain up-to-date/cached
-      # second invocation of the same, single-shaped `test` task.
       - name: Generate Kover XML report
         continue-on-error: true
         # This is advisory evidence, never a second mandatory build. Keep it daemonless
@@ -296,7 +293,7 @@ jobs:
         # hold a fleet runner after the enforcing build has already completed (#6734).
         # Account's real Testcontainers suite needs more than the old three-minute limit:
         # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain -x test
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
@@ -322,7 +319,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         continue-on-error: true
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: ${{ inputs.service }}/build/reports/kover/report.xml
           flags: ${{ inputs.service }}
@@ -550,7 +547,7 @@ jobs:
       - name: Authenticate to ECR via OIDC
         id: ecr_auth
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
@@ -587,7 +584,7 @@ jobs:
             echo "::warning title=TC pre-warm::no image cache reachable — Testcontainers will pull at test time"
           fi
 
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: |
@@ -777,9 +774,19 @@ jobs:
           set -euo pipefail
           task_list="$(./gradlew ":${SERVICE}:tasks" --all --console=plain)"
           provider_test="$(find "${SERVICE}/src/test" -type f -name '*ProviderVerificationTest.kt' -print -quit 2>/dev/null || true)"
-          if grep -Eq '^[[:space:]]*providerPactTest([[:space:]]|$)' <<< "$task_list"; then
+          has_task=false
+          if grep -Eq '^[[:space:]]*providerPactTest([[:space:]]|$)' <<< "$task_list"; then has_task=true; fi
+          # The TEST FILE decides, not the task. Since #4414 the openbank.quarkus-service convention
+          # plugin registers `providerPactTest` for EVERY service, including the ~40 that own no
+          # provider verification at all, so "the task exists" became true fleet-wide and the
+          # consumer-only branch below was unreachable. Every one of those services then ran the
+          # broker preflight, and a service the broker has never heard of got HTTP 404 and failed its
+          # contract job with a message blaming the broker (communication-service 7/7 on main,
+          # #4195). `*ProviderVerificationTest.kt` under src/test is exactly the include filter the
+          # convention's own source set uses, so it is the same predicate the task itself runs on.
+          if [ -n "$provider_test" ] && [ "$has_task" = "true" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "${SERVICE} exposes providerPactTest — provider verification will run."
+            echo "${SERVICE} has ${provider_test} and exposes providerPactTest — provider verification will run."
           elif [ -n "$provider_test" ]; then
             echo "::error::${SERVICE} has ${provider_test} but does not expose providerPactTest. Apply the service convention or register an equivalent provider task."
             exit 1

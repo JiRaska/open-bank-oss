@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.8.0
+  version: 1.10.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -156,6 +156,75 @@ paths:
                 $ref: '#/components/schemas/EnrolledDeviceResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          description: >-
+            The party is not a natural person (register type other than INDIVIDUAL or
+            SOLE_TRADER, or unknown to the register). A device key is a person's credential
+            (#10281 item 1).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: The party register could not be asked; enrolment fails closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/sca/parties/{partyId}/challenges/pending:
+    get:
+      tags: [SCA]
+      summary: Live challenges awaiting a decision for a party
+      operationId: listPendingScaChallenges
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Pending challenges, newest first, with what is being approved.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingScaResponse'
+
+  /api/v1/sca/challenges/{id}/consume:
+    post:
+      tags: [SCA]
+      summary: Spend an approved challenge on exactly the operation it authorised (single use)
+      description: >-
+        Every dynamic-linking field is compared: amount/currency/creditor (payment),
+        documentSha256/ceremonyId (document), cardId/cardAction (card) and, for an APPROVAL
+        challenge, approvalRequestId/payloadSha256. A challenge raised for one shape can never
+        be spent on another; a mismatch answers 409 and does not burn the challenge.
+      operationId: consumeScaChallenge
+      parameters:
+        - $ref: '#/components/parameters/challengeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeScaRequest'
+      responses:
+        '200':
+          description: Consumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaChallengeResponse'
+        '403':
+          description: The challenge belongs to another party
+        '404':
+          description: Challenge not found
+        '409':
+          description: Already consumed, or the operation does not match what the device signed
 
   /api/v1/sca/challenges/{id}/decision:
     post:
@@ -230,14 +299,78 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-                 SAVINGS_WITHDRAW_APPROVAL]
+                 SAVINGS_WITHDRAW_APPROVAL, APPROVAL]
         preferredMethod:
           type: string
         dynamicLinkingData:
           type: string
+          description: >-
+            Served as an object with the fields of the DynamicLinkingData schema below; the
+            published type predates that schema and is left unchanged here.
         redirectUrl:
           type: string
           nullable: true
+        onBehalfOfPartyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            The entity the human acts for (X-Acting-For at the edge). Context only — the
+            challenge still belongs to partyId (#10281 item 3).
+    DynamicLinkingData:
+      type: object
+      description: >-
+        What the device signs (RTS Art. 5). APPROVAL requires approvalRequestId and
+        payloadSha256; a payment approval also carries amount, currency and creditorIban.
+      properties:
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditorIban: { type: string, nullable: true }
+        creditorName: { type: string, nullable: true }
+        reference: { type: string, nullable: true }
+        documentSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, nullable: true }
+        cardId: { type: string, nullable: true }
+        cardAction: { type: string, nullable: true }
+        approvalRequestId:
+          type: string
+          nullable: true
+          description: The business approval request this challenge co-signs.
+        payloadSha256:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-fA-F]{64}$'
+          description: SHA-256 (hex) of the approval request's frozen payload.
+    ConsumeScaRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditor: { type: string, nullable: true }
+        documentSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, nullable: true }
+        cardId: { type: string, nullable: true }
+        cardAction: { type: string, nullable: true }
+        approvalRequestId: { type: string, nullable: true }
+        payloadSha256: { type: string, nullable: true }
+    PendingScaResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string }
+        method: { type: string }
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditorIban: { type: string, nullable: true }
+        creditorName: { type: string, nullable: true }
+        reference: { type: string, nullable: true }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        approvalRequestId: { type: string, nullable: true }
+        payloadSha256: { type: string, nullable: true }
+        onBehalfOfPartyId: { type: string, format: uuid, nullable: true }
     VerifyScaRequest:
       type: object
       properties:
@@ -266,6 +399,15 @@ components:
         expiresAt:
           type: string
           format: date-time
+        onBehalfOfPartyId:
+          type: string
+          format: uuid
+          nullable: true
+        decidedByPartyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Whose enrolled device decided the challenge (#10281 item 3); null while undecided.
 
     EnrollDeviceRequest:
       type: object

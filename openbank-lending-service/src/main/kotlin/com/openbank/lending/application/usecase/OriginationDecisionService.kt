@@ -68,7 +68,10 @@ class OriginationDecisionService(
                     PolicyApplication(attributes(application, assessment), LocalDate.now(clock)),
                     withPackChecks,
                 )
+                val ratios = affordabilityRatios(application)
                 val recorded = application.copy(
+                    decisionDsti = ratios?.dsti,
+                    decisionDti = ratios?.dti,
                     decisionOutcome = outcomeName(decision),
                     decisionPriceBand = (decision as? PolicyDecision.Approve)?.priceBand,
                     decisionReasons = decision.evaluation.reasons.joinToString(",") {
@@ -122,8 +125,10 @@ class OriginationDecisionService(
         application.employmentTenureMonths?.let {
             attributes[PolicyAttribute.EMPLOYMENT_TENURE_MONTHS] = PolicyValue.Numeric(BigDecimal(it))
         }
-        attributes[PolicyAttribute.CUSTOMER_TYPE] =
-            PolicyValue.Text(if (assessment.hasAdverseData) "ADVERSE_BUREAU" else "STANDARD")
+        if (assessment.available) {
+            attributes[PolicyAttribute.CUSTOMER_TYPE] =
+                PolicyValue.Text(if (assessment.hasAdverseData) "ADVERSE_BUREAU" else "STANDARD")
+        }
         application.jurisdiction?.let {
             attributes[PolicyAttribute.JURISDICTION] = PolicyValue.Text(it)
         }
@@ -139,35 +144,36 @@ class OriginationDecisionService(
     }
 
     companion object {
-        /**
-         * DSTI/DTI exactly as the ASSESSMENT leg reads them — the single definition, shared with the
-         * credit-risk read side so a console can never show a ratio the engine did not evaluate.
-         * Null when there is no positive verified income (the engine then fails closed to REFER with
-         * `INPUT_MISSING`, ADR-0213 D2).
-         *
-         * `dsti` is the NEW installment over income, which is what `PolicyAttribute.DSTI` has meant
-         * since the engine shipped; `dstiIncludingExistingDebt` adds `existingDebtServiceMonthly`
-         * (the CNB/EBA total-debt-service definition) and is exposed for the read side only. Making
-         * the engine read the total is a credit-policy change (ADR-0213 D4), not a refactor.
-         */
+        /** Total debt ratios; absent or inconsistent debt evidence cannot establish affordability. */
         fun affordabilityRatios(application: LoanApplication): AffordabilityRatios? {
             val income = application.verifiedIncomeMonthly?.takeIf { it.isPositive() } ?: return null
+            val existingService = application.existingDebtServiceMonthly ?: return null
+            val existingDebt = application.existingDebtOutstanding ?: return null
+            if (listOf(income, existingService, existingDebt).any {
+                    it.currency != application.requestedAmount.currency || !it.isNonNegative()
+                }
+            ) {
+                return null
+            }
             val schedule = Amortization.schedule(
                 principal = application.requestedAmount,
                 nominalAnnualRate = application.nominalAnnualRate,
                 termPeriods = application.termPeriods,
                 periodsPerYear = application.periodsPerYear,
                 firstDueDate = application.firstDueDate,
+                method = application.method,
             )
-            val monthlyPayment = schedule.installments.first().payment.amount
-            val existing = application.existingDebtServiceMonthly?.amount ?: BigDecimal.ZERO
+            val monthlyPayment = schedule.installments.maxOf { it.payment.amount }
+                .multiply(BigDecimal(application.periodsPerYear))
+                .divide(BigDecimal(MONTHS_IN_YEAR), MathContext.DECIMAL128)
+            val dsti = monthlyPayment.add(existingService.amount).divide(income.amount, MathContext.DECIMAL128)
             return AffordabilityRatios(
-                dsti = monthlyPayment.divide(income.amount, MathContext.DECIMAL128),
-                dti = application.requestedAmount.amount.divide(
+                dsti = dsti,
+                dti = application.requestedAmount.amount.add(existingDebt.amount).divide(
                     income.amount.multiply(BigDecimal(MONTHS_IN_YEAR)),
                     MathContext.DECIMAL128,
                 ),
-                dstiIncludingExistingDebt = monthlyPayment.add(existing).divide(income.amount, MathContext.DECIMAL128),
+                dstiIncludingExistingDebt = dsti,
             )
         }
     }

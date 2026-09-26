@@ -271,9 +271,15 @@ class PartyResource(
             .build()
     }
 
+    // #10486 batch 6: ROLE_API admits delegation-service's OWN machine principal (party eligibility
+    // before a mandate) once the shared openbank-services client loses ROLE_OPERATOR. The endpoint had
+    // no @Authorize, so a bare ROLE_API would have opened it to every service account; OPA (enforced
+    // here) now decides `party.read` by identity (`service-delegation-party-read` in pid_rest_ext.rego),
+    // and staff keep base `operator-read-any`.
     @GET
     @Path("/{id}")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.API)
+    @Authorize(action = "party.read", resource = "#id")
     @Operation(summary = "Get party by internal ID")
     suspend fun getById(@PathParam("id") id: UUID): Response =
         Response.ok(getPartyUseCase.getById(id).toResponse()).build()

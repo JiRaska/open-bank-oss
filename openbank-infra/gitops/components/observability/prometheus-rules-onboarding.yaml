@@ -84,10 +84,18 @@ spec:
         - alert: KycPartiesWithoutCase
           # Issue #5698. PartyEventConsumer caught every exception, logged it and returned — which
           # ACKS the Kafka message. A few seconds of kyc-db downtime therefore destroyed the only
-          # copy of a PARTY_CREATED: no KYC case, party stuck in PENDING_KYC forever, accounts stuck
-          # in PENDING_ACTIVATION, no welcome bonus. 10 of 73 sandbox parties were in that state,
-          # the oldest since 2026-06-07, and it was found only because a human noticed an account
-          # did not work.
+          # copy of a PARTY_CREATED: no KYC case, party stuck in PENDING_KYC forever, and it was
+          # found only because a human noticed an account did not work. (The "10 of 73" figure this
+          # comment used to carry was WITHDRAWN on #5698 and must not be reinstated — a later
+          # re-measure took it from the issue body rather than from the correction, and it has been
+          # quoted as fact twice since. Whatever the count is, read it off the gauge.)
+          #
+          # #9726: what this gauge counts changed. Parties created BEFORE the oldest KYC case in the
+          # store predate the auto-open consumer, so no case was ever possible for them; they are
+          # excluded here and published separately as openbank_kyc_orphaned_parties_pre_consumer.
+          # Without that split the sandbox floor was 6 and `> 0` was unsatisfiable, so the alert was
+          # permanently lit and structurally silent about a genuine new orphan. A step change in the
+          # pre_consumer series is worth a look in its own right — it means the derived cutoff moved.
           #
           # Why the two rules above could not catch it. PartyEventDeadLettered needs a DLQ record,
           # and the whole defect is that the event was acked and never dead-lettered.
@@ -112,8 +120,8 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "{{ $value }} party(ies) have no KYC case at all"
-            description: "openbank_kyc_orphaned_parties is {{ $value }} — that many parties, all past the detection grace period, have NO kyc_cases row. Each is a customer permanently stuck: PENDING_KYC party, accounts stuck in PENDING_ACTIVATION, no welcome bonus, and nothing retries because the PARTY_CREATED event was acked and dropped (#5698). Not self-healing — the event is gone, so it needs a replay per party. The stranded party ids are logged by kyc-service under `[orphan-detection]`; openbank_kyc_orphaned_parties_oldest_age_seconds says how long the worst one has been waiting."
+            summary: "{{ $value }} eligible party(ies) have no KYC case at all"
+            description: "openbank_kyc_orphaned_parties is {{ $value }} — that many parties, all past the detection grace period and all created after the auto-open consumer demonstrably worked, have NO kyc_cases row. Each is a customer stuck in PENDING_KYC, and nothing retries because the PARTY_CREATED event was acked and dropped (#5698). Not self-healing — the event is gone, so it needs a replay per party. Before remediating, CHECK what these parties are: parties that predate the consumer are already excluded (openbank_kyc_orphaned_parties_pre_consumer), but an e2e fixture party is indistinguishable from a real customer here, and a triage pass has twice ranked ineligible rows as the estate's top finding (#9726). The ids are logged by kyc-service under `[orphan-detection]`; openbank_kyc_orphaned_parties_oldest_age_seconds says how long the worst one has been waiting. Do not quote the party count as a customer-impact figure without confirming each id has an account."
         - alert: OnboardingProjectionWireFormatMismatch
           # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
           # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments

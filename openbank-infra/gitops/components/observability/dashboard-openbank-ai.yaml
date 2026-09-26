@@ -193,7 +193,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * (sum(rate(openbank_llm_requests_total{outcome=~\"http_error|exception\",job=\"observability/openbank-services\"}[15m])) / clamp_min(sum(rate(openbank_llm_requests_total{outcome!=\"not_configured\",job=\"observability/openbank-services\"}[15m])), 0.0000001))",
+              "expr": "100 * (sum(rate(openbank_llm_requests_total{outcome=~\"http_error|exception\",job=\"observability/openbank-services\"}[15m])) / clamp_min(sum(rate(openbank_llm_requests_total{outcome!=\"not_configured\",job=\"observability/openbank-services\"}[15m])), 0.0000001)) or vector(0)",
               "refId": "A"
             }
           ],
@@ -244,7 +244,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum(increase(openbank_llm_requests_total{outcome=\"not_configured\",job=\"observability/openbank-services\"}[1h]))",
+              "expr": "sum(increase(openbank_llm_requests_total{outcome=\"not_configured\",job=\"observability/openbank-services\"}[1h])) or vector(0)",
               "refId": "A"
             }
           ],
@@ -466,7 +466,7 @@ data:
         {
           "id": 10,
           "type": "timeseries",
-          "title": "Call latency p50/p95/p99 (successful calls)",
+          "title": "Call Latency P50/P95/P99 (24h)",
           "gridPos": {
             "x": 12,
             "y": 19,
@@ -477,19 +477,19 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.5, sum by (le) (rate(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -517,12 +517,12 @@ data:
               "mode": "multi"
             }
           },
-          "description": "Failures are timed too but excluded here — a 60s timeout would swamp the success distribution."
+          "description": "Successful-call latency over 24 hours so quiet periods retain the last useful operational view."
         },
         {
           "id": 11,
-          "type": "table",
-          "title": "Unpriced models (tokens with no price-book entry, 24h)",
+          "type": "stat",
+          "title": "Unpriced Tokens (24h)",
           "gridPos": {
             "x": 0,
             "y": 27,
@@ -533,22 +533,46 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "openbank:llm_tokens_unpriced_24h > 0",
+              "expr": "sum(openbank:llm_tokens_unpriced_24h) or vector(0)",
               "refId": "A",
               "instant": true,
-              "format": "table"
+              "format": "time_series"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short"
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
             },
             "overrides": []
           },
           "options": {
-            "showHeader": true
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
           },
-          "description": "Empty is the healthy state. Any row: add the model to the price book in prometheus-rules-ai.yaml."
+          "description": "Tokens excluded from cost because their model has no price-book entry."
         },
         {
           "id": 12,

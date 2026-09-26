@@ -15,6 +15,7 @@ import com.openbank.casecoordinator.domain.model.CaseSignalEvidence
 import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceStage
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.Contribution
+import com.openbank.casecoordinator.infrastructure.observability.CaseCoordinatorMetricsService
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
@@ -38,6 +39,7 @@ class CaseActivitiesImpl(
     private val dataSource: DataSource,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
+    private val metrics: CaseCoordinatorMetricsService,
 ) : CaseSynthesisActivity,
     CaseProposalActivity,
     CaseProposalDeliveryActivity,
@@ -127,6 +129,7 @@ class CaseActivitiesImpl(
                 ps.executeUpdate()
             }
         }
+        metrics.recordCaseOpened(start.caseClass.name, start.deliveryMode.name)
     }
 
     override fun recordContributions(caseId: String, contributions: List<Contribution>) {
@@ -165,6 +168,7 @@ class CaseActivitiesImpl(
                         signalId = contribution.signalId,
                         caseId = caseId,
                         agentId = contribution.agentId,
+                        authenticatedPrincipal = contribution.authenticatedPrincipal,
                         capability = "case.contribute",
                         stage = CaseSignalEvidenceStage.PERSISTED,
                         observedAtEpochMs = now.toInstant().toEpochMilli(),
@@ -192,21 +196,22 @@ class CaseActivitiesImpl(
         conn.prepareStatement(
             """
             INSERT INTO case_signal_evidence
-                (signal_id, case_id, agent_id, capability, stage, observed_at,
-                 rollout_id, policy_decision_id, policy_reason)
-            VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
+                (signal_id, case_id, agent_id, authenticated_principal, capability, stage, observed_at,
+                  rollout_id, policy_decision_id, policy_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
             ON CONFLICT (signal_id, stage) DO NOTHING
             """.trimIndent(),
         ).use { ps ->
             ps.setObject(P1, UUID.fromString(evidence.signalId))
             ps.setObject(P2, caseUuid(evidence.caseId))
             ps.setString(P3, evidence.agentId)
-            ps.setString(P4, evidence.capability)
-            ps.setString(P5, evidence.stage.name)
-            ps.setTimestamp(P6, Timestamp.from(Instant.ofEpochMilli(evidence.observedAtEpochMs)))
-            ps.setString(P7, evidence.rolloutId)
-            ps.setString(P8, evidence.policyDecisionId)
-            ps.setString(P9, evidence.policyReason)
+            ps.setString(P4, evidence.authenticatedPrincipal)
+            ps.setString(P5, evidence.capability)
+            ps.setString(P6, evidence.stage.name)
+            ps.setTimestamp(P7, Timestamp.from(Instant.ofEpochMilli(evidence.observedAtEpochMs)))
+            ps.setString(P8, evidence.rolloutId)
+            ps.setString(P9, evidence.policyDecisionId)
+            ps.setString(P10, evidence.policyReason)
             ps.executeUpdate()
         }
     }
@@ -235,6 +240,7 @@ class CaseActivitiesImpl(
         const val P7 = 7
         const val P8 = 8
         const val P9 = 9
+        const val P10 = 10
 
         /** Deterministic correlation UUID for a workflow id — the V1 schema keys on UUID. */
         fun caseUuid(caseId: String): UUID {

@@ -27,4 +27,11 @@ describe('BCP semantic theme contract', () => {
     expect(source).toContain('5AMLD Art. 18')
     expect(source).toContain('DORA Art. 12')
   })
+
+  it('exposes continuity tiers as native keyboard controls', () => {
+    expect(source).toContain('aria-controls={`bcp-tier-${tier.id}`}')
+    expect(source).toContain('aria-expanded={expanded}')
+    expect(source).toContain('<button')
+    expect(source).toContain('id={`bcp-tier-${tier.id}`}')
+  })
 })

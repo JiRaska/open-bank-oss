@@ -46,7 +46,7 @@ spec:
   authorization:
     type: simple
     acls:
-      # mp.messaging.outgoing.ict-incident-events-out.topic — DORA ICT incidents.
+      # mp.messaging.outgoing.ict-incident-outbox-out.topic — durable DORA ICT incident relay.
       - resource:
           type: topic
           name: openbank.security.ict.incident

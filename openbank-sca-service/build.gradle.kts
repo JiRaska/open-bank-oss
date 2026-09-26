@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -22,6 +25,9 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
@@ -55,6 +61,14 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
+tasks.test {
+    // The party-register REST + OIDC clients (#10281 item 1) pushed the module suite past Gradle's
+    // default test heap: with several Quarkus test profiles booted in one fork it died with
+    // OutOfMemoryError mid-ScaServiceTest (measured twice, reproducible). Same 2 GiB override the
+    // account/lending/delegation suites carry.
+    maxHeapSize = "2g"
+}
+
 kover {
     reports {
         filters {
@@ -79,3 +93,24 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Mutation testing on the security-critical domain (ADR-0063 / ADR-0030 D3, issue #8349). Weekly +
+// manual via pitest.yml, advisory — never a per-PR gate.
+//
+// Why this service is in scope while clearing/swift/lending are deliberately not: the exclusion in
+// pitest.yml is about THIN domains (one model file, no branching worth mutating), not about
+// money-path membership. Strong customer authentication (PSD2 RTS Art. 4/5): the challenge lifecycle decides whether an
+// authentication succeeds, and the attempt counter is what makes brute force bounded. A surviving
+// mutant there is an authentication check that never fires.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.sca.domain.*")
+    targetTests = setOf("com.openbank.sca.domain.*", "com.openbank.sca.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
+    // must not fail the run, so the threshold is 0 until the score is measured and sustained.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.sca.domain.*Kt")
+}

@@ -77,3 +77,47 @@ test_service_m2m_excluded_from_aml_write if {
 test_anonymous_denied if {
 	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "amlCase.list"}
 }
+
+# --- amlCase.create (#10486 batch 3) ---
+
+aml_case_openers := [
+	"service-account-openbank-domestic-payment",
+	"service-account-openbank-sepa-payment",
+	"service-account-openbank-sepa-instant",
+	"service-account-openbank-fx",
+]
+
+test_named_openers_create_case_with_role_api_only if {
+	every id in aml_case_openers {
+		allow.allow with input as {"principal": {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}, "action": "amlCase.create"}
+	}
+}
+
+test_named_openers_granted_nothing_else if {
+	every id in aml_case_openers {
+		every action in {"amlCase.updateDecision", "sanctions.create", "ledger.create"} {
+			reasons := allowed_reasons with input as {"principal": {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}, "action": action}
+			not reasons["service-aml-case-create-m2m"]
+		}
+	}
+}
+
+test_named_opener_may_not_update_decision if {
+	count(allowed_reasons) == 0 with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-fx", "roles": ["ROLE_API"]}, "action": "amlCase.updateDecision"}
+}
+
+test_other_role_api_service_account_may_not_create_case if {
+	not allow.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}, "action": "amlCase.create"}
+}
+
+test_shared_client_with_role_api_only_may_not_create_case if {
+	not allow.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}, "action": "amlCase.create"}
+}
+
+test_staff_create_case if {
+	"operator-aml-case-create" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.create"}
+}
+
+test_viewer_may_not_create_case if {
+	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "amlCase.create"}
+}

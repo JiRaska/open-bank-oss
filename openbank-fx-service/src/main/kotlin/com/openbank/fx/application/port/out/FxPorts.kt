@@ -17,6 +17,13 @@ interface FxRateRepository {
 
     suspend fun save(rate: FxRate): FxRate
 
+    /**
+     * Persists [rates] and one transactional-outbox row in the SAME transaction: either every
+     * rate of a fixing and its `fx.fixing.published` event commit together, or none do. A crash
+     * between the two can therefore never leave stored rates that no consumer is told about.
+     */
+    suspend fun saveAllWithOutbox(rates: List<FxRate>, outboxMessage: OutboxMessage): List<FxRate>
+
     suspend fun findLatest(base: String, quote: String, type: RateType): FxRate?
 
     suspend fun findAll(): List<FxRate>

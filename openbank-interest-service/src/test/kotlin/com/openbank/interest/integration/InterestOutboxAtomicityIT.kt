@@ -156,6 +156,35 @@ class InterestOutboxAtomicityIT {
      * above is a claim the query is capable of failing.
      */
     @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_OPERATOR"])
+    fun `a rate config and its rate-changed event commit together, on create and on deactivate`() {
+        val productId = "RATE_EVT_${UUID.randomUUID().toString().take(PRODUCT_SUFFIX_LENGTH)}"
+        createRateConfig(productId)
+        val configId = rows(CONFIG_ID_SQL, productId) { UUID.fromString(it.getString(1)) }.single()
+
+        val created = rows(RATE_EVENT_SQL, configId) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
+        assertThat(created).describedAs("exactly one rate-changed row after create").hasSize(1)
+        val (createdPayload, createdOutboxXmin, createdConfigXmin) = created.single()
+        assertThat(createdPayload).contains("\"change\":\"CREATED\"")
+        assertThat(createdOutboxXmin)
+            .describedAs("config row and outbox row written by the same transaction")
+            .isEqualTo(createdConfigXmin)
+
+        Given { contentType("application/json") } When {
+            delete("/api/v1/interest/rates/$configId")
+        } Then { statusCode(200) }
+
+        val events = rows(RATE_EVENT_SQL, configId) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
+        assertThat(events).hasSize(2)
+        val deactivated = events.single { it.first.contains("\"change\":\"DEACTIVATED\"") }
+        // The UPDATE rewrote the config row, so its xmin is now the deactivating transaction's —
+        // which must also be the one that wrote the DEACTIVATED event.
+        assertThat(deactivated.second).isEqualTo(deactivated.third)
+        // Control: the two writes were two transactions, so the comparison can come out unequal.
+        assertThat(deactivated.second).isNotEqualTo(createdOutboxXmin)
+    }
+
+    @Test
     fun `the atomicity query returns nothing for a capitalization that was never written`() {
         assertThat(writersOf(UUID.randomUUID())).isNull()
     }
@@ -187,7 +216,7 @@ class InterestOutboxAtomicityIT {
         return WriterRows(head.first, head.second, head.third, accrualXmins)
     }
 
-    private fun <T> rows(sql: String, capitalizationId: UUID, map: (java.sql.ResultSet) -> T): List<T> =
+    private fun <T> rows(sql: String, capitalizationId: Any, map: (java.sql.ResultSet) -> T): List<T> =
         dataSource.connection.use { connection ->
             connection.prepareStatement(sql).use { statement ->
                 statement.setObject(1, capitalizationId)
@@ -274,6 +303,16 @@ class InterestOutboxAtomicityIT {
             JOIN interest_outbox o ON o.aggregate_id = c.id
             JOIN withholding_tax w ON w.capitalization_id = c.id
             WHERE c.id = ?
+        """.trimIndent()
+
+        const val CONFIG_ID_SQL = "SELECT id::text FROM interest_rate_configs WHERE product_id = ?"
+
+        val RATE_EVENT_SQL = """
+            SELECT o.payload, o.xmin::text, c.xmin::text
+            FROM interest_outbox o
+            JOIN interest_rate_configs c ON c.id = o.aggregate_id
+            WHERE o.aggregate_id = ? AND o.event_type = 'interest.rate.changed.v1'
+            ORDER BY o.created_at, o.id
         """.trimIndent()
 
         val ACCRUAL_SQL = """

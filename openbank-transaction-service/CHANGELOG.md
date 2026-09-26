@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.24.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.3...transaction-service-v1.24.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [1.24.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.2...transaction-service-v1.24.3) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
+## [1.24.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.1...transaction-service-v1.24.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [1.24.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.0...transaction-service-v1.24.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **fx:** give fx-service an mTLS listener and point transaction-service's rate lookup at it ([#10401](https://github.com/JiRaska/open-bank-oss/issues/10401)) ([2523bfc](https://github.com/JiRaska/open-bank-oss/commit/2523bfccbc3f99843553973c26c06f04fc5eb8ee))
+
+## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.23.0...transaction-service-v1.24.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.22.0...transaction-service-v1.23.0) (2026-09-13)
+
+
+### Features
+
+* **transaction:** say what a merchant coordinate can actually answer ([#9115](https://github.com/JiRaska/open-bank-oss/issues/9115)) ([6c01167](https://github.com/JiRaska/open-bank-oss/commit/6c01167cbd64ec75c77738457cecd667f2840a0b))
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **transaction:** bind four-eyes approvals to the request, not the maker ([#5043](https://github.com/JiRaska/open-bank-oss/issues/5043)) ([20ed7a1](https://github.com/JiRaska/open-bank-oss/commit/20ed7a1899c25dd3858a96c4f841db8ee0abcaa7))
+* **transaction:** guard transaction_outbox created_at plausibility at INSERT ([#9289](https://github.com/JiRaska/open-bank-oss/issues/9289)) ([e4c6e7c](https://github.com/JiRaska/open-bank-oss/commit/e4c6e7c05143073ac2a1a902310c86c4d1113f58))
+
 ## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.1...transaction-service-v1.22.0) (2026-09-08)
 
 

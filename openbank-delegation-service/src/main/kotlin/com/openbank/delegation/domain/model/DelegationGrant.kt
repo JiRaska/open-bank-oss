@@ -104,6 +104,11 @@ data class DelegationGrant(
     val dailyLimit: Money? = null,
     val monthlyLimit: Money? = null,
     val exposure: Exposure? = null,
+    /**
+     * Review-only context selected at offer time. Null is retained for grants created before
+     * periodic recertification was introduced; a scheduler must never guess a value for them.
+     */
+    val recertificationAudience: DelegationRecertificationAudience? = null,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime?,
     val status: DelegationStatus = DelegationStatus.OFFERED,

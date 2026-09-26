@@ -6,7 +6,7 @@ package com.openbank.lending.infrastructure.client
 import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.arc.properties.IfBuildProperty
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
@@ -35,7 +35,10 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 5: the borrower account lookup (account.list) is minted by the NAMED oidc-client
+// `m2m` - Keycloak client `openbank-lending` (ROLE_API only), the identity its ledger and
+// transaction legs already use - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
 interface AccountServiceRestClient {

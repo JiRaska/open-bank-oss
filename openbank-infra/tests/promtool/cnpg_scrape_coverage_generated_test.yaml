@@ -50,6 +50,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -87,6 +89,8 @@ tests:
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -140,6 +144,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -153,6 +159,8 @@ tests:
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
@@ -177,6 +185,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -216,6 +226,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -240,6 +252,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sca"}'
@@ -253,6 +267,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -318,6 +334,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -355,6 +373,8 @@ tests:
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -408,6 +428,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -421,6 +443,8 @@ tests:
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
@@ -445,6 +469,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -484,6 +510,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -508,6 +536,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sca"}'
@@ -521,6 +551,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -562,6 +594,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -599,6 +633,8 @@ tests:
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -652,6 +688,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -665,6 +703,8 @@ tests:
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
@@ -689,6 +729,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -728,6 +770,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -752,6 +796,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sca"}'
@@ -765,6 +811,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -818,6 +866,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -855,6 +905,8 @@ tests:
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -908,6 +960,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -921,6 +975,8 @@ tests:
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
@@ -943,6 +999,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -982,6 +1040,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1006,6 +1066,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sca"}'
@@ -1019,6 +1081,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -1067,6 +1131,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
@@ -1104,6 +1170,8 @@ tests:
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -1157,6 +1225,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
@@ -1170,6 +1240,8 @@ tests:
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
         values: "1+0x40"
@@ -1192,6 +1264,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -1231,6 +1305,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1255,6 +1331,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sca"}'
@@ -1268,6 +1346,8 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"

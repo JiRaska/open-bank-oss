@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.3...sepa-payment-v0.14.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.2...sepa-payment-v0.14.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.1...sepa-payment-v0.14.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.0...sepa-payment-v0.14.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.3...sepa-payment-v0.14.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.2...sepa-payment-v0.13.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sepa-payment:** guard sepa_payment_outbox created_at plausibility at INSERT ([#9292](https://github.com/JiRaska/open-bank-oss/issues/9292)) ([be2c03d](https://github.com/JiRaska/open-bank-oss/commit/be2c03d10f87cf6c44ae4f3c9b158ab52b209096))
+* **sepa-payment:** publish the real SepaPaymentStatus vocabulary ([#9670](https://github.com/JiRaska/open-bank-oss/issues/9670)) ([5a47064](https://github.com/JiRaska/open-bank-oss/commit/5a4706490198461fb8b3f6ee907d6b3d85cadd29))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.1...sepa-payment-v0.13.2) (2026-09-08)
 
 

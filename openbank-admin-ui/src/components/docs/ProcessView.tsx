@@ -20,7 +20,8 @@ import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { TONE_BORDER_LEFT_CLASS, TONE_TEXT_CLASS } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { overallScore, type Process, type Status, type TechNode } from '@/lib/docs/process/schema'
+import type { Process, Status, TechNode } from '@/lib/docs/process/schema'
+import { overallScore } from '@/lib/docs/process/score'
 import { STATUS_META, StatusDot } from '@/lib/docs/status'
 
 type Mode = 'reality' | 'target'
@@ -67,7 +68,7 @@ export function ProcessView({ proc }: { proc: Process }) {
             <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} style={{
               padding: '6px 14px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer',
               fontFamily: 'inherit',
-              background: mode === m ? 'var(--accent)' : 'var(--surface)',
+              background: mode === m ? 'var(--accent-strong)' : 'var(--surface)',
               color: mode === m ? '#fff' : 'var(--text-secondary)',
             }}>{m === 'reality' ? 'Realita (dnes)' : 'Cíl (CNB/EBA)'}</button>
           ))}
@@ -90,7 +91,7 @@ export function ProcessView({ proc }: { proc: Process }) {
           <button key={id} type="button" aria-pressed={lens === id} onClick={() => setLens(id)} style={{
             padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
             border: `1px solid ${lens === id ? 'var(--accent)' : 'var(--border)'}`,
-            background: lens === id ? 'var(--accent)' : 'var(--surface)',
+            background: lens === id ? 'var(--accent-strong)' : 'var(--surface)',
             color: lens === id ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
           }}>{label}</button>
         ))}

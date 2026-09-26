@@ -253,6 +253,7 @@ openbank-admin-ui/dora.json
 # API (openbank-admin-ui/scripts/collect-gate-health.mjs, ADR-0255). Derived — never
 # committed.
 openbank-admin-ui/gate-health.json
+openbank-admin-ui/gate-catalog.json
 # Generated code-derived dependency graph baked at build time
 # (scripts/generate-service-graph.mjs, ADR-0029 D1). Derived — never committed.
 openbank-admin-ui/service-graph.json

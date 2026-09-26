@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
@@ -66,4 +67,36 @@ test('prioritizes second votes and keeps triage understandable on a narrow scree
   await page.getByLabel('Find a person or case').fill('nobody matches')
   await expect(page.getByRole('status')).toContainText('No cases match these filters')
   await expect(page.getByText('The active queue is unchanged.')).toBeVisible()
+})
+
+test('identity review reasons and verdict remain readable in both themes', async ({ page }) => {
+  await page.route('**/api/svc/pid-service/api/v1/parties/cases', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(cases),
+  }))
+  await page.goto('/identity-cases')
+
+  const main = page.locator('#main-content')
+  await expect(main.locator('.badge').filter({ hasText: 'National-ID collision' })).toHaveClass(/badge-danger/)
+  await expect(main.locator('.badge').filter({ hasText: 'Possible namesake' })).toHaveClass(/badge-warning/)
+  await expect(main.locator('.badge').filter({ hasText: 'awaiting 2nd approval' })).toHaveClass(/badge-warning/)
+  await expect(main.getByText('DISTINCT_NEW', { exact: true })).toHaveClass(/tone-text-info/)
+
+  for (const dark of [false, true]) {
+    if (dark) {
+      await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
+      await expect(page.locator('html')).toHaveClass(/dark/)
+    }
+    const scan = await new AxeBuilder({ page })
+      .include('#main-content')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
+  }
+
+  await page.getByRole('button', { name: 'Switch to Czech' }).click()
+  await expect(main.locator('.badge').filter({ hasText: 'Kolize rodného čísla' })).toHaveClass(/badge-danger/)
+  await expect(main.locator('.badge').filter({ hasText: 'Možný jmenovec' })).toHaveClass(/badge-warning/)
 })

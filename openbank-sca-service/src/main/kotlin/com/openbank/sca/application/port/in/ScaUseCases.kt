@@ -13,6 +13,8 @@ data class InitiateScaCommand(
     val preferredMethod: ScaMethod?,
     val dynamicLinkingData: DynamicLinkingData?,
     val redirectUrl: String?,
+    /** The entity the human acts for, recorded as context on the challenge (#10281 item 3). */
+    val onBehalfOfPartyId: UUID? = null,
 )
 
 data class VerifyScaCommand(val challengeId: UUID, val partyId: UUID, val otp: String?)
@@ -75,6 +77,8 @@ data class ConsumeScaCommand(
     val ceremonyId: String? = null,
     val cardId: String? = null,
     val cardAction: String? = null,
+    val approvalRequestId: String? = null,
+    val payloadSha256: String? = null,
 )
 
 /**

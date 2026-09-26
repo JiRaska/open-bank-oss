@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.31.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.3...account-service-v0.31.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.31.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.2...account-service-v0.31.3) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.31.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.1...account-service-v0.31.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.0...account-service-v0.31.1) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.1...account-service-v0.31.0) (2026-09-20)
+
+
+### Features
+
+* **account:** open the business current account when a business party activates ([#10374](https://github.com/JiRaska/open-bank-oss/issues/10374)) ([e204c40](https://github.com/JiRaska/open-bank-oss/commit/e204c405f782ed0820e546eb6925fd8e89fa42be))
+
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.0...account-service-v0.30.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **sca:** add an mTLS listener and give account-service's SCA approval a URL and a bearer ([#10402](https://github.com/JiRaska/open-bank-oss/issues/10402)) ([99bf2e3](https://github.com/JiRaska/open-bank-oss/commit/99bf2e3acb7fde204fae95e322546cdea6031b44)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.29.0...account-service-v0.30.0) (2026-09-17)
+
+
+### Features
+
+* **account:** open the business current account at digital onboarding ([#10173](https://github.com/JiRaska/open-bank-oss/issues/10173)) ([b8cbf1d](https://github.com/JiRaska/open-bank-oss/commit/b8cbf1d928d84ff360cf0560f2c7d725eb711dc7))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.28.0...account-service-v0.29.0) (2026-09-13)
+
+
+### Features
+
+* **account:** authorize SCA-derived representatives ([#9405](https://github.com/JiRaska/open-bank-oss/issues/9405)) ([2dc9d72](https://github.com/JiRaska/open-bank-oss/commit/2dc9d72c10a87d2e9eb7b08e813d2bff75513eac))
+* **account:** record the terms version a term deposit opens under ([#9263](https://github.com/JiRaska/open-bank-oss/issues/9263)) ([848d79e](https://github.com/JiRaska/open-bank-oss/commit/848d79e8e54ab1137cc8b8d603390cbc03388147))
+* **delegation:** enforce organization grant authority ([#9522](https://github.com/JiRaska/open-bank-oss/issues/9522)) ([4f77c79](https://github.com/JiRaska/open-bank-oss/commit/4f77c792d4609251a843082b9ce0c8a09f1ad5ed))
+* **delegation:** project approval policy to account ([#9401](https://github.com/JiRaska/open-bank-oss/issues/9401)) ([58e3bbd](https://github.com/JiRaska/open-bank-oss/commit/58e3bbd91b1691ad05a150b53e02a4f0f6fb4df4))
+
+
+### Bug Fixes
+
+* **account:** guard account_outbox created_at plausibility at INSERT ([#9291](https://github.com/JiRaska/open-bank-oss/issues/9291)) ([875cff3](https://github.com/JiRaska/open-bank-oss/commit/875cff3b949134b079e605a2d2ec5842a0d4b87f))
+* **account:** publish EXPIRED on the withdrawal-proposal status filter ([#9669](https://github.com/JiRaska/open-bank-oss/issues/9669)) ([3890fd2](https://github.com/JiRaska/open-bank-oss/commit/3890fd2727857e516355dfc0cf8dd55b0bc3654c))
+* **account:** replay-safe authorization grants + withdrawal proposals + ADR-0295 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9063](https://github.com/JiRaska/open-bank-oss/issues/9063)) ([d65101b](https://github.com/JiRaska/open-bank-oss/commit/d65101bb1feea0f6a9f0bcf5a1c779f35d7288f1))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.4...account-service-v0.28.0) (2026-09-08)
 
 

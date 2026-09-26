@@ -18,6 +18,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { BADGE_CLASS, Drawer, PageHeader, StatusBadge, statusTone } from '@/components/ui'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
   SAVINGS:      <Banknote size={13} />,
@@ -179,7 +180,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
       <div role="group" aria-label={t('Karty detailu produktu', 'Product detail sections')} style={{ display: 'flex', gap: '2px', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
         {tabs.map(tabItem => (
           <button key={tabItem.id} type="button" aria-pressed={tab === tabItem.id} onClick={() => setTab(tabItem.id as typeof tab)}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer', background: tab === tabItem.id ? 'var(--accent)' : 'transparent', color: tab === tabItem.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer', background: tab === tabItem.id ? 'var(--accent-strong)' : 'transparent', color: tab === tabItem.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s' }}>
             <span aria-hidden="true">{tabItem.icon}</span>{tabItem.label}
           </button>
         ))}
@@ -374,6 +375,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {product.termsAndConditions?.map(tac => {
                 const isCurrent = !tac.effectiveTo
+                const documentUrl = trustedHttpsUrl(tac.url)
                 return (
                   <div key={tac.id} style={{ padding: '10px 12px', borderRadius: '7px', background: isCurrent ? 'var(--success-bg)' : 'var(--surface-2)', border: `1px solid ${isCurrent ? 'var(--success-border)' : 'var(--border)'}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
@@ -384,10 +386,12 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                       {t('Platnost', 'Validity')}: {tac.effectiveFrom}{tac.effectiveTo ? ` → ${tac.effectiveTo}` : ` → ${t('dosud', 'present')}`}
                     </div>
                     {tac.summary && <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{tac.summary}</div>}
-                    <a href={tac.url} target="_blank" rel="noopener noreferrer"
+                    {documentUrl ? <a href={documentUrl} target="_blank" rel="noopener noreferrer"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
                       <ExternalLink size={11} /> {t('Otevřít dokument', 'Open document')}
-                    </a>
+                    </a> : <span role="status" style={{ fontSize: '11px', color: 'var(--warning-text)', fontWeight: 600 }}>
+                      {t('Odkaz na dokument není bezpečně dostupný', 'Document link is not safely available')}
+                    </span>}
                   </div>
                 )
               })}
@@ -410,8 +414,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: isCurrent ? 'var(--accent)' : 'var(--text-primary)' }}>v{v.version}</span>
-                        {!v.isPublic && <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-3)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}>{t('Interní', 'Internal')}</span>}
-                        {isCurrent && <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{t('Aktuální', 'Current')}</span>}
+                        {!v.isPublic && <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-3)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}>{t('Interní', 'Internal')}</span>}
+                        {isCurrent && <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{t('Aktuální', 'Current')}</span>}
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                         {v.validFrom}{v.validTo ? ` → ${v.validTo}` : ` → ${t('dosud', 'present')}`}
@@ -470,18 +474,21 @@ export default function ProductCatalogPage() {
         return a.code.localeCompare(b.code)
       })
       setProducts(items)
-      if (selectedProduct) {
-        const refreshed = items.find(p => p.id === selectedProduct.id)
-        if (refreshed) setSelectedProduct(refreshed)
-      }
+      // Resolve against the state current when the response commits, not the
+      // selection captured when this request started. This keeps a newly made
+      // selection from being replaced by stale closure data and lets `load`
+      // remain stable for the mount effect and manual refresh button.
+      setSelectedProduct(current => current
+        ? items.find(product => product.id === current.id) ?? current
+        : null)
     } catch (e) {
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
     }
-  }, [selectedProduct])
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const filtered = useMemo(() => products.filter(p => {
     if (typeFilter !== 'ALL' && p.type !== typeFilter) return false

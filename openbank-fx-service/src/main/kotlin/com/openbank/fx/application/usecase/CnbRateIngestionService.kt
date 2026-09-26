@@ -4,15 +4,18 @@
 
 package com.openbank.fx.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.fx.application.port.`in`.CnbIngestionResult
 import com.openbank.fx.application.port.`in`.CnbRateIngestionUseCase
 import com.openbank.fx.application.port.`in`.IngestCnbFixingCommand
 import com.openbank.fx.application.port.out.CnbRateProvider
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.domain.cnb.CnbFixingParser
+import com.openbank.fx.domain.event.FxFixingPublished
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateSource
 import com.openbank.fx.domain.model.RateType
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
@@ -29,6 +32,10 @@ import java.util.UUID
  * `bid = ask = mid = ratePerUnit`, `rateType = INDICATIVE`, valid for the fixing's business day
  * (`validFrom = fixing date 00:00 Europe/Prague`, `validTo = next day 00:00`). Ingestion is
  * idempotent on `(source = CNB, pair, validFrom)`, so re-running the same day is a no-op.
+ *
+ * The newly stored rates and one `fx.fixing.published.v1` outbox row commit in a single
+ * transaction (ADR-0314 D5), so the risk engine learns about exactly the rows that exist. A run
+ * that stores nothing emits nothing.
  */
 @ApplicationScoped
 class CnbRateIngestionService(
@@ -37,6 +44,7 @@ class CnbRateIngestionService(
     @ConfigProperty(name = "openbank.cnb.currencies", defaultValue = "EUR,USD,GBP")
     private val enabledCurrencies: String,
     private val clock: Clock,
+    private val objectMapper: ObjectMapper,
 ) : CnbRateIngestionUseCase {
 
     /**
@@ -72,9 +80,8 @@ class CnbRateIngestionService(
         val validTo = fixing.date.plusDays(CNB_VALIDITY_DAYS).atStartOfDay(zone).toInstant()
         val wanted = enabled
 
-        var ingested = 0
         var skipped = 0
-        val stored = mutableListOf<String>()
+        val fresh = mutableListOf<FxRate>()
 
         for (rate in fixing.rates) {
             if (rate.code !in wanted) continue
@@ -83,7 +90,7 @@ class CnbRateIngestionService(
                 continue
             }
             val perUnit = rate.ratePerUnit
-            rateRepo.save(
+            fresh +=
                 FxRate(
                     id = UUID.randomUUID(),
                     baseCurrency = rate.code,
@@ -95,13 +102,34 @@ class CnbRateIngestionService(
                     validFrom = validFrom,
                     validTo = validTo,
                     createdAt = Instant.now(clock),
-                ),
-            )
-            ingested++
-            stored += rate.code
+                )
         }
 
-        return CnbIngestionResult(fixing.date, fixing.sequence, ingested, skipped, stored)
+        if (fresh.isNotEmpty()) {
+            val event = FxFixingPublished(
+                source = RateSource.CNB.name,
+                fixingDate = fixing.date,
+                sequence = fixing.sequence,
+                quoteCurrency = QUOTE,
+                validFrom = validFrom,
+                validTo = validTo,
+                rates = fresh.map { FxFixingPublished.FixingRate(it.id, it.baseCurrency, it.bidRate) },
+                occurredAt = Instant.now(clock),
+            )
+            rateRepo.saveAllWithOutbox(
+                fresh,
+                OutboxMessage(
+                    // Deterministic per (source, day): every event about one fixing shares a
+                    // partition key, so they stay ordered.
+                    aggregateId = UUID.nameUUIDFromBytes("CNB:${fixing.date}".toByteArray()),
+                    eventType = FxFixingPublished.EVENT_TYPE,
+                    payload = objectMapper.writeValueAsString(event),
+                    createdAt = Instant.now(clock),
+                ),
+            )
+        }
+
+        return CnbIngestionResult(fixing.date, fixing.sequence, fresh.size, skipped, fresh.map { it.baseCurrency })
     }
 
     override suspend fun getCnbRate(base: String, quote: String, asOf: LocalDate?): FxRate? {

@@ -171,6 +171,9 @@ class SepaPaymentReturnAuditEvidenceIT {
         assertThat(node.path("returnReasonCode").asText()).isEqualTo("AM09")
         assertThat(node.path("paymentId").asText()).isEqualTo(payment.id.toString())
         assertThat(node.path("reversalPerformed").asBoolean()).isFalse()
+        assertThat(node.path("version").asLong())
+            .describedAs("the evidence names the exact RETURNED aggregate revision")
+            .isEqualTo(payment.revision + 1)
         // These four are what audit-service's AuditConsumer reads; getting them wrong lands the row
         // on its "unknown"/absent sentinels, and `source_service` is chain-hashed into `record_hash`
         // so attribution cannot be corrected after the fact.

@@ -252,3 +252,15 @@ interface PartyUseCase {
  * account from the party id server-side.
  */
 data class PhoneDirectoryMatch(val phoneHash: String, val partyId: UUID, val legalName: String)
+
+/** [declaredBy] is the authenticated caller, recorded on the version row for the audit trail. */
+data class DeclareAmlProfileCommand(val partyId: UUID, val declaration: AmlProfileDeclaration, val declaredBy: String)
+
+/** The personal AML profile (AML Act 253/2008 §9 + FATCA/CRS self-certification). */
+interface PartyAmlProfileUseCase {
+    /** The current version, or null when the person has never declared one. Unknown party throws not-found. */
+    suspend fun getAmlProfile(partyId: UUID): PartyAmlProfile?
+
+    /** Validates, stores a new version (history kept), and updates the derived party facts. */
+    suspend fun declareAmlProfile(cmd: DeclareAmlProfileCommand): PartyAmlProfile
+}

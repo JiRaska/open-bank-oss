@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.7](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.6...product-catalog-v0.18.7) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.5...product-catalog-v0.18.6) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.4...product-catalog-v0.18.5) (2026-09-13)
+
+
+### Bug Fixes
+
+* **product-catalog:** guard catalog_outbox created_at plausibility at INSERT ([#9318](https://github.com/JiRaska/open-bank-oss/issues/9318)) ([fab20b4](https://github.com/JiRaska/open-bank-oss/commit/fab20b4e1809a766a524ca3af4e85376665b3a2e))
+
 ## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.3...product-catalog-v0.18.4) (2026-09-08)
 
 

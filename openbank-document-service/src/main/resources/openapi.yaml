@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -18,6 +18,7 @@ tags:
   - name: Templates
   - name: Documents
   - name: Signature Ceremonies
+  - name: Business Agreements
 
 paths:
   /api/v1/documents/templates:
@@ -276,6 +277,87 @@ paths:
         '200':
           description: Decision recorded
 
+  /api/v1/business-agreements:
+    post:
+      tags: [Business Agreements]
+      summary: Render (or return) a company's onboarding agreement and open its multi-signer ceremony
+      description: >-
+        Internal (kyb-service, ROLE_API; OPA action document.business-agreement.ensure). Idempotent
+        per (caseId, lang): the same request returns the same agreement. A changed request
+        re-renders the agreement only while nobody has signed it (the old ceremony is withdrawn as
+        EXPIRED and the document archived); once any signer has signed, or the agreement is SIGNED,
+        a changed request - or a request in the other language - answers 409. The agreement and
+        every disclosure are stored with partyRef = entityPartyId and caseRef = caseId; disclosures
+        are rendered once per case and code and then reused, so the returned set is stable. The
+        ceremony's signers are signers[].partyRef in request order (signature level ADVANCED); each
+        SIGNED decision is SCA-verified against sha256, and the bank's PAdES seal is applied when
+        the last signer signs, after which sealedSha256 is set.
+      operationId: ensureBusinessAgreement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnsureBusinessAgreementRequest'
+      responses:
+        '200':
+          description: The agreement, its ceremony and its annexed disclosures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessAgreement'
+        '400':
+          description: Invalid request (missing field, unsupported lang, duplicate or non-UUID signer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not permitted by policy
+        '409':
+          description: The agreement for this case is already (partly) signed and cannot be replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: A required template or the product's fee schedule is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/business-agreements/{caseId}:
+    get:
+      tags: [Business Agreements]
+      summary: Get a company's onboarding agreement by kyb case
+      description: >-
+        Internal (ROLE_API; OPA action document.business-agreement.read). With lang, the agreement
+        in that language; without it, the signed agreement if any, else the first one found.
+      operationId: getBusinessAgreement
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: lang
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [cs, en]
+      responses:
+        '200':
+          description: The agreement, its ceremony and its annexed disclosures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessAgreement'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   parameters:
     resourceId:
@@ -474,6 +556,134 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    EnsureBusinessAgreementRequest:
+      type: object
+      required: [caseId, entityPartyId, lang, entity, signers, signingRule, product]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        entityPartyId:
+          type: string
+          format: uuid
+        lang:
+          type: string
+          enum: [cs, en]
+        entity:
+          type: object
+          required: [name, ico, seat, legalForm]
+          properties:
+            name:
+              type: string
+            ico:
+              type: string
+            seat:
+              type: string
+              description: Registered office on a single line.
+            legalForm:
+              type: string
+        representatives:
+          type: array
+          items:
+            type: object
+            required: [name, role]
+            properties:
+              partyRef:
+                type: [string, 'null']
+              name:
+                type: string
+              role:
+                type: string
+        signers:
+          type: array
+          minItems: 1
+          description: Ceremony signers, in signing order. partyRef values must be distinct party UUIDs.
+          items:
+            type: object
+            required: [partyRef, name, role]
+            properties:
+              partyRef:
+                type: string
+                format: uuid
+              name:
+                type: string
+              role:
+                type: string
+        signingRule:
+          type: string
+          description: The manner of acting for the company as registered.
+        product:
+          type: object
+          required: [code, name, currency]
+          properties:
+            code:
+              type: string
+              description: Product reference product-catalog resolves (e.g. prod-004); its fee list feeds the fee schedule.
+            name:
+              type: string
+            currency:
+              type: string
+
+    BusinessAgreement:
+      type: object
+      required: [caseId, documentId, templateCode, templateVersion, sha256, ceremonyId, ceremonyStatus, signers, disclosures]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        templateCode:
+          type: string
+          description: RAMCOVA_SMLOUVA_PO_CS or RAMCOVA_SMLOUVA_PO_EN.
+        templateVersion:
+          type: string
+        sha256:
+          type: string
+          description: Digest of the agreement as rendered — the value every signer's SCA challenge binds to. Never changes.
+        sealedSha256:
+          type: [string, 'null']
+          description: Digest of the stored PDF after the bank's PAdES seal; null until the ceremony completes.
+        ceremonyId:
+          type: string
+          format: uuid
+        ceremonyStatus:
+          type: string
+          enum: [DRAFT, PENDING, PARTIALLY_SIGNED, COMPLETED, DECLINED, EXPIRED]
+        signers:
+          type: array
+          items:
+            type: object
+            required: [partyRef, status]
+            properties:
+              partyRef:
+                type: string
+              status:
+                type: string
+                enum: [PENDING, SIGNED, DECLINED]
+              signedAt:
+                type: [string, 'null']
+                format: date-time
+        disclosures:
+          type: array
+          description: Annexes in print order (VOP, SAZEBNIK_PO, PREDSMLUVNI_INFORMACE_PO, INFORMACE_POJISTENI_VKLADU), each suffixed with the language.
+          items:
+            type: object
+            required: [code, version, title, sha256, documentId]
+            properties:
+              code:
+                type: string
+              version:
+                type: string
+              title:
+                type: string
+              sha256:
+                type: string
+              documentId:
+                type: string
+                format: uuid
 
     ApiError:
       type: object

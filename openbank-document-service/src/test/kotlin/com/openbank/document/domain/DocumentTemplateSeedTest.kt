@@ -4,11 +4,15 @@
 
 package com.openbank.document.domain
 
+import com.github.jknack.handlebars.Handlebars
+import com.github.jknack.handlebars.Helper
 import com.openbank.document.domain.model.TemplateEngine
 import com.openbank.document.domain.model.TemplateStatus
 import com.openbank.document.infrastructure.render.HandlebarsTemplateRenderer
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
 /**
@@ -28,7 +32,7 @@ class DocumentTemplateSeedTest {
             "address" to "Václavské náměstí 1, 110 00 Praha 1",
             "email" to "jana.novakova@example.com",
         ),
-        "product" to mapOf("name" to "Standard Savings Account", "code" to "SAVINGS_STANDARD"),
+        "product" to mapOf("name" to "Standard Savings Account", "code" to "SAVINGS_STANDARD", "currency" to "EUR"),
         "account" to mapOf("iban" to "CZ6508000000192000145399", "currency" to "CZK"),
         "document" to mapOf(
             "date" to "2026-07-14",
@@ -71,6 +75,33 @@ class DocumentTemplateSeedTest {
             ),
         ),
         "signature" to mapOf("block" to "Podepsáno elektronicky / Signed electronically"),
+        // Business onboarding (RAMCOVA_SMLOUVA_PO / SAZEBNIK_PO / PREDSMLUVNI_INFORMACE_PO /
+        // INFORMACE_POJISTENI_VKLADU) — the shape BusinessAgreementService supplies.
+        "bank" to mapOf("name" to "OpenBank a.s.", "seat" to "Na Příkopě 1, 110 00 Praha 1", "ico" to "000 00 001"),
+        "entity" to mapOf(
+            "name" to "Stavby Horák s.r.o.",
+            "ico" to "27074358",
+            "seat" to "Jindřišská 16, 110 00 Praha 1",
+            "legalForm" to "společnost s ručením omezeným",
+        ),
+        "representatives" to listOf(
+            mapOf("name" to "Petr Horák", "role" to "jednatel"),
+            mapOf("name" to "Eva Horáková", "role" to "jednatelka"),
+        ),
+        "signers" to listOf(
+            mapOf("name" to "Petr Horák", "role" to "jednatel"),
+            mapOf("name" to "Eva Horáková", "role" to "jednatelka"),
+        ),
+        "signingRule" to "Za společnost jednají dva jednatelé společně.",
+        "agreement" to mapOf("date" to "2026-09-17", "number" to "PO-3F2A9C1D0B4E"),
+        "disclosures" to listOf(
+            mapOf("title" to "Všeobecné obchodní podmínky", "code" to "VOP_CS", "version" to "1.1.0"),
+            mapOf("title" to "Sazebník poplatků pro podnikatele", "code" to "SAZEBNIK_PO_CS", "version" to "1.0.0"),
+        ),
+        "fees" to listOf(
+            mapOf("label" to "Vedení účtu", "frequency" to "měsíčně", "amount" to "19,99 EUR"),
+            mapOf("label" to "Vklad hotovosti", "frequency" to "z částky transakce", "amount" to "0,5 %"),
+        ),
         // ADR-0248 payment confirmation fields (POTVRZENI_O_PLATBE_CS/EN).
         "payment" to mapOf(
             "reference" to "PMT-2026-000987",
@@ -113,11 +144,28 @@ class DocumentTemplateSeedTest {
         "MESICNI_VYPIS" to listOf("MESICNI_VYPIS_CS", "MESICNI_VYPIS_EN"),
         "ROCNI_VYPIS_POPLATKU" to listOf("ROCNI_VYPIS_POPLATKU_CS", "ROCNI_VYPIS_POPLATKU_EN"),
         "POTVRZENI_O_PLATBE" to listOf("POTVRZENI_O_PLATBE_CS", "POTVRZENI_O_PLATBE_EN"),
+        "RAMCOVA_SMLOUVA_PO" to listOf("RAMCOVA_SMLOUVA_PO_CS", "RAMCOVA_SMLOUVA_PO_EN"),
+        "SAZEBNIK_PO" to listOf("SAZEBNIK_PO_CS", "SAZEBNIK_PO_EN"),
+        "PREDSMLUVNI_INFORMACE_PO" to listOf("PREDSMLUVNI_INFORMACE_PO_CS", "PREDSMLUVNI_INFORMACE_PO_EN"),
+        "INFORMACE_POJISTENI_VKLADU" to listOf("INFORMACE_POJISTENI_VKLADU_CS", "INFORMACE_POJISTENI_VKLADU_EN"),
     ).map { (family, expectedCodes) ->
         DynamicTest.dynamicTest("$family has both a cs and an en variant") {
             val codes = DocumentTemplateSeed.templates.map { it.code }
             assertThat(codes).containsAll(expectedCodes)
         }
+    }
+
+    /**
+     * The seeder inserts by fixed id and SKIPS an id that already exists, so a reused id silently
+     * drops a template (it happened: the first business templates reused three ADR-0248 ids and
+     * three codes never reached the database). Codes and (code, version) must be unique too.
+     */
+    @Test
+    fun `seed ids and code versions are unique`() {
+        val templates = DocumentTemplateSeed.templates
+        assertThat(templates.map { it.id }).doesNotHaveDuplicates()
+        assertThat(templates.map { it.code to it.version }).doesNotHaveDuplicates()
+        assertThat(templates.map { it.code }).doesNotHaveDuplicates()
     }
 
     @TestFactory
@@ -137,5 +185,76 @@ class DocumentTemplateSeedTest {
             assertThat(template.classification).isEqualTo("restricted")
             assertThat(template.productRef).isNull()
         }
+    }
+
+    /**
+     * The "no `{{` survives" check above cannot see a MISSING value — Handlebars renders an unknown
+     * path as an empty string. Business documents are bound contracts, so every variable they use
+     * must resolve: this renders them with a Handlebars instance whose missing-value hook throws.
+     */
+    private val strict = Handlebars().registerHelperMissing(
+        Helper<Any?> { _, options -> throw IllegalStateException("unresolved {{${options.helperName}}}") },
+    )
+
+    @TestFactory
+    fun `business onboarding templates resolve every variable and name the company and each signer`() =
+        BUSINESS_CODES.map { code ->
+            DynamicTest.dynamicTest(code) {
+                val template = DocumentTemplateSeed.templates.single { it.code == code }
+                assertThat(template.version).isEqualTo("1.0.0")
+                assertThat(template.status).isEqualTo(TemplateStatus.PUBLISHED)
+                assertThat(template.locale).isEqualTo(code.takeLast(2).lowercase())
+
+                // BusinessAgreementService passes the company as party.name to the disclosures.
+                val data = sampleData + ("party" to mapOf("name" to "Stavby Horák s.r.o."))
+                val rendered = strict.compileInline(template.bodyHtml).apply(data)
+
+                assertThat(rendered).doesNotContain("{{").doesNotContain("}}")
+                assertThat(rendered).contains("OpenBank a.s.")
+                // Real bank documents: nothing may present itself as a sample or placeholder.
+                assertThat(rendered.lowercase()).doesNotContain("sample").doesNotContain("vzor")
+                if (code.startsWith("RAMCOVA_SMLOUVA_PO")) {
+                    assertThat(rendered)
+                        .contains("Stavby Horák s.r.o.", "27074358", "Jindřišská 16, 110 00 Praha 1")
+                        .contains("společnost s ručením omezeným", "Za společnost jednají dva jednatelé společně.")
+                        .contains("PO-3F2A9C1D0B4E", "SAZEBNIK_PO_CS", "EUR")
+                    // Each signer appears in the signers list AND gets a signature line.
+                    listOf("Petr Horák", "Eva Horáková").forEach { name ->
+                        assertThat(Regex(Regex.escape(name)).findAll(rendered).count()).isGreaterThanOrEqualTo(3)
+                    }
+                } else if (!code.startsWith("SAZEBNIK_PO")) {
+                    // Pre-contractual information and the depositor sheet are addressed to the company.
+                    assertThat(rendered).contains("Stavby Horák s.r.o.")
+                }
+                if (code.startsWith("SAZEBNIK_PO")) {
+                    assertThat(rendered).contains("Vedení účtu", "19,99 EUR", "Vklad hotovosti", "0,5 %")
+                }
+                if (code.startsWith("INFORMACE_POJISTENI_VKLADU")) {
+                    assertThat(rendered).containsAnyOf("100 000 EUR", "EUR 100,000")
+                }
+            }
+        }
+
+    @TestFactory
+    fun `the strict renderer really fails on a missing variable`() = BUSINESS_CODES.map { code ->
+        DynamicTest.dynamicTest(code) {
+            val template = DocumentTemplateSeed.templates.single { it.code == code }
+            val withoutBank = sampleData - "bank"
+            assertThatThrownBy { strict.compileInline(template.bodyHtml).apply(withoutBank) }
+                .hasStackTraceContaining("unresolved")
+        }
+    }
+
+    private companion object {
+        val BUSINESS_CODES = listOf(
+            "RAMCOVA_SMLOUVA_PO_CS",
+            "RAMCOVA_SMLOUVA_PO_EN",
+            "SAZEBNIK_PO_CS",
+            "SAZEBNIK_PO_EN",
+            "PREDSMLUVNI_INFORMACE_PO_CS",
+            "PREDSMLUVNI_INFORMACE_PO_EN",
+            "INFORMACE_POJISTENI_VKLADU_CS",
+            "INFORMACE_POJISTENI_VKLADU_EN",
+        )
     }
 }

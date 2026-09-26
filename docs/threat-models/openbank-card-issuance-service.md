@@ -184,6 +184,8 @@ retiring the corresponding KEK version in Transit, not after.
 
 ## 6. Change log
 
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+
 - **2026-09-05** — Money-path classification (ADR-0283 phase 0, #8808). No code change. The
   service joins `rules.yaml: money_path_services` because the authorisation decision point (§4a)
   and the SCA-gated limit/control changes (ADR-0194) decide whether money may move. Measured
@@ -220,6 +222,7 @@ retiring the corresponding KEK version in Transit, not after.
   DLQ so a close event is never destroyed, idempotent upsert per grant id. Residual: seconds-level
   revoke propagation per ADR-0232; customer-edge adoption of the check endpoint is its own slice.
   Rollback: revert; the projection tables are droppable without touching `cards`.
+- **2026-09-21** — **Two card reads admit named machine identities (#10486 batch 6).** `GET /api/v1/cards/{id}` (`card.read`) and `GET /api/v1/cards/party/{partyId}` (`card.list`) add `ROLE_API` to `@RolesAllowed`, so delegation-service (ownership check) and party-service (GDPR Art. 15) keep reading once the shared `openbank-services` client loses `ROLE_OPERATOR`. **STRIDE-E/I:** `ROLE_API` is held by every service account and this is cardholder data, so it is narrowed twice: identity rules in `card_issuance_rest_ext.rego` (`service-delegation-card-read`, `service-party-card-list`) and, because card-issuance runs `AUTHZ_ENFORCE=false`, a Kotlin named-caller check (`requireNamedCardReader`) with one list per endpoint. `CardReadCallerGuardTest` pins the Kotlin lists to the rego and asserts only these two endpoints admit `ROLE_API`; `card_issuance_rest_ext_test.rego` denies another service account and the shared client (negative case run: widening a rule to a `service-account-` prefix turned two tests red). The secure-details endpoint (PAN/CVV) is unchanged. Rollback: revert the commit.
 ## Delegation lifecycle ordering
 
 The card enforcement projection uses a durable monotonic cursor before changing access or blocking

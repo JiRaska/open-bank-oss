@@ -77,7 +77,8 @@ jobs:
       - run: python3 .github/scripts/test-agent-admission.py
 
   steward:
-    if: github.event_name != 'pull_request'
+    # Parked until this mutating worker has shared budget admission and API isolation.
+    if: github.event_name != 'pull_request' && github.event_name == 'workflow_dispatch' && vars.AGENT_MUTATING_WORKERS_ENABLED == 'true'
     name: Tend one agent PR
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -159,11 +160,11 @@ jobs:
 
       - name: Assert the Claude credential is alive
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: "" # no provider credential until budget admission is integrated
         run: |
           set -euo pipefail
-          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set for this job."
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set for this job."
             exit 1
           fi
           npm ci --prefix .github/scripts/agent-review-claude-cli
@@ -171,7 +172,7 @@ jobs:
           echo "$PWD/.github/scripts/agent-review-claude-cli/node_modules/.bin" >> "$GITHUB_PATH"
           claude --version
           probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
-                    --max-turns 3 \
+                    --max-turns 2 --max-budget-usd 0.10 \
                     --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings 2>&1 | tail -3)
           echo "control-probe: ${probe}"
           # Assert on the REPLY, never the exit code: the CLI exits 0 on its own recorded failure.
@@ -182,7 +183,7 @@ jobs:
 
       - name: Tend
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: "" # no provider credential until budget admission is integrated
           GH_TOKEN: ${{ steps.token.outputs.token }}
           STEWARD_MODE: ${{ steps.mode.outputs.mode }}
         run: |
@@ -195,7 +196,7 @@ jobs:
           cp .github/agent-prompts/pr-steward.md /tmp/steward-prompt.md
           printf '\n\nMODE FOR THIS RUN: %s\n' "${STEWARD_MODE}" >> /tmp/steward-prompt.md
           claude -p "$(cat /tmp/steward-prompt.md)" \
-            --max-turns 120 \
+            --max-turns 12 --max-budget-usd 0.50 \
             --permission-mode bypassPermissions \
           | tee /tmp/steward-output.txt
           echo "--- steward output above ---"

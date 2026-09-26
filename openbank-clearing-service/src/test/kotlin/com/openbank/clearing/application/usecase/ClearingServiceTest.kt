@@ -154,6 +154,7 @@ class ClearingServiceTest {
         every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
         every { eventPublisher.batchSettledMessage(any()) } returns mockk()
         every { eventPublisher.netSettlementPostMessage(any()) } returns mockk()
+        every { eventPublisher.itemClearedMessage(any()) } returns mockk()
         val eventsSlot: CapturingSlot<List<OutboxMessage>> = slot()
         every {
             batchRepo.settleWithEvents(capture(updatedSlot), capture(itemsSlot), capture(eventsSlot))
@@ -165,10 +166,12 @@ class ClearingServiceTest {
         assertThat(updatedSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
         assertThat(updatedSlot.captured.settledAt).isNotNull()
         assertThat(itemsSlot.captured).allSatisfy { assertThat(it.status).isEqualTo(ClearingStatus.SETTLED) }
-        // ADR-0281: the batch.settled event AND the net_settlement.post command commit together.
-        assertThat(eventsSlot.captured).hasSize(2)
+        // Batch, ledger intent and one source-versioned acknowledgement per item commit together.
+        assertThat(eventsSlot.captured).hasSize(4)
+        assertThat(itemsSlot.captured.map { it.revision }).containsOnly(1)
         verify { eventPublisher.batchSettledMessage(any()) }
         verify { eventPublisher.netSettlementPostMessage(any()) }
+        verify(exactly = 2) { eventPublisher.itemClearedMessage(any()) }
         verify { batchRepo.settleWithEvents(any(), any(), any()) }
     }
 

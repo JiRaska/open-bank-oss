@@ -68,3 +68,22 @@ allowed_reasons contains "compliance-card-block" if {
 	"ROLE_COMPLIANCE" in input.principal.roles
 	input.action == "card.block"
 }
+
+# #10486 batch 6 — per-service machine identities for the two card READS that used to ride the
+# shared openbank-services principal's ROLE_OPERATOR. Each principal holds ROLE_API only; CardResource
+# admits ROLE_API on exactly these two endpoints, and because card-issuance still runs
+# AUTHZ_ENFORCE=false a Kotlin named-caller check (CardReadCallerGuard.kt) enforces the same lists.
+# CardReadCallerGuardTest pins the Kotlin sets to these rules.
+#   delegation-service CardIssuanceRestClient.getCard  GET /cards/{id}             card.read
+#   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
+allowed_reasons contains "service-delegation-card-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id in {"service-account-openbank-delegation"}
+	input.action == "card.read"
+}
+
+allowed_reasons contains "service-party-card-list" if {
+	input.principal.type == "HUMAN"
+	input.principal.id in {"service-account-openbank-party"}
+	input.action == "card.list"
+}

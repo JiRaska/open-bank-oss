@@ -1,0 +1,36 @@
+# Treasury domain: treasury-service + its single-owner CNPG Postgres + OIDC ExternalSecrets
+# (shared client + its own M2M client) + Kafka mTLS identity + deal-events topic + OPA bundle +
+# private-CA client certificate for the ledger edge. treasury-service books the bank's own
+# money-market deals (ADR-0315). MONEY-PATH: it posts journals to the ledger through its API.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: treasury
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/treasury
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: treasury
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      # The OPA bundle ConfigMap approaches the ceiling client-side apply can carry (256 KB
+      # last-applied annotation). Server-side apply does not write that annotation at all.
+      # Gate: opa-bundle-apply-size (.github/scripts/check-opa-bundle-apply-size.py).
+      - ServerSideApply=true

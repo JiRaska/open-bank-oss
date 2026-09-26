@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -26,6 +26,7 @@ import java.util.UUID
 data class PidPartyResponse(
     val id: UUID,
     val status: String,
+    val partyType: String? = null,
     val kycAttributes: PidKycAttributes?,
     val coreAttributes: PidCoreAttributes? = null,
 )
@@ -52,7 +53,9 @@ data class PidCoreAttributes(val givenName: String? = null, val familyName: Stri
  * "ownership could not be established" while the underlying cause was `Unauthorized, status
  * code 401` in the pod log.
  */
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 6: party.read is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-delegation` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "pid-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface PidServiceRestClient {
@@ -75,6 +78,7 @@ class ResilientPartyEligibilityClient @Inject constructor(@RestClient private va
             active = party.status == "ACTIVE",
             kycLevel = party.kycAttributes?.kycLevel ?: "NONE",
             displayName = displayNameOf(party.coreAttributes),
+            partyType = party.partyType,
         )
     }
 

@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { Layers, ExternalLink } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 // From `capability-registry`, NOT from `capabilities`: the latter imports `fs` and a client
 // component that reaches it fails the build with `Module not found: Can't resolve 'fs'`.
 import {
@@ -198,20 +199,23 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
           {t('Jak se dostat do sandboxu každé sítě', "Getting into each network's sandbox")}
         </h2>
         <ul className="mt-2 space-y-2 text-sm text-slate-700">
-          {registry.networks.map(network => (
-            <li key={network.id} className="flex flex-col gap-0.5">
-              <a
-                href={network.developerPortal}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex w-fit items-center gap-1 font-medium text-slate-900 hover:underline"
-              >
-                {network.label}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-              <span className="text-xs text-slate-600">{network.sandboxAuth}</span>
-            </li>
-          ))}
+          {registry.networks.map(network => {
+            const developerPortal = trustedHttpsUrl(network.developerPortal)
+            return (
+              <li key={network.id} className="flex flex-col gap-0.5">
+                {developerPortal ? <a
+                  href={developerPortal}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex w-fit items-center gap-1 font-medium text-slate-900 hover:underline"
+                >
+                  {network.label}
+                  <ExternalLink className="h-3 w-3" />
+                </a> : <span className="font-medium text-slate-900">{network.label}</span>}
+                <span className="text-xs text-slate-600">{network.sandboxAuth}</span>
+              </li>
+            )
+          })}
         </ul>
         <p className="mt-3 text-xs text-slate-600">
           {t(

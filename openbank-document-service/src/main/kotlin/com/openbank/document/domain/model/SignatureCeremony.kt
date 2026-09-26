@@ -40,6 +40,10 @@ data class SignatureCeremony(
     // overwriting it. A plain Int, not a framework type, so it does not violate the
     // framework-free domain layer (ADR-0002).
     val version: Int = 0,
+    // Parallel signing: every signer may decide in any order (a company's joint representatives
+    // sign whenever each gets to it). False keeps the strict [Signer.order] sequencing that retail
+    // multi-signer contracts rely on (ADR-0162 D4).
+    val parallel: Boolean = false,
 ) {
     fun open(): SignatureCeremony {
         require(status == CeremonyStatus.DRAFT) { "Only a DRAFT ceremony can be opened" }
@@ -48,10 +52,10 @@ data class SignatureCeremony(
     }
 
     /**
-     * Records a signer's decision. Signers must decide **strictly in [Signer.order]**: a decision
-     * is only accepted from the signer holding the lowest `order` among those still `PENDING` —
-     * this enforces the multi-signer sequencing ADR-0162 D4 calls for (e.g. a contract two
-     * clients sign days apart, one after the other).
+     * Records a signer's decision. Unless the ceremony is [parallel], signers must decide
+     * **strictly in [Signer.order]**: a decision is only accepted from the signer holding the
+     * lowest `order` among those still `PENDING` — the multi-signer sequencing ADR-0162 D4 calls
+     * for (e.g. a contract two clients sign days apart, one after the other).
      */
     fun recordDecision(partyRef: String, decision: SignerStatus, now: Instant): SignatureCeremony {
         require(status == CeremonyStatus.PENDING || status == CeremonyStatus.PARTIALLY_SIGNED) {
@@ -66,7 +70,7 @@ data class SignatureCeremony(
             "Signer $partyRef has already decided (${signer.status})"
         }
         val nextExpectedOrder = signers.filter { it.status == SignerStatus.PENDING }.minOf { it.order }
-        require(signer.order == nextExpectedOrder) {
+        require(parallel || signer.order == nextExpectedOrder) {
             "Signers must decide in order: signer $partyRef has order ${signer.order}, but the next " +
                 "expected signer has order $nextExpectedOrder"
         }
@@ -78,6 +82,17 @@ data class SignatureCeremony(
             }
         }
         return copy(signers = updatedSigners, status = recomputeStatus(updatedSigners))
+    }
+
+    /**
+     * Withdraws a ceremony nobody has signed yet — its document is being replaced by a re-render.
+     * Refused once any signature landed: a partially signed contract is never silently dropped.
+     */
+    fun expire(): SignatureCeremony {
+        require(status == CeremonyStatus.DRAFT || status == CeremonyStatus.PENDING) {
+            "Only a ceremony nobody has signed can be withdrawn (status $status)"
+        }
+        return copy(status = CeremonyStatus.EXPIRED)
     }
 
     private fun recomputeStatus(current: List<Signer>): CeremonyStatus = when {

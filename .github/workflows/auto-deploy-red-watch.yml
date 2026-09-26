@@ -16,14 +16,25 @@
 #   scheduled job going red would reproduce the blind spot it exists to close.
 #   So this opens or refreshes ONE issue (label `fleet-health`, marker
 #   `<!-- auto-deploy-red -->`), reopens it if hand-closed while the pipeline is
-#   still failing, and closes it itself on the next green run.
+#   still failing, and closes it itself on the next green SCHEDULED run.
 #
-# THRESHOLD: three consecutive completed failures. One failure can be a
-#   transient broker hiccup the next tick clears; three in a row (≈ 2 hours at
-#   the deploy cadence) is a stuck pipeline by any reading, and the gate itself
-#   says a REGRESSION block "will not clear on its own" (ADR-0092, #2549).
-#   Cancelled runs are not failures (concurrency-group supersede is normal,
-#   #2185) and in-progress runs are simply not a verdict yet.
+# THE POPULATION IS THE SCHEDULED LANE ONLY. Until 2026-09-13 this read the three
+#   newest completed runs of any event. auto-deploy also runs on `push` (the
+#   services a merge touched) and those runs are green legitimately — about a
+#   different subject — and they land between scheduled ticks. Ten scheduled
+#   failures over 27 hours never escalated: `2271 schedule ✗ | 2270 schedule ✗ |
+#   2269 push ✓` read as not stuck, and the not-stuck branch would have CLOSED
+#   any issue on that push green. The decision now lives in
+#   .github/scripts/detect-auto-deploy-stuck.py, where --self-test holds it to
+#   exactly that fixture, and the `auto-deploy-red-watch-declaration` gate keeps
+#   it from being re-inlined here where no test can reach it.
+#
+# THRESHOLD: three consecutive completed scheduled failures. One failure can be
+#   a transient broker hiccup the next tick clears; three in a row is a stuck
+#   pipeline by any reading, and the gate itself says a REGRESSION block "will
+#   not clear on its own" (ADR-0092, #2549). Cancelled runs are not failures
+#   (concurrency-group supersede is normal, #2185) and in-progress runs are
+#   simply not a verdict yet.
 # -----------------------------------------------------------------------------
 name: auto-deploy red watch
 
@@ -35,6 +46,8 @@ on:
   workflow_dispatch:
 
 permissions:
+  contents: read
+  actions: read
   issues: write
 
 concurrency:
@@ -44,24 +57,46 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A verdict from logic that has never been falsified is not a verdict.
+      - name: Self-test the watcher
+        run: python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
+
+      # One bounded API call (event=schedule, one page). The previous shape
+      # paginated the whole run history (~228 calls per tick to look at three
+      # runs) and was itself failing on the installation rate limit by 04:25Z
+      # on 2026-09-13.
+      - name: Evaluate the scheduled lane
+        id: verdict
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python3 .github/scripts/detect-auto-deploy-stuck.py --evaluate \
+            --repo "$GITHUB_REPOSITORY" --json /tmp/auto-deploy-red.json
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "scheduled auto-deploy lane not stuck." ;;
+            2) echo "::warning::scheduled auto-deploy lane is stuck red — escalating." ;;
+            1) echo "::error::The watch could not read the scheduled lane. That is a"
+               echo "::error::failure of THIS WATCH, not a 'not stuck' verdict."
+               exit 1 ;;
+            *) echo "::error::Unexpected exit $code."; exit "$code" ;;
+          esac
+
+      - name: Escalate or stand down
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
+            const fs = require('fs')
+            const v = JSON.parse(fs.readFileSync('/tmp/auto-deploy-red.json', 'utf8'))
             const LABEL = 'fleet-health'
             const MARKER = '<!-- auto-deploy-red -->'
-            const THRESHOLD = 3
-
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              ...context.repo, workflow_id: 'auto-deploy.yml',
-              status: 'completed', per_page: 10,
-            })
-            // completed excludes cancelled? No — completed INCLUDES cancelled/failure/success.
-            // A cancelled run is a superseded verdict, not a red one (#2185): skip it.
-            const verdicts = runs.filter(r => r.conclusion !== 'cancelled')
-            const recent = verdicts.slice(0, THRESHOLD)
-            const stuck = recent.length >= THRESHOLD && recent.every(r => r.conclusion === 'failure')
-            const latestGreen = verdicts.find(r => r.conclusion === 'success')
 
             const findOpen = async (state) => {
               const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -71,41 +106,52 @@ jobs:
               return issues.find(i => (i.body || '').includes(MARKER))
             }
 
-            if (!stuck) {
+            if (!v.stuck) {
               const open = await findOpen('open')
-              if (open && latestGreen) {
+              // Only a green SCHEDULED run newer than the streak closes the issue
+              // (R3). A green push is a fact about other services; the script
+              // never puts one in close_on.
+              if (open && v.close_on) {
                 await github.rest.issues.createComment({
                   ...context.repo, issue_number: open.number,
-                  body: `auto-deploy is green again ([run ${latestGreen.id}](${latestGreen.html_url}), ${latestGreen.created_at}) — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+                  body: `the scheduled auto-deploy lane is green again ([run ${v.close_on.id}](${v.close_on.html_url}), ${v.close_on.created_at}) — closing. _(\`${context.workflow}\` run ${context.runId})_`,
                 })
                 await github.rest.issues.update({ ...context.repo, issue_number: open.number, state: 'closed' })
                 core.info(`closed #${open.number}`)
+              } else if (open) {
+                core.info(`#${open.number} stays open: below threshold but no green scheduled run yet.`)
               } else {
-                core.info('auto-deploy not stuck; nothing to do.')
+                core.info('scheduled auto-deploy lane not stuck; nothing to do.')
               }
               return
             }
 
+            const recent = v.recent
             const first = recent[0]
             const last = recent[recent.length - 1]
-            const title = `auto-deploy has failed ${THRESHOLD}+ runs in a row — services pinned to their last deployable images`
+            const title = `auto-deploy has failed ${v.threshold}+ scheduled runs in a row — services pinned to their last deployable images`
             const body = [
               MARKER,
               '## auto-deploy is stuck red — the estate looks deployed and is not',
               '',
-              `${THRESHOLD} consecutive completed auto-deploy runs failed:`,
+              `${v.threshold} consecutive completed SCHEDULED auto-deploy runs failed:`,
               '',
               ...recent.map(r => `- [run ${r.id}](${r.html_url}) — ${r.created_at} — head \`${(r.head_sha || '').slice(0, 9)}\``),
               '',
               `Newest: ${first.created_at}; oldest of the streak: ${last.created_at}.`,
               '',
+              'Only the scheduled (reconcile) lane counts here: a green `push` run deploys the',
+              'services one merge touched and says nothing about the services that are pinned.',
+              '',
               'A REGRESSION/PENDING_BUILD block does not clear on its own — the reconcile tick',
               're-offers it forever (ADR-0092, #2549). Partial deploys still land, so the fleet',
-              'looks healthy while blocked services stay pinned. See #9130 for the first measured',
-              'instance (four failures over seven hours, found by accident).',
+              'looks healthy while blocked services stay pinned. Read the can-i-deploy job of the',
+              'newest run above for the per-service class and the failing pact verification.',
+              'See #9130 for the first measured instance (four failures over seven hours, found',
+              'by accident).',
               '',
               'This issue refreshes in place while the streak continues and closes itself on the',
-              `next green run. Hand-closing while still red reopens it. _(\`${context.workflow}\` run ${context.runId})_`,
+              `next green scheduled run. Hand-closing while still red reopens it. _(\`${context.workflow}\` run ${context.runId})_`,
             ].join('\n')
 
             const open = await findOpen('open')

@@ -17,6 +17,19 @@ interface AccrueInterestUseCase {
 interface CapitalizeInterestUseCase {
     fun capitalize(accountId: UUID, productId: String, toDate: LocalDate): Uni<InterestCapitalization>
     fun capitalizeAll(toDate: LocalDate): Uni<Int>
+
+    /**
+     * Completes every outstanding capitalization claim at its own frozen period, starting no new
+     * ones. Returns how many were completed.
+     *
+     * Exposed separately from [capitalizeAll] because the two run on very different clocks. A claim
+     * stranded by a failed ledger post freezes its `(account, product)` pair until it is completed,
+     * and [capitalizeAll] runs MONTHLY — so recovery riding along with it would leave a wedge in
+     * place for up to a month, which is how this went unnoticed for seven weeks in sandbox (#10404).
+     * This is safe to run often: it touches only sets a previous attempt already claimed, and
+     * replaying one is idempotent by the ledger key.
+     */
+    fun recoverOutstandingClaims(): Uni<Int>
 }
 
 interface GetAccrualsUseCase {

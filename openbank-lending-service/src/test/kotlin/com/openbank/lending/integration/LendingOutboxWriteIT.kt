@@ -57,6 +57,9 @@ class LendingOutboxWriteIT {
             // The scheduled dispatcher would otherwise race this test's assertion, marking the row
             // SENT (or FAILED, with no real broker) before it can be observed as freshly written.
             props["openbank.outbox.dispatch-enabled"] = "false"
+            // ADR-0314 D5: this flow books a FLOATING loan end to end, so the V18 columns, their CHECK
+            // constraint and the entity mapping are exercised against real Postgres.
+            props["lending.origination.floating-rate-enabled"] = "true"
             return props
         }
 
@@ -80,7 +83,9 @@ class LendingOutboxWriteIT {
     fun `1 - apply for a loan`() {
         val body = """
             {"partyId":"${UUID.randomUUID()}","requestedAmount":{"amount":"10000.00","currency":{"code":"EUR"}},
-            "nominalAnnualRate":0.05,"termPeriods":12,"firstDueDate":"${LocalDate.now().plusMonths(1)}"}
+            "nominalAnnualRate":0.05,"termPeriods":12,"firstDueDate":"${LocalDate.now().plusMonths(1)}",
+            "rateTerms":{"rateType":"FLOATING","rateIndex":"PRIBOR_3M","spread":0.025,
+              "resetFrequencyMonths":3,"nextResetDate":"${LocalDate.now().plusMonths(4)}"}}
         """.trimIndent()
 
         val response = Given {
@@ -166,11 +171,26 @@ class LendingOutboxWriteIT {
                     assertThat(rs.next()).describedAs("a lending_outbox row for loan $loanId").isTrue()
                     assertThat(rs.getString("event_type")).isEqualTo("loan.disbursed")
                     assertThat(rs.getString("payload")).contains(loanId)
+                    assertThat(rs.getString("payload")).contains("\"rateType\":\"FLOATING\"")
                     // #9003 falsification: do not accept "the default is Instant.now()" as proof —
                     // assert the row that lands through the REAL emitter is not epoch-stamped
                     // (44 of 45 sandbox rows carried 1970-01-01, the #3272 defect class).
                     assertThat(rs.getTimestamp("created_at").toInstant())
                         .isAfter(java.time.Instant.parse("2020-01-01T00:00:00Z"))
+                }
+            }
+            // The loan row carries the terms the application was approved with.
+            conn.prepareStatement(
+                "SELECT rate_type, rate_index, spread, reset_frequency_months, next_reset_date FROM loan WHERE id = ?",
+            ).use { ps ->
+                ps.setObject(1, UUID.fromString(loanId))
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString("rate_type")).isEqualTo("FLOATING")
+                    assertThat(rs.getString("rate_index")).isEqualTo("PRIBOR_3M")
+                    assertThat(rs.getBigDecimal("spread")).isEqualByComparingTo("0.025")
+                    assertThat(rs.getInt("reset_frequency_months")).isEqualTo(3)
+                    assertThat(rs.getDate("next_reset_date").toLocalDate()).isEqualTo(LocalDate.now().plusMonths(4))
                 }
             }
         }

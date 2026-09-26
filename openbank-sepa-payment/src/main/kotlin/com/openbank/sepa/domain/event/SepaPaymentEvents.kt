@@ -14,6 +14,7 @@ import java.util.UUID
 
 data class SepaPaymentCreatedEvent(
     val paymentId: UUID,
+    val version: Long,
     val idempotencyKey: String,
     val type: SepaPaymentType,
     val status: SepaPaymentStatus,
@@ -38,6 +39,7 @@ data class SepaPaymentCreatedEvent(
 
 data class SepaPaymentStatusChangedEvent(
     val paymentId: UUID,
+    val version: Long,
     val previousStatus: SepaPaymentStatus,
     val newStatus: SepaPaymentStatus,
     val rejectReason: String?,
@@ -71,6 +73,8 @@ data class SepaPaymentStatusChangedEvent(
  */
 data class SepaPaymentReturnedEvent(
     val paymentId: UUID,
+    /** Revision of the RETURNED transition committed with this evidence record. */
+    val version: Long,
     /** `OrgnlEndToEndId` from the pacs.004 — the reference the dispute would be raised against. */
     val originalEndToEndId: String,
     /** pacs.004 `RtrRsnInf/Rsn/Cd` (AC04, AM09, ...); null when the message carried none. */
@@ -94,6 +98,7 @@ const val RETURN_EVIDENCE_EVENT_TYPE = "sepa.payment.returned"
 
 fun SepaPayment.toStatusChangedEvent(previousStatus: SepaPaymentStatus, clock: Clock) = SepaPaymentStatusChangedEvent(
     paymentId = id,
+    version = revision,
     previousStatus = previousStatus,
     newStatus = status,
     rejectReason = rejectReason?.name,
@@ -104,6 +109,7 @@ fun SepaPayment.toStatusChangedEvent(previousStatus: SepaPaymentStatus, clock: C
 
 fun SepaPayment.toCreatedEvent(clock: Clock) = SepaPaymentCreatedEvent(
     paymentId = id,
+    version = revision,
     idempotencyKey = idempotencyKey,
     type = type,
     status = status,

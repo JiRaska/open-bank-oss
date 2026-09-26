@@ -94,8 +94,9 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
   exhaust heap.
 - The **domain layer is framework-free** (ADR-0002); `SanctionsEntry`/`SanctionsList` have zero
   Quarkus/Panache imports.
-- CNB domestic entries have **no machine-readable feed** — they are Flyway-seeded (V6) as a
-  documented, intentional exception, not an oversight.
+- The Czech national list (`CNB_DOMESTIC`, kept by MZV under Act No. 1/2023 Coll.) is imported
+  from the OpenSanctions `cz_national_sanctions` mirror like the other CSV feeds (#10757); the V6
+  demo rows are retired by the first import's reconciliation sweep.
 
 ## 5. Open items / follow-ups
 

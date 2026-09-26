@@ -5,7 +5,18 @@ import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
 
 const eslintConfig = [
   {
-    ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'next-env.d.ts'],
+    // Test runners produce bundled third-party JavaScript that is evidence, not source.
+    // Linting Playwright's minified trace viewer created 188 false errors and made the
+    // repository gate depend on whether a developer had opened a report locally.
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      'build/test-results/**',
+      'next-env.d.ts',
+    ],
   },
   ...nextCoreWebVitals,
   {

@@ -27,6 +27,7 @@ enum class CaseStatus {
     CONTESTED,
     SYNTHESIZED,
     CLOSED,
+    HALTED,
 }
 
 /** Delivery is explicit in the workflow input so replay cannot depend on mutable deployment config. */
@@ -45,7 +46,13 @@ data class CaseStart(
     val deliveryMode: CaseDeliveryMode = CaseDeliveryMode.HITL,
 )
 
-data class JoinSignal(val agentId: String, val role: String, val signalId: String = "", val rolloutId: String = "")
+data class JoinSignal(
+    val agentId: String,
+    val role: String,
+    val signalId: String = "",
+    val rolloutId: String = "",
+    val authenticatedPrincipal: String = "legacy-unknown",
+)
 
 data class ContributeSignal(
     val agentId: String,
@@ -54,6 +61,7 @@ data class ContributeSignal(
     val contested: Boolean,
     val signalId: String = "",
     val rolloutId: String = "",
+    val authenticatedPrincipal: String = "legacy-unknown",
 )
 
 /**
@@ -73,15 +81,17 @@ data class Contribution(
     val draftVersion: Int,
     val signalId: String = "",
     val rolloutId: String = "",
+    val authenticatedPrincipal: String = "legacy-unknown",
 )
 
-enum class CaseSignalEvidenceStage { AUTHORIZED, DENIED, INVOKED, CONSUMED, PERSISTED }
+enum class CaseSignalEvidenceStage { AUTHORIZED, DENIED, INVOKED, CONSUMED, PERSISTED, HALTED }
 
 /** Metadata-only collaboration evidence; summaries and evidence contents never enter this trail. */
 data class CaseSignalEvidence(
     val signalId: String,
     val caseId: String,
     val agentId: String,
+    val authenticatedPrincipal: String,
     val capability: String,
     val stage: CaseSignalEvidenceStage,
     val observedAtEpochMs: Long,

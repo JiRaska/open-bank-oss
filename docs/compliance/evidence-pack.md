@@ -57,7 +57,7 @@ Enforced authoritatively by [`openbank-libs/governance/rules.yaml`](../../openba
 | SBOM (per service) | CycloneDX SBOM generated per service | `./gradlew sbomAll` output; per-service SBOM job in [`security.yml`](../../.github/workflows/security.yml) | `grep -nE 'cyclonedx\|sbomAll' .github/workflows/security.yml` |
 | SBOM (aggregate) | Repo-level CycloneDX SBOM attached in CI | `anchore/sbom-action` (`format: cyclonedx-json`) in `security.yml` | `grep -nE 'cyclonedx-json' .github/workflows/security.yml` |
 | Image SBOM attestation | Every `openbank-*` image carries a cosign-signed CycloneDX attestation | [`cosign-attest.sh`](../../openbank-infra/scripts/lib/cosign-attest.sh); Kyverno `verify-openbank-image-sbom-attestation` policy | `cosign verify-attestation --key awskms:///alias/openbank-cosign-signing --type cyclonedx <ecr-image@sha256:...>` |
-| Image signing | Images cosign-signed, verified at admission | Kyverno `verify-openbank-image-signatures`; KMS key `alias/openbank-cosign-signing` | `cosign verify --key awskms:///alias/openbank-cosign-signing <ecr-image@sha256:...>` |
+| Image signing | Images cosign-signed, verified at admission | Kyverno `verify-openbank-image-sbom-attestation` (its `attestors` block; a separate `verify-openbank-image-signatures` policy until 2026-09-13, #9805); KMS key `alias/openbank-cosign-signing` | `cosign verify --key awskms:///alias/openbank-cosign-signing <ecr-image@sha256:...>` |
 | SLSA provenance | in-toto / SLSA provenance on releases | `rules.yaml: provenance.attestation: slsa`; release evidence bundle (below) | `grep -nE 'attestation: slsa' openbank-libs/governance/rules.yaml` |
 | Release evidence bundle | SBOM + SLSA provenance + coverage summary, cosign-signed, attached to the GitHub release | [`verify-release-evidence.yml`](../../.github/workflows/verify-release-evidence.yml) (verify side); [`backfill-release-evidence.yml`](../../.github/workflows/backfill-release-evidence.yml) | `gh api repos/JiRaska/open-bank-oss/releases/tags/<tag> --jq '.assets[].name'` |
 | Release-bundle signature verify | Each bundle document verified against the KMS cosign key + manifest digests | `verify-release-evidence.yml` (`cosign verify-blob --key awskms:///alias/openbank-cosign-signing`) | `gh workflow run verify-release-evidence.yml -f tag=<service>-v<x.y.z>` |
@@ -75,8 +75,10 @@ rollout state is `rules.yaml: provenance.gate` and the live Kyverno policy mode.
 `verify-openbank-image-sbom-attestation` ClusterPolicy is **Enforce** (graduated from Audit on
 2026-07-12, ADR-0144; documented in-line in
 [`verify-sbom-attestation-policy.yaml`](../../openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml)) —
-an image lacking a cosign-signed SBOM attestation is REJECTED at admission; the image-signature
-policy has been Enforce since 2026-06-11. Verify the live mode before asserting either way:
+an image lacking a cosign-signed SBOM attestation is REJECTED at admission; image-signature
+verification has been Enforce since 2026-06-11 and since 2026-09-13 lives in that same policy's
+single `verifyImages` entry (#9805 item 4: Kyverno v1.12.5 let separate verify policies overwrite
+each other's verdict). Verify the live mode before asserting either way:
 
 ```
 grep -nE 'validationFailureAction|Audit|Enforce' \

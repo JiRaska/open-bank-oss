@@ -253,7 +253,7 @@ export default function ObservabilityStackPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {flow.map((s) => (
               <div key={s.n} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{s.n}</div>
+                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{s.n}</div>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 700 }}>{s.title}</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px', lineHeight: 1.5 }}>{s.detail}</div>

@@ -64,7 +64,7 @@ const WORKSPACE_ICONS: Record<string, ElementType> = {
 export default function DashboardPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const { data: session } = useSession()
+  const { data: session, status: sessionStatus } = useSession()
   const [statuses, setStatuses] = useState<SvcStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -107,6 +107,7 @@ export default function DashboardPage() {
       setLastRefresh(new Date())
     } catch (error) {
       setStatuses([])
+      setLastRefresh(null)
       setEvidenceFailure(error instanceof Error && error.message === 'governance' ? 'governance' : 'health')
     }
     setLoading(false)
@@ -141,8 +142,15 @@ export default function DashboardPage() {
   const healthTone: Tone = healthState === 'healthy' ? 'success' : healthState === 'degraded' ? 'warning' : 'neutral'
   const roles = session?.user?.roles ?? []
   const persona = personaForRoles(roles)
-  const workspace = workspaceFor(persona).filter(link => hasPermission(roles, link.permission))
+  const workspace = sessionStatus === 'authenticated'
+    ? workspaceFor(persona).filter(link => hasPermission(roles, link.permission))
+    : []
   const personaLanguage = language === 'cs' ? 'cs' : 'en'
+  const workspaceIdentity = sessionStatus === 'authenticated'
+    ? personaLabel(persona, personaLanguage)
+    : sessionStatus === 'loading'
+      ? t('Ověřuji oprávnění', 'Checking permissions')
+      : t('Přístup není ověřen', 'Access is not verified')
 
   const groups = FLEET_GROUPS
 
@@ -150,7 +158,7 @@ export default function DashboardPage() {
     <div className={styles.dashboard}>
       <PageHeader
         title={t('Můj pracovní prostor', 'My workspace')}
-        subtitle={`${personaLabel(persona, personaLanguage)} · ${t('Prioritní pracovní fronty a aktuální stav platformy.', 'Priority work queues and the current platform state.')}`}
+        subtitle={`${workspaceIdentity} · ${t('Prioritní pracovní fronty a aktuální stav platformy.', 'Priority work queues and the current platform state.')}`}
         icon={<Activity className={styles.headerIcon} size={20} aria-hidden="true" />}
         actions={
           <div className={styles.headerActions}>
@@ -177,12 +185,24 @@ export default function DashboardPage() {
       <section className={`card ${styles.workspace}`} aria-labelledby="workspace-heading">
         <div className={styles.workspaceHeading}>
           <div>
-            <p className={styles.workspaceEyebrow}>{personaLabel(persona, personaLanguage)}</p>
+            <p className={styles.workspaceEyebrow}>{workspaceIdentity}</p>
             <h2 id="workspace-heading" className={styles.workspaceTitle}>{t('Pracovní fronty', 'Work queues')}</h2>
           </div>
           <span className={styles.workspaceContext}>{t('Podle vašich oprávnění', 'Based on your permissions')}</span>
         </div>
-        <div className={styles.workspaceLinks}>
+        {sessionStatus === 'loading' ? (
+          <div role="status" aria-label={t('Načítám pracovní fronty', 'Work queues are loading')} style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+            {t('Ověřuji vaše oprávnění; dostupné fronty se zobrazí za okamžik.', 'Checking your permissions; available work queues will appear shortly.')}
+          </div>
+        ) : sessionStatus !== 'authenticated' ? (
+          <p role="alert" style={{ color: 'var(--warning-text)', fontSize: 13 }}>
+            {t('Pracovní fronty nejsou dostupné, dokud není ověřena relace.', 'Work queues are unavailable until your session is verified.')}
+          </p>
+        ) : workspace.length === 0 ? (
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+            {t('Pro vaše aktuální oprávnění nejsou přiřazeny žádné pracovní fronty.', 'No work queues are assigned to your current permissions.')}
+          </p>
+        ) : <div className={styles.workspaceLinks}>
           {workspace.map(link => {
             const Icon = WORKSPACE_ICONS[link.href] ?? Activity
             return (
@@ -193,10 +213,22 @@ export default function DashboardPage() {
               </Link>
             )
           })}
-        </div>
+        </div>}
       </section>
 
-      {evidenceFailure ? (
+      {loading && lastRefresh === null ? (
+        <section role="status" aria-label={t('Načítám evidenci platformy', 'Platform evidence is loading')}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+            {t('Ověřuji aktuální stav služeb. Počty zobrazím až po úplné odpovědi.', 'Verifying current service health. Counts appear only after a complete response.')}
+          </p>
+          <div className={styles.metrics} aria-hidden="true">
+            {[0, 1, 2, 3].map(index => <div key={index} className={`card ${styles.metric}`}>
+              <div className="skeleton" style={{ height: 14, width: '65%', marginBottom: 18 }} />
+              <div className="skeleton" style={{ height: 30, width: '40%' }} />
+            </div>)}
+          </div>
+        </section>
+      ) : evidenceFailure ? (
         <section className="card" aria-label={t('Dostupnost evidence platformy', 'Platform evidence availability')}>
           <DataUnavailable
             kind="unreachable"

@@ -37,6 +37,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             rail = transaction.rail ?: com.openbank.libs.domain.payment.PaymentRail.UNKNOWN,
             instructionType = transaction.instructionType
                 ?: com.openbank.libs.domain.payment.InstructionType.UNKNOWN,
+            originatingPaymentId = transaction.originatingPaymentId,
             occurredAt = Instant.now(clock),
             sourceService = SOURCE_SERVICE,
         ),

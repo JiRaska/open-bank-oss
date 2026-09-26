@@ -426,6 +426,24 @@
   answers `GroupAuthorizationException` — which is silent, because a consumer that cannot join a
   group looks exactly like a topic with nothing on it (#8877, #8882).
 
+### A watch about ONE lane must read ONE lane
+- **`auto-deploy-red-watch` ran green through 27 hours of red — its population was every lane.**
+  auto-deploy has three triggers; only `schedule` deploys the whole fleet, and `push` runs (the
+  services one merge touched) land green between scheduled ticks. The watch read the three newest
+  completed runs of any event: `2271 schedule ✗ | 2270 schedule ✗ | 2269 push ✓` was `stuck =
+  false`, ten times over, and the not-stuck branch would have CLOSED an open issue on that push
+  green. Filter the population server-side (`event=schedule`), close only on the same lane's
+  green, bound the query (it paginated ~2 300 runs to look at three, and was failing on the
+  installation rate limit the same morning), and keep the decision in a script with a
+  `--self-test` whose known-positive is the interleaved fixture
+  (`detect-auto-deploy-stuck.py`, gate `auto-deploy-red-watch-declaration`, rules.yaml
+  `ci_watches.lane_scoped_population`). Whether the other watches share the class is a thing to
+  measure per watch, not assert.
+- **A tokenless `gh` on a recovery path is red only on the day you need it.** `gh pr list` in
+  admin-ui-deploy's deploy-source guard ran only when a deploy branch already existed and had no
+  `GH_TOKEN`; `set -e` ended the step there. Gate `workflow-gh-token-declared` matches the
+  COMMAND position, not the substring — an echoed `gh workflow run …` remediation is not a call.
+
 ### main-protection: the bypass has two halves, and only one had a reader
 - **`rulesets/rule-suites` (the bypass LOG) is private and rejects fine-grained tokens;
   `rulesets/{id}` (the bypass CONFIG) is world-readable.** Same feature, opposite access, and it
