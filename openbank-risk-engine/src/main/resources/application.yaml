@@ -412,6 +412,15 @@ authz:
 
 "%prod":
   quarkus:
+    http:
+      # East-west mTLS listener (8443): the listener must VALIDATE the caller's certificate.
+      # `quarkus.http.ssl.client-auth` is BUILD TIME, so it has to live in this file (#10441);
+      # under %prod because with no certificate configured dev/@QuarkusTest would refuse to start.
+      ssl:
+        client-auth: required
+      # Keep plain HTTP/8159: with client-auth REQUIRED Quarkus otherwise drops the HTTP listener
+      # and every existing caller and probe gets connection refused (#10505).
+      insecure-requests: enabled
     # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
     # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
     # this stays under %prod: the client certificate only exists in the cluster.
