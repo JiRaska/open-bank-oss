@@ -94,6 +94,28 @@ fields, dropping unexpected upstream identifiers. Changing the incident or case 
 the view and invalidates in-flight responses. HTTP/PostgreSQL tests and browser tests
 cover these distinctions; this does not activate business-case drill-down.
 
+### Source workflow observation staged separately (#10868)
+
+SEPA can record a source-owned payment workflow observation in the same transaction as its
+aggregate revision and outbox event. The new write is **off by default** until a stable,
+production-like 1×/10× payment-control comparison approves activation. Its source-local row
+holds the payment UUID, event UUID/type, revision, status, payload digest, observation and
+recording times, plus synthetic provenance. Additive V11 stores the explicit environment and
+workflow start time for new observations; earlier rows remain nullable and are not backfilled
+with invented scope. The bounded internal reader reports `COMPLETE`, `PARTIAL` or `UNKNOWN`,
+marking gaps, absent scope, cross-environment revisions and backwards-time observations unknown.
+An internal exact lookup requires the event ID, expected payment ID and environment together;
+neither reader establishes incident causation.
+
+The current incident assignment and aggregate permission bind an investigator to an incident
+root, not to every payment whose ID they might know. Before case drill-down, a separately
+authorized candidate relationship must bind **that exact observation and payment** to the
+assigned incident, and the source must recheck case scope, purpose, domain permission and
+current assignment with a fresh policy decision and durable disclosure audit. Time overlap,
+service dependency and a successful workflow cannot establish confirmed impact. No SEPA→Context
+topic, payment-detail endpoint or case graph edge is activated by the source-only slice;
+those boundaries require their own security review, replay/retention plan and workload proof.
+
 ## Alternatives considered
 
 - **Use the service map as observed impact:** rejected; dependency is possibility, not evidence.

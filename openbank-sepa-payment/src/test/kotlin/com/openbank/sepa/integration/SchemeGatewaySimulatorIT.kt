@@ -30,7 +30,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.sepa.it.PostgresRedisTestResource::class)
-@QuarkusTestResource(ClearingSimulatorWireMockResource::class)
+@QuarkusTestResource(ClearingSimulatorWireMockResource::class, restrictToAnnotatedClass = true)
 class SchemeGatewaySimulatorIT {
 
     @Inject

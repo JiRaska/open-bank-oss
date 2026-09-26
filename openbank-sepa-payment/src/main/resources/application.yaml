@@ -177,6 +177,9 @@ openbank:
     # OpenBank's own BIC — used as the debtor agent (DbtrAgt) in the pacs.008 (ADR-0104 D3).
     bic: ${OPENBANK_BIC:OPBKCZ22}
   sepa:
+    workflow-observations:
+      # New indexed money-path write: enable only after isolated 1x/10x payment latency proof.
+      enabled: ${SEPA_WORKFLOW_OBSERVATIONS_ENABLED:false}
     scheme-submission:
       # ADR-0104 D3 pilot. OFF by default: when off, behaviour is exactly as before (screening only).
       enabled: ${SEPA_SCHEME_SUBMISSION_ENABLED:false}
