@@ -263,6 +263,9 @@ class ContextDisclosureCommitmentOutboxEntity : PanacheEntityBase() {
     @Column(name = "attempt_count")
     var attemptCount: Int = 0
 
+    @Column(name = "claim_token")
+    var claimToken: UUID? = null
+
     @Column(name = "claimed_at")
     var claimedAt: Instant? = null
 
@@ -294,6 +297,9 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
 
     @Column(name = "attempt_count")
     var attemptCount: Int = 0
+
+    @Column(name = "claim_token")
+    var claimToken: UUID? = null
 
     @Column(name = "claimed_at")
     var claimedAt: Instant? = null

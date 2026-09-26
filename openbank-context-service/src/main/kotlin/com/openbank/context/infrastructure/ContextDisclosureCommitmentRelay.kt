@@ -13,13 +13,14 @@ import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
+import jakarta.inject.Inject
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Clock
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -36,6 +37,8 @@ class ContextDisclosureCommitmentRelay(
     @ConfigProperty(name = "openbank.context.disclosure-export.enabled", defaultValue = "false")
     private val enabled: Boolean,
 ) {
+    @Inject lateinit var outcomeWriter: ContextCommitmentOutcomeWriter
+
     private val bankScope: String get() = dispatchSettings.bankScope
 
     private val pending = AtomicLong(0).also { meters.gauge("openbank_context_disclosure_outbox_pending", it) }
@@ -53,34 +56,46 @@ class ContextDisclosureCommitmentRelay(
     suspend fun dispatch() {
         if (!enabled) return
         refreshPending()
+        val outcomes = ArrayList<ContextCommitmentOutcome>(ContextCommitmentOutcomeWriter.MAX_BATCH_SIZE)
         for (row in claim()) {
-            try {
-                val eventType = "CONTEXT_DISCLOSURE_COMMITTED"
-                val payload = mapper.writeValueAsString(
-                    mapOf(
-                        "schemaVersion" to ContextDisclosureCommitment.SCHEMA_VERSION,
-                        "eventId" to row.disclosureId.toString(),
-                        "eventType" to eventType,
-                        "aggregateType" to "CONTEXT_DISCLOSURE",
-                        "aggregateId" to row.disclosureId.toString(),
-                        "sourceService" to "context-service",
-                        "occurredAt" to row.occurredAt.toString(),
-                        "commitment" to row.commitment,
-                    ),
-                )
-                val metadata = OutgoingKafkaRecordMetadata.builder<String>().withKey(
-                    row.disclosureId.toString(),
-                ).build()
-                emitter.get().sendMessage(Message.of(payload).addMetadata(metadata)).awaitSuspending()
-                update(row.disclosureId, "SENT", clock.instant())
-            } catch (_: Exception) {
-                // No payload or restricted row values in logs; the same ID remains retryable.
-                meters.counter("openbank_context_disclosure_outbox_publish_failures_total").increment()
-                update(row.disclosureId, "FAILED", clock.instant())
+            val claimToken = checkNotNull(row.claimToken) { "Commitment claim has no ownership token" }
+            val status = publish(row)
+            outcomes.add(ContextCommitmentOutcome(row.disclosureId, claimToken, status, clock.instant()))
+            if (outcomes.size == ContextCommitmentOutcomeWriter.MAX_BATCH_SIZE) {
+                outcomeWriter.persist(ContextCommitmentKind.DISCLOSURE, outcomes)
+                outcomes.clear()
             }
         }
+        if (outcomes.isNotEmpty()) outcomeWriter.persist(ContextCommitmentKind.DISCLOSURE, outcomes)
         refreshPending()
         if (pending.get() == 0L) liveness?.recordSuccess()
+    }
+
+    private suspend fun publish(row: ContextDisclosureCommitmentOutboxEntity): ContextCommitmentOutcomeStatus = try {
+        val eventType = "CONTEXT_DISCLOSURE_COMMITTED"
+        val payload = mapper.writeValueAsString(
+            mapOf(
+                "schemaVersion" to ContextDisclosureCommitment.SCHEMA_VERSION,
+                "eventId" to row.disclosureId.toString(),
+                "eventType" to eventType,
+                "aggregateType" to "CONTEXT_DISCLOSURE",
+                "aggregateId" to row.disclosureId.toString(),
+                "sourceService" to "context-service",
+                "occurredAt" to row.occurredAt.toString(),
+                "commitment" to row.commitment,
+            ),
+        )
+        val metadata = OutgoingKafkaRecordMetadata.builder<String>().withKey(
+            row.disclosureId.toString(),
+        ).build()
+        emitter.get().sendMessage(Message.of(payload).addMetadata(metadata)).awaitSuspending()
+        ContextCommitmentOutcomeStatus.SENT
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        // Publication failures are retryable; persistence failures never enter this branch.
+        meters.counter("openbank_context_disclosure_outbox_publish_failures_total").increment()
+        ContextCommitmentOutcomeStatus.FAILED
     }
 
     private suspend fun refreshPending() {
@@ -107,6 +122,7 @@ class ContextDisclosureCommitmentRelay(
                     session.createNativeQuery(CLAIM_SQL, ContextDisclosureCommitmentOutboxEntity::class.java)
                         .setParameter("bank", bankScope)
                         .setParameter("now", now)
+                        .setParameter("claimToken", UUID.randomUUID())
                         .setParameter("stale", stale)
                         .setParameter("retryBefore", retryBefore)
                         .setParameter("batchSize", dispatchSettings.batchSize)
@@ -114,21 +130,6 @@ class ContextDisclosureCommitmentRelay(
                 }
         }.awaitSuspending()
         return rows.map { it as ContextDisclosureCommitmentOutboxEntity }
-    }
-
-    private suspend fun update(id: UUID, status: String, at: Instant) {
-        sessions.withTransaction { session, _ ->
-            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult.flatMap {
-                    session.createNativeMutationQuery(
-                        "UPDATE context_disclosure_commitment_outbox SET status = :status, " +
-                            "attempt_count = attempt_count + 1, updated_at = :at, " +
-                            "sent_at = CASE WHEN :status = 'SENT' THEN :at ELSE sent_at END " +
-                            "WHERE disclosure_id = :id AND bank_scope = :bank AND status = 'DISPATCHING'",
-                    ).setParameter("status", status).setParameter("at", at).setParameter("id", id)
-                        .setParameter("bank", bankScope).executeUpdate()
-                }
-        }.awaitSuspending()
     }
 
     companion object {
@@ -139,7 +140,7 @@ class ContextDisclosureCommitmentRelay(
         private val RETRY_DELAY = Duration.ofSeconds(RETRY_DELAY_SECONDS)
         private const val CLAIM_SQL = """
             UPDATE context_disclosure_commitment_outbox
-            SET status = 'DISPATCHING', claimed_at = :now, updated_at = :now
+            SET status = 'DISPATCHING', claimed_at = :now, updated_at = :now, claim_token = :claimToken
             WHERE disclosure_id IN (
                 SELECT disclosure_id FROM context_disclosure_commitment_outbox
                 WHERE bank_scope = :bank AND (
