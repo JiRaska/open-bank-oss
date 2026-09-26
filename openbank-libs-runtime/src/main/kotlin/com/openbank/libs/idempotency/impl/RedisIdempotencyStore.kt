@@ -9,8 +9,8 @@ import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
-import java.time.Clock
 import org.jboss.logging.Logger
+import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -49,9 +49,17 @@ class RedisIdempotencyStore(private val redis: ReactiveRedisDataSource, private 
         valueCommands.set("$KEY_PREFIX$key", value, SetArgs().ex(ttlSeconds)).awaitSuspending()
     }
 
-    override suspend fun save(key: String, requestHash: String, statusCode: Int, responseBody: String, ttlSeconds: Long) {
+    override suspend fun save(
+        key: String,
+        requestHash: String,
+        statusCode: Int,
+        responseBody: String,
+        ttlSeconds: Long,
+    ) {
         require(!requestHash.contains(SEPARATOR)) { "requestHash must not contain '$SEPARATOR'" }
-        val value = "$V2_PREFIX$requestHash$SEPARATOR$statusCode$SEPARATOR${OffsetDateTime.now(clock)}$SEPARATOR$responseBody"
+        val value = "$V2_PREFIX$requestHash$SEPARATOR$statusCode$SEPARATOR${OffsetDateTime.now(
+            clock,
+        )}$SEPARATOR$responseBody"
         valueCommands.set("$KEY_PREFIX$key", value, SetArgs().ex(ttlSeconds)).awaitSuspending()
     }
 
