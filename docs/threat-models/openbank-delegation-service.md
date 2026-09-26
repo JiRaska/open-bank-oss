@@ -253,7 +253,7 @@ attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-di
   race a plain `lookup`+`save` pair left open (two concurrent first requests could both miss and
   both execute); on a use-case failure the reservation is `release`d so a retry with the same body
   can still succeed. The fingerprint is `RequestFingerprints.of(objectMapper, method, path, dto)`
-  (`openbank-libs-runtime`, the ONE canonicaliser — this service's own `canonicalFingerprint`
+  (`openbank-libs-runtime`, the ONE canonicaliser — the service-local fingerprint
   helper is removed). Reusing the same key with a DIFFERENT request now answers **409**
   IDEMPOTENCY_KEY_REUSED (not 422 as an earlier revision of this entry stated), and a request still
   in flight under the same key answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.

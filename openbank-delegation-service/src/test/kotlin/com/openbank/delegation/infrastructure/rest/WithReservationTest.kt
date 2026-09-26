@@ -48,7 +48,7 @@ class WithReservationTest {
     }
 
     @Test
-    fun `Reserved runs the block once and saves the result`() = runBlocking {
+    fun `Reserved runs the block once and saves the result`(): Unit = runBlocking {
         val store = FakeIdempotencyStore()
         var invocations = 0
         val response = store.withReservation("k", "h") {
@@ -94,7 +94,7 @@ class WithReservationTest {
     }
 
     @Test
-    fun `Replay returns the stored response and never invokes the block or saves again`() = runBlocking {
+    fun `Replay returns the stored response and never invokes the block or saves again`(): Unit = runBlocking {
         val store = FakeIdempotencyStore()
         store.reserveResult = ReserveResult.Replay(
             IdempotencyRecord("k", 200, "cached", OffsetDateTime.now(), "h"),
