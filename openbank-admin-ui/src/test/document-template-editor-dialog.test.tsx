@@ -36,6 +36,14 @@ afterEach(() => {
 })
 
 describe('document template editor dialog', () => {
+  // Measured standalone (no other suite load) on 2026-09-27: 5595ms / 4841ms —
+  // already within ~600ms of the 5000ms default testTimeout with nothing else
+  // running. Each test mounts the full templates page (list + modal) and drives
+  // several multi-character `user.type()` calls, each keystroke a full React
+  // re-render of that tree plus the page's 250ms preview-debounce effect
+  // resetting on real timers — genuinely heavy interaction, not a bug to fix,
+  // and any full-suite CPU contention pushes it over. Scope the timeout with
+  // headroom rather than raising the file/global default.
   it('names the editor, focuses its first field and protects an unsaved draft before restoring the trigger', async () => {
     vi.stubGlobal('fetch', stubTemplates())
     const user = userEvent.setup()
@@ -66,7 +74,7 @@ describe('document template editor dialog', () => {
     await user.click(screen.getByRole('button', { name: 'Discard changes' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await waitFor(() => expect(trigger).toHaveFocus())
-  })
+  }, 15000)
 
   it('cannot dismiss while a save is in flight', async () => {
     const save = deferred<Response>()
@@ -88,5 +96,5 @@ describe('document template editor dialog', () => {
 
     save.resolve(new Response(JSON.stringify({ id: 'new-template' }), { status: 201 }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-  })
+  }, 15000)
 })
