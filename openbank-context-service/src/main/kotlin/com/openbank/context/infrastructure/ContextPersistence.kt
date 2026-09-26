@@ -306,14 +306,16 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
     lateinit var updatedAt: Instant
 }
 
-/** Operation failure reaches the managed transaction before rollback and connection release. */
+/** Each operation owns its session; overlapping work must not borrow a context-cached session. */
 internal fun <T> Mutiny.SessionFactory.boundedContextTransaction(
     timeoutMs: Int,
     block: (Mutiny.Session) -> Uni<T>,
-): Uni<T> = withTransaction { session, _ ->
-    session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-        .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
-        .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+): Uni<T> = openSession().flatMap { session ->
+    session.withTransaction {
+        session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
+            .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
+            .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+    }.onTermination().call { session.close() }
 }
 
 /** SQL and work are bounded; pool acquisition and transaction cleanup are outside this timer. */

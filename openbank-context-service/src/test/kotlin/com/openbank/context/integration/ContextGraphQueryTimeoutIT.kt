@@ -3,6 +3,7 @@ package com.openbank.context.integration
 
 import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.infrastructure.ContextGraphRepository
+import com.openbank.context.infrastructure.boundedContextTransaction
 import com.openbank.context.infrastructure.boundedGraphRead
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -11,6 +12,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
@@ -28,6 +30,7 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 @QuarkusTest
 @TestProfile(ContextGraphTimeoutRecoveryProfile::class)
@@ -77,6 +80,30 @@ class ContextGraphQueryTimeoutIT {
                 assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
             }
         }
+    }
+
+    @Test
+    fun `overlapping Context transactions in one Vertx context own separate sessions`() {
+        val entered = CompletableFuture<Mutiny.Session>()
+        val release = CompletableFuture<Int>()
+        val result = VertxContextSupport.subscribeAndAwait {
+            val first = sessions.boundedContextTransaction(4000) { session ->
+                entered.complete(session)
+                Uni.createFrom().completionStage(release)
+            }
+            val second = Uni.createFrom().completionStage(entered).chain { firstSession ->
+                sessions.boundedContextTransaction(4000) { secondSession ->
+                    // Sibling authorization and audit calls may overlap on the same context.
+                    assertThat(secondSession).isNotSameAs(firstSession)
+                    secondSession.createNativeQuery("select 1", Int::class.javaObjectType).singleResult
+                }
+            }.onTermination().invoke { release.complete(1) }
+            Uni.combine().all().unis(first, second).asTuple()
+                .ifNoItem().after(Duration.ofSeconds(5)).fail()
+                .onTermination().invoke { release.complete(1) }
+        }
+        assertThat(result.item1).isEqualTo(1)
+        assertThat(result.item2).isEqualTo(1)
     }
 
     private fun boundedSql(timeoutMs: Int, sql: String): Int = VertxContextSupport.subscribeAndAwait {
