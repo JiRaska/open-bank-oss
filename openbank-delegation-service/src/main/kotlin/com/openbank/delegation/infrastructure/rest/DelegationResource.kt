@@ -27,7 +27,11 @@ import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.RevokeDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.SuspendDelegationRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -48,6 +52,40 @@ import jakarta.ws.rs.core.UriInfo
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
+
+/**
+ * `reserve` -> Reserved: run [block], then the fingerprinted `save`; any failure from [block]
+ * releases the reservation and rethrows so a retry with the same body can succeed. Replay: the
+ * stored response is returned verbatim. Mismatch/InFlight: throw the matching exception so
+ * libs-runtime's mappers answer 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS.
+ * Side effects never run before `reserve` returns [ReserveResult.Reserved]. Kept top-level (not a
+ * class member) so it does not count against any resource class's detekt TooManyFunctions.
+ */
+suspend fun IdempotencyStore.withReservation(
+    key: String,
+    requestHash: String,
+    ttlSeconds: Long = 86400,
+    block: suspend () -> Triple<Int, String, java.net.URI?>,
+): Response = when (val reservation = reserve(key, requestHash)) {
+    is ReserveResult.Replay -> replayResponse(reservation.record.statusCode, reservation.record.responseBody)
+    ReserveResult.Reserved -> {
+        val (statusCode, body, location) = runCatching { block() }
+            .onFailure { release(key, requestHash) }
+            .getOrThrow()
+        save(key, requestHash, statusCode, body, ttlSeconds)
+        val builder = Response.status(statusCode).entity(body).type(MediaType.APPLICATION_JSON)
+        location?.let { builder.location(it) }
+        builder.build()
+    }
+    ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+    ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+}
+
+private fun replayResponse(statusCode: Int, body: String): Response = Response.status(statusCode)
+    .entity(body)
+    .type(MediaType.APPLICATION_JSON)
+    .header("X-Idempotency-Replayed", "true")
+    .build()
 
 @Tag(name = "Delegations", description = "Customer-to-party delegated access lifecycle (ADR-0232)")
 @Path("/api/v1/delegations")
@@ -129,48 +167,43 @@ class DelegationResource(
         requireNotNull(request) { "request body is required" }
         val idempotencyKey = xRequestId?.takeIf { it.isNotBlank() }
 
-        idempotencyKey?.let { key ->
-            idempotencyStore.get(offerKey(request.grantorPartyId, key))?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
-        }
-
-        val grant = offerDelegation.offer(
-            OfferDelegationCommand(
-                callerPartyId = customerPartyId,
-                actorPartyId = customerActorPartyId,
-                grantorPartyId = request.grantorPartyId,
-                granteePartyId = request.granteePartyId,
-                resourceType = request.resourceType,
-                resourceId = request.resourceId,
-                capabilities = request.capabilities,
-                approvalPolicy = request.approvalPolicy,
-                requiredApprovals = request.requiredApprovals,
-                perTransactionLimit = request.perTransactionLimit?.toDomain(),
-                dailyLimit = request.dailyLimit?.toDomain(),
-                monthlyLimit = request.monthlyLimit?.toDomain(),
-                exposure = request.exposure?.toDomain(),
-                recertificationAudience = request.recertificationAudience,
-                validTo = request.validTo,
-                grantScaSessionId = request.grantScaSessionId,
-                note = request.note,
-            ),
-        )
-        val responseBody = DelegationResponse.from(grant)
-        idempotencyKey?.let { key ->
-            idempotencyStore.save(
-                offerKey(request.grantorPartyId, key),
-                201,
-                objectMapper.writeValueAsString(responseBody),
+        suspend fun runOffer(): DelegationResponse {
+            val grant = offerDelegation.offer(
+                OfferDelegationCommand(
+                    callerPartyId = customerPartyId,
+                    actorPartyId = customerActorPartyId,
+                    grantorPartyId = request.grantorPartyId,
+                    granteePartyId = request.granteePartyId,
+                    resourceType = request.resourceType,
+                    resourceId = request.resourceId,
+                    capabilities = request.capabilities,
+                    approvalPolicy = request.approvalPolicy,
+                    requiredApprovals = request.requiredApprovals,
+                    perTransactionLimit = request.perTransactionLimit?.toDomain(),
+                    dailyLimit = request.dailyLimit?.toDomain(),
+                    monthlyLimit = request.monthlyLimit?.toDomain(),
+                    exposure = request.exposure?.toDomain(),
+                    recertificationAudience = request.recertificationAudience,
+                    validTo = request.validTo,
+                    grantScaSessionId = request.grantScaSessionId,
+                    note = request.note,
+                ),
             )
+            return DelegationResponse.from(grant)
         }
 
-        return Response.created(uriInfo.absolutePathBuilder.path(grant.id.toString()).build())
-            .entity(responseBody).build()
+        if (idempotencyKey == null) {
+            val responseBody = runOffer()
+            return Response.created(uriInfo.absolutePathBuilder.path(responseBody.id.toString()).build())
+                .entity(responseBody).build()
+        }
+
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/delegations", request)
+        return idempotencyStore.withReservation(offerKey(request.grantorPartyId, idempotencyKey), hash) {
+            val responseBody = runOffer()
+            val location = uriInfo.absolutePathBuilder.path(responseBody.id.toString()).build()
+            Triple(201, objectMapper.writeValueAsString(responseBody), location)
+        }
     }
 
     @Operation(summary = "Get delegation grant by ID")
@@ -229,14 +262,26 @@ class DelegationResource(
             throw ForbiddenException("recertification confirmation requires the grantor's customer session")
         }
         val cacheKey = recertificationConfirmKey(id, grantorPartyId, idempotencyKey)
-        idempotencyStore.get(cacheKey)?.let { cached ->
-            return objectMapper.readValue(cached.responseBody, DelegationRecertificationResponse::class.java)
-        }
-        val response = DelegationRecertificationResponse.from(
-            recertification.confirm(id, grantorPartyId, customerPartyId),
+        // The fingerprint covers only the ids already present in the cache key (method + path +
+        // grantorPartyId query param, no body) — there is no further request-specific content to
+        // bind to, so IDEMPOTENCY_KEY_REUSED is never documented for this operation in
+        // openapi.yaml (only IDEMPOTENCY_REQUEST_IN_PROGRESS is reachable/claimed).
+        val hash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/api/v1/delegations/recertifications/$id/confirm?grantorPartyId=$grantorPartyId",
+            null,
         )
-        idempotencyStore.save(cacheKey, Response.Status.OK.statusCode, objectMapper.writeValueAsString(response))
-        return response
+        val httpResponse = idempotencyStore.withReservation(cacheKey, hash) {
+            val response = DelegationRecertificationResponse.from(
+                recertification.confirm(id, grantorPartyId, customerPartyId),
+            )
+            Triple(Response.Status.OK.statusCode, objectMapper.writeValueAsString(response), null)
+        }
+        return objectMapper.readValue(
+            httpResponse.entity as String,
+            DelegationRecertificationResponse::class.java,
+        )
     }
 
     @Operation(summary = "Accept an OFFERED grant after the grantee's SCA challenge completes")
