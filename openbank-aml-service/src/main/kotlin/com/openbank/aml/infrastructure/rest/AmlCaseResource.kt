@@ -34,10 +34,15 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.net.URI
 import java.util.UUID
+
+private val log = Logger.getLogger(AmlCaseResource::class.java)
 
 @Path("/api/v1/aml/cases")
 @Produces(MediaType.APPLICATION_JSON)
@@ -95,7 +100,15 @@ class AmlCaseResource(
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
-            if (!created) idempotencyStore.release(idempotencyKey, requestHash)
+            // Shielded from cancellation and never rethrows: a release failure must not mask the
+            // original exception that made release necessary, and a cancelled caller must not
+            // abandon the release mid-flight and leave the key stuck IN_PROGRESS for its full TTL.
+            if (!created) {
+                withContext(NonCancellable) {
+                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                        .onFailure { log.warn("Failed to release idempotency key after create failure", it) }
+                }
+            }
         }
         val responseBody = amlCase.toResponse()
         idempotencyStore.save(

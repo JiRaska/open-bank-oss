@@ -6,6 +6,9 @@ package com.openbank.aml.it
 
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.usecase.AmlCaseService
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
+import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.arc.ClientProxy
@@ -152,6 +155,29 @@ class AmlCaseCreateIdempotencyFingerprintIT {
         assertThat(retry.statusCode).isEqualTo(201)
         assertThat(retry.header("X-Idempotency-Replayed")).isNull()
         assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    fun `a release failure does not mask the original create failure`() {
+        // Without withContext(NonCancellable) { runCatching { ... } } around the release call, an
+        // exception thrown by release() would propagate from the `finally` block and REPLACE the
+        // original create failure the caller actually needs to see.
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        val failingUseCase = mockk<AmlCaseService>()
+        coEvery { failingUseCase.createCase(any()) } coAnswers { error("transient failure on create") }
+        QuarkusMock.installMockForType(failingUseCase, AmlCaseUseCase::class.java)
+
+        val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
+        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
+
+        // The create failure (422, from the use case's IllegalStateException) must surface — not the
+        // IllegalStateException thrown by release().
+        assertThat(post(key, body(party, "ALERT-A")).statusCode).isEqualTo(422)
+        assertThat(caseCount(party)).isEqualTo(0)
     }
 
     @Test
