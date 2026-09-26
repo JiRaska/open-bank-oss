@@ -214,6 +214,11 @@ class EudiCredentialIssuerResource(
         return org.jose4j.base64url.Base64Url.encode(bytes)
     }
 
+    // Audited against com.openbank.libs.security.PiiMask (#11027, fleet PII-masking adoption
+    // sweep) and kept, not migrated: same shape as EudiDtos.kt's maskSubjectId (last-4 + fixed
+    // "***" prefix, no length-proportional masking), which is itself not a PiiMask match — see
+    // that function's KDoc. Left as a same-service near-duplicate rather than unified here, to
+    // keep this PR a pure audit with no behavior change (tracked as a follow-up in #11027).
     private fun maskSubject(s: String): String = if (s.length <=
         MASK_TAIL
     ) {

@@ -107,7 +107,16 @@ fun PidClaims.toResponse(): PidClaimsResponse = PidClaimsResponse(
     levelOfAssurance = levelOfAssurance,
 )
 
-/** Mask the government PID subject identifier: keep the source prefix + last 4 chars only. */
+/**
+ * Mask the government PID subject identifier: keep the source prefix + last 4 chars only.
+ *
+ * Audited against `com.openbank.libs.security.PiiMask` (#11027, fleet PII-masking adoption sweep)
+ * and kept, not migrated: the closest strategy, `PiiMask.nationalId`, keeps the first 6 characters
+ * (the date-of-birth portion of a Czech rodné číslo) and masks the suffix — the opposite of what's
+ * needed here, which is to preserve the issuer namespace *prefix* (before `:`) and the last 4
+ * characters of an opaque, non-Czech-shaped government subject id. Different information kept,
+ * different format.
+ */
 private fun maskSubjectId(subjectId: String): String {
     val tail = subjectId.takeLast(MASK_TAIL)
     val prefix = subjectId.substringBefore(":", missingDelimiterValue = "")

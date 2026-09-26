@@ -100,7 +100,13 @@ object OversightWebhook {
         return sb.append("\"").toString()
     }
 
-    /** Mask a webhook URL for audit logs — keep only scheme/host prefix + a short tail. */
+    /**
+     * Mask a webhook URL for audit logs — keep only scheme/host prefix + a short tail.
+     *
+     * Audited against `com.openbank.libs.security.PiiMask` (#11027, fleet PII-masking adoption
+     * sweep) and kept, not migrated: `PiiMask` has no URL strategy — a webhook URL is not any of
+     * EMAIL/IBAN/PAN/PHONE/NAME/NATIONAL_ID, so there is nothing here to delegate to.
+     */
     fun maskUrl(url: String): String {
         if (url.isBlank()) return "(unset)"
         val head = url.take(30)
