@@ -55,8 +55,8 @@ paths:
       responses:
         '201':
           description: TPP registered
-        '422':
-          $ref: '#/components/responses/IdempotencyKeyReused'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
     get:
       tags: [TPP Registry]
       summary: List registered TPPs
@@ -106,8 +106,8 @@ paths:
       responses:
         '200':
           description: TPP blacklisted
-        '422':
-          $ref: '#/components/responses/IdempotencyKeyReused'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
 
   /api/v1/tpp-registry/sync/eba:
     post:
@@ -122,8 +122,8 @@ paths:
       responses:
         '202':
           description: Sync triggered
-        '422':
-          $ref: '#/components/responses/IdempotencyKeyReused'
+        '409':
+          $ref: '#/components/responses/IdempotencyRequestInProgress'
 
   /api/v1/tpp-registry/sync/state:
     get:
@@ -150,8 +150,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
-    IdempotencyKeyReused:
-      description: Idempotency-Key was already used for a different request
+    IdempotencyConflict:
+      description: >-
+        Idempotency-Key conflict: either IDEMPOTENCY_KEY_REUSED (the key was already used for a
+        different request) or IDEMPOTENCY_REQUEST_IN_PROGRESS (a request with this key is still
+        being processed).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    IdempotencyRequestInProgress:
+      description: >-
+        IDEMPOTENCY_REQUEST_IN_PROGRESS: a request with this Idempotency-Key is still being
+        processed. This endpoint's fingerprint has no request-specific content (method + path
+        only), so IDEMPOTENCY_KEY_REUSED can never be returned here.
       content:
         application/json:
           schema:

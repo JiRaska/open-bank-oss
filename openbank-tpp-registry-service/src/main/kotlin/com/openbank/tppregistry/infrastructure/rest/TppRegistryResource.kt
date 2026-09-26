@@ -4,12 +4,13 @@
 
 package com.openbank.tppregistry.infrastructure.rest
 
-import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
-import com.openbank.libs.idempotency.RequestFingerprint
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.tppregistry.application.port.`in`.BlacklistTppCommand
 import com.openbank.tppregistry.application.port.`in`.CheckTppAuthorizationQuery
 import com.openbank.tppregistry.application.port.`in`.GetTppQuery
@@ -30,15 +31,41 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 
-// Canonicalises a request body so whitespace / key order in the raw JSON never changes the
-// fingerprint: sorted object keys + sorted map entries, derived from the service's own
-// ObjectMapper so custom (de)serializers still apply. Kept top-level (not a class member) so it
-// does not count against TppRegistryResource's detekt TooManyFunctions threshold.
-private fun ObjectMapper.canonicalFingerprint(method: String, path: String, body: Any?): String {
-    val canonical = copy()
-        .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
-        .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
-    return RequestFingerprint.of(method, path, body?.let { canonical.writeValueAsString(it) })
+// Kept top-level (not class members) so they do not count against TppRegistryResource's detekt
+// TooManyFunctions threshold — the class itself only exposes the REST operations.
+private fun registerKey(tppId: String, idempotencyKey: String) = "tpp:register:$tppId:$idempotencyKey"
+private fun blacklistKey(tppId: String, idempotencyKey: String) = "tpp:blacklist:$tppId:$idempotencyKey"
+private fun syncKey(idempotencyKey: String) = "tpp:sync:$idempotencyKey"
+
+private fun respond(statusCode: Int, body: String, replayed: Boolean = false): Response {
+    val builder = Response.status(statusCode).entity(body).type(MediaType.APPLICATION_JSON)
+    if (replayed) builder.header("X-Idempotency-Replayed", "true")
+    return builder.build()
+}
+
+/**
+ * `reserve` -> Reserved: run [block], then the fingerprinted `save`; any failure from [block]
+ * releases the reservation and rethrows so a retry with the same body can succeed. Replay: the
+ * stored response is returned verbatim. Mismatch/InFlight: throw the matching exception so
+ * libs-runtime's mappers answer 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS.
+ * Side effects never run before `reserve` returns [ReserveResult.Reserved].
+ */
+private suspend fun IdempotencyStore.withReservation(
+    key: String,
+    requestHash: String,
+    ttlSeconds: Long = 86400,
+    block: suspend () -> Pair<Int, String>,
+): Response = when (val reservation = reserve(key, requestHash)) {
+    is ReserveResult.Replay -> respond(reservation.record.statusCode, reservation.record.responseBody, replayed = true)
+    ReserveResult.Reserved -> {
+        val (statusCode, body) = runCatching { block() }
+            .onFailure { release(key, requestHash) }
+            .getOrThrow()
+        save(key, requestHash, statusCode, body, ttlSeconds)
+        respond(statusCode, body)
+    }
+    ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+    ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
 }
 
 @Path("/api/v1/tpp-registry")
@@ -79,20 +106,12 @@ class TppRegistryResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { registerKey(cmd.tppId, it) }
-        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/tpp-registry", cmd)
-        cacheKey?.let { key ->
-            idempotencyStore.lookup(key, hash)?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
+            ?: return respond(201, objectMapper.writeValueAsString(svc.registerTpp(cmd)))
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/tpp-registry", cmd)
+        return idempotencyStore.withReservation(cacheKey, hash) {
+            val entry = svc.registerTpp(cmd)
+            201 to objectMapper.writeValueAsString(entry)
         }
-
-        val entry = svc.registerTpp(cmd)
-        cacheKey?.let { key -> idempotencyStore.save(key, hash, 201, objectMapper.writeValueAsString(entry)) }
-        return Response.status(201).entity(entry).build()
     }
 
     @GET
@@ -133,49 +152,38 @@ class TppRegistryResource(
     ): Response {
         val reason = body["reason"] ?: "No reason provided"
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { blacklistKey(tppId, it) }
-        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/tpp-registry/$tppId/blacklist", body)
-        cacheKey?.let { key ->
-            idempotencyStore.lookup(key, hash)?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
+            ?: return respond(
+                200,
+                objectMapper.writeValueAsString(svc.blacklistTpp(BlacklistTppCommand(tppId, reason))),
+            )
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/tpp-registry/$tppId/blacklist", body)
+        return idempotencyStore.withReservation(cacheKey, hash) {
+            val result = svc.blacklistTpp(BlacklistTppCommand(tppId, reason))
+            200 to objectMapper.writeValueAsString(result)
         }
-
-        val result = svc.blacklistTpp(BlacklistTppCommand(tppId, reason))
-        cacheKey?.let { key -> idempotencyStore.save(key, hash, 200, objectMapper.writeValueAsString(result)) }
-        return Response.ok(result).build()
     }
 
+    /**
+     * The fingerprint here is over a CONSTANT (method + path, no body) — there is no
+     * request-specific content to bind to, so [ReserveResult.Mismatch] can never occur for this
+     * endpoint. `reserve`/`InFlight` still serializes concurrent syncs under the same key; see
+     * `openapi.yaml`, which documents only IDEMPOTENCY_REQUEST_IN_PROGRESS for this operation.
+     */
     @POST
     @Path("/sync/eba")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun triggerEbaSync(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let(::syncKey)
-        val hash = objectMapper.canonicalFingerprint("POST", "/api/v1/tpp-registry/sync/eba", null)
-        cacheKey?.let { key ->
-            idempotencyStore.lookup(key, hash)?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
+            ?: return respond(200, objectMapper.writeValueAsString(svc.triggerEbaSync()))
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/tpp-registry/sync/eba", null)
+        return idempotencyStore.withReservation(cacheKey, hash, ttlSeconds = 300) {
+            val result = svc.triggerEbaSync()
+            200 to objectMapper.writeValueAsString(result)
         }
-
-        val result = svc.triggerEbaSync()
-        cacheKey?.let { key -> idempotencyStore.save(key, hash, 200, objectMapper.writeValueAsString(result), 300) }
-        return Response.ok(result).build()
     }
 
     @GET
     @Path("/sync/state")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun getSyncState(): Response = Response.ok(svc.getSyncState()).build()
-
-    private fun registerKey(tppId: String, idempotencyKey: String) = "tpp:register:$tppId:$idempotencyKey"
-    private fun blacklistKey(tppId: String, idempotencyKey: String) = "tpp:blacklist:$tppId:$idempotencyKey"
-    private fun syncKey(idempotencyKey: String) = "tpp:sync:$idempotencyKey"
 }
