@@ -4,6 +4,7 @@
 
 package com.openbank.risk.infrastructure
 
+import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
@@ -13,6 +14,7 @@ import com.openbank.risk.application.port.out.CurveSetRepository
 import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.usecase.CapitalService
 import com.openbank.risk.application.usecase.CashFlowService
 import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
@@ -120,6 +122,22 @@ class SnapshotServiceProducer {
      */
     @Suppress("UnusedParameter") // the event only schedules the call
     fun validateLiquidityParameters(@Observes event: StartupEvent, config: LiquidityConfig) {
+        config.toParameters()
+    }
+
+    /**
+     * Pillar 1 credit risk, standardised approach (ADR-0313 phase 2): the versioned parameter set in
+     * `openbank.risk.capital.sa.*` ([CapitalConfig]); every risk weight comes from there, with its
+     * BCBS d424 paragraph.
+     */
+    @Produces
+    @ApplicationScoped
+    fun capitalUseCase(snapshots: SnapshotUseCase, config: CapitalConfig): CapitalUseCase =
+        CapitalService(snapshots, config.toParameters())
+
+    /** Same reason as [validateLiquidityParameters]: a bad risk weight must fail the deploy, not a request. */
+    @Suppress("UnusedParameter") // the event only schedules the call
+    fun validateCapitalParameters(@Observes event: StartupEvent, config: CapitalConfig) {
         config.toParameters()
     }
 

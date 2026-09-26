@@ -74,6 +74,20 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-09-21** — Business multi-signature on mandate creation (#10281, ADR-0312 addendum). A
+  mandate authorised under `X-Acting-For` on a legal entity's account gives a creditor a standing
+  right to debit it, so customer-edge `createSddMandate` now asks delegation-service
+  `signing/evaluate` (kind `SDD_MANDATE`) first. This service stores no per-mandate maximum, so
+  the evaluation always takes the strictest rule; a client-stated maximum is not accepted, because
+  nothing here would enforce it. When more than one signature is required the exact register body
+  (server-minted UMR included) is held as an approval request (202) and posted here once, on the
+  last co-signature, via the single-use `release-claim` with `Idempotency-Key = approvalId`; the
+  UMR is frozen with it, so a replay is refused as a duplicate mandate. No new endpoint, caller or
+  role on this service. Residual: the initiator's PAYMENT_INITIATION challenge for a mandate links
+  the creditor identifier only (there is no amount), so a challenge with no linking data at all
+  would also be accepted at consume — sca-service's rule for an amount-less consume; the payload
+  hash co-signers sign binds the whole mandate.
+
 - **2026-09-06** — Replay-safe collection authorisation (#8351, ADR-0289). `SddMandateService.authorise`
   now short-circuits when the instruction's `dueDate` equals the mandate's `lastCollectionDate`: a
   retried authorise of the same collection replays the stored policy decision with no `save` and no

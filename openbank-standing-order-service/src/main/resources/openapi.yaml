@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Standing Order Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -35,9 +35,17 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateStandingOrderRequest'
+      description: >-
+        With `replacesStandingOrderId` (an edit, #10281) the new order is created and the replaced
+        one cancelled in ONE transaction: both run never, neither-runs never. A replay of the same
+        `idempotencyKey` returns the order already created and changes nothing.
       responses:
         '201':
           description: Standing order created
+        '422':
+          description: >-
+            `replacesStandingOrderId` is not an ACTIVE or PAUSED order of the same party; nothing
+            was created or cancelled.
 
   /api/v1/standing-orders/{id}:
     get:
@@ -208,6 +216,11 @@ components:
         remittanceInfo:
           type: string
           nullable: true
+        replacesStandingOrderId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Edit — cancel this order atomically with creating the new one (#10281).
 
     ApiError:
       type: object

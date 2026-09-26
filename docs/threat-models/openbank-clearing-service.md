@@ -86,6 +86,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+
 - **2026-09-14** — Clearing acknowledgement evidence (ADR-0306): every item transition increments
   its persisted `aggregate_revision`, and batch settlement commits one
   `openbank.clearing.item.cleared` outbox row per settled item in the same database transaction as
