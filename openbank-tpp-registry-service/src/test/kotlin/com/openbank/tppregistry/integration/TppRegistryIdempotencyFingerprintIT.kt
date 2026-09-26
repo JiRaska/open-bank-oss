@@ -3,8 +3,16 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.tppregistry.integration
 
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
+import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
+import com.openbank.tppregistry.application.port.`in`.TppRegistryUseCase
+import com.openbank.tppregistry.application.usecase.TppRegistryService
 import com.openbank.tppregistry.it.PostgresRedisTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -31,6 +39,9 @@ class TppRegistryIdempotencyFingerprintIT {
 
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var useCase: TppRegistryUseCase
 
     private fun registerBody(tppId: String, name: String = "Fingerprint Probe") = """
         {"tppId":"$tppId","name":"$name","countryCode":"CZ","nca":"CNB",
@@ -193,5 +204,77 @@ class TppRegistryIdempotencyFingerprintIT {
         }
 
         assertThat(countByTppId(tppId)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "idem-it", roles = ["ROLE_ADMIN"])
+    fun `same roles in a different array order still replays, not refused`() {
+        // `roles` is a Set: Jackson preserves the client's array order into a LinkedHashSet, and
+        // RequestFingerprints deliberately keeps array element order significant — so before the
+        // fix, the identical role set sent in a different order fingerprinted differently and the
+        // retry was refused as a reuse instead of replaying.
+        val tppId = "CZ-CNB-IDEM-${UUID.randomUUID().toString().take(8)}"
+        val key = UUID.randomUUID().toString()
+        val body = """
+            {"tppId":"$tppId","name":"Fingerprint Probe","countryCode":"CZ","nca":"CNB",
+             "roles":["AISP","PISP"],"qwacSubjectDn":"CN=QWAC","qsealSubjectDn":null}
+        """.trimIndent()
+        val reorderedRoles = """
+            {"tppId":"$tppId","name":"Fingerprint Probe","countryCode":"CZ","nca":"CNB",
+             "roles":["PISP","AISP"],"qwacSubjectDn":"CN=QWAC","qsealSubjectDn":null}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(body)
+        } When {
+            post("/api/v1/tpp-registry")
+        } Then { statusCode(201) }
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(reorderedRoles)
+        } When {
+            post("/api/v1/tpp-registry")
+        } Then {
+            statusCode(201)
+            header("X-Idempotency-Replayed", "true")
+        }
+
+        assertThat(countByTppId(tppId)).describedAs("no second row for a genuine replay").isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "idem-it", roles = ["ROLE_ADMIN"])
+    fun `a release failure does not mask the original use-case failure`() {
+        // Without withContext(NonCancellable) { runCatching { ... } } around release() inside
+        // withReservation, an exception thrown by release() would propagate from onFailure and
+        // REPLACE the original use-case failure the caller actually needs to see.
+        val tppId = "CZ-CNB-IDEM-${UUID.randomUUID().toString().take(8)}"
+        val key = UUID.randomUUID().toString()
+        val failingUseCase = mockk<TppRegistryService>()
+        coEvery { failingUseCase.registerTpp(any()) } coAnswers { error("transient failure on register") }
+        QuarkusMock.installMockForType(failingUseCase, TppRegistryUseCase::class.java)
+
+        val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
+        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
+
+        // The original failure (422, from the use case's IllegalStateException, mapped by
+        // libs-runtime's CommonExceptionMappers) must surface, not the IllegalStateException
+        // thrown by release().
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(registerBody(tppId))
+        } When {
+            post("/api/v1/tpp-registry")
+        } Then {
+            statusCode(422)
+        }
+        assertThat(countByTppId(tppId)).isEqualTo(0)
     }
 }

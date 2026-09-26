@@ -30,6 +30,11 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import org.jboss.logging.Logger
+
+private val log = Logger.getLogger(TppRegistryResource::class.java)
 
 // Kept top-level (not class members) so they do not count against TppRegistryResource's detekt
 // TooManyFunctions threshold — the class itself only exposes the REST operations.
@@ -59,7 +64,18 @@ private suspend fun IdempotencyStore.withReservation(
     is ReserveResult.Replay -> respond(reservation.record.statusCode, reservation.record.responseBody, replayed = true)
     ReserveResult.Reserved -> {
         val (statusCode, body) = runCatching { block() }
-            .onFailure { release(key, requestHash) }
+            .onFailure {
+                // Shielded from cancellation and never rethrows: a release failure must not mask
+                // the ORIGINAL exception from block() (that is what getOrThrow() below rethrows),
+                // and a cancelled caller must not abandon the release mid-flight and leave the key
+                // stuck IN_PROGRESS for its full TTL.
+                withContext(NonCancellable) {
+                    runCatching { release(key, requestHash) }
+                        .onFailure { releaseFailure ->
+                            log.warn("Failed to release idempotency key after failure", releaseFailure)
+                        }
+                }
+            }
             .getOrThrow()
         save(key, requestHash, statusCode, body, ttlSeconds)
         respond(statusCode, body)
@@ -107,7 +123,15 @@ class TppRegistryResource(
     ): Response {
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { registerKey(cmd.tppId, it) }
             ?: return respond(201, objectMapper.writeValueAsString(svc.registerTpp(cmd)))
-        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/tpp-registry", cmd)
+        // `roles` is a Set: RequestFingerprints canonicalises object properties and map keys but
+        // deliberately keeps ARRAY elements in the order the client sent them (a scale difference
+        // in an amount is not a different request; an array's order might be). Jackson's
+        // CollectionDeserializer preserves that client order into a LinkedHashSet, so the same
+        // roles sent in a different order fingerprinted differently and a genuine retry was
+        // refused as IDEMPOTENCY_KEY_REUSED. Sort before hashing; `cmd` itself (and the roles
+        // order the use case sees) is untouched.
+        val fingerprintCmd = cmd.copy(roles = cmd.roles.sortedBy { it?.name ?: "" }.toCollection(LinkedHashSet()))
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/tpp-registry", fingerprintCmd)
         return idempotencyStore.withReservation(cacheKey, hash) {
             val entry = svc.registerTpp(cmd)
             201 to objectMapper.writeValueAsString(entry)
