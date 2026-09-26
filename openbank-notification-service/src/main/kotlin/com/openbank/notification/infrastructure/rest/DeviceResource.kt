@@ -40,7 +40,6 @@ private const val MAX_DEVICE_LIST_LIMIT = 200
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Devices")
 class DeviceResource {
-
     @Inject
     lateinit var repo: DeviceTokenRepository
 

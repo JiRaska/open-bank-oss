@@ -59,6 +59,17 @@
    writes catalog state. The adapter accepts only the banking loan schema, a matching offering id,
    canonical decimal amounts/rates, and a 64-hex content hash; malformed, unavailable, draft or
    mismatched data fails the application request closed rather than falling back to caller pricing.
+10. **Context → Lending (investigative evidence read, default off).** Context may request approved
+    guarantee facts and bounded shared-guarantor matches for a loan assigned to a human investigator.
+    It forwards that investigator's bearer and exact loan case/purpose; Lending checks the role and
+    policy, asks Context for at most 256 currently assigned candidate IDs, then rechecks each matched
+    loan before returning at most four related loans with bounded facts. Caller-supplied candidate IDs
+    are not accepted. A dedicated ingress rule admits only the Context workload on the TLS listener;
+    the general plaintext service port is not granted for this crossing. Context independently checks
+    every returned loan before disclosure. Missing authorization or source availability returns no
+    partial evidence. Client TLS binding and issued trust material still need verification before the
+    disabled read can be activated; the declared certificate and optional mount alone are not proof of
+    an established mTLS connection.
 
 ## 3. Controls in place (this slice)
 
@@ -86,6 +97,10 @@
   A catalog response that is unavailable, malformed, non-published or outside supported limits fails
   closed before application persistence.
 - **Secrets.** No hardcoded credentials; config values are env-var placeholders.
+- **Graph evidence is not an exposure calculation.** Approved, effective-dated guarantee records
+  establish source provenance and a shared guarantor; they do not establish current enforceability,
+  remaining collateral cover or wrongdoing. Both reader services keep responses uncached, cap the
+  fan-out and disclose truncation. Runtime 1×/10× latency qualification remains a rollout condition.
 - **Provisioning cycle integrity (ADR-0028 Phase 3, new this slice).** The scheduled IFRS 9 provisioning
   pass (`ProvisioningCycleScheduler` → `LendingService.runProvisioningCycle`) is a system-actor process,
   not user-triggered — there is no REST endpoint that lets a caller invoke it or supply its inputs. Its

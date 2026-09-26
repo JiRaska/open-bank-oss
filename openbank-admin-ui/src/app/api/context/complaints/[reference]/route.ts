@@ -5,6 +5,7 @@ import { auth } from '@/auth'
 import { hasPermission } from '@/lib/auth/roles'
 import { parseContextNeighborhood } from '@/lib/context/graph'
 import { contextServiceUrl } from '@/lib/context/server'
+import { readBoundedContextJson } from '@/lib/context/boundedJson'
 
 export const dynamic = 'force-dynamic'
 const SAFE_VALUE = /^[A-Za-z0-9._:-]{1,200}$/
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ reference: 
       const status = [400, 401, 403, 404, 503].includes(upstream.status) ? upstream.status : 502
       return NextResponse.json({ error: status === 404 ? 'not_found' : 'context_unavailable' }, { status })
     }
-    return NextResponse.json(parseContextNeighborhood(await upstream.json()), {
+    return NextResponse.json(parseContextNeighborhood(await readBoundedContextJson(upstream, 256 * 1024)), {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch {

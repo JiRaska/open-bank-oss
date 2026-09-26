@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: fraud-service-internal-tls
+  namespace: fraud
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: fraud-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - fraud-service.fraud.svc
+    - fraud-service.fraud.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -114,7 +114,7 @@ class TransactionService(
     @Suppress("LongMethod")
     private suspend fun initiateTransactionInternal(command: InitiateTransactionCommand): Transaction {
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) return existing
+        if (existing != null) return replay(existing, command)
 
         val currency = CurrencyCode.of(command.currencyCode)
         // Normalize the principal to the currency's minor units at the booking ingest (ADR-0108).
@@ -210,6 +210,7 @@ class TransactionService(
             scaExemption = command.scaExemption,
             rail = command.rail,
             instructionType = command.instructionType,
+            originatingPaymentId = command.originatingPaymentId,
             reversalOf = command.reversalOf,
             isReversal = command.type == TransactionType.REVERSAL,
         )
@@ -224,9 +225,9 @@ class TransactionService(
                 ),
             )
         } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return recoverConcurrentReplay(e, command)
         } catch (e: PgException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return recoverConcurrentReplay(e, command)
         }
 
         // ADR-0120 Phase 5: Temporal is the sole orchestrator — PaymentSagaOrchestrator removed.
@@ -361,14 +362,26 @@ class TransactionService(
      * start no second payment workflow. Anything that is not the idempotency-key conflict
      * propagates untouched.
      */
-    private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): Transaction {
+    private suspend fun recoverConcurrentReplay(e: RuntimeException, command: InitiateTransactionCommand): Transaction {
         // transactions is range-partitioned by booking_date: the violation surfaces under the
         // per-partition auto-generated name (transactions_<year>_idempotency_key_booking_date_key),
         // not the parent's uq_transactions_idempotency — match the column, not one spelling.
         val isIdempotencyKeyConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
             .any { it.message?.contains("idempotency", ignoreCase = true) == true }
         if (!isIdempotencyKeyConflict) throw e
-        return transactionRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
+        val winner = transactionRepository.findByIdempotencyKey(command.idempotencyKey) ?: throw e
+        return replay(winner, command)
+    }
+
+    private fun replay(existing: Transaction, command: InitiateTransactionCommand): Transaction {
+        // Legacy rows stay unchanged: a retry cannot retroactively establish source ownership.
+        if (existing.originatingPaymentId != null &&
+            command.originatingPaymentId != null &&
+            existing.originatingPaymentId != command.originatingPaymentId
+        ) {
+            throw TransactionUpdateConflictException("Originating payment differs from the existing transaction")
+        }
+        return existing
     }
 
     private fun generateReferenceNumber(): String {

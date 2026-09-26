@@ -179,7 +179,9 @@ class AssignmentAdministrationService(
                 when (request.purpose) {
                     "AUTHORIZATION_REVIEW" -> "delegation:${UUID.fromString(root.removePrefix("delegation:"))}"
                     "AML_INVESTIGATION" -> "aml-case:${UUID.fromString(root.removePrefix("aml-case:"))}"
+                    "FRAUD_INVESTIGATION" -> "fraud-case:${UUID.fromString(root.removePrefix("fraud-case:"))}"
                     "KYB_OWNERSHIP_REVIEW" -> "kyb-case:${UUID.fromString(root.removePrefix("kyb-case:"))}"
+                    "LENDING_EXPOSURE_REVIEW" -> "lending-loan:${UUID.fromString(root.removePrefix("lending-loan:"))}"
                     "INCIDENT_IMPACT" -> "incident:${UUID.fromString(root.removePrefix("incident:"))}"
                     else -> root
                 }
@@ -190,34 +192,30 @@ class AssignmentAdministrationService(
             makerId = maker
             createdAt = now
         }
-        transaction { session ->
-            session.persist(proposal).flatMap {
-                session.persist(audit(proposal, "PROPOSED", maker, null))
+        transaction { operation ->
+            operation.sql { session -> session.persist(proposal) }.flatMap {
+                operation.sql { session -> session.persist(audit(proposal, "PROPOSED", maker, null)) }
             }
         }
         return proposal.response()
     }
 
-    suspend fun pending(limit: Int): List<AssignmentProposalResponse> = timed(
-        sessions.withSession { session ->
-            session.createQuery(
-                "from AssignmentProposalEntity where bankScope = :bankScope and status = 'PENDING' order by createdAt",
-                AssignmentProposalEntity::class.java,
-            ).setParameter("bankScope", bankScope).setMaxResults(limit.coerceIn(1, MAX_QUEUE_SIZE)).resultList
-        },
-    ).map { it.response() }
+    suspend fun pending(limit: Int): List<AssignmentProposalResponse> = read { session ->
+        session.createQuery(
+            "from AssignmentProposalEntity where bankScope = :bankScope and status = 'PENDING' order by createdAt",
+            AssignmentProposalEntity::class.java,
+        ).setParameter("bankScope", bankScope).setMaxResults(limit.coerceIn(1, MAX_QUEUE_SIZE)).resultList
+    }.map { it.response() }
 
     suspend fun active(limit: Int): List<ActiveAssignmentResponse> {
         val now = clock.instant()
-        return timed(
-            sessions.withSession { session ->
-                session.createQuery(
-                    "from CaseAssignmentEntity where bankScope = :bankScope and validFrom <= :now and validTo > :now order by validTo",
-                    CaseAssignmentEntity::class.java,
-                ).setParameter("bankScope", bankScope).setParameter("now", now)
-                    .setMaxResults(limit.coerceIn(1, MAX_QUEUE_SIZE)).resultList
-            },
-        ).map {
+        return read { session ->
+            session.createQuery(
+                "from CaseAssignmentEntity where bankScope = :bankScope and validFrom <= :now and validTo > :now order by validTo",
+                CaseAssignmentEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("now", now)
+                .setMaxResults(limit.coerceIn(1, MAX_QUEUE_SIZE)).resultList
+        }.map {
             ActiveAssignmentResponse(it.id, it.principalId, it.caseId, it.purpose, it.validFrom, it.validTo, it.rootRef)
         }
     }
@@ -225,8 +223,10 @@ class AssignmentAdministrationService(
     @Suppress("ThrowsCount")
     suspend fun decide(id: UUID, approve: Boolean, checker: String): AssignmentProposalResponse {
         var assignmentId: UUID? = null
-        val proposal = transactionResult { session ->
-            session.find(AssignmentProposalEntity::class.java, id, LockModeType.PESSIMISTIC_WRITE).flatMap { found ->
+        val proposal = transactionResult { operation ->
+            operation.sql { session ->
+                session.find(AssignmentProposalEntity::class.java, id, LockModeType.PESSIMISTIC_WRITE)
+            }.flatMap { found ->
                 val value = found ?: throw NotFoundException("assignment proposal not found")
                 if (value.bankScope != bankScope) throw NotFoundException("assignment proposal not found")
                 if (value.status != "PENDING") throw AssignmentStateConflict("assignment proposal was already decided")
@@ -236,7 +236,8 @@ class AssignmentAdministrationService(
                 value.checkerId = checker
                 value.decidedAt = now
                 if (!approve) {
-                    session.persist(audit(value, "REJECTED", checker, null)).replaceWith(value)
+                    operation.sql { session -> session.persist(audit(value, "REJECTED", checker, null)) }
+                        .replaceWith(value)
                 } else {
                     val assignment = CaseAssignmentEntity().apply {
                         this.id = Ids.newId()
@@ -250,9 +251,9 @@ class AssignmentAdministrationService(
                         createdAt = now
                     }
                     assignmentId = assignment.id
-                    value.assignmentId = assignment.id
-                    session.persist(assignment).flatMap {
-                        session.persist(audit(value, "APPROVED", checker, assignment.id))
+                    operation.sql { session -> session.persist(assignment) }.flatMap {
+                        value.assignmentId = assignment.id
+                        operation.sql { session -> session.persist(audit(value, "APPROVED", checker, assignment.id)) }
                     }.replaceWith(value)
                 }
             }
@@ -261,13 +262,15 @@ class AssignmentAdministrationService(
     }
 
     suspend fun revoke(id: UUID, actor: String) {
-        transaction { session ->
-            session.find(CaseAssignmentEntity::class.java, id, LockModeType.PESSIMISTIC_WRITE).flatMap { found ->
+        transaction { operation ->
+            operation.sql { session ->
+                session.find(CaseAssignmentEntity::class.java, id, LockModeType.PESSIMISTIC_WRITE)
+            }.flatMap { found ->
                 val assignment = found ?: throw NotFoundException("assignment not found")
                 if (assignment.bankScope != bankScope) throw NotFoundException("assignment not found")
                 val now = clock.instant()
                 if (assignment.validTo > now) assignment.validTo = now
-                session.persist(audit(assignment, actor, now))
+                operation.sql { session -> session.persist(audit(assignment, actor, now)) }
             }
         }
     }
@@ -300,6 +303,8 @@ class AssignmentAdministrationService(
             require(root.startsWith("aml-case:") && root.length == AML_CASE_ROOT_LENGTH) { "invalid AML case root" }
             val id = UUID.fromString(root.removePrefix("aml-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the AML source case" }
+        } else if (request.purpose == "FRAUD_INVESTIGATION") {
+            validateFraudRoot(request)
         } else if (request.purpose == "KYB_OWNERSHIP_REVIEW") {
             val root = requireNotNull(request.rootRef) { "KYB_OWNERSHIP_REVIEW requires a KYB case root" }
             require(root.startsWith("kyb-case:") && root.length == KYB_CASE_ROOT_LENGTH) {
@@ -307,6 +312,8 @@ class AssignmentAdministrationService(
             }
             val id = UUID.fromString(root.removePrefix("kyb-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
+        } else if (request.purpose == "LENDING_EXPOSURE_REVIEW") {
+            validateLendingRoot(request)
         } else if (request.purpose == "INCIDENT_IMPACT") {
             val root = requireNotNull(request.rootRef) { "INCIDENT_IMPACT requires an incident root" }
             require(root.startsWith("incident:") && root.length == INCIDENT_ROOT_LENGTH) { "invalid incident root" }
@@ -321,6 +328,24 @@ class AssignmentAdministrationService(
         } else {
             require(request.rootRef == null) { "root scope is not supported for this purpose" }
         }
+    }
+
+    private fun validateLendingRoot(request: ProposeAssignmentRequest) {
+        val root = requireNotNull(request.rootRef) { "LENDING_EXPOSURE_REVIEW requires a Lending loan root" }
+        require(root.startsWith("lending-loan:") && root.length == LENDING_LOAN_ROOT_LENGTH) {
+            "invalid Lending loan root"
+        }
+        val id = UUID.fromString(root.removePrefix("lending-loan:"))
+        require(request.caseId == id.toString()) { "the investigation case must match the Lending loan" }
+    }
+
+    private fun validateFraudRoot(request: ProposeAssignmentRequest) {
+        val root = requireNotNull(request.rootRef) { "FRAUD_INVESTIGATION requires a Fraud case root" }
+        require(root.startsWith("fraud-case:") && root.length == FRAUD_CASE_ROOT_LENGTH) {
+            "invalid Fraud case root"
+        }
+        val id = UUID.fromString(root.removePrefix("fraud-case:"))
+        require(request.caseId == id.toString()) { "the investigation case must match the Fraud source case" }
     }
 
     private fun audit(p: AssignmentProposalEntity, action: String, actor: String, assignmentId: UUID?) =
@@ -351,19 +376,25 @@ class AssignmentAdministrationService(
         occurredAt = now
     }
 
-    private suspend fun transaction(block: (Mutiny.Session) -> Uni<*>): Unit =
-        timed(sessions.withTransaction { session, _ -> block(session) }).let { }
+    private suspend fun transaction(block: (ContextSqlOperation) -> Uni<*>): Unit =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            block(operation).flatMap { operation.sql { session -> session.flush() } }
+        }.awaitSuspending().let { }
 
-    private suspend fun <T> transactionResult(block: (Mutiny.Session) -> Uni<T>): T =
-        timed(sessions.withTransaction { session, _ -> block(session) })
+    private suspend fun <T> transactionResult(block: (ContextSqlOperation) -> Uni<T>): T =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            block(operation).flatMap { result -> operation.sql { session -> session.flush() }.replaceWith(result) }
+        }.awaitSuspending()
 
-    private suspend fun <T> timed(operation: Uni<T>): T = operation
-        .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+    private suspend fun <T> read(statement: (Mutiny.Session) -> Uni<T>): T =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation -> operation.sql(statement) }.awaitSuspending()
 
     private companion object {
         const val DELEGATION_ROOT_LENGTH = 47
         const val AML_CASE_ROOT_LENGTH = 45
+        const val FRAUD_CASE_ROOT_LENGTH = 47
         const val KYB_CASE_ROOT_LENGTH = 45
+        const val LENDING_LOAN_ROOT_LENGTH = 49
         const val INCIDENT_ROOT_LENGTH = 45
         const val MIN_COMPLAINT_ROOT_LENGTH = 11
         const val MAX_COMPLAINT_ROOT_LENGTH = 210
@@ -379,7 +410,9 @@ class AssignmentAdministrationService(
                 "INCIDENT_IMPACT",
                 "AUTHORIZATION_REVIEW",
                 "AML_INVESTIGATION",
+                "FRAUD_INVESTIGATION",
                 "KYB_OWNERSHIP_REVIEW",
+                "LENDING_EXPOSURE_REVIEW",
             )
     }
 }

@@ -16,6 +16,8 @@
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "idempotencyKey": "pact-domestic-txn-001",
+          "instructionType": "ONE_OFF",
+          "originatingPaymentId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
           "rail": "DOMESTIC",
           "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           "type": "DEBIT",

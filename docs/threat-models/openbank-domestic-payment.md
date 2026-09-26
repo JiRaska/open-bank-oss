@@ -36,6 +36,34 @@ to a beneficiary — a primary fraud target.
   service↔clearing-simulator (OIDC client-credentials; cluster-internal; pilot flag off by default).
 - **Assets:** payment instructions, amounts, debtor/creditor accounts.
 
+### Settlement booking provenance
+
+`SettlementAdapter` sends the persisted domestic payment's `id` as optional `originatingPaymentId`
+and its `debtorAccountId` as the source account on the existing transaction-service REST booking.
+The named `m2m` client continues to supply domestic-payment's own machine token; no credential,
+policy grant or downstream topic is added. Transaction-service accepts the correlation assertion
+only for authenticated principal `service-account-openbank-domestic-payment`, `ROLE_API`, verified
+JWT `azp = openbank-domestic-payment`, type `DEBIT`, rail `DOMESTIC` and a non-null source account.
+
+**STRIDE-S/E:** this prevents other transaction-create callers from attributing their bookings to
+a domestic payment. A compromised domestic producer can still assert a false payment relationship:
+the field records that producer's assertion, not independent proof of payment existence, ownership
+or settlement completion. Existing investigation purpose, assignment and read-audit controls still
+apply. No correlation is inferred from a key, description, amount or timestamp.
+
+**STRIDE-T/R:** transaction-service persists the supplied identifier and publishes it through its
+existing transaction outbox. A same-key replay with different non-null stored and supplied payment
+identifiers fails with 409 and changes neither financial state nor provenance. The adapter must
+treat 409 as a failure, rather than reporting an idempotent settlement success without a transaction
+ID. Real idempotent success remains the existing 201 response. Legacy bookings with a null identifier
+retain 201 on replay and remain unlinked, without backfill or another event; omitted identifiers
+preserve any stored link.
+
+**Rollout and rollback:** deploy the transaction-service provider and its assertion guard before
+the domestic producer. Roll back the producer before the provider. Existing historical bookings
+need no migration and receive no invented provenance. Both services remain subject to the existing
+money-path two-reviewer approval and ship checks.
+
 ## 3. Authn/Authz
 
 - `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` on initiation; read includes `ROLE_VIEWER`.

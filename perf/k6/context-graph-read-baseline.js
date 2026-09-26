@@ -12,14 +12,22 @@
 // the source-backed reversal edge and a posted reversal journal in every successful sample.
 import http from "k6/http";
 import { check, fail } from "k6";
-import { Trend } from "k6/metrics";
+import { Counter, Trend } from "k6/metrics";
 
-http.setResponseCallback(http.expectedStatuses(200));
+// Capacity setup deliberately probes a denied identity; a 403 there is expected.
+// The measured positive path still requires 200 through its explicit checks.
+http.setResponseCallback(http.expectedStatuses(200, 403));
 
 const lens = __ENV.CONTEXT_PERF_LENS;
 const profile = __ENV.CONTEXT_PERF_PROFILE || "smoke";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
+const responseStatusCodes = [0, 200, 204, 400, 401, 403, 404, 429, 500, 503];
+const responseStatusCounters = Object.fromEntries(responseStatusCodes.map((status) => [
+  status,
+  new Counter(`context_http_response_status_${status}`),
+]));
+const otherResponseStatuses = new Counter("context_http_response_status_other");
 
 const scenarios = profile === "capacity" ? {
   authorized_graph_reads: {
@@ -69,8 +77,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network, kyb or fraud-network");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb", "fraud-network", "lending-guarantees", "lending-shared"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS is not a supported graph lens");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -92,6 +100,39 @@ export function setup() {
       fail("Fraud network baseline requires a declared assigned-case count and a synthetic related-case fixture");
     }
   }
+  if (["lending-guarantees", "lending-shared"].includes(lens) &&
+      (!UUID.test(__ENV.CONTEXT_PERF_REFERENCE) ||
+       __ENV.CONTEXT_PERF_CASE_ID.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+       __ENV.CONTEXT_PERF_PURPOSE !== "LENDING_EXPOSURE_REVIEW" ||
+       !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID || ""))) {
+    fail("Lending baseline requires an assigned loan and one synthetic approved guarantee fixture");
+  }
+  if (lens === "lending-shared" && !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_RELATED_LOAN_ID || "")) {
+    fail("Shared lending baseline requires a synthetic related loan fixture");
+  }
+  if (profile === "capacity" && ["lending-guarantees", "lending-shared"].includes(lens)) {
+    if (!__ENV.CONTEXT_PERF_DENIED_TOKEN ||
+        __ENV.CONTEXT_PERF_DENIED_TOKEN === __ENV.CONTEXT_PERF_TOKEN) {
+      fail("Lending capacity baseline requires a distinct valid token without the graph role");
+    }
+    const deniedPath = lens === "lending-shared" ? "shared-guarantors" : "approved-guarantees";
+    const denied = http.get(
+      `${__ENV.CONTEXT_PERF_URL.replace(/\/$/, "")}/api/v1/context/lending-loans/${encodeURIComponent(__ENV.CONTEXT_PERF_REFERENCE)}/${deniedPath}`,
+      {
+        headers: {
+          Authorization: `Bearer ${__ENV.CONTEXT_PERF_DENIED_TOKEN}`,
+          "X-Investigation-Case-Id": __ENV.CONTEXT_PERF_CASE_ID,
+          "X-Investigation-Purpose": __ENV.CONTEXT_PERF_PURPOSE,
+        },
+        tags: { name: `context_${lens}_denied_preflight` },
+        redirects: 0,
+        timeout: "2s",
+      },
+    );
+    if (denied.status !== 403 || denied.body?.includes(__ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID)) {
+      fail("Lending capacity baseline requires a 403 without guarantee evidence for the denied role");
+    }
+  }
   if (lens === "complaint" && __ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID &&
       !UUID.test(__ENV.CONTEXT_PERF_EXPECTED_REVERSAL_BOOKING_ID)) {
     fail("Complaint reversal fixture requires a synthetic reversal booking UUID");
@@ -109,6 +150,8 @@ export default function () {
     "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
     kyb: `/api/v1/context/kyb-cases/${reference}/ownership-observations`,
     "fraud-network": `/api/v1/context/fraud-cases/${reference}/network`,
+    "lending-guarantees": `/api/v1/context/lending-loans/${reference}/approved-guarantees`,
+    "lending-shared": `/api/v1/context/lending-loans/${reference}/shared-guarantors`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -123,6 +166,7 @@ export default function () {
     redirects: 0,
     timeout: "2s",
   });
+  (responseStatusCounters[response.status] || otherResponseStatuses).add(1);
   graphLatency.add(response.timings.duration);
 
   let body = null;
@@ -170,34 +214,78 @@ export default function () {
             item.revision < body.observations[index - 1].revision);
       }
       if (lens === "fraud-network") return hasFraudNetworkEvidence(body);
+      if (lens === "lending-guarantees") return hasLendingGuaranteeEvidence(body);
+      if (lens === "lending-shared") return hasLendingSharedEvidence(body);
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
 }
 
+function hasLendingGuaranteeEvidence(body) {
+  const expected = __ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID.toLowerCase();
+  return body && typeof body.loanId === "string" &&
+    body.loanId.toLowerCase() === __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() &&
+    typeof body.effectiveAt === "string" && typeof body.knownAt === "string" &&
+    typeof body.truncated === "boolean" &&
+    Array.isArray(body.guarantees) && body.guarantees.length > 0 && body.guarantees.length <= 100 &&
+    body.guarantees.some((fact) => fact.guaranteeId?.toLowerCase() === expected &&
+      UUID.test(fact.contractId) && UUID.test(fact.guarantorPartyId) &&
+      UUID.test(fact.sourceDocumentId) && /^[0-9a-f]{64}$/i.test(fact.sourceSha256) &&
+      Number.isInteger(fact.revision) && fact.revision > 0);
+}
+
+function hasLendingSharedEvidence(body) {
+  const expectedLoan = __ENV.CONTEXT_PERF_EXPECTED_RELATED_LOAN_ID.toLowerCase();
+  const expectedGuarantee = __ENV.CONTEXT_PERF_EXPECTED_GUARANTEE_ID.toLowerCase();
+  if (!body || body.rootLoanId?.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+      typeof body.effectiveAt !== "string" || typeof body.knownAt !== "string" ||
+      typeof body.candidateTruncated !== "boolean" || typeof body.relatedLoansTruncated !== "boolean" ||
+      !Array.isArray(body.relatedLoans) || body.relatedLoans.length < 1 || body.relatedLoans.length > 4) return false;
+  return body.relatedLoans.some((loan) => loan.loanId?.toLowerCase() === expectedLoan &&
+    typeof loan.truncated === "boolean" && Array.isArray(loan.guarantees) &&
+    loan.guarantees.length > 0 && loan.guarantees.length <= 20 &&
+    loan.guarantees.some((fact) => fact.guaranteeId?.toLowerCase() === expectedGuarantee &&
+      UUID.test(fact.guarantorPartyId) && UUID.test(fact.sourceDocumentId) &&
+      /^[0-9a-f]{64}$/i.test(fact.sourceSha256)));
+}
+
 function hasFraudNetworkEvidence(body) {
   const assigned = Number(__ENV.CONTEXT_PERF_ASSIGNED_CASES);
   const expected = __ENV.CONTEXT_PERF_EXPECTED_RELATED_CASE_ID.toLowerCase();
-  if (!body || body.root?.status !== "OPEN" ||
-      body.root.caseId?.toLowerCase() !== __ENV.CONTEXT_PERF_REFERENCE.toLowerCase() ||
+  if (!body || !hasFraudEvidence(body.root, __ENV.CONTEXT_PERF_REFERENCE) ||
       !Array.isArray(body.related) || body.related.length < 1 || body.related.length > 4 ||
       !Number.isInteger(body.inspectedCandidates) || body.inspectedCandidates < body.related.length ||
       body.inspectedCandidates > 4 || body.comparedCandidates !== Math.min(assigned, 256) ||
       typeof body.candidateTruncated !== "boolean" ||
       (assigned > 256 && !body.candidateTruncated)) return false;
-  const seen = new Set([body.root.caseId]);
+  const seen = new Set([body.root.caseId.toLowerCase()]);
   return body.related.every((item) => {
     const evidence = item?.evidence;
-    if (evidence?.status !== "OPEN" || seen.has(evidence.caseId) ||
+    if (!hasFraudEvidence(evidence) || seen.has(evidence.caseId.toLowerCase()) ||
         !Array.isArray(item.shared) || item.shared.length < 1 || item.shared.length > 2) return false;
-    seen.add(evidence.caseId);
-    return item.shared.every((edge) =>
-      typeof edge.sourceId === "string" && UUID.test(edge.sourceId) &&
-      ((edge.type === "ACCOUNT" && edge.sourceId === body.root.accountId && edge.sourceId === evidence.accountId) ||
-        (edge.type === "COUNTERPARTY" && edge.sourceId === body.root.counterpartyId &&
-          edge.sourceId === evidence.counterpartyId)));
+    seen.add(evidence.caseId.toLowerCase());
+    const expectedShared = [
+      ...(body.root.accountId === evidence.accountId ? [{ type: "ACCOUNT", sourceId: body.root.accountId }] : []),
+      ...(body.root.counterpartyId !== null && body.root.counterpartyId === evidence.counterpartyId
+        ? [{ type: "COUNTERPARTY", sourceId: body.root.counterpartyId }] : []),
+    ];
+    return expectedShared.length > 0 && item.shared.length === expectedShared.length &&
+      item.shared.every((edge, index) => edge.type === expectedShared[index].type &&
+        edge.sourceId === expectedShared[index].sourceId);
   }) && seen.has(expected);
+}
+
+function hasFraudEvidence(evidence, caseId) {
+  return evidence !== null && typeof evidence === "object" &&
+    typeof evidence.caseId === "string" && UUID.test(evidence.caseId) &&
+    (!caseId || evidence.caseId.toLowerCase() === caseId.toLowerCase()) &&
+    typeof evidence.scoreId === "string" && UUID.test(evidence.scoreId) &&
+    typeof evidence.accountId === "string" && UUID.test(evidence.accountId) &&
+    (evidence.counterpartyId === null ||
+      (typeof evidence.counterpartyId === "string" && UUID.test(evidence.counterpartyId))) &&
+    evidence.status === "OPEN" && Number.isInteger(evidence.revision) && evidence.revision > 0 &&
+    typeof evidence.openedAt === "string" && evidence.closedAt === null;
 }
 
 function hasEvidence(history, limit) {

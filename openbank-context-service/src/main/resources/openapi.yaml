@@ -2,9 +2,168 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.6.1
+  version: 1.10.1
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/lending-loans/{loanId}/access:
+    get:
+      operationId: verifyAssignedLendingLoanAccess
+      summary: Verify live access to one exact loan without returning source data
+      description: >-
+        The human investigator's case ID must equal the loan UUID. A live, reviewed
+        LENDING_EXPOSURE_REVIEW assignment to lending-loan:{loanId} and policy allow
+        are required. Shared collateral or guarantors confer no access to other loans.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '204': { description: Exact loan assignment and policy allow; no data returned }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization unavailable }
+  /api/v1/context/lending-loans/{loanId}/approved-guarantees:
+    get:
+      operationId: getAssignedLendingApprovedGuarantees
+      summary: Read approved guarantee evidence for one assigned loan
+      description: >-
+        Disabled by default. Requires the human investigator's exact loan case ID,
+        LENDING_EXPOSURE_REVIEW purpose, current root assignment and policy allow.
+        Reads bounded source evidence directly from Lending; shared parties confer no access
+        to another loan. The response is uncached and may be truncated.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most 100 approved guarantee facts for this loan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LendingGuaranteeHistory' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, assignment, policy or source denied }
+        '503': { description: Feature disabled, authorization or source unavailable }
+  /api/v1/context/lending-loans/{loanId}/assigned-candidates:
+    get:
+      operationId: getAssignedLendingCandidates
+      summary: Return bounded current loan assignments after authorizing the human root
+      description: >-
+        Disabled by default with Lending source reads. Requires a human bearer, exact loan case ID,
+        LENDING_EXPOSURE_REVIEW purpose, and current root assignment and policy allow.
+        Returns only other loans assigned to the same investigator with canonical loan roots;
+        no loan facts or shared-party inference. The response is uncached and may be truncated.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most 256 other assigned loan IDs and a truncation flag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LendingAssignedCandidates' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, bearer, assignment or policy denied }
+        '503': { description: Feature disabled, authorization or assignment store unavailable }
+  /api/v1/context/lending-loans/{loanId}/shared-guarantors:
+    get:
+      operationId: getAssignedLendingSharedGuarantors
+      summary: Explore approved shared guarantors among independently authorized loans
+      description: >-
+        Disabled by default. Lending matches approved source facts within at most 256 loans
+        currently assigned to the same human investigator. Context rechecks each returned loan
+        before disclosing bounded evidence. A match is an investigative lead, not a statement
+        of current enforceability, exposure, or wrongdoing. Truncation makes the view partial.
+      parameters:
+        - name: loanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most four independently authorized related loans and their source evidence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LendingSharedGuarantorHistory' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Root or related loan authorization denied }
+        '503': { description: Feature disabled, authorization or source unavailable }
+  /api/v1/context/fraud-cases/{caseId}/network:
+    get:
+      operationId: getAssignedFraudCaseNetwork
+      summary: Explore explicit shared source references among independently authorized open Fraud cases
+      description: >-
+        Fraud obtains the first 256 assigned case references directly from Context, then matches
+        source-owned identifiers within that set.
+        Each returned match is independently authorized and read-audited. A limit or source gap
+        makes this a partial one-hop view, never a fraud finding or identity inference.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: Root and at most four related open cases with evidence for each explicit equality
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudCaseNetwork' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Root role, assignment, policy or current source state denied }
+        '503': { description: Authorization, reference store or source unavailable }
+  /api/v1/context/fraud-cases/{caseId}/access:
+    get:
+      operationId: verifyAssignedFraudCaseAccess
+      summary: Verify a human administrator's active assignment to this exact Fraud case
+      description: Returns no case data. Intended for source-owned, case-scoped evidence reads.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '204': { description: Active root-scoped assignment and policy allow }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization unavailable }
+  /api/v1/context/fraud-cases/{caseId}/assigned-candidates:
+    get:
+      operationId: getAssignedFraudCandidates
+      summary: Return a bounded assigned case set after human root authorization
+      description: >-
+        Used by Fraud's source matcher. The caller cannot supply case IDs for comparison;
+        Context selects the human investigator's live assigned open-case references.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: At most 256 case IDs and a truncation flag; no source identifiers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudAssignedCandidates' }
+        '403': { description: Role, assignment or policy denied }
+        '503': { description: Authorization or reference store unavailable }
   /api/v1/context/kyb-cases/{id}/access:
     get:
       operationId: checkAssignedKybCaseAccess
@@ -177,6 +336,23 @@ paths:
     get:
       operationId: getComplaintContext
       summary: Read a bounded payment-complaint context graph
+      description: >-
+        The complaint root and direct references use the highest retained source revision
+        effective at asOf (source event time). Receipt time is returned separately; this
+        endpoint does not reconstruct what was known at that time. Current case assignment
+        and policy are rechecked even for historical reads. Missing retained revisions
+        return 404; overwritten pre-migration evidence is never inferred from current rows.
+        A complaint transactionId references booking-transaction:transactionId. Payment evidence
+        is joined only through a retained transaction-service BOOKING_REQUESTED relationship
+        from transaction:paymentId to that booking transaction; paymentId and transactionId
+        remain distinct. Without that relationship no payment identity is inferred.
+        Payment, booking and rail nodes use retained source facts with explicit reference
+        precedence; a current node may serve only as an eligible baseline at or after its
+        source event time. Missing node evidence suppresses dangling links and marks the
+        neighborhood truncated. Retained relationship observations preserve the eligible source event's
+        evidence and version. On overflow the newest eligible relationships are selected and the bounded
+        result is presented in event-time order. Source contracts do not yet express general relationship withdrawal
+        or supersession; an omitted relationship does not establish that it was revoked.
       parameters:
         - $ref: '#/components/parameters/reference'
         - $ref: '#/components/parameters/caseId'
@@ -186,7 +362,7 @@ paths:
         '200': { description: Authorized bounded neighborhood; a source-confirmed SEPA return may include a REVERSAL_TRANSACTION node and REVERSED_BY edge when transaction-service returned a reversal ID }
         '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
-        '404': { description: Root not projected }
+        '404': { description: No retained complaint revision effective at asOf }
         '503': { description: Authorization decision unavailable }
   /api/v1/context/incidents/{reference}/impact:
     get:
@@ -234,6 +410,128 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    LendingSharedGuarantorHistory:
+      type: object
+      required: [rootLoanId, effectiveAt, knownAt, candidateTruncated, relatedLoansTruncated, relatedLoans]
+      properties:
+        rootLoanId: { type: string, format: uuid }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        candidateTruncated: { type: boolean }
+        relatedLoansTruncated: { type: boolean }
+        relatedLoans:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LendingRelatedLoanEvidence' }
+    LendingRelatedLoanEvidence:
+      type: object
+      required: [loanId, guarantees, truncated]
+      properties:
+        loanId: { type: string, format: uuid }
+        truncated: { type: boolean }
+        guarantees:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/LendingGuaranteeEvidence' }
+    LendingAssignedCandidates:
+      type: object
+      required: [ids, truncated]
+      properties:
+        ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        truncated: { type: boolean }
+    LendingGuaranteeHistory:
+      type: object
+      required: [loanId, effectiveAt, knownAt, guarantees, truncated]
+      properties:
+        loanId: { type: string, format: uuid }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        guarantees:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/LendingGuaranteeEvidence' }
+    LendingGuaranteeEvidence:
+      type: object
+      required: [guaranteeId, contractId, revision, guarantorPartyId, capAmount, currency, coverageFraction, seniority, validFrom, sourceDocumentId, sourceSha256, decidedAt]
+      properties:
+        guaranteeId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        supersedesGuaranteeId: { type: [string, "null"], format: uuid }
+        guarantorPartyId: { type: string, format: uuid }
+        capAmount: { type: number }
+        currency: { type: string }
+        coverageFraction: { type: number }
+        seniority: { type: integer }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: [string, "null"], format: date-time }
+        sourceDocumentId: { type: string, format: uuid }
+        sourceSha256: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        decidedAt: { type: string, format: date-time }
+    FraudAssignedCandidates:
+      type: object
+      required: [ids, truncated]
+      properties:
+        ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        truncated: { type: boolean }
+    FraudCaseNetwork:
+      type: object
+      required: [root, related, inspectedCandidates, candidateTruncated]
+      properties:
+        root: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
+        inspectedCandidates:
+          type: integer
+          minimum: 0
+          maximum: 4
+          description: Source-matched candidates independently checked by Context.
+        comparedCandidates:
+          type: integer
+          minimum: 0
+          maximum: 256
+          description: Assigned candidates compared by Fraud; absent in older responses.
+        candidateTruncated:
+          type: boolean
+          description: Assignment scan or source match limit was reached; no exhaustive negative conclusion is possible.
+        related:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [evidence, shared]
+            properties:
+              evidence: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
+              shared:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required: [type, sourceId]
+                  properties:
+                    type: { type: string, enum: [ACCOUNT, COUNTERPARTY] }
+                    sourceId: { type: string, format: uuid }
+    FraudCaseSourceEvidence:
+      type: object
+      required: [caseId, scoreId, accountId, status, revision, openedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        scoreId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        counterpartyId: { type: [string, "null"], format: uuid }
+        status: { type: string, enum: [OPEN] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
     KybObservationHistory:
       type: object
       required: [root, knownAt, observations, truncated]
@@ -277,13 +575,17 @@ components:
       properties:
         principalId: { type: string, minLength: 1, maxLength: 200 }
         caseId: { type: string, minLength: 1, maxLength: 200 }
-        purpose: { type: string, minLength: 1, maxLength: 80 }
+        purpose:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: FRAUD_INVESTIGATION requires caseId equal to the source Fraud case UUID and rootRef equal to fraud-case:caseId.
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
         rootRef:
           type: [string, "null"]
           maxLength: 300
-          description: Required exact root for every purpose — delegation:UUID, aml-case:UUID, kyb-case:UUID, incident:UUID or complaint:reference. An old unscoped assignment never authorizes a graph read.
+          description: Required exact root for every purpose — delegation:UUID, aml-case:UUID, kyb-case:UUID, fraud-case:UUID, incident:UUID or complaint:reference. An old unscoped assignment never authorizes a graph read.
     DecideAssignment:
       type: object
       required: [approve]

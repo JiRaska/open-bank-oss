@@ -86,8 +86,15 @@ class PaymentBookingProjectionConsumer(
                     meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "ignored").increment()
                     return
                 }
-                sessions.withTransaction { session, _ -> project(session, event) }
-                    .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+                ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                    operation.sql { session ->
+                        session.createNativeQuery(
+                            "select set_config('openbank.bank_scope', :bank, true)",
+                            String::class.java,
+                        )
+                            .setParameter("bank", bankScope).singleResult
+                    }.flatMap { project(operation, event) }
+                }.awaitSuspending()
                 meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "projected").increment()
                 val lag = if (stream == TRANSACTION_STREAM) transactionLag else ledgerLag
                 lag.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
@@ -100,36 +107,67 @@ class PaymentBookingProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: BookingProjectionEvent): Uni<Void> = mutation(
-        session,
-        """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
-        """.trimIndent(),
-        mapOf(
-            "bankScope" to bankScope,
-            "eventKey" to event.eventKey,
-            "source" to event.source,
-            "aggregateRef" to event.aggregateRef,
-            "version" to event.version,
-            "occurredAt" to event.occurredAt,
-            "processedAt" to clock.instant(),
-        ),
-    ).flatMap { inserted ->
-        if (inserted == 0) {
-            Uni.createFrom().voidItem()
-        } else {
-            upsertPlaceholderNode(session, event.fromNode)
-                .flatMap { upsertEvidenceNode(session, event.toNode) }
-                .flatMap { insertEdge(session, event) }
-                .replaceWithVoid()
+    private fun project(operation: ContextSqlOperation, event: BookingProjectionEvent): Uni<Void> =
+        GraphNodeHistoryWriter.append(
+            operation,
+            bankScope,
+            projectionGeneration,
+            event.eventKey,
+            event.aggregateRef,
+            listOf(event.fromNode.observation(false), event.toNode.observation(true)),
+            clock.instant(),
+        ).flatMap {
+            GraphEdgeHistoryWriter.append(
+                operation,
+                bankScope,
+                projectionGeneration,
+                event.eventKey,
+                event.aggregateRef,
+                listOf(
+                    GraphEdgeObservation(
+                        event.fromNode.key,
+                        event.toNode.key,
+                        event.relation,
+                        event.source,
+                        event.occurredAt,
+                        event.version,
+                    ),
+                ),
+                clock.instant(),
+            )
+        }.flatMap {
+            mutation(
+                operation,
+                """INSERT INTO context_projection_events
+                    (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
+                    VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                    ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
+                """.trimIndent(),
+                mapOf(
+                    "bankScope" to bankScope,
+                    "generation" to projectionGeneration,
+                    "eventKey" to event.eventKey,
+                    "source" to event.source,
+                    "aggregateRef" to event.aggregateRef,
+                    "version" to event.version,
+                    "occurredAt" to event.occurredAt,
+                    "processedAt" to clock.instant(),
+                ),
+            )
+        }.flatMap { inserted ->
+            if (inserted == 0) {
+                Uni.createFrom().voidItem()
+            } else {
+                upsertPlaceholderNode(operation, event.fromNode)
+                    .flatMap { upsertEvidenceNode(operation, event.toNode) }
+                    .flatMap { insertEdge(operation, event) }
+                    .replaceWithVoid()
+            }
         }
-    }
 
     /** A placeholder makes projection order irrelevant; its owning source replaces it later. */
-    private fun upsertPlaceholderNode(session: Mutiny.Session, node: BookingNode): Uni<Int> = mutation(
-        session,
+    private fun upsertPlaceholderNode(operation: ContextSqlOperation, node: BookingNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -140,8 +178,8 @@ class PaymentBookingProjectionConsumer(
         node.values(bankScope, projectionGeneration, clock.instant()),
     )
 
-    private fun upsertEvidenceNode(session: Mutiny.Session, node: BookingNode): Uni<Int> = mutation(
-        session,
+    private fun upsertEvidenceNode(operation: ContextSqlOperation, node: BookingNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -158,14 +196,15 @@ class PaymentBookingProjectionConsumer(
         node.values(bankScope, projectionGeneration, clock.instant()),
     )
 
-    private fun insertEdge(session: Mutiny.Session, event: BookingProjectionEvent): Uni<Int> = mutation(
-        session,
+    private fun insertEdge(operation: ContextSqlOperation, event: BookingProjectionEvent): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
-             source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version)
+             source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version, retained_history_from)
             VALUES (:id, :bankScope, :generation, 'COMPLAINT', :fromKey, :toKey, :relation,
-                    :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (edge_id) DO NOTHING
+                    :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version, :validFrom)
+            ON CONFLICT (bank_scope, projection_generation, edge_id) DO UPDATE SET
+              retained_history_from = LEAST(context_edges.retained_history_from, EXCLUDED.retained_history_from)
         """.trimIndent(),
         mapOf(
             "id" to stableId("COMPLAINT|${event.fromNode.key}|${event.toNode.key}|${event.relation}"),
@@ -182,11 +221,12 @@ class PaymentBookingProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private companion object {
         const val TRANSACTION_INITIATED = "TransactionInitiated"
@@ -237,6 +277,17 @@ private data class BookingNode(
         "version" to version,
     )
 }
+
+private fun BookingNode.observation(authoritative: Boolean) = GraphNodeObservation(
+    key,
+    type,
+    source,
+    sourceRef,
+    label,
+    validFrom,
+    version,
+    authoritative,
+)
 
 private data class BookingProjectionEvent(
     val eventKey: String,

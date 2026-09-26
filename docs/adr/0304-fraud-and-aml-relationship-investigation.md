@@ -104,14 +104,68 @@ observation cap, assignment scope and source lag mean absence of an edge does no
 prove absence of a relationship. Exact identifier equality is a lead, not a fraud
 finding or inferred ownership.
 
-Fraud's current source emits a temporary fraud-hold change for marketing suppression;
-it does not have a case/assignment lifecycle or an authoritative fraud finding. Its
-signals cannot be reused as an investigative case or an account restriction. A true
-fraud-case source contract, purpose-bound authorization and independent negative tests
-are prerequisites for the Fraud lens.
+Fraud's temporary fraud-hold signal for marketing suppression remains separate from
+investigative evidence and cannot be reused as an investigative case or an account
+restriction. The source now persists versioned investigation cases with `OPEN` and
+`CLOSED_NO_FINDING` transitions and a transactional outbox. Context assignments remain
+the independent authority for investigative access; opening a source case grants no
+assignment. Neither a review score nor an open case is an authoritative fraud finding.
+The isolated source-to-Context proof is recorded in
+[the Fraud E2E report](../../perf/reports/2026-09-26-context-fraud-source-e2e.md);
+it does not establish sandbox deployment or production workload qualification.
+
+The first Fraud network lens now uses a distinct reference-only Fraud topic. Context
+fetches live OPEN case associations from Fraud over HTTPS only after a case-scoped
+assignment, policy decision and committed audit; every candidate repeats that chain.
+Only exact account or counterparty UUID equality within the same identifier role
+becomes a visible edge. Discovery is limited to four currently assigned case
+references, and the UI labels a truncated or empty result as a partial search.
+No device graph, inferred identity, vector-generated edge or fraud finding is
+represented. The source URL is required runtime secret material, while the tracked
+deployment declares service identity for generated network policy. Missing secret,
+TLS trust, source, PDP or audit fails closed. This is an investigative pilot slice.
 
 Broader cross-case expansion, retention/restriction workflow, load evidence and a
-controlled pilot remain required. The bounded AML network is not completion of ADR-0304.
+controlled pilot remain required. The bounded AML and Fraud networks are not
+completion of ADR-0304.
+
+The current Fraud pilot selects the first four assigned case references by UUID
+**before** comparing source-owned account and counterparty identifiers. Once an
+investigator has more than four eligible cases, a genuinely related case can be
+outside that slice. The `candidateTruncated` response flag warns about this; an
+empty related list must not be described as an exhaustive negative finding.
+
+The next Fraud network increment will select candidates by explicit equality in
+Fraud's indexed case store. Fraud will fetch a bounded set of case IDs directly
+from Context under the investigator's bearer, after a fresh root-scoped assignment,
+policy and audit decision. The caller cannot supply candidate IDs. Fraud will match
+only the returned IDs against the live root case's account and counterparty **within the
+same identifier role**. The source response will contain candidate case IDs only,
+not account or counterparty IDs. Context will independently re-authorize, audit
+and fetch each candidate's evidence before returning it to the UI. A page limit
+or unavailable source will be reported as partial or unavailable, never as a
+complete network. The reference Kafka topic remains case-ID/revision/time only.
+Measure lookup selectivity, authorization cost and p95/p99 latency with 1× and
+10× assigned-case populations before increasing the interactive expansion cap.
+
+Candidate IDs supplied in an HTTP body are **not proof of assignment**. Fraud must
+not return a match, count, truncation signal or timing-distinguishable result for
+an unverified candidate: a caller with access to the root could otherwise probe
+guessed case IDs. The source lookup therefore requires authenticated Context
+service identity *and* the human investigator's bearer. Fraud obtains candidates
+only from Context's live, human-authorized case-scoped endpoint before evaluating
+equality. Context independently re-authorizes and audits each matching case before
+disclosing its source evidence. A plain caller-controlled header or a client-side-only
+filter does not satisfy this condition. Until dual authorization and bounded 1×/10×
+load behavior are verified, the four-case pilot remains the exposed behavior.
+
+Rollout is sequenced: provision the dedicated OIDC client credential in the
+existing secret store, verify its service-account principal and sole investigation
+role against the sandbox realm, and wait for the Context ExternalSecret to be
+Ready before applying the Deployment reference. The Context Deployment retains
+`maxUnavailable: 0`, so an absent secret stalls the new pod while the existing
+replica serves. Do not count the matcher as deployed until a real token exchange,
+denied direct-admin request, authorized case read and 1×/10× latency check pass.
 
 ## Alternatives considered
 

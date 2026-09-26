@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Internal endpoint values stay in the secret store.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: fraud-service-source-discovery
+  namespace: fraud
+  annotations:
+    openbank.io/rotation-deadline: "2027-09-17"
+spec:
+  refreshInterval: 1h
+  secretStoreRef: {name: vault-kv, kind: ClusterSecretStore}
+  target: {name: fraud-service-source-discovery, creationPolicy: Owner}
+  data:
+    - secretKey: CONTEXT_SERVICE_URL
+      remoteRef: {key: fraud-service-source-discovery, property: CONTEXT_SERVICE_URL}

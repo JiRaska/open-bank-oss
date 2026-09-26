@@ -2,7 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
-followup: "#9945 — add durable incident emission and aggregate revisions, then correlate incident windows with observed business workflows and case-level evidence"
+followup: "#10868 — correlate incident windows with observed business workflows and case-level evidence; #9945 — shared graph roadmap"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -90,6 +90,35 @@ incident lens is not declared activated by this code. The base Context service a
 sandbox replica; that fact does not establish that this branch's incident consumer or source
 relay has been deployed and replayed.
 
+### Source contract required for case-level impact
+
+The current security-scanner incident record and `ict-incident-event.schema.json` contain an
+incident ID, times, status and affected service names. They contain no business-case, workflow,
+payment or customer reference. An incident-to-service edge is therefore a declared scope claim,
+not evidence that a particular business case failed. Before enabling case drill-down, the owner
+of each business workflow must persist a bounded, versioned observation of its own execution:
+an opaque workflow/case reference, service and environment, observed interval, outcome,
+source event ID/revision and evidence digest. The source must say whether the observation is
+complete, sampled or unavailable for the incident window. A separate incident-owned association
+records which incident window was evaluated, the rule version, observation references and the
+resulting `CONFIRMED`, `POSSIBLE` or `UNKNOWN` impact claim. Corrections append a new revision;
+they never rewrite the prior evidentiary state.
+
+Only source-generated opaque references and revisions may enter a dedicated Context projection
+feed. Customer, account, payment and case details remain at the owning source, behind a
+case-scoped API. Context may disclose a case edge only after a live incident assignment, purpose,
+domain permission and policy decision for that exact case; a generic operator/admin role is
+insufficient. Every expansion writes a disclosure record. No raw trace/log body, arbitrary
+attributes or free text enters this feed. The producer owns the topic, schema, retention and
+replay boundary; Context owns its consumer, dead-letter handling and projection generation.
+
+Acceptance requires a source-to-API test proving a failed workflow produces a traceable case
+claim, a successful or unobserved workflow does not become `CONFIRMED`, and a correction/replay
+preserves history. Access tests must cover revoked assignment, cross-environment and cross-case
+queries, hidden identifiers in aggregate mode, unavailable policy/audit and stale observations.
+The 1×/10× benchmark must include observed-case fixtures, concurrent incident response and the
+payment/control regression check before this lens can be called complete.
+
 The aggregate API now distinguishes a missing root (`MISSING`), a bounded slice
 (`PARTIAL`) and an available projection (`AVAILABLE`). Availability describes the
 projection, not completeness of telemetry or confirmed customer impact. The admin
@@ -139,3 +168,4 @@ cover these distinctions; this does not activate business-case drill-down.
 - [ADR-0146](0146-incident-response-and-security-operations-framework.md)
 - [ADR-0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md)
 - [Implementation roadmap #9945](https://github.com/JiRaska/open-bank-oss/issues/9945)
+- [Observed business-case impact #10868](https://github.com/JiRaska/open-bank-oss/issues/10868)

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { contextServiceUrl } from '@/lib/context/server'
 import { AUTHORITY_UUID, authorityTimestamp, parseAuthorityHistory } from '@/lib/context/authorityHistory'
+import { readBoundedContextJson } from '@/lib/context/boundedJson'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (!response.ok) return NextResponse.json({ error: 'context_unavailable' }, { status: response.status < 504 ? response.status : 502 })
     let history
     try {
-      history = parseAuthorityHistory(await response.json())
+      history = parseAuthorityHistory(await readBoundedContextJson(response, 256 * 1024))
       if (history.root !== `delegation:${id.toLowerCase()}`) throw new Error('Scope mismatch')
       for (const key of ['effectiveAt', 'knownAt'] as const) {
         const requested = query.get(key)

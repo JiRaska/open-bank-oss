@@ -24,6 +24,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
@@ -47,16 +49,20 @@ import java.util.UUID
  * dynamic target is the idiomatic pact-jvm fix.
  *
  * Boots Quarkus so the HTTP target hits the live `POST /api/v1/transactions`; `@TestSecurity`
- * matches the endpoint's `@RolesAllowed(Roles.OPERATOR)`. Message interactions need no endpoint —
+ * supplies an admitted caller and OIDC claims for domestic source ownership. Message interactions
+ * need no endpoint —
  * the [PactVerifyProvider] method returns the wire JSON the provider would emit.
  *
  * The negative contract (an authenticated caller without ROLE_OPERATOR must answer 403) is pinned
  * in the git-pact twin `TransactionPactFolderProviderVerificationTest`, which runs on every PR;
  * this class is `pactbroker.url`-gated and would skip exactly where that pin is needed (ADR-0279 #3).
  */
+// Test OIDC metadata supplies the domestic source owner for its upgraded request pact.
+// Authorization failures are exercised separately by TransactionSourceOwnershipIT.
 @QuarkusTest
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "service-account-openbank-domestic-payment", roles = ["ROLE_API", "ROLE_OPERATOR"])
+@OidcSecurity(claims = [Claim(key = "azp", value = "openbank-domestic-payment")])
 @Provider("openbank-transaction-service")
 @PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
@@ -92,7 +98,7 @@ class TransactionPactProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         // The four "missing or expired token" interactions expect 401, and the class-level
-        // @TestSecurity authenticates EVERY replay as pact-verifier — so without clearing the test
+        // @TestSecurity authenticates EVERY replay — so without clearing the test
         // identity the provider answers 201 and the contract's whole point is inverted. Measured on
         // the live broker: `{"attribute":"status","description":"expected status of 401 but was
         // 201"}` alongside the MissingStateChangeMethod below (issue #9752).

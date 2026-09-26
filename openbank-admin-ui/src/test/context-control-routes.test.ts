@@ -33,6 +33,17 @@ describe('context graph control BFFs', () => {
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer admin-token')
   })
 
+  it('rejects an oversized assignment proposal before forwarding it', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
+    const { POST } = await import('@/app/api/context/assignments/route')
+    const request = new NextRequest('http://localhost/api/context/assignments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ principalId: 'a'.repeat(17 * 1024), caseId: 'case-1', purpose: 'PAYMENT_COMPLAINT', rootRef: 'complaint:CMP-42', validTo: '2026-09-14T10:00:00Z' }),
+    })
+    expect((await POST(request)).status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects unscoped or mismatched incident and complaint assignments before forwarding', async () => {
     const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
     const { POST } = await import('@/app/api/context/assignments/route')

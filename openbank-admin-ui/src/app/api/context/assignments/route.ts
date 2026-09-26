@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { contextHeaders, contextServiceUrl } from '@/lib/context/server'
+import { readBoundedContextJson } from '@/lib/context/boundedJson'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const token = await adminToken()
   if (!token) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
-  const body = await req.json().catch(() => null)
+  const body = await readBoundedContextJson(req, 16 * 1024).catch(() => null)
   if (!validProposal(body)) return NextResponse.json({ error: 'invalid_assignment' }, { status: 400 })
   return relay(contextServiceUrl('/api/v1/context/assignment-proposals'), token, 'POST', body)
 }
@@ -32,7 +33,7 @@ async function relay(url: string, token: string, method = 'GET', body?: unknown)
       method, cache: 'no-store', headers: contextHeaders(token),
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(5_000),
     })
-    const payload = upstream.status === 204 ? null : await upstream.json().catch(() => ({ error: 'invalid_response' }))
+    const payload = upstream.status === 204 ? null : await readBoundedContextJson(upstream, 256 * 1024).catch(() => ({ error: 'invalid_response' }))
     return NextResponse.json(payload, { status: upstream.status, headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return NextResponse.json({ error: 'upstream_unreachable' }, { status: 502 })

@@ -9,6 +9,8 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.time.LocalDate
 import java.util.UUID
 
+const val MAX_PARTY_CARD_LIST_LIMIT = 100
+
 /**
  * Outbound persistence port for the card aggregate.
  *
@@ -32,6 +34,9 @@ interface CardRepository {
 
     suspend fun findByPartyId(partyId: UUID): List<Card>
     suspend fun findByPartyId(partyId: UUID, limit: Int): List<Card>
+
+    /** Database-bounded newest slice for Customer 360; full list remains for subject access. */
+    suspend fun findRecentByPartyId(partyId: UUID, limit: Int): List<Card>
 
     /**
      * Cards issued under a delegation grant (ADR-0249 D1). Drives D2's "revocation must bite":

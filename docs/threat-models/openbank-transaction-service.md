@@ -37,6 +37,39 @@ and the original booking is already on an authorized complaint path; the bounded
 use the identifier to traverse arbitrary transactions. Missing legacy fields stay unlinked.
 Disclosure still requires the complaint case assignment, purpose, policy decision and read audit.
 
+### Domestic REST booking correlation
+
+The optional `originatingPaymentId` on `POST /api/v1/transactions` crosses the existing domestic
+settlement REST boundary. A non-null value is accepted only from the authenticated
+`service-account-openbank-domestic-payment` principal with `ROLE_API` and a verified JWT whose
+`azp` is `openbank-domestic-payment`, for a `DEBIT` on rail `DOMESTIC` with a non-null source account.
+The request guard runs before the domain call, in addition to the existing RBAC and
+`transaction.create` OPA decision. Other callers retaining that action cannot assert this link;
+payload identity, a caller-supplied header, and the actor UUID fallback grant no authority.
+
+**STRIDE-S/E:** the guard prevents an operator, another service or a delegated human token from
+claiming domestic payment provenance. Compromise of the domestic service identity can still assert
+a false relationship: this is an authenticated producer assertion, not independent verification of
+payment existence, ownership or settlement success. Transaction-service supplies its own persisted
+transaction identity and source account. Investigations must retain that distinction and their
+existing purpose/assignment/read-audit checks; identifiers alone confer no access.
+
+**STRIDE-T/R:** the command's payment identifier is copied into the transaction row and the existing
+transactional-outbox `TransactionInitiated` payload. Both the early replay and concurrent-insert
+recovery reject different non-null stored/supplied payment identifiers with 409, without changing
+the row or publishing another event. Equal identifiers retain the existing 201 replay. A legacy
+null stored identifier also retains 201, stays null and emits no new event; omitting the identifier
+preserves any existing link. No historical relationship is reconstructed from an idempotency key,
+description, amount or timestamp. Restoring command-to-row propagation also preserves the explicit
+identifier already supplied by `SchemeAcceptedConsumer`; its Kafka producer ACL boundary is unchanged.
+
+**Rollout and rollback:** deploy transaction-service's optional-field provider and guard first,
+then domestic-payment's producer. Legacy replayed bookings remain unlinked. Roll back the domestic
+producer before the provider so the optional metadata is no longer sent to an older provider.
+There are no new policy grants, credentials, topics or database columns. Both money-path changes
+require the existing two-reviewer approval and ship checks; the API contract minor bump is checked
+against the OpenAPI diff independently of the release version.
+
 ### 2a. Kafka inbound trust boundary — `payment.scheme-accepted` (ADR-0108)
 
 `SchemeAcceptedConsumer` opens a new **inbound trust boundary**: any Kafka producer able to publish to `payment.scheme-accepted` can trigger a settlement transaction in the money-path engine.

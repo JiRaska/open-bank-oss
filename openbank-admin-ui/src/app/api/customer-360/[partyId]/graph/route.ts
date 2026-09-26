@@ -17,7 +17,7 @@ const MAX_SOURCE_BYTES = 1024 * 1024
 const LIMITS = { accounts: 50, cards: 50, notifications: 30, lending: 30, aml: 30, devices: 20, documents: 30 } as const
 
 type Source = 'accounts' | 'cards' | 'notifications' | 'lending' | 'aml' | 'devices' | 'documents'
-type ReadResult = { source: Source; body: unknown; available: boolean }
+type ReadResult = { source: Source; body: unknown; available: boolean; status?: number }
 
 function sourceRows(source: Source, body: unknown): unknown[] | null {
   if (source === 'accounts') {
@@ -57,7 +57,7 @@ async function read(source: Source, url: string, authorization: string): Promise
     const response = await fetch(url, {
       headers: { authorization }, cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS),
     })
-    if (!response.ok) return { source, body: null, available: false }
+    if (!response.ok) return { source, body: null, available: false, status: response.status }
     const body = await boundedJson(response)
     return { source, body, available: sourceRows(source, body) !== null }
   } catch {
@@ -96,6 +96,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
       partyRef: partyId, page: '0', size: String(LIMITS.documents + 1),
     }), bearer),
   ])
+  // A rejected bearer is not a source outage. Never return a partly populated graph under an
+  // expired token; a source-specific 403 is represented separately from an unavailable service.
+  if (results.some(result => result.status === 401)) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401, headers: { 'cache-control': 'private, no-store' } })
+  }
   const bySource = new Map(results.map(result => [result.source, result]))
   const accounts = bySource.get('accounts')!
   const cards = bySource.get('cards')!
@@ -118,7 +123,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     amlCases: parsed.aml.slice(0, LIMITS.aml),
     devices: parsed.devices.slice(0, LIMITS.devices),
     documents: parsed.documents.slice(0, LIMITS.documents),
-    unavailable: results.filter(result => !result.available).map(result => result.source),
+    unavailable: results.filter(result => !result.available && result.status !== 403).map(result => result.source),
+    restricted: results.filter(result => result.status === 403).map(result => result.source),
     truncated: results.filter(result => result.available && sourceRows(result.source, result.body)!.length > LIMITS[result.source])
       .map(result => result.source),
     fetchedAt: new Date().toISOString(),

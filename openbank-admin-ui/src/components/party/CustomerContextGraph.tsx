@@ -20,7 +20,7 @@ import {
   type CustomerGraphKind,
   type LiveCustomerFacts,
 } from '@/lib/context/customerGraph'
-import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
+import { GraphAccessDeniedError, loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
 import styles from './CustomerContextGraph.module.css'
 
 const EMPTY_LIVE: LiveCustomerFacts = emptyLiveCustomerFacts()
@@ -48,9 +48,9 @@ export function CustomerContextGraph({ evidence, partyName }: {
   const [flow, setFlow] = useFlowAnimation()
   const [live, setLive] = useState<LiveCustomerFacts>(EMPTY_LIVE)
   const [loading, setLoading] = useState(true)
+  const [denied, setDenied] = useState(false)
 
   useEffect(() => {
-    if (!evidence.available) return
     let current = true
     void loadCustomerGraphFacts(evidence.partyId)
       .then(facts => {
@@ -58,9 +58,10 @@ export function CustomerContextGraph({ evidence, partyName }: {
         setLive(facts)
         setLoading(false)
       })
-      .catch(() => {
+      .catch(error => {
         if (!current) return
         setLive(emptyLiveCustomerFacts(['graph']))
+        setDenied(error instanceof GraphAccessDeniedError)
         setLoading(false)
       })
     return () => { current = false }
@@ -97,9 +98,17 @@ export function CustomerContextGraph({ evidence, partyName }: {
     device: t('Zařízení', 'Device'), document: t('Dokument', 'Document'),
   }
 
-  if (!evidence.available) return null
-
   const focusId = selectedId ?? hoveredId
+
+  if (loading) return <section aria-labelledby={headingId} className={styles.shell}>
+    <h2 id={headingId}>{t('Kontextový graf', 'Context graph')}</h2>
+    <p role="status">{t('Ověřuji přístup ke grafu…', 'Checking graph access…')}</p>
+  </section>
+
+  if (denied) return <section aria-labelledby={headingId} className={styles.shell}>
+    <h2 id={headingId}>{t('Kontextový graf', 'Context graph')}</h2>
+    <p role="alert">{t('Přístup ke grafu byl zamítnut.', 'Access to the context graph was denied.')}</p>
+  </section>
 
   return <section aria-labelledby={headingId} className={styles.shell}>
     <div className={styles.heading}>
@@ -117,10 +126,19 @@ export function CustomerContextGraph({ evidence, partyName }: {
       </div>
       <span className={styles.feedStatus} role="status"><span aria-hidden="true" className={loading ? styles.loadingDot : styles.liveDot} />{loading
         ? t('Načítám živé zdroje…', 'Loading live sources…')
-        : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} doménových vstupů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} domain feeds`)}</span>
+        : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length - (live.restricted?.length ?? 0))}/${GRAPH_FEEDS} doménových vstupů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length - (live.restricted?.length ?? 0))}/${GRAPH_FEEDS} domain feeds`)}</span>
     </div>
+    {!evidence.available && <p role="status" className={styles.warning}>
+      {t(
+        'Analytická projekce není dostupná. Vztahy ze zdrojových služeb se načítají nezávisle.',
+        'The analytics projection is unavailable. Source-backed relationships load independently.',
+      )}
+    </p>}
     {live.unavailable.length > 0 && <p role="status" className={styles.warning}>
       {t('Nedostupné zdroje', 'Unavailable sources')}: {live.unavailable.join(', ')}. {t('Graf je částečný.', 'The graph is partial.')}
+    </p>}
+    {!!live.restricted?.length && <p role="status" className={styles.warning}>
+      {t('Zdroje bez oprávnění', 'Restricted sources')}: {live.restricted.join(', ')}. {t('Odvozená projekce je skrytá.', 'Derived projection evidence is hidden.')}
     </p>}
     <div className={styles.controls}>
       <label>{t('Typ uzlu', 'Node type')}

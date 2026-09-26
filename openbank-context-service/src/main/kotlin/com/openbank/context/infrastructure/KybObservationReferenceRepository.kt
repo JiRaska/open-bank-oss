@@ -15,7 +15,6 @@ import jakarta.persistence.Table
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import java.io.Serializable
-import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -111,7 +110,7 @@ class KybObservationReferenceRepository(
     /** recordedAt is assigned by PostgreSQL; current snapshots use the same clock. */
     suspend fun databaseNow(): Instant = transaction { session ->
         session.createNativeQuery("select clock_timestamp()", OffsetDateTime::class.java).singleResult
-    }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending().toInstant()
+    }.awaitSuspending().toInstant()
 
     suspend fun history(caseId: UUID, knownAt: Instant): KybObservationHistory {
         val rows = transaction { session ->
@@ -123,7 +122,7 @@ class KybObservationReferenceRepository(
                 KybObservationReferenceEntity::class.java,
             ).setParameter("bank", bankScope).setParameter("caseId", caseId).setParameter("knownAt", knownAt)
                 .setMaxResults(MAX_OBSERVATIONS + 1).resultList
-        }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+        }.awaitSuspending()
         return KybObservationHistory(
             root = "kyb-case:$caseId",
             knownAt = knownAt,
@@ -135,47 +134,54 @@ class KybObservationReferenceRepository(
     }
 
     suspend fun append(reference: KybObservationReference) {
-        transaction { session ->
-            session.createNativeMutationQuery(
-                """INSERT INTO context_kyb_observation_references
-                   (bank_scope, event_id, case_id, observation_id, revision, source_sha256)
-                   VALUES (:bank, :event, :case, :observation, :revision, :hash)
-                   ON CONFLICT DO NOTHING
-                """.trimIndent(),
-            ).setParameter("bank", bankScope).setParameter("event", reference.eventId)
-                .setParameter("case", reference.caseId).setParameter("observation", reference.observationId)
-                .setParameter("revision", reference.revision).setParameter("hash", reference.sourceSha256)
-                .executeUpdate().flatMap {
+        scopedOperation { operation ->
+            operation.sql { session ->
+                session.createNativeMutationQuery(
+                    """INSERT INTO context_kyb_observation_references
+                       (bank_scope, event_id, case_id, observation_id, revision, source_sha256)
+                       VALUES (:bank, :event, :case, :observation, :revision, :hash)
+                       ON CONFLICT DO NOTHING
+                    """.trimIndent(),
+                ).setParameter("bank", bankScope).setParameter("event", reference.eventId)
+                    .setParameter("case", reference.caseId).setParameter("observation", reference.observationId)
+                    .setParameter("revision", reference.revision).setParameter("hash", reference.sourceSha256)
+                    .executeUpdate()
+            }.flatMap {
+                operation.sql { session ->
                     session.createQuery(
                         "from KybObservationReferenceEntity where bankScope = :bank and eventId = :event",
                         KybObservationReferenceEntity::class.java,
                     ).setParameter("bank", bankScope).setParameter("event", reference.eventId).singleResultOrNull
-                }.invoke { row ->
-                    check(
-                        row != null &&
-                            row.caseId == reference.caseId &&
-                            row.observationId == reference.observationId &&
-                            row.revision == reference.revision &&
-                            row.sourceSha256 == reference.sourceSha256,
-                    ) {
-                        "conflicting KYB observation reference"
-                    }
                 }
-        }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            }.invoke { row ->
+                check(
+                    row != null &&
+                        row.caseId == reference.caseId &&
+                        row.observationId == reference.observationId &&
+                        row.revision == reference.revision &&
+                        row.sourceSha256 == reference.sourceSha256,
+                ) {
+                    "conflicting KYB observation reference"
+                }
+            }
+        }.awaitSuspending()
     }
 
     suspend fun restrict(reference: KybObservationReference) {
-        transaction { session ->
-            session.createNativeMutationQuery(
-                """INSERT INTO context_kyb_observation_restrictions
-                   (bank_scope, observation_id, event_id, case_id, revision, source_sha256)
-                   VALUES (:bank, :observation, :event, :case, :revision, :hash)
-                   ON CONFLICT DO NOTHING
-                """.trimIndent(),
-            ).setParameter("bank", bankScope).setParameter("observation", reference.observationId)
-                .setParameter("event", reference.eventId).setParameter("case", reference.caseId)
-                .setParameter("revision", reference.revision).setParameter("hash", reference.sourceSha256)
-                .executeUpdate().flatMap {
+        scopedOperation { operation ->
+            operation.sql { session ->
+                session.createNativeMutationQuery(
+                    """INSERT INTO context_kyb_observation_restrictions
+                       (bank_scope, observation_id, event_id, case_id, revision, source_sha256)
+                       VALUES (:bank, :observation, :event, :case, :revision, :hash)
+                       ON CONFLICT DO NOTHING
+                    """.trimIndent(),
+                ).setParameter("bank", bankScope).setParameter("observation", reference.observationId)
+                    .setParameter("event", reference.eventId).setParameter("case", reference.caseId)
+                    .setParameter("revision", reference.revision).setParameter("hash", reference.sourceSha256)
+                    .executeUpdate()
+            }.flatMap {
+                operation.sql { session ->
                     session.createQuery(
                         "from KybObservationRestrictionEntity where bankScope = :bank and observationId = :observation",
                         KybObservationRestrictionEntity::class.java,
@@ -183,25 +189,29 @@ class KybObservationReferenceRepository(
                         "bank",
                         bankScope,
                     ).setParameter("observation", reference.observationId).singleResultOrNull
-                }.invoke { row ->
-                    check(
-                        row != null &&
-                            row.eventId == reference.eventId &&
-                            row.caseId == reference.caseId &&
-                            row.revision == reference.revision &&
-                            row.sourceSha256 == reference.sourceSha256,
-                    ) { "conflicting KYB observation restriction" }
                 }
-        }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            }.invoke { row ->
+                check(
+                    row != null &&
+                        row.eventId == reference.eventId &&
+                        row.caseId == reference.caseId &&
+                        row.revision == reference.revision &&
+                        row.sourceSha256 == reference.sourceSha256,
+                ) { "conflicting KYB observation restriction" }
+            }
+        }.awaitSuspending()
     }
 
-    private fun <T> transaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> = sessions.withTransaction { session, _ ->
-        session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-            .setParameter("bank", bankScope).singleResult.flatMap {
-                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-                    .setParameter("timeout", "${timeoutMs}ms").singleResult
-            }.flatMap { block(session) }
-    }
+    private fun <T> transaction(statement: (Mutiny.Session) -> Uni<T>): Uni<T> =
+        scopedOperation { operation -> operation.sql(statement) }
+
+    private fun <T> scopedOperation(block: (ContextSqlOperation) -> Uni<T>): Uni<T> =
+        ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { block(operation) }
+        }
 
     private companion object {
         const val MAX_OBSERVATIONS = 50

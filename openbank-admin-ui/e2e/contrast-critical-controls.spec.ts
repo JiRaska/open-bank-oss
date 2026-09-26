@@ -47,6 +47,9 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/docs/service-map')
       if (theme === 'dark') await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
       await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
+      for (const source of ['health', 'governance', 'topology']) {
+        await expect(page.getByTestId(`map-evidence-${source}`)).toContainText('Verified')
+      }
       await page.getByRole('button', { name: 'Account', exact: true }).click()
       const detail = page.getByTestId('map-service-detail')
       await expect(detail).toContainText('PostgreSQL')

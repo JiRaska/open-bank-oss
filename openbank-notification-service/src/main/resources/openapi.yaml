@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.10.0
+  version: 1.10.1
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -57,7 +57,7 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Optional maximum number of returned devices; total remains the full party count.
+          description: Return at most this many newest devices. Omit for the full subject-access list; total remains the full party count.
           schema:
             type: integer
             minimum: 1

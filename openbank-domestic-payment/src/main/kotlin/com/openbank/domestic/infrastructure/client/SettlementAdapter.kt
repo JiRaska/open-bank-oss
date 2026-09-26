@@ -31,9 +31,8 @@ import java.util.UUID
  * Adapter over [TransactionServiceClient] — books the debit leg in transaction-service once
  * the Czech CERTIS scheme returns ACSC (ADR-0108). The idempotency key is payment-scoped so
  * Temporal retries never double-book: transaction-service early-returns the existing transaction
- * for a repeated key and answers 201 with it, which is the arm that actually fires. The 409 branch
- * below is unreachable against that service today and kept only as defence if it ever adopts a
- * conflict response — do not cite it as the deduplication mechanism.
+ * for a repeated key and answers 201 with it. A 409 is a conflicting booking and must not
+ * mark the payment settled.
  *
  * The OIDC token is acquired explicitly (not via OidcClientRequestReactiveFilter) because the
  * filter loses the Vert.x context on Temporal activity threads — same root cause as ADR-0104
@@ -103,6 +102,7 @@ class SettlementAdapter(
                 valueDate = valueDate,
                 rail = "DOMESTIC",
                 instructionType = "ONE_OFF",
+                originatingPaymentId = payment.id,
             ),
         ).awaitSuspending()
 
@@ -111,18 +111,6 @@ class SettlementAdapter(
                 val txId = extractTransactionId(response)
                 log.infof("Settlement booked for payment %s → transactionId=%s", payment.id, txId)
                 SettlementOutcome(settled = true, transactionId = txId)
-            }
-            // Unreachable against transaction-service today — it replays a duplicate key as 201
-            // with the existing transaction (see this class's KDoc). Kept as defence, and logged
-            // loudly enough to notice if that ever changes.
-            HTTP_CONFLICT -> {
-                log.infof(
-                    "Settlement already booked (409) for payment %s — idempotent success. " +
-                        "NOTE: transaction-service is not expected to answer 409; if this line " +
-                        "appears, its duplicate handling changed and the docs need revisiting.",
-                    payment.id,
-                )
-                SettlementOutcome(settled = true, transactionId = null)
             }
             else -> {
                 throw SettlementUnavailableException(
@@ -211,7 +199,6 @@ class SettlementAdapter(
 
     private companion object {
         const val HTTP_CREATED = 201
-        const val HTTP_CONFLICT = 409
         const val MAX_DESCRIPTION = 140
         const val SETTLE_TIMEOUT_MS = 8_000L
         const val IBAN_BANK_DIGITS = 4

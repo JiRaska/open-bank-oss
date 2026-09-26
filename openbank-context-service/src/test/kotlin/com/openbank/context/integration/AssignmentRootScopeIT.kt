@@ -67,6 +67,27 @@ class AssignmentRootScopeIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_ADMIN"])
+    fun `Fraud proposal requires the exact canonical source case root`() {
+        val caseId = UUID.randomUUID().toString()
+        val body = mapOf(
+            "principalId" to ACTOR,
+            "caseId" to caseId,
+            "purpose" to "FRAUD_INVESTIGATION",
+            "validTo" to Instant.now().plusSeconds(3600).toString(),
+        )
+        given().contentType("application/json").body(body)
+            .`when`().post("/api/v1/context/assignment-proposals").then().statusCode(400)
+        for (root in listOf("fraud-case:${UUID.randomUUID()}", "aml-case:$caseId", "fraud-case:invalid")) {
+            given().contentType("application/json").body(body + ("rootRef" to root))
+                .`when`().post("/api/v1/context/assignment-proposals").then().statusCode(400)
+        }
+        given().contentType("application/json").body(body + ("rootRef" to "fraud-case:${caseId.uppercase()}"))
+            .`when`().post("/api/v1/context/assignment-proposals").then().statusCode(201)
+            .body("rootRef", equalTo("fraud-case:$caseId"))
+    }
+
     private fun seedLegacyAssignment(caseId: String, purpose: String) {
         val config = ConfigProvider.getConfig()
         DriverManager.getConnection(

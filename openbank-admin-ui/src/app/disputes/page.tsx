@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { MessageSquareWarning, Search, CheckCircle2, Clock, RefreshCw, AlertTriangle, Timer } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
@@ -18,13 +18,14 @@ import {
   parseDisputeList,
   type DisputeRecord,
 } from '@/lib/disputes/disputePortfolio'
-import { ComplaintContextInvestigation } from '@/components/context/ComplaintContextInvestigation'
+import { ComplaintContextInvestigation, type ComplaintContextInvestigationHandle } from '@/components/context/ComplaintContextInvestigation'
 import { ContextAssignmentAdministration } from '@/components/context/ContextAssignmentAdministration'
 
 export default function DisputesPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
+  const complaintInvestigationRef = useRef<ComplaintContextInvestigationHandle>(null)
   const { data, loading, unavailable, waking, reload } = useServiceResource<DisputeRecord[]>(
     '/api/disputes',
     { select: parseDisputeList },
@@ -87,7 +88,7 @@ export default function DisputesPage() {
         </div>}
 
         <ContextAssignmentAdministration />
-        <ComplaintContextInvestigation />
+        <ComplaintContextInvestigation ref={complaintInvestigationRef} />
 
         {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
           {t('Aktualizuji spory; poslední snapshot zůstává dostupný.', 'Refreshing disputes; the last snapshot remains available.')}
@@ -137,7 +138,7 @@ export default function DisputesPage() {
             <div className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka sporů', 'Scrollable disputes table')}>
               <table className="table">
                 <thead><tr>
-                  {[t('Reference', 'Reference'), t('Typ', 'Type'), t('Transakce', 'Transaction'), t('Částka', 'Amount'), t('Status', 'Status'), t('SLA', 'SLA'), t('Vytvořeno', 'Created')].map(h => (
+                  {[t('Reference', 'Reference'), t('Typ', 'Type'), t('Transakce', 'Transaction'), t('Částka', 'Amount'), t('Status', 'Status'), t('SLA', 'SLA'), t('Vytvořeno', 'Created'), t('Vyšetřování', 'Investigation')].map(h => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr></thead>
@@ -154,6 +155,7 @@ export default function DisputesPage() {
                     </td>
                     <td>{slaStatus(d.resolutionDeadline, d.status)}</td>
                     <td style={{ color: 'var(--text-tertiary)' }}>{d.createdAt ? new Date(d.createdAt).toLocaleString(numberLocale) : '—'}</td>
+                    <td><button type="button" className="btn btn-secondary btn-sm" onClick={() => complaintInvestigationRef.current?.selectReference(d.reference)} aria-label={t(`Vyšetřit reklamaci ${d.reference}`, `Investigate complaint ${d.reference}`)}>{t('Vyšetřit', 'Investigate')}</button></td>
                   </tr>
                 ))}</tbody>
               </table>

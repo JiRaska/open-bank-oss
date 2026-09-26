@@ -360,7 +360,7 @@ export default function LendingPage() {
               <th style={th}>{t('Částka', 'Amount')}</th>
               <th style={th}>{t('Stav', 'Status')}</th>
               <th style={th}>{tab === 'queue' ? t('Podáno', 'Submitted') : t('Čerpáno', 'Disbursed')}</th>
-              {tab === 'queue' && <th style={th} />}
+              <th style={th}>{tab === 'portfolio' ? t('Evidence', 'Evidence') : ''}</th>
             </tr>
           </thead>
           <tbody>
@@ -393,10 +393,11 @@ export default function LendingPage() {
                 <td style={{ ...td, color: 'var(--text-tertiary)', fontSize: 12 }}>
                   {l.disbursedAt ? new Date(l.disbursedAt).toLocaleString(dateLocale) : '—'}
                 </td>
+                <td style={td}><Link href={`/lending/loans/${l.id}/guarantees`} style={{ color: 'var(--accent)', fontSize: 12 }}>{t('Záruky', 'Guarantees')} ›</Link></td>
               </tr>
             ))}
             {!loading && ((tab === 'queue' && visibleApps.length === 0) || (tab === 'portfolio' && loans.length === 0)) && (
-              <tr><td colSpan={tab === 'queue' ? 5 : 4} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+              <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
                 {stage && tab === 'queue'
                   ? t(`Ve stavu „${label(stage)}“ nic není.`, `Nothing in “${label(stage)}”.`)
                   : t('Žádné záznamy', 'No records')}

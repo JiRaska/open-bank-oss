@@ -25,9 +25,12 @@ import com.openbank.transaction.infrastructure.persistence.repository.MerchantCa
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -38,6 +41,7 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -63,6 +67,9 @@ class TransactionResource(
     private val merchantCatalog: MerchantCatalogRepository,
     private val merchantLocations: MerchantLocationRepository,
 ) {
+
+    @Inject
+    lateinit var identity: SecurityIdentity
 
     @GET
     @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -160,6 +167,7 @@ class TransactionResource(
         request: InitiateTransactionRequest,
         @Context securityContext: SecurityContext,
     ): Response {
+        validateOriginatingPayment(request)
         val initiatedBy = runCatching { UUID.fromString(securityContext.userPrincipal?.name) }
             .getOrDefault(UUID.fromString("00000000-0000-0000-0000-000000000000"))
         val command = InitiateTransactionCommand(
@@ -179,12 +187,26 @@ class TransactionResource(
             scaExemption = request.scaExemption,
             rail = parseEnumParam<PaymentRail>("rail", request.rail),
             instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
+            originatingPaymentId = request.originatingPaymentId,
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))
             .entity(tx.toResponse())
             .type(MediaType.APPLICATION_JSON)
             .build()
+    }
+
+    /** Only the authenticated domestic producer owns domestic payment source correlation. */
+    private fun validateOriginatingPayment(request: InitiateTransactionRequest) {
+        if (request.originatingPaymentId == null) return
+        val token = identity.principal as? JsonWebToken
+        val ownsSource = identity.principal.name == "service-account-openbank-domestic-payment" &&
+            identity.hasRole(Roles.API) &&
+            token?.getClaim<Any>("azp") == "openbank-domestic-payment" &&
+            request.rail == PaymentRail.DOMESTIC.name &&
+            request.type == TransactionType.DEBIT.name &&
+            request.sourceAccountId != null
+        if (!ownsSource) throw ForbiddenException("Originating payment metadata requires the domestic payment producer")
     }
 
     @POST
@@ -338,6 +360,8 @@ data class InitiateTransactionRequest(
     val rail: String? = null,
     /** How the movement was instructed — an [InstructionType] name (ADR-0103 D2). */
     val instructionType: String? = null,
+    /** Source correlation, accepted only from the authenticated domestic payment producer. */
+    val originatingPaymentId: UUID? = null,
 )
 
 data class TransactionResponse(

@@ -41,7 +41,9 @@ class DomesticPaymentTransactionServicePactConsumerTest {
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "valueDate": "2026-01-20",
-          "rail": "DOMESTIC"
+          "rail": "DOMESTIC",
+          "instructionType": "ONE_OFF",
+          "originatingPaymentId": "dddddddd-dddd-dddd-dddd-dddddddddddd"
         }
     """.trimIndent()
 

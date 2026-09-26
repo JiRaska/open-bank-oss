@@ -1,0 +1,380 @@
+// SPDX-License-Identifier: Apache-2.0
+package com.openbank.context.integration
+
+import com.openbank.context.domain.ContextNamespace
+import com.openbank.context.infrastructure.ContextGraphRepository
+import com.openbank.context.infrastructure.ContextSqlOperation
+import com.openbank.context.infrastructure.boundedContextTransaction
+import com.openbank.context.infrastructure.boundedGraphRead
+import com.openbank.libs.testing.containers.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.asUni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.Context
+import io.vertx.core.Vertx
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.config.ConfigProvider
+import org.hibernate.reactive.mutiny.Mutiny
+import org.junit.jupiter.api.Test
+import java.sql.DriverManager
+import java.sql.Timestamp
+import java.time.Duration
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+
+@QuarkusTest
+@TestProfile(ContextGraphTimeoutRecoveryProfile::class)
+@QuarkusTestResource(
+    value = PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_context_it")],
+)
+@QuarkusTestResource(ContextMessagingTestResource::class)
+class ContextGraphQueryTimeoutIT {
+    @Inject lateinit var sessions: Mutiny.SessionFactory
+
+    @Inject lateinit var graph: ContextGraphRepository
+
+    @Test
+    fun `graph reads set a transaction local PostgreSQL statement timeout`() {
+        val configured = ConfigProvider.getConfig().getValue("openbank.context.query-timeout-ms", Int::class.java)
+        val actual = VertxContextSupport.subscribeAndAwait {
+            CoroutineScope(Dispatchers.Unconfined).async {
+                sessions.boundedGraphRead(configured) { session ->
+                    session.createNativeQuery(
+                        "select (extract(epoch from current_setting('statement_timeout')::interval) * 1000)::int",
+                        Int::class.javaObjectType,
+                    )
+                        .singleResult
+                }.awaitSuspending()
+            }.asUni()
+        }
+        assertThat(actual).isBetween(1, configured)
+    }
+
+    @Test
+    fun `timed out graph transactions release connections for subsequent reads`() {
+        // More attempts than pool slots expose connections lost during timeout cleanup.
+        repeat(6) {
+            assertThatThrownBy {
+                boundedSql(100, "select 1 from pg_sleep(1)")
+            }.satisfies(
+                java.util.function.Consumer<Throwable> { failure ->
+                    val timedOut = generateSequence(failure) { it.cause }.any { cause ->
+                        cause is io.smallrye.mutiny.TimeoutException ||
+                            cause.message?.contains("statement timeout") == true
+                    }
+                    assertThat(timedOut).isTrue()
+                },
+            )
+            repeat(3) {
+                assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+            }
+        }
+    }
+
+    @Test
+    fun `database timeout finishes SQL before transaction cleanup and pool recovery`() {
+        assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        assertThatThrownBy {
+            VertxContextSupport.subscribeAndAwait<Int> {
+                sessions.boundedContextTransaction(100) { session ->
+                    // Separate server completion from an earlier client cancellation deadline.
+                    session.createNativeQuery(
+                        "select set_config('statement_timeout', '1000ms', true)",
+                        String::class.java,
+                    ).singleResult.flatMap {
+                        session.createNativeQuery("select 1 from pg_sleep(2)", Int::class.javaObjectType)
+                            .singleResult
+                    }
+                }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+            }
+        }.satisfies(
+            java.util.function.Consumer<Throwable> { failure ->
+                val causes = generateSequence(failure) { it.cause }.toList()
+                assertThat(causes.any { it is io.smallrye.mutiny.TimeoutException }).isFalse()
+                assertThat(causes.any { it.message?.contains("statement timeout") == true }).isTrue()
+            },
+        )
+        repeat(6) {
+            assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        }
+    }
+
+    @Test
+    @Suppress("LongMethod", "NestedBlockDepth") // JDBC observes SQL independently of the cancelled subscription.
+    fun `caller cancellation keeps session open until active SQL stops`() {
+        val backend = AtomicInteger()
+        val activeSession = AtomicReference<Mutiny.Session>()
+        val subscriptionContext = AtomicReference<Context>()
+        val subscription = VertxContextSupport.subscribeAndAwait {
+            Uni.createFrom().item {
+                subscriptionContext.set(Vertx.currentContext())
+                sessions.boundedContextTransaction(500) { session ->
+                    activeSession.set(session)
+                    session.createNativeQuery("select pg_backend_pid()", Int::class.javaObjectType)
+                        .singleResult.flatMap { pid ->
+                            backend.set(pid)
+                            session.createNativeQuery("select 1 from pg_sleep(2)", Int::class.javaObjectType)
+                                .singleResult
+                        }
+                }.subscribe().with({ }, { })
+            }
+        }
+        fun cancelOnContext() {
+            val cancelled = CompletableFuture<Void>()
+            subscriptionContext.get().runOnContext {
+                subscription.cancel()
+                cancelled.complete(null)
+            }
+            cancelled.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        val config = ConfigProvider.getConfig()
+        try {
+            DriverManager.getConnection(
+                config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+                config.getValue("quarkus.datasource.username", String::class.java),
+                config.getValue("quarkus.datasource.password", String::class.java),
+            ).use { connection ->
+                connection.prepareStatement(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ? " +
+                        "AND state = 'active' AND query LIKE '%pg_sleep(2)%')",
+                ).use { statement ->
+                    fun sqlActive(): Boolean {
+                        statement.setInt(1, backend.get())
+                        return statement.executeQuery().use { rows ->
+                            rows.next()
+                            rows.getBoolean(1)
+                        }
+                    }
+                    val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+                    while (!sqlActive() && System.nanoTime() < deadline) Thread.sleep(5)
+                    assertThat(sqlActive()).`as`("delayed SQL must be running before cancellation").isTrue()
+                    cancelOnContext()
+                    while (sqlActive() && System.nanoTime() < deadline) {
+                        assertThat(activeSession.get().isOpen)
+                            .`as`("session must remain open while PostgreSQL still executes its query").isTrue()
+                        Thread.sleep(5)
+                    }
+                    assertThat(sqlActive()).`as`("cancelled database work must stop within the watchdog").isFalse()
+                }
+            }
+            repeat(6) { assertThat(boundedSql(2000, "select 1")).isEqualTo(1) }
+        } finally {
+            cancelOnContext()
+        }
+    }
+
+    @Test
+    fun `overlapping Context transactions in one Vertx context own separate sessions`() {
+        val entered = CompletableFuture<Mutiny.Session>()
+        val release = CompletableFuture<Int>()
+        val result = VertxContextSupport.subscribeAndAwait {
+            val first = sessions.boundedContextTransaction(4000) { session ->
+                entered.complete(session)
+                Uni.createFrom().completionStage(release)
+            }
+            val second = Uni.createFrom().completionStage(entered).chain { firstSession ->
+                sessions.boundedContextTransaction(4000) { secondSession ->
+                    // Sibling authorization and audit calls may overlap on the same context.
+                    assertThat(secondSession).isNotSameAs(firstSession)
+                    secondSession.createNativeQuery("select 1", Int::class.javaObjectType).singleResult
+                }
+            }.onTermination().invoke { release.complete(1) }
+            Uni.combine().all().unis(first, second).asTuple()
+                .ifNoItem().after(Duration.ofSeconds(5)).fail()
+                .onTermination().invoke { release.complete(1) }
+        }
+        assertThat(result.item1).isEqualTo(1)
+        assertThat(result.item2).isEqualTo(1)
+    }
+
+    private fun boundedSql(timeoutMs: Int, sql: String): Int = VertxContextSupport.subscribeAndAwait {
+        sessions.boundedGraphRead(timeoutMs) { session ->
+            session.createNativeQuery(sql, Int::class.javaObjectType).singleResult
+        }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+    }
+
+    @Test
+    fun `successful SQL result remains successful after delayed result processing`() {
+        assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        val result = VertxContextSupport.subscribeAndAwait<Int> {
+            ContextSqlOperation.execute(sessions, 100) { operation ->
+                operation.sql { session ->
+                    session.createNativeQuery("select 1", Int::class.javaObjectType).singleResult
+                }.flatMap { delayedOnContext(it) }
+            }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+        }
+        assertThat(result).isEqualTo(1)
+    }
+
+    @Test
+    fun `expired statement admission budget prevents subsequent SQL submission`() {
+        assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+        val secondSubmitted = AtomicBoolean()
+        assertThatThrownBy {
+            VertxContextSupport.subscribeAndAwait<Int> {
+                ContextSqlOperation.execute(sessions, 100) { operation ->
+                    operation.sql { session ->
+                        session.createNativeQuery("select 1", Int::class.javaObjectType).singleResult
+                    }.flatMap { delayedOnContext(it) }.flatMap {
+                        operation.sql { session ->
+                            secondSubmitted.set(true)
+                            session.createNativeQuery("select 2", Int::class.javaObjectType).singleResult
+                        }
+                    }
+                }.ifNoItem().after(Duration.ofSeconds(5)).fail()
+            }
+        }.satisfies(
+            java.util.function.Consumer<Throwable> { failure ->
+                assertThat(generateSequence(failure) { it.cause }.any { it is TimeoutException }).isTrue()
+            },
+        )
+        assertThat(secondSubmitted.get()).isFalse()
+    }
+
+    private fun <T> delayedOnContext(value: T): Uni<T> {
+        val context = checkNotNull(Vertx.currentContext())
+        return Uni.createFrom().item(value).onItem().delayIt().by(Duration.ofMillis(200))
+            .emitOn { task -> context.runOnContext { task.run() } }
+    }
+
+    @Test
+    fun `graph rejects oversized caller budgets before database access`() {
+        for ((nodes, edges) in listOf(101 to 200, 100 to 201, 0 to 200, 100 to 0)) {
+            assertThatThrownBy {
+                runBlocking {
+                    graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:bounded", Instant.now(), nodes, edges)
+                }
+            }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    @Test
+    @Suppress("LongMethod", "NestedBlockDepth") // Real-DB fixture and cleanup must bracket both assertions.
+    fun `bounded root query merges both directions once and excludes expired evidence`() {
+        val root = "incident:${UUID.randomUUID()}"
+        val target = "transaction:${UUID.randomUUID()}"
+        val other = "transaction:${UUID.randomUUID()}"
+        val asOf = Instant.now().minusSeconds(30)
+        val newest = UUID.randomUUID()
+        val outgoing = UUID.randomUUID()
+        val incoming = UUID.randomUUID()
+        val expired = UUID.randomUUID()
+        val bank = ConfigProvider.getConfig().getValue("openbank.context.bank-scope", String::class.java)
+        val generation = ConfigProvider.getConfig().getValue("openbank.context.projection-generation", Long::class.java)
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            try {
+                for (key in listOf(root, target, other)) {
+                    connection.prepareStatement(
+                        """INSERT INTO context_nodes
+                          (node_row_id,node_key,bank_scope,projection_generation,namespace,node_type,
+                           source_system,source_ref,display_label,classification,valid_from,recorded_at,source_version)
+                          VALUES (?,?,?,?,'INCIDENT','Synthetic','test',?,?,'INTERNAL',?,?,1)""",
+                    ).use { statement ->
+                        statement.setObject(1, UUID.randomUUID())
+                        statement.setString(2, key)
+                        statement.setString(3, bank)
+                        statement.setLong(4, generation)
+                        statement.setString(5, key)
+                        statement.setString(6, key)
+                        statement.setTimestamp(7, Timestamp.from(asOf.minusSeconds(60)))
+                        statement.setTimestamp(8, Timestamp.from(asOf.minusSeconds(60)))
+                        statement.executeUpdate()
+                    }
+                }
+                for (fixture in listOf(
+                    EdgeFixture(newest, root, root, asOf.minusSeconds(1), null),
+                    EdgeFixture(outgoing, root, target, asOf.minusSeconds(2), null),
+                    EdgeFixture(incoming, other, root, asOf.minusSeconds(3), null),
+                    EdgeFixture(expired, root, target, asOf.minusSeconds(4), asOf.minusSeconds(1)),
+                )) {
+                    connection.prepareStatement(
+                        """INSERT INTO context_edges
+                          (edge_id,bank_scope,projection_generation,namespace,from_key,to_key,relation_type,
+                           source_system,evidence_ref,valid_from,valid_to,recorded_at,source_version)
+                          VALUES (?,?,?,'INCIDENT',?,?,'CONNECTED','test',?,?,?,?,1)""",
+                    ).use { statement ->
+                        statement.setObject(1, fixture.id)
+                        statement.setString(2, bank)
+                        statement.setLong(3, generation)
+                        statement.setString(4, fixture.from)
+                        statement.setString(5, fixture.to)
+                        statement.setString(6, fixture.id.toString())
+                        statement.setTimestamp(7, Timestamp.from(asOf.minusSeconds(60)))
+                        statement.setTimestamp(8, fixture.validTo?.let(Timestamp::from))
+                        statement.setTimestamp(9, Timestamp.from(fixture.recordedAt))
+                        statement.executeUpdate()
+                    }
+                }
+
+                val bounded = graphRead(root, asOf, 2)
+                assertThat(bounded?.edges?.map { it.id }).containsExactly(newest.toString(), outgoing.toString())
+                assertThat(bounded?.truncated).isTrue()
+                val complete = graphRead(root, asOf, 3)
+                assertThat(complete?.edges?.map { it.id })
+                    .containsExactly(newest.toString(), outgoing.toString(), incoming.toString())
+                assertThat(complete?.truncated).isFalse()
+            } finally {
+                connection.prepareStatement("DELETE FROM context_edges WHERE bank_scope = ? AND edge_id IN (?,?,?,?)")
+                    .use { statement ->
+                        statement.setString(1, bank)
+                        listOf(newest, outgoing, incoming, expired).forEachIndexed { index, id ->
+                            statement.setObject(index + 2, id)
+                        }
+                        statement.executeUpdate()
+                    }
+                connection.prepareStatement("DELETE FROM context_nodes WHERE bank_scope = ? AND node_key IN (?,?,?)")
+                    .use { statement ->
+                        statement.setString(1, bank)
+                        listOf(root, target, other).forEachIndexed { index, key ->
+                            statement.setString(index + 2, key)
+                        }
+                        statement.executeUpdate()
+                    }
+            }
+        }
+    }
+
+    private fun graphRead(root: String, asOf: Instant, edges: Int) = VertxContextSupport.subscribeAndAwait {
+        CoroutineScope(Dispatchers.Unconfined).async {
+            graph.neighborhood(ContextNamespace.INCIDENT, root, asOf, 10, edges)
+        }.asUni()
+    }
+
+    private data class EdgeFixture(
+        val id: UUID,
+        val from: String,
+        val to: String,
+        val recordedAt: Instant,
+        val validTo: Instant?,
+    )
+}
+
+class ContextGraphTimeoutRecoveryProfile : QuarkusTestProfile {
+    override fun getConfigOverrides(): Map<String, String> = mapOf(
+        "quarkus.datasource.reactive.max-size" to "2",
+        "quarkus.scheduler.enabled" to "false",
+    )
+}

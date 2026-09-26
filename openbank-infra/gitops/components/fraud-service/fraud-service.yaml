@@ -8,6 +8,7 @@ kind: Rollout
 metadata:
   name: fraud-service
   namespace: fraud
+  annotations: {openbank.io/service-dependencies: context/context-service}
   labels: {app.kubernetes.io/name: fraud-service, app.kubernetes.io/part-of: fraud}
 spec:
   # Abort and roll back automatically if pods haven't become healthy within
@@ -23,7 +24,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fraud-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a6472ea20815436d"
+        openbank.tech/policy-checksum: "26263f17b116b9e1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -37,8 +38,12 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8133}
+            - {name: https, containerPort: 8443}
             - {name: management, containerPort: 8085}
           env:
+            - {name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES, value: /mnt/fraud-tls/tls.crt}
+            - {name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES, value: /mnt/fraud-tls/tls.key}
+            - {name: QUARKUS_HTTP_SSL_PORT, value: "8443"}
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://fraud-db-rw.fraud.svc:5432/openbank_fraud
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -122,6 +127,8 @@ spec:
             # simply never raises — the fail-open contract by design, but silently so).
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            - name: CONTEXT_SERVICE_URL
+              valueFrom: {secretKeyRef: {name: fraud-service-source-discovery, key: CONTEXT_SERVICE_URL}}
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -142,6 +149,7 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
+            - {name: fraud-tls, mountPath: /mnt/fraud-tls, readOnly: true}
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -150,6 +158,10 @@ spec:
               readOnly: true
             - name: msg-override
               mountPath: /mnt/msg-config
+              readOnly: true
+            - name: context-tls-trust
+              mountPath: /mnt/context-tls/ca.crt
+              subPath: ca.crt
               readOnly: true
           resources:
             requests: {cpu: 250m, memory: 310Mi}
@@ -230,6 +242,7 @@ spec:
               memory: 64Mi
       volumes:
         - {name: tmp, emptyDir: {}}
+        - {name: fraud-tls, secret: {secretName: fraud-service-internal-tls}}
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -244,6 +257,9 @@ spec:
         - name: msg-override
           configMap:
             name: fraud-service-msg-override
+        - name: context-tls-trust
+          secret:
+            secretName: fraud-context-trust
   strategy:
     canary:
       stableService: fraud-service
@@ -278,7 +294,7 @@ metadata:
   labels: {app.kubernetes.io/name: fraud-service}
 spec:
   selector: {app.kubernetes.io/name: fraud-service}
-  ports: [{name: http, port: 8133, targetPort: http}]
+  ports: [{name: http, port: 8133, targetPort: http}, {name: https, port: 8443, targetPort: https}]
 ---
 apiVersion: v1
 kind: Service

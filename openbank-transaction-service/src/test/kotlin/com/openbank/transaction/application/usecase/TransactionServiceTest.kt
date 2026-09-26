@@ -30,6 +30,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
+import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -111,6 +112,86 @@ class TransactionServiceTest {
         assertThat(result).isEqualTo(existing)
         coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
         verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
+
+    @Test
+    fun `originating payment survives save workflow reread and event serialization`(): Unit = runBlocking {
+        val paymentId = UUID.randomUUID()
+        val command = initiateCommand().copy(originatingPaymentId = paymentId)
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        val publisher = com.openbank.transaction.infrastructure.messaging.LoggingTransactionEventPublisher(
+            com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+                .registerModule(com.fasterxml.jackson.datatype.jsr310.JavaTimeModule()),
+            clock,
+        )
+        every { eventPublisher.initiatedPayload(any()) } answers { publisher.initiatedPayload(firstArg()) }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.originatingPaymentId).isEqualTo(paymentId)
+        coVerify(exactly = 1) {
+            transactionRepository.save(
+                match { it.originatingPaymentId == paymentId },
+                match { it.payload.contains("\"originatingPaymentId\":\"$paymentId\"") },
+            )
+        }
+        assertThat(publisher.settledPayload(result, UUID.randomUUID()))
+            .contains("\"originatingPaymentId\":\"$paymentId\"")
+    }
+
+    @Test
+    fun `replay accepts same or omitted source and leaves legacy null unchanged`(): Unit = runBlocking {
+        val paymentId = UUID.randomUUID()
+        for ((stored, supplied) in listOf(paymentId to paymentId, paymentId to null, null to paymentId, null to null)) {
+            val command = initiateCommand().copy(originatingPaymentId = supplied)
+            val existing = transaction(command.idempotencyKey).copy(originatingPaymentId = stored)
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+
+            assertThat(service.initiateTransaction(command)).isSameAs(existing)
+        }
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
+        verify(exactly = 0) { eventPublisher.initiatedPayload(any()) }
+        verify(exactly = 0) { workflowStub.execute(any()) }
+    }
+
+    @Test
+    fun `replay rejects a different nonnull source without writing or emitting`(): Unit = runBlocking {
+        val command = initiateCommand().copy(originatingPaymentId = UUID.randomUUID())
+        val existing = transaction(command.idempotencyKey).copy(originatingPaymentId = UUID.randomUUID())
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+
+        assertThat(runCatching { service.initiateTransaction(command) }.exceptionOrNull())
+            .isInstanceOf(TransactionUpdateConflictException::class.java)
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
+        verify(exactly = 0) { eventPublisher.initiatedPayload(any()) }
+        verify(exactly = 0) { workflowStub.execute(any()) }
+    }
+
+    @Test
+    fun `concurrent replay applies source conflict and legacy compatibility to the winner`(): Unit = runBlocking {
+        val supplied = UUID.randomUUID()
+        for (stored in listOf(supplied, null, UUID.randomUUID())) {
+            val command = initiateCommand().copy(originatingPaymentId = supplied)
+            val winner = transaction(command.idempotencyKey).copy(originatingPaymentId = stored)
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany
+                listOf(null, winner)
+            every { eventPublisher.initiatedPayload(any()) } returns "{}"
+            coEvery { transactionRepository.save(any(), any()) } throws
+                PersistenceException("transactions_2026_idempotency_key_booking_date_key")
+
+            val result = runCatching { service.initiateTransaction(command) }
+            if (stored != null && stored != supplied) {
+                assertThat(result.exceptionOrNull()).isInstanceOf(TransactionUpdateConflictException::class.java)
+            } else {
+                assertThat(result.getOrThrow()).isSameAs(winner)
+            }
+        }
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
+        verify(exactly = 0) { workflowStub.execute(any()) }
     }
 
     @Test

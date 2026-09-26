@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.TimeoutException
 
 class ContextQueryServiceTest {
     private val now = Instant.parse("2026-09-13T10:00:00Z")
@@ -57,6 +58,82 @@ class ContextQueryServiceTest {
         coVerify(exactly = 0) { pdp.allow(any()) }
         coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
         coVerify { audit.record(match { it.decision == "DENIED" && it.reasonCode == "NO_ACTIVE_ASSIGNMENT" }) }
+    }
+
+    @Test
+    fun `assignment timeout is unavailable and skips policy and data`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } throws TimeoutException()
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) {
+            audit.record(match { it.decision == "UNAVAILABLE" && it.reasonCode == "ASSIGNMENT_UNAVAILABLE" })
+        }
+    }
+
+    @Test
+    fun `failed authorization audit blocks data without another audit attempt`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { audit.record(any()) } throws TimeoutException()
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
+        coVerify(exactly = 1) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { audit.recordDisclosure(any()) }
+    }
+
+    @Test
+    fun `failed denial audit is unavailable without policy or recursive audit`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns false
+        coEvery { audit.record(any()) } throws TimeoutException()
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
+        coVerify(exactly = 1) { audit.record(any()) }
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `assignment cancellation propagates without policy audit or data`(): Unit = runBlocking {
+        val cancellation = CancellationException("request cancelled")
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } throws cancellation
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isSameAs(cancellation)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `audit cancellation propagates and blocks data`(): Unit = runBlocking {
+        val cancellation = CancellationException("request cancelled")
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { audit.record(any()) } throws cancellation
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isSameAs(cancellation)
+        coVerify(exactly = 1) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `policy denial remains denied after successful audit`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(false, policyVersion = "bundle-9")
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAccessDenied::class.java)
+        coVerify(exactly = 1) {
+            audit.record(match { it.decision == "DENIED" && it.reasonCode == "POLICY_DENIED" })
+        }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -130,7 +207,7 @@ class ContextQueryServiceTest {
         coEvery { audit.recordDisclosure(any()) } throws IllegalStateException("audit unavailable")
 
         assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
-            .isInstanceOf(IllegalStateException::class.java)
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
         coVerify(exactly = 1) { audit.record(match { it.decision == "ALLOWED" }) }
         coVerify(exactly = 1) { audit.recordDisclosure(any()) }
     }
@@ -212,6 +289,56 @@ class ContextQueryServiceTest {
         assertThat(impact.total).isEqualTo(1)
         assertThat(impact.toString()).doesNotContain("service:s1")
         coVerify { audit.recordDisclosure(match { it.disclosure.evidenceCount == 1 && it.disclosure.truncated }) }
+    }
+
+    @Test
+    fun `fraud evidence requires assignment to the exact root even for admin`(): Unit = runBlocking {
+        val admin = Investigator("admin-1", listOf("ROLE_ADMIN"))
+        val investigation = InvestigationContext("case-42", "FRAUD_INVESTIGATION", now)
+        coEvery {
+            assignments.isAssignedToRoot(
+                admin.id,
+                investigation.caseId,
+                investigation.purpose,
+                "fraud-case:case-42",
+                now,
+            )
+        } returns false
+
+        assertThatThrownBy {
+            runBlocking { service.fraudCaseEvidence("case-42", admin, investigation) { ContextReadResult(Unit, null) } }
+        }.isInstanceOf(ContextAccessDenied::class.java)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify {
+            audit.record(match { it.rootRef == "fraud-case:case-42" && it.decision == "DENIED" })
+        }
+    }
+
+    @Test
+    fun `fraud evidence passes scoped policy and audits before returning`(): Unit = runBlocking {
+        val admin = Investigator("admin-1", listOf("ROLE_ADMIN"))
+        val investigation = InvestigationContext("case-42", "FRAUD_INVESTIGATION", now)
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "fraud-policy-1")
+        val disclosure = ContextDisclosure(listOf("fraud-case:case-42"), 1, false)
+
+        assertThat(
+            service.fraudCaseEvidence("case-42", admin, investigation) { ContextReadResult("allowed", disclosure) },
+        ).isEqualTo("allowed")
+        coVerify {
+            pdp.allow(
+                match {
+                    it.action == "context.fraud-case.read" &&
+                        it.resource?.id == "fraud-case:case-42" &&
+                        it.attributes["rootScopeVerified"] == true &&
+                        it.attributes["purpose"] == "FRAUD_INVESTIGATION"
+                },
+            )
+        }
+        coVerify { audit.record(match { it.decision == "ALLOWED" && it.policyVersion == "fraud-policy-1" }) }
+        coVerify {
+            audit.recordDisclosure(match { it.disclosure == disclosure && it.queryHash.length == 64 })
+        }
     }
 
     private fun node(key: String, type: String) = ContextNode(
