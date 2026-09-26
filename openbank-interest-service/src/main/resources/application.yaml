@@ -205,6 +205,11 @@ interest:
       interest-expense-gbp: ${INTEREST_GL_INTEREST_EXPENSE_GBP:a0000000-0000-0000-0000-000000004013}
       withholding-tax-payable: ${INTEREST_GL_WITHHOLDING_TAX_PAYABLE:a0000000-0000-0000-0000-000000002200}
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   interest:
     accrual-cron: "0 0 1 * * ?"
     capitalization-cron: "0 0 2 1 * ?"

@@ -217,6 +217,11 @@ mp:
     scheduler:
       enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   card:
     # Base64 of 32 random bytes (AES-256). Deliberately absent from this file: card-issuance
     # refuses to boot rather than store synthetic PANs unencrypted (AesGcmCardSecretCipher).

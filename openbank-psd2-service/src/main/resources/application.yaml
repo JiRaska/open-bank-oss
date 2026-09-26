@@ -148,6 +148,11 @@ authz:
   enforce: "${AUTHZ_ENFORCE:true}"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   psd2:
     sandbox-mode: true
     idempotency-ttl-seconds: 86400

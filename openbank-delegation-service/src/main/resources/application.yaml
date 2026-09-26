@@ -237,6 +237,11 @@ mp:
     enforce: "false"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   delegation:
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
