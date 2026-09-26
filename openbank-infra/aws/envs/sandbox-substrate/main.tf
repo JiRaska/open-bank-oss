@@ -1,3 +1,8 @@
+locals {
+  # One desired state for both the recorder and its repair automation.
+  config_recording_enabled = false
+}
+
 module "network" {
   source = "../../modules/network"
 
@@ -119,7 +124,7 @@ module "audit_baseline" {
   # openbank-config-recording-daily budget in finops-budget.tf remains as the
   # tripwire against silent re-enable. Prod-shaped environments keep the module
   # default (enabled).
-  config_recording_enabled   = false
+  config_recording_enabled   = local.config_recording_enabled
   config_recording_frequency = "DAILY"
 
   # 1-day COMPLIANCE lock keeps the sandbox destroyable; config history is short-lived.
