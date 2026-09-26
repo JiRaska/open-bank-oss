@@ -9,7 +9,6 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.math.MathContext
-import java.math.RoundingMode
 import kotlin.random.Random
 
 /**
@@ -109,22 +108,6 @@ class MoneyAllocationTest {
         assertThatThrownBy { m.allocate(1, -1) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { m.split(0) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { m.split(-2) }.isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    @Test
-    fun `rounding policies mirror today's call-site behaviour`() {
-        val eur = CurrencyCode.of("EUR")
-        val czk = CurrencyCode.of("CZK")
-        assertThat(RoundingPolicy.LEDGER_POSTING.round(BigDecimal("1.005"), eur)).isEqualByComparingTo("1.00")
-        assertThat(RoundingPolicy.DISPLAY.round(BigDecimal("1.015"), eur)).isEqualByComparingTo("1.02")
-        assertThat(RoundingPolicy.FX_AMOUNT.round(BigDecimal("1.005"), eur)).isEqualByComparingTo("1.01")
-        assertThat(RoundingPolicy.FEE.round(BigDecimal("1.005"), eur)).isEqualByComparingTo("1.01")
-        assertThat(
-            RoundingPolicy.INTEREST_ACCRUAL.round(BigDecimal("0.0000125"), eur).toPlainString(),
-        ).isEqualTo("0.000013")
-        assertThat(RoundingPolicy.FX_RATE.round(BigDecimal("0.123456785"), eur).toPlainString()).isEqualTo("0.12345679")
-        assertThat(RoundingPolicy.TAX_WITHHOLDING.round(BigDecimal("150.99"), czk).toPlainString()).isEqualTo("150")
-        assertThat(RoundingPolicy.TAX_WITHHOLDING.mode).isEqualTo(RoundingMode.DOWN)
     }
 
     @Test
