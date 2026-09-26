@@ -37,10 +37,14 @@ class OpaPolicyDecisionPointProducer {
     @ConfigProperty(name = "opa.path", defaultValue = OpaSidecarPolicyDecisionPoint.DEFAULT_QUERY_PATH)
     lateinit var opaPath: String
 
-    // A Kotlin default here (`= 500L`) would generate a synthetic constructor and silently
-    // discard whatever `opa.timeout-ms` says (rules.yaml: configproperty_kotlin_defaults). Use
-    // `lateinit` over the boxed type instead, exactly as `opaUrl`/`opaPath` above rely solely on
-    // the annotation's defaultValue.
+    // This is FIELD injection (a class-body property, not a constructor parameter), so a Kotlin
+    // default here would NOT trip the synthetic-constructor trap in
+    // rules.yaml: configproperty_kotlin_defaults / check-configproperty-kotlin-defaults.py — that
+    // gate is scoped to constructor parameters only, and CDI overwrites a defaulted field via field
+    // injection after construction regardless. `lateinit` + the annotation's `defaultValue` is used
+    // here purely for consistency with `opaUrl`/`opaPath` above, not because a field default would
+    // have discarded config (it would not have — the deleted per-service `AuthzProducer` copies
+    // used exactly that shape and honoured `opa.timeout-ms` correctly).
     @ConfigProperty(name = "opa.timeout-ms", defaultValue = DEFAULT_OPA_TIMEOUT_MS_STR)
     lateinit var opaTimeoutMs: java.lang.Long
 
