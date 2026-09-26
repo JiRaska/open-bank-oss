@@ -138,6 +138,17 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-08-09** — Boundary (1) gains its first real callers (issue #4221). No new *kind* of
   boundary: the inbound REST surface, its `@RolesAllowed`/`@Authorize` gates, the rule engine and
   every stored artefact are untouched. What changes is that boundary (1) — described above as the

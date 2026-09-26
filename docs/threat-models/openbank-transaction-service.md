@@ -319,6 +319,17 @@ every URL and the upload path is unaffected.
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-08** — Logo ingest from an operator-named URL (`POST …/logo/fetch`), plus `GET …/logo-sources` so the operator screen can tell "off by design" from "broken" (§4g). This is the service's only outbound internet call and an SSRF primitive by construction; it is fenced by an allowlist that is **empty by default**, https-only, a publicly-routable check on every resolved address, and refusal (not following) of redirects. Fetched bytes get the same re-encode as an upload. Residual DNS-rebinding risk is recorded in §4g rather than claimed closed. Rollback: unset the allowlist and the endpoint refuses everything.
 
 - **2026-09-07** — Per-town merchant locations (`merchant_location`, `…/locations[/{cityToken}]`) and a `precision` field on `MerchantGeo` (§4f). The seeded catalogue pinned each chain at one Prague coordinate, so a Billa purchase in Brno rendered 185 km from where it happened; coordinates now say whether they are `EXACT` (the place the money was spent) or `CITY` (representative for the town), and `EXACT` is refused without the device id that would justify it — in the API and in a `CHECK` constraint. No new caller, role or network edge. Rollback: revert; geo falls back to the catalogue pin.

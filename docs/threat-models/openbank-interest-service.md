@@ -64,6 +64,17 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-24** — `interest.rate.changed.v1` and index terms (ADR-0314 D5, #10618). Every rate-config write (operator create, operator deactivate, catalog profile applied, catalog supersession cutting `effectiveTo`) now writes an outbox row in the SAME transaction, on the existing `openbank.interest.accrual.event` topic that audit-service already reads: no new topic, ACL, caller, endpoint or privilege. `InterestRateConfig` gains optional `rateIndex` (closed enum) and `spread`, accepted on the existing `POST /rates` under the existing `interest.create` authz; V17 adds the columns plus a CHECK that they appear only as a pair on VARIABLE rates, and the service rejects the same shapes as 400 first. **Tampering:** index terms do not change how accrual computes today — `annualRate` stays the rate applied — so a wrong index can mislead a downstream repricer but cannot move money here. **Info disclosure:** product rate terms, not personal data; the payload's `accountId` is set only for a per-account override and is an opaque id. **Repudiation:** outbox `event_id` plus the audit trail. Rollback: revert; V17 is additive, and dropping both columns is the down-migration.
 - **2026-09-21** — Ledger capitalization call: late booking and refusal handling (#10404). A
   capitalization completed after its period end (the recovery sweep) sent `entryDate = periodTo`

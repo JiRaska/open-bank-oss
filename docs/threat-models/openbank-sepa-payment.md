@@ -142,6 +142,17 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-14** — Return-evidence source revision (ADR-0306): SEPA lifecycle transitions increment
   persisted `aggregate_revision` under a row lock, and created, status and return outbox bodies
   carry that revision. The existing `sepa.payment.returned` evidence remains atomic with

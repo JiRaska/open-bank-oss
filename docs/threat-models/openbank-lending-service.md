@@ -549,6 +549,17 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 
 ## 10. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-25** — Ledger-backfill request history for the admin console (#10618): READ-ONLY `GET /api/v1/lending/ledger-backfill/requests?limit=` (1..100) and `GET .../requests/{id}`, both on the existing action `lending.ledgerBackfill.read` (ROLE_FINANCE / ROLE_ADMIN humans; the service-account veto applies unchanged). `BackfillRequestView` additively exposes `proposedAt` / `decidedAt` / `executedAt`. **Information disclosure:** the rows carry maker/checker/executor principal names and plan hashes — already visible to the same roles through the write responses; no party data. No write path, posting, event or migration. Rollback: revert.
 - **2026-09-25** — **Privilege change: ROLE_FINANCE runs the ledger backfill (#10618).** `LedgerBackfillResource` `@RolesAllowed` widens from ROLE_ADMIN to ROLE_ADMIN + ROLE_FINANCE on all four actions (`lending.ledgerBackfill.read/propose/decide/execute`). OPA: new `finance-ledger-backfill` allow reason (HUMAN, not `service-account-*`, ROLE_FINANCE, backfill actions only); the role veto becomes "neither ROLE_ADMIN nor ROLE_FINANCE", and the service-account veto is unchanged, so no machine identity can reach the flow whatever roles it holds. **Elevation of privilege / repudiation:** maker != checker stays in `LedgerBackfillService` (`MakerCheckerViolation`, 422) and the approval stays bound to the plan hash re-checked at execution; execute is granted to FINANCE as well, because the control is the two-person approval and keeping execute ADMIN-only would make a platform administrator a party to every finance posting. ROLE_FINANCE gains no other lending action (rego test `test_finance_denied_other_lending_writes`). No new endpoint, posting shape, event or migration. Money-path: two approvals. Rollback: revert; the realm role can stay unassigned.
 - **2026-09-24** — New caller admitted: the `risk` namespace (openbank-risk-engine) on lending's ingress, via the regenerated NetworkPolicy. The generator admits a caller namespace on both the HTTP port (8126) and the mTLS listener (8443), as for every existing caller; risk-engine itself only dials 8443 with a client certificate from `openbank-ca`. The only operation it is authorised for is the read-only `lending.book.read` (#10729). No write path, no new endpoint. Rollback: revert; the caller side has its own switch.

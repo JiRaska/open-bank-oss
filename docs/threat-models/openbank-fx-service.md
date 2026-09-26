@@ -52,6 +52,17 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-24** — Trust-boundary change (ADR-0314 D5, #10618): a second outbound Kafka topic, `openbank.fx.fixing.published`, carrying each ingested ČNB fixing (`fx.fixing.published.v1`). New channel `fx-fixing-out`, new KafkaTopic, and a Write/Describe ACL on that topic only for the existing `fx-service` KafkaUser; no new inbound surface, caller, endpoint or privilege. The rates and the event commit in ONE transaction (`FxRateRepository.saveAllWithOutbox`), which also changes ingestion from one transaction per currency to one per fixing: a failure now stores none of that day's rates rather than some, and the next scheduled run retries the whole day. **Tampering:** the event is a copy of public statutory rates, not a new source of truth — `fx_rates` stays the record and a consumer that needs certainty re-reads it by `rateId`; the payload carries only ids the same transaction wrote. **Info disclosure:** none beyond the public ČNB list. **Repudiation:** outbox `event_id` + `ce-*` headers as for conversions. **Routing:** both event families share `fx_outbox`; `KafkaFxOutboxEventPublisher` routes by event-type prefix, pinned by a test that asserts the other emitter is untouched. Rollback: revert; the topic may stay, it has no consumer yet.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. The public CNB feed is explicitly a non-banking external boundary and does not receive the marker; a fleet gate requires every new client to choose one of these treatments.
   The accompanying client-source normalization is formatting-only: request payloads, client targets,
