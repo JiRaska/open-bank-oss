@@ -112,6 +112,7 @@ class ContextApiIT {
         val reference = "CMP-E2E-${UUID.randomUUID()}"
         val accountId = UUID.randomUUID()
         val transactionId = UUID.randomUUID()
+        val paymentId = UUID.randomUUID()
         val disputeId = UUID.randomUUID()
         val version = NOW.epochSecond * 1_000_000_000 + NOW.nano
         val payload = complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version)
@@ -127,19 +128,18 @@ class ContextApiIT {
 
         repeat(2) { source.send(payload) }
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
-        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId, reversalId)
-        sendPaymentLifecycle(payments, transactionId)
-        val bookingTransactionId = UUID.randomUUID()
+        val clearingItemId = sendRailEvidence(clearing, sepaReturns, paymentId, reversalId)
+        sendPaymentLifecycle(payments, paymentId)
         val journalId = UUID.randomUUID()
         val reversalJournalId = UUID.randomUUID()
-        ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
+        ledger.send(ledgerPostedEvent(journalId, transactionId))
         ledger.send(ledgerPostedEvent(reversalJournalId, reversalId))
-        transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
-        transactions.send(transactionReversalEvent(reversalId, bookingTransactionId))
+        transactions.send(transactionInitiatedEvent(transactionId, paymentId))
+        transactions.send(transactionReversalEvent(reversalId, transactionId))
         assertProjectionState(
             reference,
+            paymentId,
             transactionId,
-            bookingTransactionId,
             journalId,
             clearingItemId,
             reversalId,
@@ -147,7 +147,7 @@ class ContextApiIT {
         )
         awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$reversalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$reversalJournalId", 1)
-        val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
+        val unrelatedComplaint = seedUnrelatedComplaint(paymentId)
 
         seedAssignment(CASE, PURPOSE, "complaint:$reference")
         val response = given()

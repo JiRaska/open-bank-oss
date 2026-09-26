@@ -115,7 +115,16 @@ time, revision ordering and explicit withdrawal/supersession semantics; that acc
 ID is labelled a reference, not a booked reversal; ledger evidence remains the booking proof.
 The fixed complaint query follows only `CONCERNS_TRANSACTION` and an allow-listed directed lifecycle
 second hop, plus source/prefix/relation allow-listed booking-transaction and ledger-journal hops, so
-it cannot pivot from a shared transaction into another complaint. `TransactionInitiated` carries the
+it cannot pivot from a shared transaction into another complaint. The complaint's `transactionId`
+names the transaction-service booking, represented as `booking-transaction:<transactionId>`;
+it is not the domestic payment ID represented as `transaction:<paymentId>`. The reader reaches
+that payment only through transaction-service's explicit incoming `BOOKING_REQUESTED` association.
+Without that association it may show the referenced booking and its independently observed ledger
+or reversal evidence, but never invents a payment link, even when the UUIDs happen to be equal.
+Historical complaint snapshots retain their original source references; read normalization does
+not rewrite those immutable observations. The reverse history index in V23 supports this bounded
+lookup; its rollback drops only the index and does not remove evidentiary rows.
+`TransactionInitiated` carries the
 stable originating payment id and `JournalPosted` carries explicit producer attribution; both are
 transactional-outbox events. Their projectors tolerate reverse delivery order through replaceable
 placeholder nodes and expose the actual posted journal rather than inferring booking from a payment

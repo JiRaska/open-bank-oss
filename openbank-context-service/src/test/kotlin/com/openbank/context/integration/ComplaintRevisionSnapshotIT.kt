@@ -74,14 +74,14 @@ class ComplaintRevisionSnapshotIT {
             graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(1), 50, 50)
         }
         assertThat(requireNotNull(priorView).nodes.map { it.label }).anyMatch { it.contains("RECEIVED") }
-        assertThat(priorView.edges.map { it.to }).contains("transaction:$priorTransaction")
-            .doesNotContain("transaction:$currentTransaction")
+        assertThat(priorView.edges.map { it.to }).contains("booking-transaction:$priorTransaction")
+            .doesNotContain("booking-transaction:$currentTransaction")
         val currentView = onVertx {
             graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(2), 50, 50)
         }
         assertThat(requireNotNull(currentView).nodes.map { it.label }).anyMatch { it.contains("RESOLVED") }
-        assertThat(currentView.edges.map { it.to }).contains("transaction:$currentTransaction")
-            .doesNotContain("transaction:$priorTransaction")
+        assertThat(currentView.edges.map { it.to }).contains("booking-transaction:$currentTransaction")
+            .doesNotContain("booking-transaction:$priorTransaction")
         assertThat(
             onVertx {
                 graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME, 50, 50)
@@ -140,10 +140,12 @@ class ComplaintRevisionSnapshotIT {
     fun `later payment status does not erase the payment evidence at the earlier complaint time`() {
         val reference = "CMP-PAYMENT-${UUID.randomUUID()}"
         val payment = UUID.randomUUID()
+        val booking = UUID.randomUUID()
         onVertx {
             consumer.consume(
-                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), payment),
+                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), booking),
             )
+            bookings.consumeTransaction(bookingEvent(payment, booking, 1))
             payments.consume(paymentEvent(payment, 2, "SETTLED"))
             payments.consume(paymentEvent(payment, 1, "RECEIVED"))
             payments.consume(paymentEvent(payment, 2, "SETTLED"))
@@ -189,7 +191,7 @@ class ComplaintRevisionSnapshotIT {
         }
         onVertx {
             consumer.consume(
-                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), payment),
+                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), booking),
             )
         }
         val view = requireNotNull(
@@ -215,7 +217,7 @@ class ComplaintRevisionSnapshotIT {
                 """"occurredAt":"${TIME.plusSeconds(version)}"}"""
         onVertx {
             consumer.consume(
-                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), payment),
+                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), booking),
             )
             payments.consume(paymentEvent(payment, 1, "RECEIVED"))
             bookings.consumeTransaction(bookingEvent(2))
@@ -244,6 +246,117 @@ class ComplaintRevisionSnapshotIT {
         assertThat(relationship.evidenceRef).isEqualTo("transaction:$booking:2")
         assertThat(relationship.validFrom).isEqualTo(TIME.plusSeconds(2))
     }
+
+    @Test
+    fun `missing authoritative booking association never treats transaction identity as payment identity`() {
+        val reference = "CMP-NO-MAPPING-${UUID.randomUUID()}"
+        val actualTransaction = UUID.randomUUID()
+        val payment = UUID.randomUUID()
+        onVertx {
+            consumer.consume(
+                event(
+                    UUID.randomUUID(),
+                    reference,
+                    1,
+                    "complaint.received",
+                    "RECEIVED",
+                    UUID.randomUUID(),
+                    actualTransaction,
+                ),
+            )
+            // A domestic ID matching the transaction ID is still not an authoritative association.
+            payments.consume(paymentEvent(actualTransaction, 1, "RECEIVED"))
+            payments.consume(paymentEvent(payment, 1, "RECEIVED"))
+            bookings.consumeTransaction(bookingEvent(payment, actualTransaction, 2))
+        }
+        val prior = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(1), 50, 50)
+            },
+        )
+        assertThat(prior.nodes.map { it.key }).contains("booking-transaction:$actualTransaction")
+            .doesNotContain("transaction:$actualTransaction", "transaction:$payment")
+        assertThat(prior.edges.map { it.relation }).doesNotContain("BOOKING_REQUESTED", "CREATED")
+        val later = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(2), 50, 50)
+            },
+        )
+        assertThat(later.nodes.map { it.key }).contains("transaction:$payment")
+            .doesNotContain("transaction:$actualTransaction")
+        assertThat(later.nodes.single { it.key == "booking-transaction:$actualTransaction" }.sourceSystem)
+            .isEqualTo("transaction-service")
+        assertThat(later.edges.single { it.relation == "BOOKING_REQUESTED" }.from).isEqualTo("transaction:$payment")
+        val bounded = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(2), 50, 2)
+            },
+        )
+        assertThat(bounded.truncated).isTrue()
+        assertThat(bounded.edges).hasSize(2)
+        assertThat(bounded.nodes.map { it.key }).doesNotContain("transaction:$payment")
+    }
+
+    @Test
+    fun `booking and reversal ledger facts remain visible without a payment association`() {
+        val reference = "CMP-BOOKING-ONLY-${UUID.randomUUID()}"
+        val transaction = UUID.randomUUID()
+        val reversal = UUID.randomUUID()
+        val journal = UUID.randomUUID()
+        val reversalJournal = UUID.randomUUID()
+        val at = TIME.plusSeconds(1)
+        fun ledgerEvent(journalId: UUID, transactionId: UUID): String =
+            """{"eventType":"JournalPosted","sourceService":"ledger-service","aggregateId":"$journalId",""" +
+                """"version":1,"transactionId":"$transactionId","entryDate":"2026-09-01","occurredAt":"$at"}"""
+        val reversalEvent =
+            """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+                """"aggregateId":"$reversal","version":1,"type":"REVERSAL","reversalOf":"$transaction",""" +
+                """"occurredAt":"$at"}"""
+        onVertx {
+            consumer.consume(
+                event(
+                    UUID.randomUUID(),
+                    reference,
+                    1,
+                    "complaint.received",
+                    "RECEIVED",
+                    UUID.randomUUID(),
+                    transaction,
+                ),
+            )
+            // Domestic evidence with the same UUID must not become payment correlation.
+            payments.consume(paymentEvent(transaction, 1, "RECEIVED"))
+            bookings.consumeLedger(ledgerEvent(journal, transaction))
+            bookings.consumeTransaction(reversalEvent)
+            bookings.consumeLedger(ledgerEvent(reversalJournal, reversal))
+        }
+        val view = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", at, 50, 50)
+            },
+        )
+        assertThat(view.nodes.map { it.key }).contains(
+            "booking-transaction:$transaction",
+            "booking-transaction:$reversal",
+            "ledger-booking:$journal",
+            "ledger-booking:$reversalJournal",
+        ).doesNotContain("transaction:$transaction", "payment-stage:domestic:$transaction:1")
+        assertThat(view.edges.map { it.relation }).doesNotContain("BOOKING_REQUESTED", "CREATED")
+        assertThat(view.edges).anySatisfy { edge ->
+            assertThat(edge.from).isEqualTo("booking-transaction:$transaction")
+            assertThat(edge.to).isEqualTo("booking-transaction:$reversal")
+            assertThat(edge.relation).isEqualTo("REVERSED_BY")
+            assertThat(edge.evidenceRef).isEqualTo("transaction:$reversal:1")
+        }
+        assertThat(view.edges.filter { it.relation == "BOOKED_AS" }.map { it.to })
+            .containsExactlyInAnyOrder("ledger-booking:$journal", "ledger-booking:$reversalJournal")
+        assertThat(view.truncated).isFalse()
+    }
+
+    private fun bookingEvent(payment: UUID, booking: UUID, revision: Long): String =
+        """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+            """"aggregateId":"$booking","version":$revision,"originatingPaymentId":"$payment",""" +
+            """"occurredAt":"${TIME.plusSeconds(revision)}"}"""
 
     private fun paymentEvent(id: UUID, revision: Long, status: String): String {
         val type = if (revision == 1L) "DOMESTIC_PAYMENT_CREATED" else "DOMESTIC_PAYMENT_STATUS_CHANGED"

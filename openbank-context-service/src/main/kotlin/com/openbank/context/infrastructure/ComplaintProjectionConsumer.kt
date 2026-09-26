@@ -178,7 +178,7 @@ class ComplaintProjectionConsumer(
               recorded_at = EXCLUDED.recorded_at,
               source_version = EXCLUDED.source_version
             WHERE context_nodes.source_version < EXCLUDED.source_version
-              AND NOT (EXCLUDED.node_type = 'TRANSACTION' AND context_nodes.source_system = 'domestic-payment')
+              AND NOT (EXCLUDED.node_type = 'TRANSACTION' AND context_nodes.source_system <> 'dispute-service')
         """.trimIndent(),
         mapOf(
             "rowId" to stableId("$bankScope|$projectionGeneration|${node.key}"),
@@ -344,7 +344,7 @@ private data class ComplaintProjectionEvent(
     val complaintNode = node(complaintKey, "COMPLAINT", complaintId, "Complaint $reference · $status", "RESTRICTED")
     val accountNode = accountId?.let { node("account:$it", "ACCOUNT", it, "Account reference", "RESTRICTED") }
     val transactionNode = transactionId?.let {
-        node("transaction:$it", "TRANSACTION", it, "Transaction reference", "RESTRICTED")
+        node("booking-transaction:$it", "TRANSACTION", it, "Transaction reference", "RESTRICTED")
     }
     val disputeNode = disputeId?.let { node("dispute:$it", "DISPUTE", it, "Dispute reference", "RESTRICTED") }
     val edges = listOfNotNull(

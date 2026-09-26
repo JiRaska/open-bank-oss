@@ -85,19 +85,21 @@ quarkus:
       enabled: false
 "%test":
   quarkus:
+    kafka:
+      devservices:
+        # This profile uses in-memory messaging; real Kafka is verified by source E2E probes.
+        enabled: false
     oidc:
       enabled: false
     oidc-client:
       enabled: false
   openbank:
     context:
-      # Hosted CI cold-starts PostgreSQL and the reactive pool under shared CPU.
-      # Keep production's 500 ms fail-fast budget while preventing infrastructure
-      # scheduling jitter from turning the integration test into a false 500.
+      # Exercise the same 500 ms fail-fast budget as production.
       query-timeout-ms: 500
     commitment-export:
       # Each enabled relay claims a bounded batch once per second; tune only after measured drain proof.
-      batch-size: ${CONTEXT_COMMITMENT_EXPORT_BATCH_SIZE:200}0
+      batch-size: ${CONTEXT_COMMITMENT_EXPORT_BATCH_SIZE:200}
   mp:
     messaging:
       outgoing:

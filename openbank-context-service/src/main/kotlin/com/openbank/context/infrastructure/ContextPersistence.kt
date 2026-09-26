@@ -329,7 +329,6 @@ class ContextGraphRepository(
     @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextGraphPort {
-    @Suppress("LongMethod") // Every evidence hop has its own remaining-edge bound.
     override suspend fun neighborhood(
         namespace: ContextNamespace,
         root: String,
@@ -341,57 +340,11 @@ class ContextGraphRepository(
             "Graph read limits exceed the approved bounded-query policy"
         }
         val graphRoot = resolveGraphRoot(namespace, root, asOf, maxEdges + 1) ?: return null
-        val firstHop = graphRoot.edges
-        val paymentEvidence = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
-            val transactionKeys = firstHop.filter {
-                it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
-            }.map(ContextEdgeEntity::toKey)
-            findComplaintPaymentEvidenceEdges(transactionKeys, asOf, maxEdges - firstHop.size + 1)
+        val edges = if (namespace == ContextNamespace.COMPLAINT) {
+            findComplaintEvidenceEdges(root, graphRoot.edges, asOf, maxEdges)
         } else {
-            emptyList()
+            graphRoot.edges
         }
-        val bookingTransactionKeys = paymentEvidence.filter {
-            it.relationType == BOOKING_REQUESTED
-        }.map(ContextEdgeEntity::toKey)
-        val reversalEvidence = if (firstHop.size + paymentEvidence.size <= maxEdges) {
-            findComplaintBookingEvidenceEdges(
-                bookingTransactionKeys,
-                TRANSACTION_SOURCE,
-                BOOKING_TRANSACTION_PREFIX,
-                REVERSED_BY,
-                asOf,
-                maxEdges - firstHop.size - paymentEvidence.size + 1,
-            )
-        } else {
-            emptyList()
-        }
-        val ledgerEvidence = if (firstHop.size + paymentEvidence.size + reversalEvidence.size <= maxEdges) {
-            findComplaintBookingEvidenceEdges(
-                bookingTransactionKeys + reversalEvidence.map(ContextEdgeEntity::toKey),
-                LEDGER_SOURCE,
-                LEDGER_BOOKING_PREFIX,
-                BOOKED_AS,
-                asOf,
-                maxEdges - firstHop.size - paymentEvidence.size - reversalEvidence.size + 1,
-            )
-        } else {
-            emptyList()
-        }
-        val clearingEvidence = if (
-            firstHop.size + paymentEvidence.size + reversalEvidence.size + ledgerEvidence.size <= maxEdges
-        ) {
-            val clearingItemKeys = paymentEvidence.filter {
-                it.relationType == SUBMITTED_TO && it.sourceSystem == CLEARING_SOURCE
-            }.map(ContextEdgeEntity::toKey)
-            findComplaintClearingEvidenceEdges(
-                clearingItemKeys,
-                asOf,
-                maxEdges - firstHop.size - paymentEvidence.size - reversalEvidence.size - ledgerEvidence.size + 1,
-            )
-        } else {
-            emptyList()
-        }
-        val edges = firstHop + paymentEvidence + reversalEvidence + ledgerEvidence + clearingEvidence
         val boundedEdges = edges.take(maxEdges)
         val keys = graphRoot.boundedKeys(boundedEdges, maxNodes)
         val nodes = graphRoot.mergeNodes(keys, findNodes(namespace, keys, asOf))
@@ -402,6 +355,65 @@ class ContextGraphRepository(
             boundedEdges.filter { it.fromKey in visibleKeys && it.toKey in visibleKeys }.map { it.domain() },
             edges.size > maxEdges || nodes.size >= maxNodes || visibleKeys.size < keys.size,
         )
+    }
+
+    private suspend fun findComplaintEvidenceEdges(
+        root: String,
+        firstHop: List<ContextEdgeEntity>,
+        asOf: Instant,
+        maxEdges: Int,
+    ): List<ContextEdgeEntity> {
+        if (firstHop.size > maxEdges) return firstHop
+        val bookingKeys = firstHop.filter {
+            it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
+        }.map(ContextEdgeEntity::toKey).distinct()
+        val associations = GraphEdgeHistoryReader(
+            sessions,
+            objectMapper,
+            bankScope,
+            projectionGeneration,
+            queryTimeoutMs,
+        ).find(
+            bookingKeys,
+            listOf(GraphEdgeRule(TRANSACTION_SOURCE, "transaction:%", setOf(BOOKING_REQUESTED))),
+            asOf,
+            maxEdges - firstHop.size + 1,
+            incoming = true,
+        )
+        val edges = (firstHop + associations).toMutableList()
+        // History reads with a nonpositive remaining bound return without issuing SQL.
+        val paymentEvidence = findComplaintPaymentEvidenceEdges(
+            associations.map(ContextEdgeEntity::fromKey).distinct(),
+            asOf,
+            maxEdges - edges.size + 1,
+        )
+        edges.addAll(paymentEvidence)
+        val reversalEvidence = findComplaintBookingEvidenceEdges(
+            bookingKeys,
+            TRANSACTION_SOURCE,
+            BOOKING_TRANSACTION_PREFIX,
+            REVERSED_BY,
+            asOf,
+            maxEdges - edges.size + 1,
+        )
+        edges.addAll(reversalEvidence)
+        edges.addAll(
+            findComplaintBookingEvidenceEdges(
+                bookingKeys + reversalEvidence.map(ContextEdgeEntity::toKey),
+                LEDGER_SOURCE,
+                LEDGER_BOOKING_PREFIX,
+                BOOKED_AS,
+                asOf,
+                maxEdges - edges.size + 1,
+            ),
+        )
+        val clearingKeys = paymentEvidence.filter {
+            it.relationType == SUBMITTED_TO && it.sourceSystem == CLEARING_SOURCE
+        }.map(ContextEdgeEntity::toKey)
+        val reader = GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs)
+        val clearingRules = listOf(GraphEdgeRule(CLEARING_SOURCE, CLEARING_EVIDENCE_PREFIX, setOf(SETTLED)))
+        edges.addAll(reader.find(clearingKeys, clearingRules, asOf, maxEdges - edges.size + 1))
+        return edges
     }
 
     private suspend fun resolveGraphRoot(
@@ -454,7 +466,6 @@ class ContextGraphRepository(
             transactionKeys,
             listOf(
                 GraphEdgeRule(DOMESTIC_PAYMENT_SOURCE, PAYMENT_STAGE_PREFIX, COMPLAINT_LIFECYCLE_RELATIONS.toSet()),
-                GraphEdgeRule(TRANSACTION_SOURCE, BOOKING_TRANSACTION_PREFIX, setOf(BOOKING_REQUESTED)),
                 GraphEdgeRule(CLEARING_SOURCE, CLEARING_ITEM_PREFIX, setOf(SUBMITTED_TO)),
                 GraphEdgeRule(SEPA_SOURCE, RETURN_EVIDENCE_PREFIX, setOf(RETURNED_BY)),
                 GraphEdgeRule(SEPA_SOURCE, REVERSAL_TRANSACTION_PREFIX, setOf(REVERSED_BY)),
@@ -474,18 +485,6 @@ class ContextGraphRepository(
         GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
             bookingTransactionKeys,
             listOf(GraphEdgeRule(source, toPrefix, setOf(relation))),
-            asOf,
-            limit,
-        )
-
-    private suspend fun findComplaintClearingEvidenceEdges(
-        clearingItemKeys: List<String>,
-        asOf: Instant,
-        limit: Int,
-    ): List<ContextEdgeEntity> =
-        GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
-            clearingItemKeys,
-            listOf(GraphEdgeRule(CLEARING_SOURCE, CLEARING_EVIDENCE_PREFIX, setOf(SETTLED))),
             asOf,
             limit,
         )

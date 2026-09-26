@@ -104,11 +104,15 @@ observation cap, assignment scope and source lag mean absence of an edge does no
 prove absence of a relationship. Exact identifier equality is a lead, not a fraud
 finding or inferred ownership.
 
-Fraud's current source emits a temporary fraud-hold change for marketing suppression;
-it does not have a case/assignment lifecycle or an authoritative fraud finding. Its
-signals cannot be reused as an investigative case or an account restriction. A true
-fraud-case source contract, purpose-bound authorization and independent negative tests
-are prerequisites for the Fraud lens.
+Fraud's temporary fraud-hold signal for marketing suppression remains separate from
+investigative evidence and cannot be reused as an investigative case or an account
+restriction. The source now persists versioned investigation cases with `OPEN` and
+`CLOSED_NO_FINDING` transitions and a transactional outbox. Context assignments remain
+the independent authority for investigative access; opening a source case grants no
+assignment. Neither a review score nor an open case is an authoritative fraud finding.
+The isolated source-to-Context proof is recorded in
+[the Fraud E2E report](../../perf/reports/2026-09-26-context-fraud-source-e2e.md);
+it does not establish sandbox deployment or production workload qualification.
 
 The first Fraud network lens now uses a distinct reference-only Fraud topic. Context
 fetches live OPEN case associations from Fraud over HTTPS only after a case-scoped

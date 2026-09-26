@@ -126,6 +126,50 @@ class GraphEdgeHistoryIT {
         assertThat(read(root, asOf = TIME.plusSeconds(2)).single().evidenceRef).isEqualTo(laterEvent)
     }
 
+    @Test
+    fun `incoming authoritative association is bounded historical bank and generation evidence`() {
+        val booking = "booking-transaction:${UUID.randomUUID()}"
+        val payment = "transaction:${UUID.randomUUID()}"
+        seedBaseline(payment, booking)
+        append(payment, "booking-later:$booking", listOf(observation(payment, booking, 2)))
+        append(payment, "booking-prior:$booking", listOf(observation(payment, booking, 1)))
+        val excluded = listOf(
+            observation("transaction:${UUID.randomUUID()}", booking, 1).copy(source = "untrusted-source"),
+            observation("account:${UUID.randomUUID()}", booking, 1),
+            observation("transaction:${UUID.randomUUID()}", booking, 1).copy(relation = "BOOKED_AS"),
+        )
+        append(booking, "booking-excluded:$booking", excluded)
+        fun incoming(
+            bank: String = BANK,
+            generation: Long = GENERATION,
+            asOf: Instant = TIME.plusSeconds(2),
+            limit: Int = 1,
+        ) = onVertx {
+            GraphEdgeHistoryReader(sessions, mapper, bank, generation, 5000).find(
+                listOf(booking),
+                listOf(GraphEdgeRule("transaction-service", "transaction:%", setOf("BOOKING_REQUESTED"))),
+                asOf,
+                limit,
+                incoming = true,
+            )
+        }
+        val prior = incoming(asOf = TIME.plusSeconds(1)).single()
+        assertThat(prior.fromKey).isEqualTo(payment)
+        assertThat(prior.toKey).isEqualTo(booking)
+        assertThat(prior.sourceVersion).isEqualTo(1)
+        assertThat(prior.evidenceRef).isEqualTo("booking-prior:$booking")
+        assertThat(incoming().single().evidenceRef).isEqualTo("booking-later:$booking")
+        assertThat(incoming(bank = "another-bank")).isEmpty()
+        assertThat(incoming(generation = GENERATION + 1)).isEmpty()
+        val secondPayment = "transaction:${UUID.randomUUID()}"
+        append(secondPayment, "booking-second:$booking", listOf(observation(secondPayment, booking, 3)))
+        val allEligible = incoming(asOf = TIME.plusSeconds(3), limit = 2)
+        assertThat(allEligible.map { it.fromKey }).containsExactly(payment, secondPayment)
+        val bounded = incoming(asOf = TIME.plusSeconds(3), limit = 1)
+        assertThat(bounded.map { it.fromKey }).containsExactly(secondPayment)
+        assertThat(bounded.single().evidenceRef).isEqualTo("booking-second:$booking")
+    }
+
     private fun seedBaseline(root: String, target: String) {
         val config = ConfigProvider.getConfig()
         DriverManager.getConnection(

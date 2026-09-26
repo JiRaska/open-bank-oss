@@ -65,7 +65,7 @@ class ProjectionGenerationReplayIT {
         val complaintPayload = """{"schemaVersion":1,"sourceVersion":1,"aggregateRevision":1,""" +
             """"eventType":"complaint.received","sourceService":"dispute-service",""" +
             """"complaintId":"$complaint","reference":"$reference","status":"RECEIVED",""" +
-            """"occurredAt":"$TIME","accountId":"$account","transactionId":"$payment"}"""
+            """"occurredAt":"$TIME","accountId":"$account","transactionId":"$booking"}"""
         val paymentPayload = """{"eventType":"DOMESTIC_PAYMENT_CREATED","sourceService":"domestic-payment",""" +
             """"paymentId":"$payment","aggregateRevision":1,"status":"RECEIVED",""" +
             """"occurredAt":"$TIME"}"""
@@ -102,7 +102,7 @@ class ProjectionGenerationReplayIT {
         )
         val expectedEdges = setOf(
             "complaint:$reference|account:$account|CONCERNS_ACCOUNT",
-            "complaint:$reference|transaction:$payment|CONCERNS_TRANSACTION",
+            "complaint:$reference|booking-transaction:$booking|CONCERNS_TRANSACTION",
             "transaction:$payment|payment-stage:domestic:$payment:1|CREATED",
             "transaction:$payment|booking-transaction:$booking|BOOKING_REQUESTED",
             "transaction:$payment|clearing-item:$item|SUBMITTED_TO",

@@ -109,7 +109,7 @@ internal class ComplaintSnapshot(private val revision: ComplaintRevisionEntity) 
     private val references = listOfNotNull(
         revision.accountId?.let { node("account:$it", "ACCOUNT", it, "Account reference") to "CONCERNS_ACCOUNT" },
         revision.transactionId?.let {
-            node("transaction:$it", "TRANSACTION", it, "Transaction reference") to "CONCERNS_TRANSACTION"
+            node("booking-transaction:$it", "TRANSACTION", it, "Transaction reference") to "CONCERNS_TRANSACTION"
         },
         revision.disputeId?.let { node("dispute:$it", "DISPUTE", it, "Dispute reference") to "RELATED_DISPUTE" },
     )
