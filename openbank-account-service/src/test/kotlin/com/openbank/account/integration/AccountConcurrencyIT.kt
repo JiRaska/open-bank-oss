@@ -5,6 +5,7 @@
 package com.openbank.account.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
@@ -25,7 +26,10 @@ import java.util.concurrent.TimeUnit
  * scheduler that happens to serialise the requests still proves "no double effect".
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 class AccountConcurrencyIT {
 
     private val productId = UUID.fromString("00000000-2222-0000-0000-000000000001")

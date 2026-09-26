@@ -9,8 +9,10 @@ import com.openbank.libs.persistence.outbox.OutboxDispatch
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -54,7 +56,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(CardOutboxDispatchIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.cardissuance.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_cards_it")],
+)
 class CardOutboxBreakerOpenIT {
 
     @Inject

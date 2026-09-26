@@ -8,7 +8,9 @@ import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.VelocityWindow
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
@@ -36,7 +38,10 @@ import java.util.UUID
  * cross-test interference and no cleanup needed.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.fraud.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fraud_it")],
+)
 class VelocityAggregateRepositoryImplIT {
 
     @Inject

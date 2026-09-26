@@ -7,13 +7,14 @@ import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.usecase.queueAllowance
 import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
-import com.openbank.lending.it.PostgresRedisTestResource
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -73,7 +74,10 @@ class AllowanceAtomicityTestResource(
 
 @QuarkusTest
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class AllowanceOutboxAtomicityIT {
     @Inject
     lateinit var dataSource: DataSource

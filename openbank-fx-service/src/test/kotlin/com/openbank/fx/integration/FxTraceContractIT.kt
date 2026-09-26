@@ -8,12 +8,13 @@ import com.openbank.fx.domain.screening.ScreeningMatchStatus
 import com.openbank.fx.domain.screening.ScreeningResult
 import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.fx.infrastructure.client.SanctionsScreeningAdapter
-import com.openbank.fx.it.PostgresRedisTestResource
 import com.openbank.fx.it.TraceContractProfile
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
@@ -39,7 +40,10 @@ import java.util.UUID
  * 201, is invisible to every assertion this module already had, and lands in a trace of its own.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fx_it")],
+)
 @TestProfile(TraceContractProfile::class)
 class FxTraceContractIT {
 

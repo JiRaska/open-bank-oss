@@ -11,7 +11,9 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -62,7 +64,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * is otherwise healthy — turning this fix into the very problem it removes.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.aml.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_aml_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "ROLE_COMPLIANCE"])
 @Provider("openbank-aml-service")
 @PactBroker

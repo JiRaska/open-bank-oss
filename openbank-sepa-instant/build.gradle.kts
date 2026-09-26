@@ -46,6 +46,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(project(":openbank-libs-testing"))
     // In-memory reactive-messaging connector: SctInstBootSmokeIT swaps the Kafka outgoing
     // channel to InMemoryConnector so the boot smoke-test needs no broker (ADR-0104 D4 / #578).
     testImplementation(libs.smallrye.reactive.messaging.inmemory)

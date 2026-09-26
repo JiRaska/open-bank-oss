@@ -4,9 +4,10 @@
 
 package com.openbank.account.integration
 
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -76,7 +77,10 @@ import java.util.UUID
  * `theLegacyArmOmitsTheGrantor` red here and flips the customer-edge sibling's 403 to a 201.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @QuarkusTestResource(LegacyArmOmitsGrantorIT.InMemoryDelegationChannel::class)
 class LegacyArmOmitsGrantorIT {
 

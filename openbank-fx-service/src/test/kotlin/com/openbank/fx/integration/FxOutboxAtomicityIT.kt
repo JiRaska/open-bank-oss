@@ -8,10 +8,12 @@ import com.openbank.fx.domain.screening.ScreeningMatchStatus
 import com.openbank.fx.domain.screening.ScreeningResult
 import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.fx.infrastructure.client.SanctionsScreeningAdapter
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -66,7 +68,10 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(FxOutboxAtomicityIT.NoDispatchInMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.fx.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fx_it")],
+)
 class FxOutboxAtomicityIT {
 
     class NoDispatchInMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

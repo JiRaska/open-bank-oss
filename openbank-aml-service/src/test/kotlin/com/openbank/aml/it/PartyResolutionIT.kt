@@ -4,7 +4,9 @@
 package com.openbank.aml.it
 
 import com.openbank.aml.infrastructure.persistence.repository.AmlCaseRepositoryImpl
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -33,7 +35,10 @@ import java.util.UUID
  * is which rows the sweep selects and what it writes, not that a rest-client works.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_aml_it")],
+)
 class PartyResolutionIT {
 
     @Inject

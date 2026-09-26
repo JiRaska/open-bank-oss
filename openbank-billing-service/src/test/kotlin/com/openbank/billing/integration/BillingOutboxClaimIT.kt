@@ -5,11 +5,12 @@ package com.openbank.billing.integration
 
 import com.openbank.billing.infrastructure.outbox.BillingOutboxRepositoryImpl
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
-import com.openbank.billing.it.PostgresRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -33,7 +34,10 @@ import java.util.UUID
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_billing_it")],
+)
 class BillingOutboxClaimIT {
 
     @Inject

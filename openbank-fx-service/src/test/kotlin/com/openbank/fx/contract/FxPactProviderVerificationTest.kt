@@ -15,7 +15,9 @@ import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateSource
 import com.openbank.fx.domain.model.RateType
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
@@ -58,7 +60,10 @@ import java.util.concurrent.TimeUnit
  * broker).
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.fx.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fx_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-fx-service")
 @PactBroker

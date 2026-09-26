@@ -15,9 +15,10 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.infrastructure.persistence.repository.DelegatedSpendBindingRepositoryImpl
-import com.openbank.domestic.it.PostgresRedisTestResource
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.uni
@@ -42,7 +43,10 @@ import javax.sql.DataSource
 /** Real-Postgres proof of the delegated payment create/finalizer serialization boundary. */
 @QuarkusTest
 @QuarkusTestResource(DomesticPaymentBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_domestic_payment_it")],
+)
 class DelegatedSpendBindingStateMachineIT {
     @Inject
     lateinit var bindingRepository: DelegatedSpendBindingRepository

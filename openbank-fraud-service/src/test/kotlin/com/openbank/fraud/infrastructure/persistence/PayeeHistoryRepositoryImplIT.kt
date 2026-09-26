@@ -7,7 +7,9 @@ package com.openbank.fraud.infrastructure.persistence
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.domain.model.FraudVerdict
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.vertx.mutiny.pgclient.PgPool
 import jakarta.inject.Inject
@@ -24,7 +26,10 @@ import java.util.UUID
  * idempotent-replay behaviour is verified for real, not just "a query happened".
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.fraud.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fraud_it")],
+)
 class PayeeHistoryRepositoryImplIT {
 
     @Inject

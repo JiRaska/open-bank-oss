@@ -12,8 +12,10 @@ import com.openbank.libs.domain.feature.TRANSACTION_INITIATED
 import com.openbank.libs.domain.feature.VELOCITY_TXN_COUNT_H1
 import com.openbank.libs.domain.feature.VELOCITY_TXN_COUNT_H24
 import com.openbank.libs.feature.online.RedisOnlineFeatureStore
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -29,7 +31,10 @@ import java.util.UUID
  * a production model regression. A fixed bucket-relative clock makes this independent of wall time.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.fraud.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fraud_it")],
+)
 class FeatureParityIT {
 
     @Inject

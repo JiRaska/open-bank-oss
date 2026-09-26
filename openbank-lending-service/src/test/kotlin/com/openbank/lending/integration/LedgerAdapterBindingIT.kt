@@ -7,9 +7,10 @@ package com.openbank.lending.integration
 import com.openbank.lending.infrastructure.adapter.RestLedgerPostingAdapter
 import com.openbank.lending.infrastructure.client.AccountServiceClient
 import com.openbank.lending.infrastructure.client.BorrowerCreditClient
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.arc.Arc
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -37,7 +38,10 @@ import org.junit.jupiter.api.Test
  * whether the adapter bean exists at all is the question the build-time gate actually answers.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 @TestProfile(RestBackendsProfile::class)
 class LedgerAdapterBindingIT {
 
@@ -71,7 +75,10 @@ class LedgerAdapterBindingIT {
  * what decides.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 @TestProfile(OfflineBackendsProfile::class)
 class InertLedgerAdapterBindingIT {
 

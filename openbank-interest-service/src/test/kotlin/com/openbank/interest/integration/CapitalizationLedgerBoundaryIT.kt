@@ -16,7 +16,9 @@ import com.openbank.interest.domain.tax.TaxResidency
 import com.openbank.interest.domain.tax.TaxpayerType
 import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestCapitalizationEntity
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import jakarta.inject.Inject
@@ -46,7 +48,10 @@ import java.util.UUID
  * See [LedgerBoundary]'s KDoc for exactly what is real here and what is not.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.interest.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_interest_it")],
+)
 class CapitalizationLedgerBoundaryIT {
 
     @Inject

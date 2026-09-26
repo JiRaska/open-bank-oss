@@ -7,8 +7,9 @@ package com.openbank.billing.integration
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.infrastructure.scheduler.BillingCycleScheduler
-import com.openbank.billing.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -47,7 +48,10 @@ import java.time.LocalDate
  * the database and commits a row at all, not what it decides once it gets there.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_billing_it")],
+)
 @TestProfile(BillingCycleSweepVertxContextIT.FastSweepProfile::class)
 class BillingCycleSweepVertxContextIT {
 
