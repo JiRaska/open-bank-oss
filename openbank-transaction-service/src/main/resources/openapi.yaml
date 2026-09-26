@@ -14,7 +14,8 @@ info:
   # the logo-ingest routes. 1.16.0 was claimed on main by #8838 while this branch was open, so this
   # takes the next free minor; whoever lands second renumbers (the matching version line merging
   # "cleanly" is the trap — git sees identical text, not a taken version).
-  version: 1.17.0
+  # 1.17.0 -> 1.18.0: optional originatingPaymentId on the domestic machine booking request.
+  version: 1.18.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -60,6 +61,18 @@ paths:
       tags: [Transactions]
       summary: Initiate a new transaction
       operationId: initiateTransaction
+      description: |
+        An optional originatingPaymentId records the authenticated domestic-payment producer's
+        assertion that its payment caused this booking; it does not independently verify the
+        payment's existence or ownership. Supplying it requires ROLE_API, authenticated principal
+        service-account-openbank-domestic-payment, verified token azp openbank-domestic-payment,
+        type DEBIT, rail DOMESTIC and a non-null sourceAccountId.
+
+        Replaying an idempotency key returns the existing transaction without another booking or
+        event. If both stored and supplied originatingPaymentId values are non-null and differ,
+        the replay is rejected with 409. A legacy transaction with no stored payment identifier
+        remains unlinked when replayed with one: 201 returns the existing transaction without
+        backfilling or publishing a new event. Omitting the identifier preserves any stored link.
       security:
         - bearerAuth: []
       requestBody:
@@ -70,13 +83,15 @@ paths:
               $ref: '#/components/schemas/InitiateTransactionRequest'
       responses:
         '201':
-          description: Transaction created
+          description: Transaction created, or existing transaction returned for an idempotent replay
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Idempotent replay supplies a different non-null originating payment identifier
 
   /api/v1/transactions/search:
     get:
@@ -970,6 +985,16 @@ components:
           type: string
           format: uuid
           nullable: true
+        originatingPaymentId:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Domestic-payment's authenticated assertion of the rail payment that caused this booking.
+            Optional for existing callers. A non-null value requires ROLE_API, authenticated principal
+            service-account-openbank-domestic-payment and verified token azp openbank-domestic-payment,
+            with type DEBIT, rail DOMESTIC and a non-null sourceAccountId. The identifier is not
+            independent proof of payment existence or ownership; legacy unlinked bookings remain unlinked.
         targetAccountId:
           type: string
           format: uuid
