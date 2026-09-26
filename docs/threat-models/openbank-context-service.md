@@ -67,6 +67,15 @@ and linked payment projectors still require their own historical reproducibility
 This increases retained restricted references: governed retention/restriction/erasure and
 replay operations remain production prerequisites. No bulk history export is introduced.
 
+Normalized payment/booking/rail nodes use a shared append-only history and event digest store
+with forced bank-scoped RLS. A changed event node set fails before current-state deduplication;
+older deliveries are retained without replacing the latest current materialization. Source-owned
+nodes and references are explicitly distinct, and a future owning-source fact cannot erase an
+earlier reference. Historical lookups use scoped indexed top-one candidates for at most 100 keys,
+retain SQL and caller timeouts, and suppress dangling links when a node's history is unavailable.
+No raw source payload is retained. Stable edge-history correctness and the increased history
+retention footprint remain separate production acceptance requirements.
+
 ## Delegation source history
 
 The authority-history endpoint adds root-scoped assignments and an append-only source observation

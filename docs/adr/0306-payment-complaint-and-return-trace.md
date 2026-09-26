@@ -89,6 +89,19 @@ current-state rows. Controlled replay from complete retained source events is re
 older complaint roots. Retention/erasure operations for these restricted snapshots still need an
 approved operational lifecycle before production activation. Lifecycle evidence owned by other
 projectors and the full trace's historical reproducibility remain separate acceptance work.
+Domestic payment, transaction/ledger booking and clearing/SEPA-return projections now share an
+append-only normalized node-history store. Every accepted event appends its node facts before
+current-state deduplication, including older arrivals. An event-level digest rejects a changed
+node set on replay; node-level digests additionally bind the exact retained fact. Source-owned
+nodes take precedence over reference placeholders only when the source fact existed at `asOf`.
+The reader obtains at most two indexed candidates for each of at most 100 selected keys; it
+does not sort the entire graph history. Missing retained nodes suppress dangling links and mark
+the result truncated. Eligible current rows remain readable as limited baseline facts only at
+or after their stored source event time; they cannot reconstruct overwritten earlier revisions.
+Replay remains required for pre-migration history. Stable payment/booking/clearing edge revisions and correction/withdrawal
+semantics still need historical storage; current first-write links cannot prove a complete
+historical trace after reverse delivery or source correction. The return's reversal transaction
+ID is labelled a reference, not a booked reversal; ledger evidence remains the booking proof.
 The fixed complaint query follows only `CONCERNS_TRANSACTION` and an allow-listed directed lifecycle
 second hop, plus source/prefix/relation allow-listed booking-transaction and ledger-journal hops, so
 it cannot pivot from a shared transaction into another complaint. `TransactionInitiated` carries the

@@ -50,7 +50,11 @@ class DomesticPaymentProjectionConsumer(
             }
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected domestic payment event source" }
             val event = parse(root)
-            sessions.withTransaction { session, _ -> project(session, event) }
+            sessions.withTransaction { session, _ ->
+                session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
+                    .setParameter("timeout", "${timeoutMs}ms").singleResult
+                    .flatMap { project(session, event) }
+            }
                 .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", STREAM, "outcome", "projected").increment()
             projectionLagSeconds.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
@@ -63,32 +67,43 @@ class DomesticPaymentProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: DomesticPaymentProjectionEvent): Uni<Void> = mutation(
-        session,
-        """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
-        """.trimIndent(),
-        mapOf(
-            "bankScope" to bankScope,
-            "eventKey" to event.eventKey,
-            "source" to SOURCE_SERVICE,
-            "aggregateRef" to event.paymentKey,
-            "version" to event.sourceVersion,
-            "occurredAt" to event.occurredAt,
-            "processedAt" to clock.instant(),
-        ),
-    ).flatMap { inserted ->
-        if (inserted == 0) {
-            Uni.createFrom().voidItem()
-        } else {
-            upsertNode(session, event.paymentNode)
-                .flatMap { upsertNode(session, event.stageNode) }
-                .flatMap { upsertEdge(session, event.stageEdge) }
-                .replaceWithVoid()
+    private fun project(session: Mutiny.Session, event: DomesticPaymentProjectionEvent): Uni<Void> =
+        GraphNodeHistoryWriter.append(
+            session,
+            bankScope,
+            projectionGeneration,
+            event.eventKey,
+            event.paymentKey,
+            listOf(event.paymentNode.observation(), event.stageNode.observation()),
+            clock.instant(),
+        ).flatMap {
+            mutation(
+                session,
+                """INSERT INTO context_projection_events
+                    (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
+                    VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                    ON CONFLICT (bank_scope, event_key) DO NOTHING
+                """.trimIndent(),
+                mapOf(
+                    "bankScope" to bankScope,
+                    "eventKey" to event.eventKey,
+                    "source" to SOURCE_SERVICE,
+                    "aggregateRef" to event.paymentKey,
+                    "version" to event.sourceVersion,
+                    "occurredAt" to event.occurredAt,
+                    "processedAt" to clock.instant(),
+                ),
+            )
+        }.flatMap { inserted ->
+            if (inserted == 0) {
+                Uni.createFrom().voidItem()
+            } else {
+                upsertNode(session, event.paymentNode)
+                    .flatMap { upsertNode(session, event.stageNode) }
+                    .flatMap { upsertEdge(session, event.stageEdge) }
+                    .replaceWithVoid()
+            }
         }
-    }
 
     private fun upsertNode(session: Mutiny.Session, node: PaymentProjectionNode): Uni<Int> = mutation(
         session,
@@ -211,6 +226,17 @@ private data class PaymentProjectionNode(
     val label: String,
     val validFrom: Instant,
     val sourceVersion: Long,
+)
+
+private fun PaymentProjectionNode.observation() = GraphNodeObservation(
+    key,
+    type,
+    "domestic-payment",
+    sourceRef,
+    label,
+    validFrom,
+    sourceVersion,
+    true,
 )
 
 private data class PaymentProjectionEdge(

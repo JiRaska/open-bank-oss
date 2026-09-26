@@ -342,6 +342,10 @@ paths:
         endpoint does not reconstruct what was known at that time. Current case assignment
         and policy are rechecked even for historical reads. Missing retained revisions
         return 404; overwritten pre-migration evidence is never inferred from current rows.
+        Payment, booking and rail nodes use retained source facts with explicit reference
+        precedence; a current node may serve only as an eligible baseline at or after its
+        source event time. Missing node evidence suppresses dangling links and marks the
+        neighborhood truncated. Stable edge history remains incomplete.
       parameters:
         - $ref: '#/components/parameters/reference'
         - $ref: '#/components/parameters/caseId'

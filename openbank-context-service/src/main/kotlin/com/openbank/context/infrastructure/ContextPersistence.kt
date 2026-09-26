@@ -301,6 +301,7 @@ internal fun <T> Mutiny.SessionFactory.boundedGraphRead(timeoutMs: Int, block: (
 @ApplicationScoped
 class ContextGraphRepository(
     private val sessions: Mutiny.SessionFactory,
+    private val objectMapper: ObjectMapper,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
@@ -371,11 +372,12 @@ class ContextGraphRepository(
         val boundedEdges = edges.take(maxEdges)
         val keys = graphRoot.boundedKeys(boundedEdges, maxNodes)
         val nodes = graphRoot.mergeNodes(keys, findNodes(namespace, keys, asOf))
+        val visibleKeys = nodes.map { it.key }.toSet()
         return ContextNeighborhood(
             root,
             nodes.map { it.domain() },
-            boundedEdges.filter { it.fromKey in keys && it.toKey in keys }.map { it.domain() },
-            edges.size > maxEdges || nodes.size >= maxNodes,
+            boundedEdges.filter { it.fromKey in visibleKeys && it.toKey in visibleKeys }.map { it.domain() },
+            edges.size > maxEdges || nodes.size >= maxNodes || visibleKeys.size < keys.size,
         )
     }
 
@@ -509,16 +511,22 @@ class ContextGraphRepository(
         namespace: ContextNamespace,
         keys: List<String>,
         asOf: Instant,
-    ): List<ContextNodeEntity> = sessions.boundedGraphRead(queryTimeoutMs) { session ->
-        session.createQuery(
-            "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                "namespace = :namespace and key in (:keys) and validFrom <= :asOf and " +
-                "(validTo is null or validTo > :asOf)",
-            ContextNodeEntity::class.java,
-        ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-            .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
-            .setParameter("keys", keys).resultList
-    }.awaitSuspending()
+    ): List<ContextNodeEntity> {
+        if (namespace == ContextNamespace.COMPLAINT) {
+            return GraphNodeHistoryReader(sessions, bankScope, projectionGeneration, queryTimeoutMs, objectMapper)
+                .find(keys, asOf)
+        }
+        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
+            session.createQuery(
+                "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                    "namespace = :namespace and key in (:keys) and validFrom <= :asOf and " +
+                    "(validTo is null or validTo > :asOf)",
+                ContextNodeEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
+                .setParameter("keys", keys).resultList
+        }.awaitSuspending()
+    }
 
     private companion object {
         // Keep each direction index-ordered and bounded before merging. The previous OR predicate

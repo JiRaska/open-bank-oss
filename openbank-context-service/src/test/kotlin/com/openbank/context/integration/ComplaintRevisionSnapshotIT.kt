@@ -5,6 +5,8 @@ import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.infrastructure.AssignmentAdministrationService
 import com.openbank.context.infrastructure.ComplaintProjectionConsumer
 import com.openbank.context.infrastructure.ContextGraphRepository
+import com.openbank.context.infrastructure.DomesticPaymentProjectionConsumer
+import com.openbank.context.infrastructure.PaymentBookingProjectionConsumer
 import com.openbank.context.infrastructure.ProposeAssignmentRequest
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -39,6 +41,12 @@ class ComplaintRevisionSnapshotIT {
 
     @Inject
     lateinit var graph: ContextGraphRepository
+
+    @Inject
+    lateinit var payments: DomesticPaymentProjectionConsumer
+
+    @Inject
+    lateinit var bookings: PaymentBookingProjectionConsumer
 
     @Inject
     lateinit var assignments: AssignmentAdministrationService
@@ -126,6 +134,81 @@ class ComplaintRevisionSnapshotIT {
             .header("X-Investigation-Purpose", "PAYMENT_COMPLAINT")
             .queryParam("asOf", TIME.plusSeconds(1).toString())
             .get("/api/v1/context/complaints/$reference").then().statusCode(403)
+    }
+
+    @Test
+    fun `later payment status does not erase the payment evidence at the earlier complaint time`() {
+        val reference = "CMP-PAYMENT-${UUID.randomUUID()}"
+        val payment = UUID.randomUUID()
+        onVertx {
+            consumer.consume(
+                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), payment),
+            )
+            payments.consume(paymentEvent(payment, 2, "SETTLED"))
+            payments.consume(paymentEvent(payment, 1, "RECEIVED"))
+            payments.consume(paymentEvent(payment, 2, "SETTLED"))
+        }
+        val earlier = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(1), 50, 50)
+            },
+        )
+        assertThat(earlier.nodes.single { it.key == "transaction:$payment" }.label)
+            .isEqualTo("Domestic payment · RECEIVED")
+        val later = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(2), 50, 50)
+            },
+        )
+        assertThat(later.nodes.single { it.key == "transaction:$payment" }.label)
+            .isEqualTo("Domestic payment · SETTLED")
+        assertThatThrownBy { onVertx { payments.consume(paymentEvent(payment, 1, "REJECTED")) } }
+            .hasStackTraceContaining("conflicting graph node revision")
+    }
+
+    @Test
+    fun `eligible legacy owner baseline beats a retained foreign reference and changed node sets fail replay`() {
+        val reference = "CMP-BASELINE-${UUID.randomUUID()}"
+        val payment = UUID.randomUUID()
+        val booking = UUID.randomUUID()
+        val payload = """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+            """"aggregateId":"$booking","originatingPaymentId":"$payment","version":0,"occurredAt":"${TIME.plusSeconds(
+                1,
+            )}"}"""
+        onVertx { bookings.consumeTransaction(payload) }
+        scopedConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE context_nodes SET source_system = 'domestic-payment', source_version = 7, " +
+                    "display_label = 'Domestic payment · SENT_TO_CLEARING' " +
+                    "WHERE bank_scope = 'openbank-cz' AND node_key = ?",
+            ).use { statement ->
+                statement.setString(1, "transaction:$payment")
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            connection.commit()
+        }
+        onVertx {
+            consumer.consume(
+                event(UUID.randomUUID(), reference, 1, "complaint.received", "RECEIVED", UUID.randomUUID(), payment),
+            )
+        }
+        val view = requireNotNull(
+            onVertx {
+                graph.neighborhood(ContextNamespace.COMPLAINT, "complaint:$reference", TIME.plusSeconds(1), 50, 50)
+            },
+        )
+        assertThat(view.nodes.single { it.key == "transaction:$payment" }.label)
+            .isEqualTo("Domestic payment · SENT_TO_CLEARING")
+        assertThatThrownBy {
+            onVertx { bookings.consumeTransaction(payload.replace(payment.toString(), UUID.randomUUID().toString())) }
+        }.hasStackTraceContaining("conflicting graph node revision")
+    }
+
+    private fun paymentEvent(id: UUID, revision: Long, status: String): String {
+        val type = if (revision == 1L) "DOMESTIC_PAYMENT_CREATED" else "DOMESTIC_PAYMENT_STATUS_CHANGED"
+        val statusField = if (revision == 1L) "status" else "newStatus"
+        return """{"eventType":"$type","sourceService":"domestic-payment","paymentId":"$id",""" +
+            """"aggregateRevision":$revision,"$statusField":"$status","occurredAt":"${TIME.plusSeconds(revision)}"}"""
     }
 
     private fun event(

@@ -87,7 +87,14 @@ class PaymentRailProjectionConsumer(
                     meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "ignored").increment()
                     return
                 }
-                sessions.withTransaction { session, _ -> project(session, event) }
+                sessions.withTransaction { session, _ ->
+                    session.createNativeQuery(
+                        "select set_config('statement_timeout', :timeout, true)",
+                        String::class.java,
+                    )
+                        .setParameter("timeout", "${timeoutMs}ms").singleResult
+                        .flatMap { project(session, event) }
+                }
                     .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
                 meters.counter(METRIC_EVENTS, "stream", stream, "outcome", "projected").increment()
                 (if (stream == CLEARING_STREAM) clearingLag else sepaReturnLag)
@@ -101,23 +108,33 @@ class PaymentRailProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: RailProjectionEvent): Uni<Void> = mutation(
+    private fun project(session: Mutiny.Session, event: RailProjectionEvent): Uni<Void> = GraphNodeHistoryWriter.append(
         session,
-        """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
-        """.trimIndent(),
-        mapOf(
-            "bankScope" to bankScope,
-            "eventKey" to event.eventKey,
-            "source" to event.source,
-            "aggregateRef" to event.aggregateRef,
-            "version" to event.version,
-            "occurredAt" to event.occurredAt,
-            "processedAt" to clock.instant(),
-        ),
-    ).flatMap { inserted ->
+        bankScope,
+        projectionGeneration,
+        event.eventKey,
+        event.aggregateRef,
+        event.nodes.map { it.observation() },
+        clock.instant(),
+    ).flatMap {
+        mutation(
+            session,
+            """INSERT INTO context_projection_events
+                    (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
+                    VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                    ON CONFLICT (bank_scope, event_key) DO NOTHING
+            """.trimIndent(),
+            mapOf(
+                "bankScope" to bankScope,
+                "eventKey" to event.eventKey,
+                "source" to event.source,
+                "aggregateRef" to event.aggregateRef,
+                "version" to event.version,
+                "occurredAt" to event.occurredAt,
+                "processedAt" to clock.instant(),
+            ),
+        )
+    }.flatMap { inserted ->
         if (inserted == 0) {
             Uni.createFrom().voidItem()
         } else {
@@ -232,6 +249,17 @@ private data class RailNode(
     )
 }
 
+private fun RailNode.observation() = GraphNodeObservation(
+    key,
+    type,
+    source,
+    sourceRef,
+    label,
+    validFrom,
+    version,
+    type in setOf("CLEARING_ITEM", "CLEARING_EVIDENCE", "RETURN_EVIDENCE"),
+)
+
 private data class RailEdge(val from: String, val to: String, val relation: String)
 
 private data class RailProjectionEvent(
@@ -308,7 +336,7 @@ private data class RailProjectionEvent(
                             "REVERSAL_TRANSACTION",
                             "sepa-payment",
                             id,
-                            "Reversal booked",
+                            "Reversal transaction reference",
                             at,
                             version,
                         )
