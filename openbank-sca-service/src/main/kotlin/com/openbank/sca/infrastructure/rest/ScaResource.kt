@@ -4,15 +4,16 @@
 
 package com.openbank.sca.infrastructure.rest
 
-import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
-import com.openbank.libs.idempotency.RequestFingerprint
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.sca.application.port.`in`.ConsumeScaCommand
 import com.openbank.sca.application.port.`in`.ConsumeScaUseCase
 import com.openbank.sca.application.port.`in`.EnrollDeviceCommand
@@ -65,6 +66,8 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.UUID
 
@@ -236,37 +239,47 @@ class ScaResource(
         @HeaderParam("X-Request-ID") xRequestId: String?,
     ): Response {
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
-        val requestHash = fingerprint("POST", CHALLENGES_PATH, request)
-        requestKey?.let { key ->
-            idempotencyStore.lookup(scaCreateKey(request.partyId, key), requestHash)?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
-        }
-
-        val challenge = initiateSca.initiate(
-            InitiateScaCommand(
-                partyId = request.partyId,
-                purpose = request.purpose,
-                preferredMethod = request.preferredMethod,
-                dynamicLinkingData = request.dynamicLinkingData,
-                redirectUrl = request.redirectUrl,
-                onBehalfOfPartyId = request.onBehalfOfPartyId,
-            ),
+        val command = InitiateScaCommand(
+            partyId = request.partyId,
+            purpose = request.purpose,
+            preferredMethod = request.preferredMethod,
+            dynamicLinkingData = request.dynamicLinkingData,
+            redirectUrl = request.redirectUrl,
+            onBehalfOfPartyId = request.onBehalfOfPartyId,
         )
-        val responseBody = ScaChallengeResponse.from(challenge)
-        requestKey?.let { key ->
-            idempotencyStore.save(
-                scaCreateKey(request.partyId, key),
-                requestHash = requestHash,
-                statusCode = 201,
-                responseBody = objectMapper.writeValueAsString(responseBody),
-                ttlSeconds = 300,
-            )
+        if (requestKey == null) {
+            return Response.status(201).entity(ScaChallengeResponse.from(initiateSca.initiate(command))).build()
         }
+        // #10916: the key is bound to the request it was first used for, and claimed atomically
+        // BEFORE any challenge is minted — a concurrent duplicate sees InFlight, a different body
+        // sees Mismatch, and neither mints anything.
+        val storeKey = scaCreateKey(request.partyId, requestKey)
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", CHALLENGES_PATH, request)
+        when (val reservation = idempotencyStore.reserve(storeKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
+                .type(MediaType.APPLICATION_JSON)
+                .header("X-Idempotency-Replayed", "true")
+                .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
+        }
+        // Any failure (including cancellation) drops the marker so a retry of the same request
+        // can run instead of reading InFlight until the marker's TTL lapses.
+        var completed = false
+        val responseBody = try {
+            ScaChallengeResponse.from(initiateSca.initiate(command)).also { completed = true }
+        } finally {
+            if (!completed) withContext(NonCancellable) { idempotencyStore.release(storeKey, requestHash) }
+        }
+        idempotencyStore.save(
+            storeKey,
+            requestHash = requestHash,
+            statusCode = 201,
+            responseBody = objectMapper.writeValueAsString(responseBody),
+            ttlSeconds = 300,
+        )
         return Response.status(201).entity(responseBody).build()
     }
 
@@ -411,20 +424,6 @@ class ScaResource(
     }
 
     private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
-
-    /**
-     * Binds an Idempotency-Key to the request it was first used for (#10916): the deserialised
-     * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
-     * while any field value does.
-     */
-    private fun fingerprint(method: String, path: String, body: Any): String =
-        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
-
-    private val canonicalMapper: ObjectMapper by lazy {
-        objectMapper.copy()
-            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-    }
 
     private companion object {
         const val CHALLENGES_PATH = "/api/v1/sca/challenges"

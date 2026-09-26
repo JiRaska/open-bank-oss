@@ -22,7 +22,8 @@ import javax.sql.DataSource
 /**
  * #10916 through real HTTP and real Redis: an Idempotency-Key on `POST /api/v1/sca/challenges`
  * is bound to the request it was first used for. A retry replays; the same key with a different
- * body is refused 422 and mints nothing; key order / whitespace do not count as a different body.
+ * body is refused 409 IDEMPOTENCY_KEY_REUSED and mints nothing; key order / whitespace do not count
+ * as a different body; a request that fails releases its reservation so the key can be reused.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
@@ -55,7 +56,7 @@ class ScaInitiateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
-    fun `same key with a different body is refused 422 and mints nothing`() {
+    fun `same key with a different body is refused 409 and mints nothing`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
         initiate(key, body(party, "https://example.test/a"), expect = 201)
@@ -67,7 +68,7 @@ class ScaInitiateIdempotencyFingerprintIT {
         } When {
             post("/api/v1/sca/challenges")
         } Then {
-            statusCode(422)
+            statusCode(409)
             body("code", equalTo("IDEMPOTENCY_KEY_REUSED"))
         }
         assertThat(challengeCount(party)).isEqualTo(1)
@@ -96,6 +97,32 @@ class ScaInitiateIdempotencyFingerprintIT {
             header("X-Idempotency-Replayed", "true")
             body("id", equalTo(first))
         }
+        assertThat(challengeCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `a request that fails releases the key so a retry is not stuck in progress`() {
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        // TOTP has no delivery path: the use case refuses it (422) after the key was reserved.
+        val undeliverable =
+            """{"partyId":"$party","purpose":"LOGIN","preferredMethod":"TOTP","redirectUrl":"https://example.test/a"}"""
+        repeat(2) {
+            Given {
+                contentType("application/json")
+                header("Idempotency-Key", key)
+                body(undeliverable)
+            } When {
+                post("/api/v1/sca/challenges")
+            } Then {
+                // Not 409 IDEMPOTENCY_REQUEST_IN_PROGRESS: the failed attempt released its marker.
+                statusCode(422)
+                body("code", equalTo("VALIDATION_ERROR"))
+            }
+        }
+        // The corrected request may reuse the key — no stale marker binds it to the failed body.
+        initiate(key, body(party, "https://example.test/a"), expect = 201)
         assertThat(challengeCount(party)).isEqualTo(1)
     }
 
