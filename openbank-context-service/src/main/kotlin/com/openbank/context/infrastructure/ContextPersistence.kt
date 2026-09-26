@@ -306,12 +306,19 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
     lateinit var updatedAt: Instant
 }
 
-/** The reactive timeout bounds the caller; PostgreSQL must stop the query as well. */
+/** Operation failure reaches the managed transaction before rollback and connection release. */
+internal fun <T> Mutiny.SessionFactory.boundedContextTransaction(
+    timeoutMs: Int,
+    block: (Mutiny.Session) -> Uni<T>,
+): Uni<T> = withTransaction { session, _ ->
+    session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
+        .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
+        .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+}
+
+/** SQL and work are bounded; pool acquisition and transaction cleanup are outside this timer. */
 internal fun <T> Mutiny.SessionFactory.boundedGraphRead(timeoutMs: Int, block: (Mutiny.Session) -> Uni<T>): Uni<T> =
-    withTransaction { session, _ ->
-        session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
-            .setParameter("timeout", "${timeoutMs}ms").singleResult.flatMap { block(session) }
-    }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail()
+    boundedContextTransaction(timeoutMs, block)
 
 @ApplicationScoped
 class ContextGraphRepository(
@@ -590,7 +597,7 @@ class CaseAssignmentRepository(
         purpose: String,
         root: String,
         at: Instant,
-    ): Boolean = sessions.withSession { session ->
+    ): Boolean = sessions.boundedContextTransaction(queryTimeoutMs) { session ->
         session.createQuery(
             "select count(a) from CaseAssignmentEntity a where bankScope = :bankScope and principalId = :principal " +
                 "and caseId = :caseId and purpose = :purpose and rootRef = :root and validFrom <= :at and validTo > :at",
@@ -598,7 +605,7 @@ class CaseAssignmentRepository(
         ).setParameter("bankScope", bankScope).setParameter("principal", principalId)
             .setParameter("caseId", caseId).setParameter("purpose", purpose).setParameter("root", root)
             .setParameter("at", at).singleResult
-    }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
+    }.awaitSuspending() > 0
 }
 
 @ApplicationScoped
@@ -634,13 +641,13 @@ class ContextReadAuditRepository(
             status = "PENDING"
             updatedAt = entity.occurredAt
         }
-        sessions.withTransaction { session, _ ->
+        sessions.boundedContextTransaction(queryTimeoutMs) { session ->
             session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
                 .setParameter("bank", bankScope).singleResult
                 .flatMap { session.persist(entity) }
                 .flatMap { session.persist(commitment) }
-        }
-            .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+                .flatMap { session.flush() }
+        }.awaitSuspending()
     }
 
     override suspend fun recordDisclosure(entry: ContextDisclosureAudit) {
@@ -663,11 +670,12 @@ class ContextReadAuditRepository(
             status = "PENDING"
             updatedAt = entity.occurredAt
         }
-        sessions.withTransaction { session, _ ->
+        sessions.boundedContextTransaction(queryTimeoutMs) { session ->
             session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
                 .setParameter("bank", bankScope).singleResult
                 .flatMap { session.persist(entity) }
                 .flatMap { session.persist(commitment) }
-        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+                .flatMap { session.flush() }
+        }.awaitSuspending()
     }
 }

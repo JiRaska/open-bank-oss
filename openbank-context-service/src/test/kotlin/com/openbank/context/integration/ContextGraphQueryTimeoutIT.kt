@@ -8,6 +8,8 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -23,10 +25,12 @@ import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 @QuarkusTest
+@TestProfile(ContextGraphTimeoutRecoveryProfile::class)
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_context_it")],
@@ -52,6 +56,33 @@ class ContextGraphQueryTimeoutIT {
             }.asUni()
         }
         assertThat(actual).isEqualTo(configured)
+    }
+
+    @Test
+    fun `timed out graph transactions release connections for subsequent reads`() {
+        // More attempts than pool slots expose connections lost during timeout cleanup.
+        repeat(6) {
+            assertThatThrownBy {
+                boundedSql(100, "select 1 from pg_sleep(1)")
+            }.satisfies(
+                java.util.function.Consumer<Throwable> { failure ->
+                    val timedOut = generateSequence(failure) { it.cause }.any { cause ->
+                        cause is io.smallrye.mutiny.TimeoutException ||
+                            cause.message?.contains("statement timeout") == true
+                    }
+                    assertThat(timedOut).isTrue()
+                },
+            )
+            repeat(3) {
+                assertThat(boundedSql(2000, "select 1")).isEqualTo(1)
+            }
+        }
+    }
+
+    private fun boundedSql(timeoutMs: Int, sql: String): Int = VertxContextSupport.subscribeAndAwait {
+        sessions.boundedGraphRead(timeoutMs) { session ->
+            session.createNativeQuery(sql, Int::class.javaObjectType).singleResult
+        }.ifNoItem().after(Duration.ofSeconds(5)).fail()
     }
 
     @Test
@@ -168,5 +199,12 @@ class ContextGraphQueryTimeoutIT {
         val to: String,
         val recordedAt: Instant,
         val validTo: Instant?,
+    )
+}
+
+class ContextGraphTimeoutRecoveryProfile : QuarkusTestProfile {
+    override fun getConfigOverrides(): Map<String, String> = mapOf(
+        "quarkus.datasource.reactive.max-size" to "2",
+        "quarkus.scheduler.enabled" to "false",
     )
 }
