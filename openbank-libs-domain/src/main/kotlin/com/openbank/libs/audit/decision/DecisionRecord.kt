@@ -62,18 +62,34 @@ data class InputDigest(val hex: String) {
         private val HEX_PATTERN = Regex("^[0-9a-f]{64}$")
 
         /**
-         * Hashes [fields] over a canonical serialisation: entries sorted by key, joined as
-         * `key=value` with a `\n` separator, UTF-8 encoded, SHA-256'd. Deterministic across JVMs
-         * and across map implementations/insertion order — the only thing that changes the
-         * digest is the (key, value) content itself.
+         * Hashes [fields] over a canonical, **injective** serialisation: entries sorted by key
+         * (`String.compareTo`, i.e. UTF-16 code-unit order, as RFC 8785 §3.2.3 requires for JSON
+         * map keys), each entry written length-prefixed as
+         * `<utf8 byte length of key>:<key><utf8 byte length of value>:<value>` with no separator
+         * between entries. The length prefixes make every entry self-delimiting, so no delimiter
+         * character (`=`, `\n`, `:`, …) appearing inside a key or value can ever be misread as a
+         * field boundary — unlike a plain `"$key=$value"` join, which is not injective: the flat
+         * map `{a: "1\nb=2"}` and the nested pair `{a: "1", b: "2"}` both produced the identical
+         * string `a=1\nb=2` under the old scheme, so two different input sets hashed to the same
+         * digest.
          */
         fun sha256(fields: Map<String, String>): InputDigest {
-            val canonical = fields.entries
+            val buffer = java.io.ByteArrayOutputStream()
+            fields.entries
                 .sortedBy { it.key }
-                .joinToString(separator = "\n") { "${it.key}=${it.value}" }
-            val digestBytes = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+                .forEach { (key, value) ->
+                    appendLengthPrefixed(buffer, key)
+                    appendLengthPrefixed(buffer, value)
+                }
+            val digestBytes = MessageDigest.getInstance("SHA-256").digest(buffer.toByteArray())
             val hex = digestBytes.joinToString(separator = "") { "%02x".format(it) }
             return InputDigest(hex)
+        }
+
+        private fun appendLengthPrefixed(buffer: java.io.ByteArrayOutputStream, value: String) {
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            buffer.write("${bytes.size}:".toByteArray(Charsets.UTF_8))
+            buffer.write(bytes)
         }
     }
 }

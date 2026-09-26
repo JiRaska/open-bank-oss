@@ -179,6 +179,48 @@ class DecisionRecordTest {
         assertThat(InputDigest(digest.hex)).isEqualTo(digest)
     }
 
+    // --- sha256 injectivity (security review finding) ------------------------------------------
+    //
+    // A naive "$key=$value" join with a "\n" separator is NOT injective: a single field whose
+    // value embeds the separator and a delimiter can collide with a completely different field
+    // set. {a: "1\nb=2"} and {a: "1", b: "2"} both used to serialise to the identical string
+    // "a=1\nb=2" and therefore hash to the same digest, even though they are different inputs.
+
+    @Test
+    fun `a value embedding the field separator does not collide with a different field set`() {
+        val singleFieldWithEmbeddedSeparator = InputDigest.sha256(mapOf("a" to "1\nb=2"))
+        val twoDistinctFields = InputDigest.sha256(mapOf("a" to "1", "b" to "2"))
+
+        assertThat(singleFieldWithEmbeddedSeparator).isNotEqualTo(twoDistinctFields)
+    }
+
+    @Test
+    fun `keys and values containing the encoding's own delimiters round-trip distinctly`() {
+        val digests = listOf(
+            mapOf("a=b" to "c"),
+            mapOf("a" to "=bc"),
+            mapOf("a:b" to "c"),
+            mapOf("a" to ":bc"),
+            mapOf("a\nb" to "c"),
+            mapOf("a" to "\nbc"),
+            mapOf("1" to "2"),
+            mapOf("12" to ""),
+            mapOf("1" to "2:3"),
+        ).map { InputDigest.sha256(it) }
+
+        assertThat(digests.toSet()).hasSize(digests.size)
+    }
+
+    @Test
+    fun `a length-prefix-like value does not collide with the field it mimics`() {
+        // "1:a" as a value could be mistaken for a length-prefix + 1-char field ("1:a") if entries
+        // were concatenated without a length prefix on the *value* too.
+        val a = InputDigest.sha256(mapOf("k" to "1:a"))
+        val b = InputDigest.sha256(mapOf("k" to "1:a", "extra" to "unrelated"))
+
+        assertThat(a).isNotEqualTo(b)
+    }
+
     // --- equality (data class, value semantics) ------------------------------------------------
 
     @Test
