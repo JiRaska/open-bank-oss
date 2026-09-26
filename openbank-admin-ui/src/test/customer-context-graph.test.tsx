@@ -206,4 +206,19 @@ describe('Customer context graph', () => {
     expect(result.truncated).toBe(true)
   })
 
+  it('connects source-only account references without asserting account ownership', () => {
+    const result = buildCustomerGraph({ ...evidence, accountIds: [] }, {
+      accounts: [], cards: [card], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: ['accounts'], truncated: [],
+    })
+
+    expect(result.edges).toContainEqual(expect.objectContaining({
+      from: 'customer', to: `account:${ACCOUNT_ID}`, relation: 'CARD_ACCOUNT_REFERENCE',
+    }))
+    expect(result.edges).toContainEqual(expect.objectContaining({
+      from: `account:${ACCOUNT_ID}`, to: `card:${CARD_ID}`, relation: 'HAS_CARD',
+    }))
+    expect(result.edges.some(edge => edge.to === `account:${ACCOUNT_ID}` && edge.relation === 'OWNS')).toBe(false)
+  })
+
 })

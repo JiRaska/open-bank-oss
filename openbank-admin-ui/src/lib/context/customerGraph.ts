@@ -353,6 +353,9 @@ export function buildCustomerGraph(
     if (accountNodeIds.has(id)) return id
     accountNodeIds.add(id)
     nodes.push({ id, kind: 'account', label: accountId, source, facts: [`Account reference: ${accountId}`] })
+    // A party-scoped card or case proves this reference is relevant to the investigation,
+    // not that the customer currently owns the account. Keep that distinction in the edge.
+    addEdge('customer', id, source === 'card-issuance-service' ? 'CARD_ACCOUNT_REFERENCE' : 'AML_CASE_ACCOUNT_REFERENCE')
     return id
   }
   for (const accountId of evidence.accountIds) {
