@@ -23,6 +23,7 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
+import java.util.concurrent.Executors
 
 /**
  * Negative case for the libs-runtime OPA producer (`OpaPolicyDecisionPointProducer`): with
@@ -57,7 +58,12 @@ class FxOpaDenyEnforcedTest {
     }
 
     class EnforcedWithStubOpa : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf("authz.enforce" to "true")
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "authz.enforce" to "true",
+            // Generous budget: a loaded CI runner can exceed the 500 ms production default on the
+            // first call, and a timeout is a 503, which would mask the deny under test.
+            "opa.timeout-ms" to "10000",
+        )
 
         override fun testResources(): List<QuarkusTestProfile.TestResourceEntry> =
             listOf(QuarkusTestProfile.TestResourceEntry(StubOpa::class.java))
@@ -76,6 +82,7 @@ class FxOpaDenyEnforcedTest {
                 ex.sendResponseHeaders(200, out.size.toLong())
                 ex.responseBody.use { it.write(out) }
             }
+            s.executor = Executors.newCachedThreadPool()
             s.start()
             server = s
             return mapOf("opa.url" to "http://127.0.0.1:${s.address.port}")
