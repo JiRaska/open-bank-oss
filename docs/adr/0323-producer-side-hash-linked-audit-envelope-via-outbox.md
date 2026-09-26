@@ -11,7 +11,7 @@ summary: "Producers hash-link their own audit events (producer, seq, prevHash, S
 followup: "#10908 — phase 1 ships the libs publisher; no service is migrated yet"
 ---
 
-# ADR-0318 — Producer-side hash-linked audit envelope via outbox
+# ADR-0323 — Producer-side hash-linked audit envelope via outbox
 
 ## Context
 

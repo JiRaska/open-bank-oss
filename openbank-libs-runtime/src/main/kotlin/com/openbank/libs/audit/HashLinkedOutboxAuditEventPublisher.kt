@@ -13,7 +13,7 @@ import kotlinx.coroutines.sync.withLock
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
-/** One row for the producer's audit outbox (ADR-0318). */
+/** One row for the producer's audit outbox (ADR-0323). */
 data class AuditOutboxRecord(
     val eventId: UUID,
     /** Name-based UUID of the producer: every event of one producer shares a Kafka partition. */
@@ -39,7 +39,7 @@ interface AuditChainOutbox {
 }
 
 /**
- * Opt-in durable [AuditEventPublisher] (ADR-0318 phase 1): hash-links every event into the
+ * Opt-in durable [AuditEventPublisher] (ADR-0323 phase 1): hash-links every event into the
  * producer's chain and writes it to the transactional outbox, from where the service's existing
  * outbox dispatcher relays it to the audit topic.
  *
