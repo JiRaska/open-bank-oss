@@ -11,7 +11,9 @@ import com.openbank.interest.domain.tax.WithholdingTreatment
 import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import jakarta.inject.Inject
@@ -44,7 +46,10 @@ import java.util.UUID
  * Also exercises the V6 partial unique index, the DB backstop for the same invariant.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.interest.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_interest_it")],
+)
 class CapitalizationTransactionIT {
 
     @Inject

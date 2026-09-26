@@ -10,9 +10,10 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
@@ -41,7 +42,10 @@ import java.sql.DriverManager
  */
 @QuarkusTest
 @QuarkusTestResource(LendingLoanBookPactProviderVerificationTest.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
 @Provider("openbank-lending-service")
 @PactFolder("../pacts")

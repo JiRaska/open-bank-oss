@@ -4,9 +4,10 @@
 
 package com.openbank.lending.integration
 
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
@@ -75,7 +76,10 @@ import javax.sql.DataSource
 @QuarkusTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @QuarkusTestResource(OriginationConcurrentAdvanceIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class OriginationConcurrentAdvanceIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

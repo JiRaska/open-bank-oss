@@ -7,11 +7,12 @@ package com.openbank.lending.integration
 import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.PostingKind
-import com.openbank.lending.it.PostgresRedisTestResource
 import com.openbank.lending.it.TestBorrowerCreditPort
 import com.openbank.lending.it.TestRecordingLedgerPostingPort
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.arc.ClientProxy
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -51,7 +52,10 @@ import javax.sql.DataSource
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class LedgerBackfillIT {
 
     @Inject

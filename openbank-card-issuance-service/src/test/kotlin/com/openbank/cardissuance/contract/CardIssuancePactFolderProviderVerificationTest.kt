@@ -13,9 +13,10 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.cardissuance.infrastructure.persistence.entity.CardEntity
 import com.openbank.cardissuance.infrastructure.persistence.repository.CardRepositoryImpl
-import com.openbank.cardissuance.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -65,7 +66,10 @@ import java.util.UUID
  * `@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")`.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_cards_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_VIEWER", "ROLE_OPERATOR"])
 @Provider("openbank-card-issuance-service")
 @PactFolder("../pacts")

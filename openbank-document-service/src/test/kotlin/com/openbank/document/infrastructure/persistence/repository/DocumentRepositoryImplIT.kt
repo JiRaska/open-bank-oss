@@ -7,10 +7,11 @@ package com.openbank.document.infrastructure.persistence.repository
 import com.openbank.document.application.port.out.DuplicateDocumentException
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
-import com.openbank.document.it.PostgresRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -30,7 +31,10 @@ import java.util.UUID
  * mocked repository cannot exercise, so this needs a real Postgres (Testcontainers).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
+)
 class DocumentRepositoryImplIT {
 
     @Inject

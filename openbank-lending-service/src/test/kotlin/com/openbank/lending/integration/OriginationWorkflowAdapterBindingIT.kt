@@ -7,10 +7,11 @@ package com.openbank.lending.integration
 import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.temporal.TemporalOriginationWorkflowAdapter
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.arc.Arc
 import io.quarkus.arc.ClientProxy
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -40,7 +41,10 @@ import org.junit.jupiter.api.Test
  * eagerly, so the binding is observable without one.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 @TestProfile(TemporalEnabledProfile::class)
 class OriginationWorkflowAdapterBindingIT {
 
@@ -73,7 +77,10 @@ class OriginationWorkflowAdapterBindingIT {
  * the gate — an adapter that was never gated at all would satisfy it just as well.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 @TestProfile(TemporalDisabledProfile::class)
 class InertOriginationWorkflowAdapterBindingIT {
 

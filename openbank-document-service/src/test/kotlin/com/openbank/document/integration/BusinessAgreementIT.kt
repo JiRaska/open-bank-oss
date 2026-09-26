@@ -4,11 +4,12 @@
 
 package com.openbank.document.integration
 
-import com.openbank.document.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -42,7 +43,10 @@ import java.util.concurrent.Executors
  */
 @QuarkusTest
 @TestProfile(BusinessAgreementIT.RemoteStubsProfile::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
+)
 @QuarkusTestResource(BusinessAgreementIT.InMemoryKafkaResource::class)
 class BusinessAgreementIT {
 

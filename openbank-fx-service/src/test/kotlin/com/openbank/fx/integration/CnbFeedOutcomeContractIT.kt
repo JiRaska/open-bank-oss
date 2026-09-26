@@ -4,12 +4,13 @@
 package com.openbank.fx.integration
 
 import com.openbank.fx.application.port.out.CnbRateProvider
-import com.openbank.fx.it.PostgresRedisTestResource
 import com.openbank.libs.observability.FeedFetchMetrics
 import com.openbank.libs.observability.FeedFetchOutcome
 import com.openbank.libs.observability.WorkflowLivenessMetrics
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -51,7 +52,10 @@ import java.time.LocalDate
  * would pass for the wrong reason and keep passing if the contract were removed.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fx_it")],
+)
 @TestProfile(CnbFeedOutcomeContractIT.EmptyFeedProfile::class)
 class CnbFeedOutcomeContractIT {
 

@@ -14,9 +14,11 @@ import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.infrastructure.persistence.FraudOutboxRepositoryImpl
 import com.openbank.fraud.infrastructure.persistence.entity.FraudOutboxEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -43,7 +45,10 @@ import java.util.UUID
  * account-service is reachable from this IT's stack.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.fraud.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fraud_it")],
+)
 class FraudHoldServiceIT {
 
     @Inject

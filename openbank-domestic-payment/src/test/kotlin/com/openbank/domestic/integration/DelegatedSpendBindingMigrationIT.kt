@@ -4,8 +4,9 @@
 
 package com.openbank.domestic.integration
 
-import com.openbank.domestic.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -22,7 +23,10 @@ import javax.sql.DataSource
 /** Real-Postgres proof for V10/V13/V14's delegated-spend binding invariants. */
 @QuarkusTest
 @QuarkusTestResource(DomesticPaymentBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_domestic_payment_it")],
+)
 class DelegatedSpendBindingMigrationIT {
 
     @Inject

@@ -8,8 +8,9 @@ import com.openbank.document.application.port.out.TemplatePublishConflictExcepti
 import com.openbank.document.domain.model.DocumentTemplate
 import com.openbank.document.domain.model.TemplateEngine
 import com.openbank.document.domain.model.TemplateStatus
-import com.openbank.document.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -30,7 +31,10 @@ import java.util.UUID
  * live in the seed data (two coexisting PUBLISHED versions of the same VOP/framework/account codes).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
+)
 class DocumentTemplateRepositoryImplIT {
 
     @Inject

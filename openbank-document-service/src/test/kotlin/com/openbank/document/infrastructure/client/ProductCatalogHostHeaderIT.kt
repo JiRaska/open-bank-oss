@@ -4,9 +4,11 @@
 
 package com.openbank.document.infrastructure.client
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
@@ -34,7 +36,10 @@ import java.util.concurrent.Executors
  * account-service stack (PostgresRedpandaRedisTestResource) like every other IT here.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
+)
 @QuarkusTestResource(ProductCatalogHostHeaderIT.CatalogStub::class)
 class ProductCatalogHostHeaderIT {
 

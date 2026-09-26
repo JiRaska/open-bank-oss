@@ -11,13 +11,14 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
-import com.openbank.billing.it.PostgresRedisTestResource
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -30,7 +31,10 @@ import java.time.OffsetDateTime
 
 /** Broker-sourced twin that publishes billing verification for deployment safety on main. */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_billing_it")],
+)
 @Provider("openbank-billing-service")
 @PactBroker(enablePendingPacts = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")

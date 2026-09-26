@@ -6,8 +6,9 @@ package com.openbank.fx.integration
 import com.openbank.fx.application.port.out.CnbRateProvider
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.domain.model.RateSource
-import com.openbank.fx.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -49,7 +50,10 @@ import java.util.UUID
  * dispatch through to the real Postgres write is exercised for real.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_fx_it")],
+)
 @TestProfile(CnbIngestionSchedulerVertxContextIT.FastIngestionProfile::class)
 class CnbIngestionSchedulerVertxContextIT {
 

@@ -8,8 +8,10 @@ import com.openbank.interest.infrastructure.client.JournalResponse
 import com.openbank.interest.infrastructure.client.LedgerCallGuard
 import com.openbank.interest.infrastructure.client.LedgerRestClient
 import com.openbank.interest.infrastructure.client.PostJournalRequest
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.Mock
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -36,7 +38,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * capitalization's journal posted in that window failed with it too.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.interest.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_interest_it")],
+)
 class LedgerCallGuardIT {
 
     @Inject

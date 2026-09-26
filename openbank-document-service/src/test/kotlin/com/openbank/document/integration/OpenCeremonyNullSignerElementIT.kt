@@ -7,10 +7,11 @@ package com.openbank.document.integration
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.infrastructure.persistence.repository.DocumentRepositoryImpl
-import com.openbank.document.it.PostgresRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -40,7 +41,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(OpenCeremonyNullSignerElementIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_documents_it")],
+)
 class OpenCeremonyNullSignerElementIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
