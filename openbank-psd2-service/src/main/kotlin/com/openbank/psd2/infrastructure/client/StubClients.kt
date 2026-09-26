@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.infrastructure.client
 
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.psd2.application.port.out.AccountServiceClient
 import com.openbank.psd2.application.port.out.ConsentServiceClient
 import com.openbank.psd2.application.port.out.ConsentSnapshot
@@ -23,10 +24,6 @@ import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
-
-// CodeQL java/log-injection: several IDs logged below ultimately trace back to caller/request
-// input. Strip CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
-private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
 
 @ApplicationScoped
 class StubAccountServiceClient(private val clock: Clock) : AccountServiceClient {

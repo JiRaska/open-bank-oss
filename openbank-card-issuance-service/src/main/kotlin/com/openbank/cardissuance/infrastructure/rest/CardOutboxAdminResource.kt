@@ -6,6 +6,7 @@ package com.openbank.cardissuance.infrastructure.rest
 
 import com.openbank.cardissuance.application.port.out.CardOutboxRepository
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.sanitizeForLog
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -104,12 +105,7 @@ class CardOutboxAdminResource(private val outbox: CardOutboxRepository) {
     // CodeQL java/log-injection (alert 420): operatorId is the raw X-Operator-Id header, so a
     // caller can put CR/LF in it and forge additional log lines (CWE-117). `parsed` needs no
     // such treatment — it is already through UUID.fromString above.
-    //
-    // Deliberately a member of this class, NOT a top-level extension. A top-level declaration
-    // placed between @Path and the class binds the annotation to the FUNCTION: McpEndpoint
-    // shipped exactly that shape, RESTEasy never registered the resource, and every POST /mcp
-    // answered 404 on a running pod while its unit tests stayed green (#3371).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     private companion object {
         private val log: Logger = Logger.getLogger(CardOutboxAdminResource::class.java)

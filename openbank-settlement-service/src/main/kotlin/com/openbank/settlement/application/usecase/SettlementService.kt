@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
@@ -49,9 +50,7 @@ class SettlementService(
 
     private val log = Logger.getLogger(SettlementService::class.java)
 
-    // CodeQL java/log-injection: idempotencyKey is caller-supplied and flows straight into the
-    // log line below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     override suspend fun originate(command: OriginateSettlementCommand): Settlement {
         // Idempotency: derive the settlement id deterministically from the caller's key, so a

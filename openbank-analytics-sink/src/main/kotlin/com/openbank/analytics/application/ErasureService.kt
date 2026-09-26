@@ -8,6 +8,7 @@ import com.openbank.analytics.application.port.out.CryptoErasure
 import com.openbank.libs.analytics.AggregateKey
 import com.openbank.libs.analytics.LegalBasis
 import com.openbank.libs.analytics.RetentionPolicies
+import com.openbank.libs.security.sanitizeForLog
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
@@ -76,10 +77,7 @@ class ErasureService {
 
     private val log = Logger.getLogger(ErasureService::class.java)
 
-    // CodeQL java/log-injection: aggregateType/aggregateId/requestedBy are caller-supplied and
-    // flow straight into log lines below. Strip CR/LF so an attacker can't forge additional
-    // log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     suspend fun erase(aggregateType: String, aggregateId: String, requestedBy: String): ErasureDecision {
         val category = RetentionPolicies.categoryForAggregateType(aggregateType)

@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.infrastructure.rest.filter
 
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.psd2.infrastructure.client.TppAuthorizationGuard
 import jakarta.annotation.Priority
 import jakarta.ws.rs.Priorities
@@ -20,10 +21,7 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
 
     private val log = Logger.getLogger(EidasMtlsFilter::class.java)
 
-    // CodeQL java/log-injection: path and tppId come straight off the request (URI segment /
-    // X-TPP-ID / SSL-CLIENT-S-DN header) and are logged verbatim below. Strip CR/LF so an
-    // attacker can't forge additional log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     @Suppress("LongMethod")
     override fun filter(ctx: ContainerRequestContext) {
