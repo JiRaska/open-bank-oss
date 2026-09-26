@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Run a localhost-only, three-service settlement-to-ledger-to-balance proof."""
+"""Run a localhost settlement-to-ledger-to-balance proof with optional audit ingestion."""
 
 from __future__ import annotations
 
@@ -296,11 +296,11 @@ def java_executable() -> str:
     raise RuntimeError("Java not found; set JAVA_HOME or add java to PATH")
 
 
-def create_realm(secret: str, password: str) -> Path:
+def create_realm(secret: str, password: str, with_audit: bool = False) -> Path:
     realm = {
         "realm": "settlement-proof",
         "enabled": True,
-        "roles": {"realm": [{"name": role} for role in ["ROLE_OPERATOR", "ROLE_API"]]},
+        "roles": {"realm": [{"name": role} for role in ["ROLE_OPERATOR", "ROLE_API", "ROLE_AUDITOR"]]},
         "clients": [
             {
                 "clientId": "proof-browser",
@@ -317,7 +317,7 @@ def create_realm(secret: str, password: str) -> Path:
                 "lastName": "Operator",
                 "email": "proof@example.invalid",
                 "emailVerified": True,
-                "realmRoles": ["ROLE_OPERATOR"],
+                "realmRoles": ["ROLE_OPERATOR", "ROLE_AUDITOR"] if with_audit else ["ROLE_OPERATOR"],
                 "credentials": [{"type": "password", "value": password, "temporary": False}],
             }
         ],
@@ -388,15 +388,17 @@ def main() -> None:
         help="Lose one committed journal reply, or all five activity attempts",
     )
     parser.add_argument("--recover-after-loss", action="store_true", help="Reset the exhausted local workflow before journal booking")
+    parser.add_argument("--with-audit", action="store_true", help="Prove real settlement outbox ingestion and audit chain integrity")
     args = parser.parse_args()
     if args.recover_after_loss and args.drop_ledger_response != 5:
         parser.error("--recover-after-loss requires --drop-ledger-response 5")
     global postgres
 
     java = java_executable()
+    service_names = ["ledger", "balance", "settlement"] + (["audit"] if args.with_audit else [])
     service_jars = {
         name: ROOT / f"openbank-{name}-service/build/quarkus-app/quarkus-run.jar"
-        for name in ["ledger", "balance", "settlement"]
+        for name in service_names
     }
     source_metadata = {
         "git_head": run("git", "rev-parse", "HEAD"),
@@ -408,7 +410,7 @@ def main() -> None:
     }
     secret = uuid.uuid4().hex
     password = uuid.uuid4().hex
-    realm_file = create_realm(secret, password)
+    realm_file = create_realm(secret, password, args.with_audit)
     print(f"Evidence directory: {OUT}", flush=True)
 
     postgres, postgres_port = docker(
@@ -423,7 +425,9 @@ def main() -> None:
         ),
         "postgres",
     )
-    for database in ["ledger", "balance", "settlement"]:
+    if args.with_audit:
+        sql("proof", "CREATE ROLE openbank NOLOGIN")  # Existing audit migration grants, isolated fixture only.
+    for database in service_names:
         sql("proof", f"CREATE DATABASE {database}")
 
     redis, redis_port = docker("redis", "valkey/valkey:8-alpine", 6379)
@@ -468,14 +472,19 @@ def main() -> None:
     )
     containers.append(kafka)
     until(lambda: run("docker", "exec", kafka, "rpk", "cluster", "info", "-X", "brokers=127.0.0.1:9092"), "Kafka")
-    for topic in [
+    audit_topics = []
+    if args.with_audit:
+        audit_config = yaml.safe_load((ROOT / "openbank-audit-service/src/main/resources/application.yaml").read_text())
+        audit_topics = audit_config["mp"]["messaging"]["incoming"]["audit-events-in"]["topics"].split(",")
+        audit_topics.append("openbank.dlq.audit.audit-events-in")
+    for topic in sorted(set([
         "openbank.ledger.journal.posted",
         "openbank.account.events",
         "openbank.balance.events",
         "openbank.settlement.events",
         "openbank.dlq.balance.ledger-events-in",
         "openbank.dlq.balance.balance-init-in",
-    ]:
+    ] + audit_topics)):
         run("docker", "exec", kafka, "rpk", "topic", "create", topic, "-X", "brokers=127.0.0.1:9092")
 
     temporal, temporal_port = docker(
@@ -502,16 +511,17 @@ def main() -> None:
     )["access_token"]
     print("Local infrastructure ready; synthetic OIDC operator token issued", flush=True)
 
-    service_ports = {name: port() for name in ["ledger", "balance", "settlement"]}
+    service_ports = {name: port() for name in service_names}
     ledger_client_port = service_ports["ledger"]
     if args.drop_ledger_response:
         response_loss_proxy = LedgerResponseLossProxy(ledger_client_port, args.drop_ledger_response)
         ledger_client_port = response_loss_proxy.port
     opa_ports = {
         name: start_opa(name, component)
-        for name, component in [("ledger", "ledger"), ("balance", "balances"), ("settlement", "payments")]
+        for name, component in ([("ledger", "ledger"), ("balance", "balances"), ("settlement", "payments")]
+                                + ([("audit", "audit")] if args.with_audit else []))
     }
-    for name in ["ledger", "balance", "settlement"]:
+    for name in service_names:
         env = child_environment()
         env.update(
             {
@@ -540,6 +550,8 @@ def main() -> None:
             }
         )
         properties = ["-Dmp.messaging.incoming.ledger-events-in.auto.offset.reset=earliest"] if name == "balance" else []
+        if name == "audit":
+            properties.append("-Dmp.messaging.incoming.audit-events-in.auto.offset.reset=earliest")
         start_process(
             [java, "-Xmx384m", *properties, "-jar", str(service_jars[name])],
             name,
@@ -764,6 +776,30 @@ def main() -> None:
             "originalRunId": original_run, "recoveredRunId": observed_run, "durableRecoveryFacts": 1,
         }
         print("Recovery", json.dumps(recovery_evidence), flush=True)
+    audit_evidence = None
+    if args.with_audit:
+        expected_events = json.loads(sql(
+            "settlement",
+            f"SELECT json_agg(payload::jsonb) FROM settlement_outbox WHERE aggregate_id='{settlement_id}'",
+        ))
+        final_status = "BOOKED" if recovery_evidence else expected_status
+        assert expected_events and any(event["status"] == final_status for event in expected_events)
+
+        def audit_matches() -> list[dict[str, Any]] | None:
+            stored = json.loads(sql(
+                "audit",
+                "SELECT coalesce(json_agg(payload::jsonb), '[]'::json) FROM audit_entries "
+                f"WHERE aggregate_id='{settlement_id}' AND event_type='SETTLEMENT_STATE_CHANGED'",
+            ))
+            order = lambda event: event["eventId"]
+            return stored if sorted(stored, key=order) == sorted(expected_events, key=order) else None
+
+        ingested_events = until(audit_matches, "exact settlement audit ingestion", 60)
+        integrity = request(f"http://127.0.0.1:{service_ports['audit']}/api/v1/audit/integrity", token=token)
+        assert integrity["chainStatus"] == "INTACT" and integrity["unchainedCount"] == 0, integrity
+        assert integrity["checkedCount"] >= len(ingested_events), integrity
+        audit_evidence = {"matchedSettlementEvents": len(ingested_events), "integrity": integrity}
+        print("Audit", json.dumps(audit_evidence), flush=True)
     print("Fault injection", json.dumps(fault_evidence), flush=True)
     print("Journals response", json.dumps(journals), flush=True)
     print("Balances", json.dumps(final_balances), flush=True)
@@ -778,6 +814,7 @@ def main() -> None:
                 "responseLoss": fault_evidence,
                 "settlementStatus": "BOOKED" if recovery_evidence else expected_status,
                 "recovery": recovery_evidence,
+                "audit": audit_evidence,
             },
             indent=2,
         )

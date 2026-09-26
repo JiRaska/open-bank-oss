@@ -1,12 +1,12 @@
 # Local settlement-to-ledger-to-balance proof
 
 `settlement-real-services-e2e.py` runs the settlement, ledger, and balance Quarkus services as
-separate JVMs against isolated local dependencies. It exercises a real settlement origination,
+separate JVMs against isolated local dependencies, with an optional fourth audit-service JVM. It exercises a real settlement origination,
 Temporal workflow, Kafka journal projection, Keycloak OIDC, and the checked-in OPA bundles. It also
 checks the cover hold lifecycle, settlement protocol, exact projected balances, duplicate
 idempotency, posted journal legs, and service-account authorization log evidence.
 
-This is a **local three-service integration proof only**. It does not exercise external payment
+This is a **local integration proof only**. It does not exercise external payment
 rails, full disaster recovery, or a sandbox deployment, and its result is not evidence for those
 paths.
 
@@ -87,3 +87,18 @@ durable outbox fact for `LEDGER_STATE_UNKNOWN` → `BOOKED`. The evidence direct
 for the explicit original/recovered executions and the
 reset command result. This is a controlled local recovery exercise; it does not reset any shared
 workflow or prove production operator authorization.
+
+## Verify delivery into the audit service
+
+Build `:openbank-audit-service:quarkusBuild`, then add `--with-audit` to any of the modes above.
+This starts a fourth real JVM, its own PostgreSQL database and the checked-in audit OPA bundle.
+The local broker contains the audit consumer's configured topics; the fixture selects `earliest`
+so records emitted before consumer readiness remain visible. The synthetic operator additionally
+receives `ROLE_AUDITOR` only in this mode.
+
+The proof compares the complete JSON payload of every settlement outbox event with the persisted
+`SETTLEMENT_STATE_CHANGED` audit entries for the same settlement. Missing, duplicate or changed
+entries fail. It then calls the authenticated `/api/v1/audit/integrity` endpoint and requires an
+intact chain, no unchained records and a non-empty checked count covering those events.
+`result.json.audit` records the counts and integrity response. This proves local Kafka delivery and
+chain persistence; external signed anchors, archival retention and disaster recovery remain separate.

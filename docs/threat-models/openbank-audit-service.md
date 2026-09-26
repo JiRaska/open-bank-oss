@@ -40,3 +40,16 @@ acknowledgement-on-failure is unsafe. See `docs/runbooks/audit-ingestion-recover
 Each append allocates its numeric row ID from the existing database sequence while holding the
 append lock. Per-process cached ID blocks are not used. The sequence and existing rows stay
 unchanged; gaps between numeric IDs are expected and are not missing-event evidence.
+
+### Policy decision point wiring
+
+`AuthzProducer` registers the shared `OpaSidecarPolicyDecisionPoint` as the service's CDI policy
+decision point. `opa.url`, `opa.path` and `opa.timeout-ms` select the sidecar and bound requests.
+A running OPA sidecar alone does not provide this bean: without the producer enforced `@Authorize`
+requests fail with `POLICY_DECISION_POINT_UNAVAILABLE`, while advisory mode cannot exercise the
+policy. Missing/unreachable OPA remains fail-closed when enforcement is enabled. The deployment's
+existing enforcement setting and role/action policy are unchanged by this wiring repair.
+
+The real-services settlement proof with `--with-audit` uses enforced authorization and the generated
+audit bundle, then checks complete outbox-to-audit payload correspondence and the authenticated
+integrity endpoint. It does not attest the deployed enforcement setting or external signed anchors.

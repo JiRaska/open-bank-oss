@@ -289,3 +289,9 @@ openbank:
       # suspected incident, or widen it if the log grows enough for the walk to cost real time —
       # openbank_audit_chain_verify_duration_seconds is what tells them which.
       cron: ${AUDIT_CHAIN_VERIFY_CRON:0 0 * * * ?}
+
+# The OPA sidecar requires a service-owned CDI PolicyDecisionPoint producer.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
