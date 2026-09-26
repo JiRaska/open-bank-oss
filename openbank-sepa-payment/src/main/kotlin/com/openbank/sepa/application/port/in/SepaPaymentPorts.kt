@@ -24,6 +24,12 @@ data class CreateSepaPaymentCommand(
     val currency: String,
     val remittanceInfo: String?,
     val endToEndId: String?,
+    /**
+     * Fingerprint of the HTTP request this command came from (#10916). Persisted with the payment
+     * so a replay by [idempotencyKey] can tell a retry from a key reused for a different payment
+     * even after the Redis record has expired or been evicted. `null` for callers with no request.
+     */
+    val requestHash: String? = null,
 )
 
 data class ListSepaPaymentsQuery(

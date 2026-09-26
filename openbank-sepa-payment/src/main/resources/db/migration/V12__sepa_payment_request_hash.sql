@@ -1,0 +1,17 @@
+-- #10916: bind the durable Idempotency-Key dedupe to the request it was first used for.
+--
+-- sepa_payments.idempotency_key is UNIQUE and outlives the Redis idempotency record, so after
+-- that record expires or is evicted a key reused for a DIFFERENT payment used to be answered
+-- with the first payment. request_hash stores the SHA-256 request fingerprint
+-- (RequestFingerprints.of: method + path + canonical body, 64 lowercase hex chars) the payment
+-- was created under; SepaPaymentService refuses a key whose stored hash differs (409
+-- IDEMPOTENCY_KEY_REUSED). Rows created before this migration keep NULL and keep the old
+-- replay-by-key behaviour.
+--
+-- Nullable, no default, no backfill: a metadata-only change on Postgres, no table rewrite.
+--
+-- Rollback: `ALTER TABLE sepa_payments DROP COLUMN request_hash;` and delete this file's row from
+-- flyway_schema_history. Only after rolling back the code that reads it — the entity maps the
+-- column and would fail every query without it. Data lost on rollback: only the fingerprints,
+-- which returns the service to key-only dedupe.
+ALTER TABLE sepa_payments ADD COLUMN request_hash VARCHAR(64);

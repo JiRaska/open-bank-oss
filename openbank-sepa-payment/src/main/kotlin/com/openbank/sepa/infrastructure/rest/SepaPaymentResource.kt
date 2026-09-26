@@ -4,12 +4,13 @@
 
 package com.openbank.sepa.infrastructure.rest
 
-import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
-import com.openbank.libs.idempotency.RequestFingerprint
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.security.actorName
 import com.openbank.libs.security.actorType
 import com.openbank.libs.web.ApiVersionResponseFilter
@@ -70,38 +71,35 @@ class SepaPaymentResource(
         // answered 500 in exactly the case it was written for. A blank header was always a 400.
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
-        // #10916: the key is bound to this request's fingerprint — the same key with a different
-        // payment answers 422 IDEMPOTENCY_KEY_REUSED instead of replaying the first payment.
-        val requestHash = requestFingerprint("POST", CREATE_PATH, request)
-        idempotencyStore.lookup(idempotencyKey, requestHash)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
+        // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
+        // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
+        // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
+        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
                 .header("X-Idempotency-Replayed", "true")
                 .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
         }
 
-        val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey))
+        var created = false
+        val payment = try {
+            paymentUseCase.createPayment(request.toCommand(idempotencyKey, requestHash)).also { created = true }
+        } finally {
+            // Any failure (the exception propagates unchanged) frees the in-flight marker so a
+            // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
+            if (!created) idempotencyStore.release(idempotencyKey, requestHash)
+        }
         val responseBody = payment.toResponse()
         idempotencyStore.save(idempotencyKey, requestHash, 201, objectMapper.writeValueAsString(responseBody))
 
         return Response.created(URI.create("/api/v1/sepa-payments/${payment.id}"))
             .entity(responseBody)
             .build()
-    }
-
-    /**
-     * The canonical request fingerprint (#10916): the DESERIALISED DTO re-serialised with sorted
-     * keys, so whitespace and JSON key order in the raw body do not change the hash, while any
-     * change in a field value does.
-     */
-    private fun requestFingerprint(method: String, path: String, body: Any): String =
-        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
-
-    private val canonicalMapper: ObjectMapper by lazy {
-        objectMapper.copy()
-            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
     }
 
     @GET

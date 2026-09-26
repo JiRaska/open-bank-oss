@@ -57,6 +57,8 @@ data class SepaPayment(
     /** Monotonic aggregate revision persisted with every lifecycle transition. */
     val revision: Long = 0,
     val transactionId: UUID? = null,
+    /** Request fingerprint the payment was created under (#10916); `null` for legacy rows. */
+    val requestHash: String? = null,
 ) {
     fun transitionTo(
         targetStatus: SepaPaymentStatus,
