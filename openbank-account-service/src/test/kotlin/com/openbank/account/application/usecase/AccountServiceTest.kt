@@ -93,7 +93,7 @@ class AccountServiceTest {
             every { ibanGenerator.generate(command.currency) } returns iban
             coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
             coEvery { accountRepository.existsByIban(iban) } returns false
-            coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+            coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
             coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
             val result = service.openAccount(command)
@@ -111,6 +111,7 @@ class AccountServiceTest {
                     },
                     match { it.isPrimary && it.currency == command.currency },
                     eq(command.idempotencyKey),
+                    isNull(),
                 )
                 eventPublisher.publish(
                     "openbank.accounts.account.created",
@@ -150,7 +151,7 @@ class AccountServiceTest {
             .hasMessageContaining("IBAN collision")
 
         coVerify(exactly = 0) {
-            accountRepository.saveNewAccount(any(), any(), any())
+            accountRepository.saveNewAccount(any(), any(), any(), any())
             balancePort.initialize(any(), any(), any())
             eventPublisher.publish(any(), any(), any())
         }
@@ -260,7 +261,7 @@ class AccountServiceTest {
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
 
-        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
         // #4348 hazard: a blocked open must never share the accountCreated count with a real one.
         verify(exactly = 0) { metrics.accountCreated(any(), any()) }
     }
@@ -276,7 +277,7 @@ class AccountServiceTest {
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
 
-        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
         verify(exactly = 0) { metrics.accountCreated(any(), any()) }
     }
 
@@ -291,7 +292,7 @@ class AccountServiceTest {
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(AccountScreeningUnavailableException::class.java)
 
-        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
         verify(exactly = 0) { metrics.accountCreated(any(), any()) }
     }
 
@@ -304,7 +305,7 @@ class AccountServiceTest {
         coEvery { sanctionsScreening.screen("Clean Customer", any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
         coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
@@ -324,7 +325,7 @@ class AccountServiceTest {
         coEvery { sanctionsScreening.screen("Alice Example", any()) } returns SanctionsScreenResult("CLEAR", 0.05, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(capture(savedSlot), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(capture(savedSlot), any(), any(), any()) } answers { firstArg() }
         coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
@@ -347,7 +348,7 @@ class AccountServiceTest {
             .isInstanceOf(ProductNotEligibleException::class.java)
             .hasMessageContaining("does not exist")
 
-        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
     }
 
     @Test
@@ -362,7 +363,7 @@ class AccountServiceTest {
             .isInstanceOf(ProductNotEligibleException::class.java)
             .hasMessageContaining("DRAFT")
 
-        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
     }
 
     @Test
@@ -375,7 +376,7 @@ class AccountServiceTest {
             ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE", "CZK"))
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         val result = service.openAccount(command)
@@ -395,7 +396,7 @@ class AccountServiceTest {
             .isInstanceOf(ProductNotEligibleException::class.java)
             .hasMessageContaining("EUR, not CZK")
 
-        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
     }
 
     @Test
@@ -407,7 +408,7 @@ class AccountServiceTest {
         coEvery { productCatalog.findById(command.productId) } returns ProductLookupResult.Unavailable
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         val result = service.openAccount(command)
@@ -423,7 +424,7 @@ class AccountServiceTest {
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         service.openAccount(command)
@@ -581,7 +582,7 @@ class AccountServiceTest {
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         val result = service.openAccount(command)
@@ -594,6 +595,7 @@ class AccountServiceTest {
                         it.termsUrl == "https://docs.example/td-2026-01.pdf" &&
                         it.termsEffectiveFrom == java.time.LocalDate.parse("2026-01-01")
                 },
+                any(),
                 any(),
                 any(),
             )

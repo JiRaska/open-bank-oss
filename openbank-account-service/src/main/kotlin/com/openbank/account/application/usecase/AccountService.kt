@@ -45,6 +45,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.observability.DomainMetrics
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
@@ -79,7 +80,7 @@ class AccountService(
         // Idempotent replay (#465): a repeated key returns the original account and never opens
         // a second one. The Redis record in the REST layer is only a response cache — this DB
         // check (and the transactional key insert in saveNewAccount) is the source of truth.
-        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
 
         // ADR-0032 §C: Sanctions gate — fails closed.
         // HIT: confirmed match — hard block.
@@ -163,11 +164,16 @@ class AccountService(
         // the same contract as the sequential replay above: return the winner's account,
         // publish no second event, count no second metric.
         val saved = try {
-            accountRepository.saveNewAccount(account, primaryPocketFor(account), command.idempotencyKey)
+            accountRepository.saveNewAccount(
+                account,
+                primaryPocketFor(account),
+                command.idempotencyKey,
+                command.requestHash,
+            )
         } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
         } catch (e: PgException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
         }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
@@ -513,6 +519,19 @@ class AccountService(
         closedAt = null,
         version = 0L,
     )
+
+    /**
+     * #10916: the durable half of the Idempotency-Key check. The Redis record expires (or is
+     * evicted) while the account_idempotency row does not, so a key reused for a DIFFERENT
+     * opening must be refused here too rather than answered with the first account. A key stored
+     * without a fingerprint (legacy row, or a caller with none) keeps the plain replay.
+     */
+    private suspend fun replayOrRefuse(existing: Account, command: OpenAccountCommand): Account {
+        val requestHash = command.requestHash ?: return existing
+        val stored = accountRepository.findIdempotencyRequestHash(command.idempotencyKey)
+        if (stored != null && stored != requestHash) throw IdempotencyKeyReusedException()
+        return existing
+    }
 
     /**
      * The loser of a concurrent duplicate-open race: both contenders passed the replay check

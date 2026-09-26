@@ -4,9 +4,7 @@
 
 package com.openbank.account.infrastructure.rest
 
-import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.AddPocketCommand
 import com.openbank.account.application.port.`in`.ClearSavingsGoalCommand
@@ -37,8 +35,11 @@ import com.openbank.account.infrastructure.rest.dto.SavingsGoalRequest
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
-import com.openbank.libs.idempotency.RequestFingerprint
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.security.Roles
 import io.quarkus.logging.Log
 import io.quarkus.security.identity.SecurityIdentity
@@ -126,20 +127,6 @@ class AccountResource(
             customerPartyId != null && ownerPartyId != customerPartyId
     }
 
-    /**
-     * The canonical request fingerprint (#10916): the DESERIALISED DTO re-serialised with sorted
-     * keys, so whitespace and JSON key order in the raw body do not change the hash, while any
-     * change in a field value does.
-     */
-    private fun requestFingerprint(method: String, path: String, body: Any): String =
-        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
-
-    private val canonicalMapper: ObjectMapper by lazy {
-        objectMapper.copy()
-            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-    }
-
     @POST
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.create")
@@ -152,30 +139,42 @@ class AccountResource(
         // non-nullable type only decided where the NPE landed — a 500 that tells the caller the
         // server broke. libs-runtime maps IllegalArgumentException to 400.
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
-        // #10916: the key is bound to this request's fingerprint — the same key with a different
-        // opening request answers 422 IDEMPOTENCY_KEY_REUSED instead of replaying the first one.
-        val requestHash = requestFingerprint("POST", ACCOUNTS_PATH, request)
-        idempotencyStore.lookup(idempotencyKey, requestHash)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
+        // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
+        // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
+        // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", ACCOUNTS_PATH, request)
+        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
                 .header("X-Idempotency-Replayed", "true")
                 .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
         }
 
-        val account = accountUseCase.openAccount(
-            OpenAccountCommand(
-                idempotencyKey = idempotencyKey,
-                partyId = request.partyId,
-                productId = request.productId,
-                accountType = request.accountType,
-                currency = CurrencyCode.of(request.currencyCode),
-                requestedBy = operatorId(),
-                legalName = request.legalName,
-                termsVersion = request.termsVersion,
-                termsUrl = request.termsUrl,
-                termsEffectiveFrom = request.termsEffectiveFrom,
-            ),
-        )
+        var opened = false
+        val account = try {
+            accountUseCase.openAccount(
+                OpenAccountCommand(
+                    idempotencyKey = idempotencyKey,
+                    requestHash = requestHash,
+                    partyId = request.partyId,
+                    productId = request.productId,
+                    accountType = request.accountType,
+                    currency = CurrencyCode.of(request.currencyCode),
+                    requestedBy = operatorId(),
+                    legalName = request.legalName,
+                    termsVersion = request.termsVersion,
+                    termsUrl = request.termsUrl,
+                    termsEffectiveFrom = request.termsEffectiveFrom,
+                ),
+            ).also { opened = true }
+        } finally {
+            // Any failure (the exception propagates unchanged) frees the in-flight marker so a
+            // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
+            if (!opened) idempotencyStore.release(idempotencyKey, requestHash)
+        }
         val responseBody = account.toResponse()
         val json = objectMapper.writeValueAsString(responseBody)
         idempotencyStore.save(idempotencyKey, requestHash, 201, json)

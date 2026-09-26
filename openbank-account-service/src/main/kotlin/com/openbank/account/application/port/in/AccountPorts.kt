@@ -18,6 +18,12 @@ import java.util.UUID
 
 data class OpenAccountCommand(
     val idempotencyKey: String,
+    /**
+     * Fingerprint of the HTTP request this command came from (#10916), persisted with the
+     * idempotency key so a replay can tell a retry from a key reused for a different opening
+     * after the Redis record is gone. `null` for callers with no HTTP request (onboarding).
+     */
+    val requestHash: String? = null,
     val partyId: UUID,
     val productId: UUID,
     val accountType: AccountType,

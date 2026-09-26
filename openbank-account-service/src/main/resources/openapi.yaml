@@ -12,8 +12,8 @@ info:
   # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
   # opening other account types are unaffected; term-deposit openings come only from
   # customer-edge, updated in the same change).
-  # 1.18 -> 1.19 (#10916): additive — 422 IDEMPOTENCY_KEY_REUSED on open-account when an
-  # Idempotency-Key is reused with a different request body.
+  # 1.18 -> 1.19 (#10916): additive — open-account documents 409 IDEMPOTENCY_KEY_REUSED (key
+  # reused with a different request) and 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (same request in flight).
   version: 1.19.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
@@ -63,12 +63,22 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: Idempotency-Key already used (replayed)
+          description: >
+            Idempotency-Key conflict (#10916), distinguished by `code`.
+            IDEMPOTENCY_KEY_REUSED — the key was already used for a different request (method,
+            path or canonical body differ); nothing is opened and the stored response is not
+            replayed. IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still being processed
+            under this key; retry later. A completed same-body retry is not a 409: it replays the
+            stored 201 with `X-Idempotency-Replayed: true`.
           headers:
             X-Idempotency-Replayed:
               schema:
                 type: string
                 enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
           description: >
@@ -76,9 +86,6 @@ paths:
             (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
             (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
             neither the matched name nor the party (#8512).
-            Also IDEMPOTENCY_KEY_REUSED: the Idempotency-Key was already used for a
-            different request (method, path or canonical body differ), so the stored
-            response is not replayed (#10916).
         '503':
           description: >
             Sanctions screening temporarily unavailable; the opening gate fails
