@@ -10,9 +10,12 @@ import org.junit.jupiter.api.Test
 
 /**
  * Pins the [PolicyDecisionPoint] contract so future implementations cannot
- * silently drift. The two stub implementations are also the test fixtures
- * for every other service's `@Authorize`-decorated test — so a regression
- * here would break the libs test ergonomics promise (ADR-0034 D3).
+ * silently drift. The allow-all test fixture lives in `openbank-libs-testing`
+ * now (`com.openbank.libs.testing.authz.AllowAllPolicyDecisionPoint` —
+ * `AllowAllPolicyDecisionPointTest` there pins its contract); this module
+ * keeps only [DenyAllPolicyDecisionPoint], the genuinely-production
+ * kill-switch implementation, plus the shape tests that don't depend on
+ * either stub.
  */
 class PolicyDecisionPointTest {
 
@@ -22,15 +25,6 @@ class PolicyDecisionPointTest {
         resource = ResourceRef(type = "party", id = "p-123"),
         attributes = mapOf("client-ip" to "10.0.0.1"),
     )
-
-    @Test
-    fun `allow-all returns allow with grep-able test-stub reason`(): Unit = runBlocking {
-        val pdp: PolicyDecisionPoint = AllowAllPolicyDecisionPoint()
-        val decision = pdp.allow(sampleQuery)
-        assertThat(decision.allow).isTrue()
-        assertThat(decision.reason).isEqualTo("test-stub")
-        assertThat(decision.policyVersion).isEqualTo("allow-all")
-    }
 
     @Test
     fun `deny-all returns deny with kill-switch reason`(): Unit = runBlocking {
@@ -55,18 +49,5 @@ class PolicyDecisionPointTest {
         // The two queries are otherwise structurally identical — which is the
         // ADR-0034 point: REST and MCP planes go through ONE decision shape.
         assertThat(human.copy(principal = agent.principal)).isEqualTo(agent)
-    }
-
-    @Test
-    fun `resource is optional for non-scoped actions`(): Unit = runBlocking {
-        val pdp = AllowAllPolicyDecisionPoint()
-        val nonScoped = AuthzQuery(
-            principal = Principal(id = "ops", type = "HUMAN"),
-            action = "system.snapshot",
-            resource = null,
-        )
-        // Must not throw — null resource is legitimate.
-        val decision = pdp.allow(nonScoped)
-        assertThat(decision.allow).isTrue()
     }
 }

@@ -4429,6 +4429,34 @@ gates:
     run: |
       bash .github/scripts/check-no-service-principal-type.sh .
 
+  # No unconditional allow-all PDP under any service's src/main (rules.yaml: authz_policy).
+  # AllowAllPolicyDecisionPoint used to live in openbank-libs-domain/src/main — a class that
+  # unconditionally allows every @Authorize-decorated call, reachable from every production
+  # service's classpath, distinguishable from the real OpaSidecarPolicyDecisionPoint only by
+  # which bean a service's own AuthzProducer happened to @Produces. It has moved to
+  # openbank-libs-testing (test scope, pulled in only via testImplementation), and this gate
+  # keeps it — or anything shaped like it — from coming back. Flags a function under src/main
+  # that resolves to `AuthzDecision(allow = true, ...)` with no branching keyword anywhere in
+  # its body, i.e. a decision that can never be anything but allow. Deliberately does not flag
+  # DenyAllPolicyDecisionPoint (unconditional allow = false), which is a genuine production
+  # kill-switch (rules.yaml: authz_policy), nor a conditional PDP that merely contains the
+  # string on one branch. openbank-libs-testing's own src/main is excluded by module name: it
+  # is a test-fixture library every consumer pulls in via testImplementation, never from a
+  # service's own src/main, so a class there never reaches a production classpath. ENFORCED.
+  - id: no-allow-all-pdp-in-main
+    name: "no unconditional allow-all PDP under src/main (enforced)"
+    group: security
+    mode: enforced
+    rationale: "AllowAllPolicyDecisionPoint used to live in openbank-libs-domain/src/main, reachable from every production service's classpath and distinguishable from the real OPA-backed PDP only by which bean a service's AuthzProducer happened to @Produces; it has moved to openbank-libs-testing (test scope only), and this gate keeps the shape from coming back."
+    review_after: "2027-03-26"
+    min_subjects: 1000   # 2543 *.kt files under src/main scanned at introduction 2026-09-26; well under half
+    budget_seconds: 30   # measured ~8s at introduction 2026-09-26; generous headroom for fleet growth
+    selftest: python3 .github/scripts/check-no-allow-all-pdp-in-main.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-allow-all-pdp-in-main.py"]
+    run: |
+      python3 .github/scripts/check-no-allow-all-pdp-in-main.py .
+
   # psd2's ANONYMOUS OPA grant rests on upstream eIDAS mTLS authentication
   # (issue #2169, rules.yaml: authz_policy). psd2_rest_ext.rego grants
   # psd2.list/read/create/initiate/delete to an ANONYMOUS principal because a

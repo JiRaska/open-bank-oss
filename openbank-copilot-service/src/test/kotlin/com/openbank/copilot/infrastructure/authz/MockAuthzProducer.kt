@@ -4,8 +4,8 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.infrastructure.authz
 
-import com.openbank.libs.authz.AllowAllPolicyDecisionPoint
 import com.openbank.libs.authz.PolicyDecisionPoint
+import com.openbank.libs.testing.authz.AllowAllPolicyDecisionPoint
 import io.quarkus.test.Mock
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
