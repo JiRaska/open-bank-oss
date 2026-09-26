@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-dad4c4b2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-fdae3cff
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}
