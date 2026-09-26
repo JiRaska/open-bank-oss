@@ -41,6 +41,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.time.Clock
@@ -105,6 +106,9 @@ class LendingResource(
                 val created = apply.apply(request, actor()).awaitSuspending()
                 Response.status(HTTP_CREATED).entity(objectMapper.writeValueAsString(created))
                     .type(MediaType.APPLICATION_JSON).build()
+            } catch (e: CancellationException) {
+                // Never a 4xx: a cancelled request must propagate, not become a refusal.
+                throw e
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                 // Same mapping as before: any use-case refusal is a 400 with the message.
                 Response.status(400).entity(mapOf("error" to e.message)).build()

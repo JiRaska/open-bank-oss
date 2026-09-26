@@ -23,6 +23,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -105,6 +106,9 @@ class CustomerIntakeResource(
                 val created = apply.apply(application, "$CUSTOMER_ACTOR_PREFIX$partyId").awaitSuspending()
                 Response.status(HTTP_CREATED).entity(objectMapper.writeValueAsString(created))
                     .type(MediaType.APPLICATION_JSON).build()
+            } catch (e: CancellationException) {
+                // Never a 4xx: a cancelled request must propagate, not become a refusal.
+                throw e
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                 error(HTTP_UNPROCESSABLE, e.message ?: "intake refused")
             }

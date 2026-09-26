@@ -193,6 +193,17 @@ class CustomerIntakeResourceTest {
     }
 
     @Test
+    fun `a cancelled submission propagates the cancellation instead of answering 422 (#10958)`() {
+        val (res, _) = resource(apply = RecordingApply(kotlinx.coroutines.CancellationException("client gone")))
+
+        assertThatThrownBy {
+            kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-c", null, request()) }
+        }.isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        // The claim was released, so the client's retry is not stuck IN_PROGRESS.
+        assertThat(store.markers).doesNotContainKey("lending:intake-apply:$partyId:idem-c")
+    }
+
+    @Test
     fun `different idempotency keys are two applications, not a replay`() {
         val (res, _) = resource()
         kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-a", null, request()) }
@@ -234,13 +245,14 @@ class CustomerIntakeResourceTest {
 
     /** Records what the resource actually handed the use case — the assertions that matter are about
      *  the request the DESK layer will see, not about the HTTP status alone. */
-    private class RecordingApply : ApplyForLoanUseCase {
+    private class RecordingApply(private val failure: Throwable? = null) : ApplyForLoanUseCase {
         var lastRequest: LoanApplicationRequest? = null
         var lastActor: String? = null
 
         override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
             lastRequest = request
             lastActor = proposedBy
+            failure?.let { return Uni.createFrom().failure(it) }
             return Uni.createFrom().nullItem()
         }
 

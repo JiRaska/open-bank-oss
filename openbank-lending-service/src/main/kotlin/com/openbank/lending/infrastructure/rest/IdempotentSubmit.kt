@@ -10,10 +10,13 @@ import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import org.jboss.logging.Logger
 
 private const val HTTP_CREATED = 201
+private val LOG: Logger = Logger.getLogger("com.openbank.lending.infrastructure.rest.IdempotentSubmit")
 
 /**
  * The one idempotent-submit flow both lending application endpoints share (#10916, libs #10922).
@@ -27,6 +30,12 @@ private const val HTTP_CREATED = 201
  *  - [ReserveResult.Reserved] → [submit] runs; a 201 is stored under [requestHash], anything else
  *    (a refusal response or an exception, including cancellation) releases the claim so a retry
  *    can run.
+ *
+ * Once [submit] has returned 201 the application EXISTS, so the claim is never released again:
+ * if the [save] that completes it fails (store error, or the marker expired and the key was taken
+ * meanwhile), the created response is still returned and the in-flight marker is left to expire,
+ * so a retry answers 409 IN_PROGRESS rather than creating a second application. Releasing there
+ * would hand the key to a retry with no durable dedupe behind it.
  *
  * [submit] must return a JSON [String] entity. A `null` [storeKey] (no key supplied) runs [submit]
  * unguarded — the pre-existing contract for un-keyed callers.
@@ -48,15 +57,43 @@ internal suspend fun IdempotencyStore.submitOnce(
         ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
         ReserveResult.Reserved -> Unit
     }
-    var stored = false
+    var completed = false
     try {
         val response = submit()
-        if (response.status == HTTP_CREATED) {
-            save(storeKey, requestHash, response.status, response.entity as String, ttlSeconds)
-            stored = true
-        }
+        if (response.status != HTTP_CREATED) return response
+        // The resource now exists: from here on the claim must never be released.
+        completed = true
+        saveCompleted(storeKey, requestHash, response, ttlSeconds)
         return response
     } finally {
-        if (!stored) withContext(NonCancellable) { release(storeKey, requestHash) }
+        if (!completed) {
+            withContext(NonCancellable) {
+                runCatching { release(storeKey, requestHash) }
+                    .onFailure { LOG.warnf(it, "could not release idempotency marker after a failed submit") }
+            }
+        }
+    }
+}
+
+/**
+ * Stores a 201 whose resource already exists. A failure is logged and swallowed, never rethrown:
+ * the caller must answer the created response and keep the in-flight marker (see [submitOnce]).
+ */
+private suspend fun IdempotencyStore.saveCompleted(
+    storeKey: String,
+    requestHash: String,
+    response: Response,
+    ttlSeconds: Long,
+) {
+    try {
+        save(storeKey, requestHash, response.status, response.entity as String, ttlSeconds)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        LOG.warnf(
+            e,
+            "idempotent submit created the resource but could not store the response; " +
+                "the in-flight marker is kept so a retry answers IN_PROGRESS, not a duplicate",
+        )
     }
 }
