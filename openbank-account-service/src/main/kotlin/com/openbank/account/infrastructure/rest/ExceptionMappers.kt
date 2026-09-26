@@ -219,7 +219,7 @@ class AccountScreeningUnavailableExceptionMapper : ExceptionMapper<AccountScreen
 // provider-type-classpath gate. Fleet-wide registration is tracked as a follow-up (#8875 is
 // the party-service instance of the same latent defect).
 // UnauthorizedException -> 401 is libs-runtime's UnauthorizedExceptionMapper (#8993); a local
-// copy for the same type is the #526 non-deterministic collision, removed in #10911. The two
+// copy for the same type is the #526 non-deterministic collision; removed here to close #10911. The two
 // below have no libs-runtime equivalent yet.
 @Provider
 class QuarkusAuthenticationFailedExceptionMapper : ExceptionMapper<AuthenticationFailedException> {

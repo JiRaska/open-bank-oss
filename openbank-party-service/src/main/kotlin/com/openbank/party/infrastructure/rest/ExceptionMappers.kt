@@ -164,7 +164,7 @@ class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> 
 // including services without quarkus-security on the classpath — the #6240 boot-failure
 // class, enforced by the provider-type-classpath gate.
 // UnauthorizedException -> 401 is libs-runtime's UnauthorizedExceptionMapper (#8993); a local
-// copy for the same type is the #526 non-deterministic collision, removed in #10911. The two
+// copy for the same type is the #526 non-deterministic collision; removed here to close #10911. The two
 // below have no libs-runtime equivalent yet.
 @Provider
 class QuarkusAuthenticationFailedExceptionMapper : ExceptionMapper<AuthenticationFailedException> {
