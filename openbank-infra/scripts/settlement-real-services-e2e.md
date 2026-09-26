@@ -102,3 +102,15 @@ entries fail. It then calls the authenticated `/api/v1/audit/integrity` endpoint
 intact chain, no unchained records and a non-empty checked count covering those events.
 `result.json.audit` records the counts and integrity response. This proves local Kafka delivery and
 chain persistence; external signed anchors, archival retention and disaster recovery remain separate.
+
+## Insufficient cover before ledger booking
+
+Add `--reject-cover` to originate a second settlement for 61 CZK after the payer has 60 CZK
+available. The real balance service refuses the reservation. The proof waits for the workflow
+to close, verifies that no BookToLedger activity was scheduled, no journal or hold exists,
+and balance versions are unchanged after idempotent replay. Exactly one durable
+BALANCE_STATE_UNKNOWN outbox fact must exist. The completed history is retained.
+
+This verifies the current conservative failure state, not a terminal business rejection or
+automatic reconciliation. A failed cover activity is still reported as BALANCE_STATE_UNKNOWN;
+this test does not claim that distinction has been resolved or exercise lost cover replies.

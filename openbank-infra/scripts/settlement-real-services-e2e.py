@@ -389,6 +389,7 @@ def main() -> None:
     )
     parser.add_argument("--recover-after-loss", action="store_true", help="Reset the exhausted local workflow before journal booking")
     parser.add_argument("--with-audit", action="store_true", help="Prove real settlement outbox ingestion and audit chain integrity")
+    parser.add_argument("--reject-cover", action="store_true", help="Verify insufficient cover never reaches ledger booking")
     args = parser.parse_args()
     if args.recover_after_loss and args.drop_ledger_response != 5:
         parser.error("--recover-after-loss requires --drop-ledger-response 5")
@@ -800,6 +801,48 @@ def main() -> None:
         assert integrity["checkedCount"] >= len(ingested_events), integrity
         audit_evidence = {"matchedSettlementEvents": len(ingested_events), "integrity": integrity}
         print("Audit", json.dumps(audit_evidence), flush=True)
+    rejected_cover_evidence = None
+    if args.reject_cover:
+        before = balances_correct()
+        assert before
+        rejected_body = dict(settlement_body, idempotencyKey="no-cover-" + uuid.uuid4().hex, amount=61)
+        rejected_id = request(settlement_endpoint, rejected_body, token)["id"]
+        until(
+            lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{rejected_id}'") == "BALANCE_STATE_UNKNOWN",
+            "insufficient-cover outcome", 90,
+        )
+
+        def closed_cover_history() -> dict[str, Any] | None:
+            history = json.loads(run(
+                "docker", "exec", temporal, "temporal", "workflow", "show",
+                "--workflow-id", f"settlement-{rejected_id}", "--namespace", "openbank-settlement",
+                "--address", "127.0.0.1:7233", "--output", "json", "--command-timeout", "10s",
+            ))
+            return history if history["events"][-1]["eventType"] == "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED" else None
+
+        history = until(closed_cover_history, "insufficient-cover workflow completion", 30)
+        (OUT / "workflow-rejected-cover.json").write_text(json.dumps(history, indent=2))
+        scheduled = [
+            event["activityTaskScheduledEventAttributes"]["activityType"]["name"]
+            for event in history["events"] if "activityTaskScheduledEventAttributes" in event
+        ]
+        assert "ReserveSettlementCover" in scheduled and "BookToLedger" not in scheduled, scheduled
+        rejected_journals = request(f"{ledger_endpoint}/transaction/{rejected_id}", token=token)
+        assert rejected_journals == [], rejected_journals
+        assert sql("balance", f"SELECT count(*) FROM balance_holds WHERE reference_id='{rejected_id}'") == "0"
+        assert request(settlement_endpoint, rejected_body, token)["id"] == rejected_id
+        after = balances_correct()
+        assert after and [b["version"] for b in after] == [b["version"] for b in before]
+        assert sql(
+            "settlement", "SELECT count(*) FROM settlement_outbox "
+            f"WHERE aggregate_id='{rejected_id}' AND payload::jsonb->>'status'='BALANCE_STATE_UNKNOWN'",
+        ) == "1"
+        rejected_cover_evidence = {
+            "settlementId": rejected_id, "status": "BALANCE_STATE_UNKNOWN",
+            "journals": rejected_journals, "holdCount": 0, "scheduledActivities": scheduled,
+            "unchangedBalanceVersions": [b["version"] for b in after],
+        }
+        print("Rejected cover", json.dumps(rejected_cover_evidence), flush=True)
     print("Fault injection", json.dumps(fault_evidence), flush=True)
     print("Journals response", json.dumps(journals), flush=True)
     print("Balances", json.dumps(final_balances), flush=True)
@@ -812,6 +855,7 @@ def main() -> None:
                 "journals": journals,
                 "source": source_metadata,
                 "responseLoss": fault_evidence,
+                "rejectedCover": rejected_cover_evidence,
                 "settlementStatus": "BOOKED" if recovery_evidence else expected_status,
                 "recovery": recovery_evidence,
                 "audit": audit_evidence,
