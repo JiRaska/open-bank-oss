@@ -144,6 +144,11 @@ dependencies {
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
+    // RedisIdempotencyStoreIT runs the store's three Lua scripts against a REAL Valkey: the unit
+    // test only exercises a Kotlin twin of them, which cannot catch a Lua defect.
+    // 2.0.5 is what the Quarkus BOM resolves for every service; the catalog's 1.20.4 bundles a
+    // docker-java that current Docker Engines reject (API < 1.40), which would silently skip it.
+    testImplementation("org.testcontainers:testcontainers:2.0.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
