@@ -10,8 +10,8 @@ set -euo pipefail
 
 cd "$SRC/open-bank-oss"
 
-# 1) Compile the fuzzed classes (domain module only — no Quarkus, no containers).
-./gradlew :openbank-libs-domain:classes --no-daemon -q
+# 1) Compile the fuzzed classes (framework-free libs modules only — no Quarkus, no containers).
+./gradlew :openbank-libs-domain:classes :openbank-libs-iso20022:classes --no-daemon -q
 
 # 2) Compile the fuzz harnesses against them. The fuzz module is a standalone build with
 # its own settings.gradle.kts and NO wrapper of its own, so drive it with the ROOT wrapper

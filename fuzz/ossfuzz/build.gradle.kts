@@ -21,6 +21,10 @@ dependencies {
     // The fuzzed code: libs-domain classes, compiled by the parent build and consumed
     // as a file dependency so this module needs no inclusion in the root project.
     implementation(files("../../openbank-libs-domain/build/classes/kotlin/main"))
+    // Pacs008Reader moved to openbank-libs-iso20022 (ADR-0317 phase 1); its classes and the
+    // XSDs it validates against (processedResources) come from that module's build output.
+    implementation(files("../../openbank-libs-iso20022/build/classes/kotlin/main"))
+    implementation(files("../../openbank-libs-iso20022/build/resources/main"))
     implementation("com.code-intelligence:jazzer-api:0.22.1")
     // libs-domain's own compile-time deps used by the fuzzed classes
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.18.2")
