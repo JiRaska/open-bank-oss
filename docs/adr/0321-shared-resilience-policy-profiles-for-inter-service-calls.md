@@ -96,9 +96,8 @@ static, and the keyed/unkeyed decision is made per call by which exception type 
 custom interceptor or SmallRye FT's programmatic `TypedGuard` API were rejected for this: both
 move the policy out of the annotation the `resilience-profile` gate reads. Per-environment tuning uses
 MicroProfile FT's own config override (`<class>/<method>/Timeout/value`) — never a new literal.
-A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")`, visible beside the
-call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation does not exist yet; it lands
-with the profile catalogue (#10930).
+A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")` (the annotation does not exist yet; it lands with the profile catalogue, #10930), visible beside the
+call — the same review shape as `SyntheticTaintExternalBoundary`.
 
 **D3 — Metrics.** Every profiled adapter records through `ResilientCallMetrics`, which gains a
 closed `profile` tag next to `adapter` and `outcome`. Breaker state and bulkhead rejections come

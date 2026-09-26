@@ -29,11 +29,14 @@ failure that made #4011 dangerous rather than merely untidy.
 
 CODE-ABOUT-CODE, decided before the first run. A guard over source text will flag the very
 prose that explains the defect it exists to catch — this repo has been bitten three times.
-The precedence here: naming a non-existent annotation is permitted when the surrounding
-paragraph CITES AN ISSUE (`#1234`). A document that says "`@Audited` was inert and is gone
-(#4011)" is the correction; a document that says "`@Audited` audits the detail endpoint" is
-the defect. Requiring the citation means the author has to point at the record, and the rule
-is derivable rather than a list of blessed sentences.
+The precedence here: naming a non-existent annotation is permitted when the annotation's OWN
+LOGICAL UNIT — same line, same markdown table row, or same list item (a bullet plus its
+indented continuation lines) — CITES AN ISSUE (`#1234`). A document that says "`@Audited` was
+inert and is gone (#4011)" is the correction; a document that says "`@Audited` audits the
+detail endpoint" is the defect. Requiring the citation to sit on the same unit — not merely
+somewhere in the same blank-line-delimited block — means one citation cannot license every
+other annotation nearby (#10976: a whole markdown table has no blank lines, so it used to be
+one block, and a single row's citation whitelisted every other row).
 
 Prose legitimately names annotations this codebase deliberately did not adopt (ADR-0016
 rejects `@RunOnVirtualThread`; a residual-risk column may name the control that is still
@@ -109,21 +112,51 @@ FENCE = re.compile(r"^\s*```")
 ISSUE_REF = re.compile(r"#\d{2,}")
 
 
-def paragraph_of(lines: list[str]) -> list[str]:
-    """For each line index, the text of the blank-line-delimited block it belongs to.
+LIST_ITEM_START = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
 
-    A correction spans several lines (a bullet, a table row, a code sample and its comment),
-    so the issue citation that licenses naming an absent annotation is looked for across the
-    whole block rather than on the one line.
+
+def unit_of(lines: list[str]) -> list[str]:
+    """For each line index, the text of the LOGICAL UNIT it belongs to: the citation that
+    licenses naming an absent annotation must sit on that unit, not merely somewhere in the
+    same blank-line-delimited block (#10976 — a whole markdown table, or a whole multi-bullet
+    paragraph, is one such block, so a block-wide license lets one citation whitelist every
+    other annotation nearby).
+
+    A unit is, in order:
+      - a list item: the bullet/numbered line plus any following non-blank lines that are
+        indented MORE than the bullet marker and do not themselves start a new item — a
+        continuation of the same point (e.g. a correction's "see the record… (#4011)" on the
+        line below its bullet).
+      - otherwise, a single line. This covers a markdown table row (one row is one physical
+        line) and ordinary running prose, where a citation two sentences away no longer
+        licenses anything.
     """
     out: list[str] = [""] * len(lines)
-    start = 0
-    for i in range(len(lines) + 1):
-        if i == len(lines) or not lines[i].strip():
-            block = "\n".join(lines[start:i])
-            for j in range(start, i):
-                out[j] = block
-            start = i + 1
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        m = LIST_ITEM_START.match(line)
+        if m and line.strip():
+            indent = len(m.group(1))
+            j = i + 1
+            while j < n:
+                nxt = lines[j]
+                if not nxt.strip():
+                    break
+                if LIST_ITEM_START.match(nxt):
+                    break
+                nxt_indent = len(nxt) - len(nxt.lstrip())
+                if nxt_indent <= indent:
+                    break
+                j += 1
+            unit = "\n".join(lines[i:j])
+            for k in range(i, j):
+                out[k] = unit
+            i = j
+        else:
+            out[i] = line
+            i += 1
     return out
 
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
@@ -267,7 +300,7 @@ def check_rule_b(
             rel = str(path.relative_to(root))
             text = gatelib.read_text(path, errors="replace")
             lines = text.splitlines()
-            paragraphs = paragraph_of(lines)
+            units = unit_of(lines)
             in_fence = False
             for lineno, line in enumerate(lines, 1):
                 if FENCE.match(line):
@@ -280,9 +313,12 @@ def check_rule_b(
                     if (rel, name) in allowlist:
                         exercised.add((rel, name))
                         continue
-                    if ISSUE_REF.search(paragraphs[lineno - 1]):
+                    if ISSUE_REF.search(units[lineno - 1]):
                         # code-about-code: prose explaining an absent annotation, with a
                         # pointer to the record that decided it. See the module docstring.
+                        # The citation must be on the SAME UNIT as the annotation (#10976) —
+                        # same line, same table row, or same list item — not merely anywhere
+                        # in the same blank-line-delimited block.
                         continue
                     problems.append(
                         f"{rel}:{lineno}: names `@{name}`, which is not declared or imported "
@@ -374,6 +410,36 @@ def self_test() -> int:
         if not any("0003-z.md" in p and "@Phantom" in p
                    for p in check_rule_b(root, allowlist={})):
             print("SELF-TEST FAIL: rule B did not flag an uncited phantom claim")
+            ok = False
+
+        # (#10976 a) a table has no blank lines, so it used to be ONE block — a citation in
+        # one row must not license an absent annotation named in a DIFFERENT row.
+        (adr / "0004-table.md").write_text(
+            "| Control | Note |\n"
+            "| --- | --- |\n"
+            "| `@Used` | fixed, see #4011 |\n"
+            "| `@TableGhost` | masks the field |\n"
+        )
+        table_b = check_rule_b(root, allowlist={})
+        if not any("0004-table.md" in p and "@TableGhost" in p for p in table_b):
+            print(
+                "SELF-TEST FAIL: rule B did not flag @TableGhost — a citation in an "
+                "UNRELATED table row must not license it (#10976)"
+            )
+            ok = False
+
+        # (#10976 b) a paragraph whose only issue reference sits on a different line/list item
+        # than the annotation — the old whole-block license must no longer apply.
+        (adr / "0005-paragraph.md").write_text(
+            "- `@ParaGhost` still audits every write today.\n"
+            "- Unrelated note about rollout, tracked separately (#4011).\n"
+        )
+        para_b = check_rule_b(root, allowlist={})
+        if not any("0005-paragraph.md" in p and "@ParaGhost" in p for p in para_b):
+            print(
+                "SELF-TEST FAIL: rule B did not flag @ParaGhost — the issue citation is on "
+                "a DIFFERENT list item and must not license it (#10976)"
+            )
             ok = False
 
     print("SELF-TEST PASS" if ok else "SELF-TEST FAILED")
