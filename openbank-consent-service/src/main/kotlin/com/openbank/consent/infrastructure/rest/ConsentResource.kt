@@ -80,9 +80,10 @@ class ConsentResource(
         val idempotencyKey = request.tppTransactionId?.takeIf { it.isNotBlank() }
             ?: xRequestId?.takeIf { it.isNotBlank() }
 
-        val requestHash = fingerprint("POST", CONSENTS_PATH, request)
+        val requestHash = fingerprint(canonicalMapper, "POST", CONSENTS_PATH, request)
         idempotencyKey?.let { key ->
-            idempotencyStore.lookup(consentCreateKey(request.granteeId, request.partyId, key), requestHash)?.let { cached ->
+            val storeKey = consentCreateKey(request.granteeId, request.partyId, key)
+            idempotencyStore.lookup(storeKey, requestHash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -240,14 +241,7 @@ class ConsentResource(
         return ConsentCheckResponse(granted = granted)
     }
 
-    /**
-     * Binds the idempotency key to the request it was first used for (#10916): the deserialised
-     * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
-     * while any field value does.
-     */
-    private fun fingerprint(method: String, path: String, body: Any): String =
-        RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
-
+    /** Sorted-key copy of the service mapper, used only for [fingerprint]. */
     private val canonicalMapper: ObjectMapper by lazy {
         objectMapper.copy()
             .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
@@ -261,6 +255,14 @@ class ConsentResource(
         const val CONSENTS_PATH = "/api/v1/consents"
     }
 }
+
+/**
+ * Binds the idempotency key to the request it was first used for (#10916): the deserialised
+ * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
+ * while any field value does. Top-level to keep [ConsentResource] under detekt's function cap.
+ */
+private fun fingerprint(canonicalMapper: ObjectMapper, method: String, path: String, body: Any): String =
+    RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
 
 /**
  * The whole answer: a boolean. No consent id, no scopes, no validity window — a caller that
