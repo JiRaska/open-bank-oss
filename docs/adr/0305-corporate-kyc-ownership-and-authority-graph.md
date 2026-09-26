@@ -1,7 +1,8 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
+followup: "#10233 — complete ownership and representation source evidence, corrections, erasure and the case-scoped lens"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -51,7 +52,7 @@ Companies House serves PSC statements from a separate endpoint; a missing PSC-li
 resource alone is not proof that the company has no reportable controllers.
 
 Before this lens ingests UBO evidence, KYB must persist a bounded, versioned source
-observation with its source hash, fetched/recorded time, record references, statements,
+observation with a mapped-finding hash, fetched/recorded time, record references, statements,
 corrections and restriction state. An outbox event can then refer to that observation.
 The existing `openbank.kyb.events` lifecycle topic is unsuitable for owner-level facts:
 onboarding and the analytics sink already consume it, and the latter can retain raw
@@ -61,6 +62,54 @@ No owner name, date of birth, address or free text goes on the topic. Context re
 from KYB's durable observation API under service authorization, never from Kafka
 retention alone. This is an egress and access review gate, not permission to publish
 before the contract, ACLs, threat model and consumer are tested together.
+
+The first bounded slice stores versioned PSC observations in KYB and emits only
+`caseId`, `observationId`, `revision` and `sourceSha256` on the dedicated topic.
+Despite its compatibility name, `sourceSha256` currently hashes KYB's serialized
+mapped finding, not the original register response. It proves reference consistency
+between the event and source row, not authenticity of the upstream source. Capturing
+and verifying the original source artifact with its own digest remains required before
+the complete evidentiary lens can claim document-level provenance. A
+separate `KybUboObservationRestricted` reference event has the same minimized fields.
+KYB retains the original mapped observation and records a fixed restriction reason, actor and
+time in a separate table; subsequent detail reads fail closed. Context persists a
+durable, bank-scoped tombstone and excludes the observation from every history read,
+including when the restriction event arrives before the recorded event. Replays are
+idempotent and conflicting references fail. This slice does not yet implement
+erasure, corrected-observation lineage, indirect ownership or the complete authority
+lens; those remain acceptance gates before full delivery.
+Flyway V9 reserves an append-only, case-scoped correction proposal and replacement
+link. It enforces a changed mapped finding, matching case, different proposal and
+decision actors, and an approved proposal plus its replacement in one transaction.
+V10 adds append-only case-, principal- and purpose-scoped read audit for correction
+candidates. The KYB API can now propose a candidate only from a fresh register read,
+release it after a live assignment check and committed read audit, and let a different
+KYC/admin reviewer approve or reject it only after their own audited candidate read.
+V11 indexes that reviewer/candidate existence check and the read path stops at one row;
+it does not imply a measured 10× workload qualification.
+Approval writes the successor observation
+and the existing minimized reference event in one transaction. The observation detail
+exposes an explicit predecessor ID; chronological adjacency alone is not a correction.
+Context does not yet render supersession lineage, and KYB still lacks the original
+register artifact, so neither document-level provenance nor the complete graph lens
+is claimed by this stage.
+
+The historical observation read names both the onboarding case and the observation.
+It requires KYC/admin authorization and the exact `KYB_OWNERSHIP_REVIEW` purpose. KYB
+checks the caller's still-active, approved case-root assignment with Context over an
+authenticated HTTPS connection on every direct read; a denial or unavailable check
+releases no finding. KYB commits an actor, purpose, case, observation and timestamp
+audit row before returning detail. A missing or cross-case observation returns no detail.
+Context independently repeats its assignment decision before resolving a reference
+on an analyst's behalf.
+The same live case check precedes a permanent restriction or correction decision.
+Context provides a data-free `204` access operation so KYB can check assignment
+without materializing the bounded history. The KYB client stages this transition
+behind `openbank.kyb.data-free-context-access-enabled`, defaulting to `false` while
+the Context operation is deployed and verified. Enabling it switches every live
+assignment check to the `204` operation; denial or unavailability fails closed,
+without falling back to a full-history read. Rollout must install and verify the
+Context operation first, then enable the KYB switch in a later release.
 
 The UI supports an `effectiveAt` snapshot and identifies late-recorded evidence. It must
 not render a current representative as authorized at a past date or a revoked power as
