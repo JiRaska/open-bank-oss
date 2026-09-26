@@ -6,6 +6,7 @@ package com.openbank.lending.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.LedgerBackfillRequestRepository
+import com.openbank.lending.application.port.out.LedgerPostResult
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanEventEmitter
@@ -51,7 +52,11 @@ data class BackfillRequestView(
 /** Outcome of one leg in an execution run. */
 data class LegOutcome(val reference: String, val kind: String, val status: String, val error: String? = null)
 
-/** Outcome for one loan: POSTED (every leg accepted by the ledger), FAILED (stopped at the first failure). */
+/**
+ * Outcome for one loan (#10904): POSTED (at least one leg booked by this run, none failed),
+ * ALREADY_POSTED (every leg was an idempotent replay: the ledger booked nothing), UNCONFIRMED (accepted,
+ * but the ledger did not say whether it booked), FAILED (stopped at the first failure).
+ */
 data class LoanOutcome(
     val loanId: String,
     val status: String,
@@ -126,8 +131,12 @@ class LedgerBackfillService(
                 updatedAt = now
             }
             // Natural-key replay (#8351): a retried propose for the same plan returns the pending
-            // request instead of stacking a second one awaiting a checker.
-            requests.findProposedByHash(plan.planHash).flatMap { twin ->
+            // request instead of stacking a second one awaiting a checker. A plan that is already
+            // approved or executed is refused outright (#10904).
+            requests.findSignedOffByHash(plan.planHash).flatMap { signedOff ->
+                signedOff.firstOrNull()?.let { error(alreadySignedOff(it)) }
+                requests.findProposedByHash(plan.planHash)
+            }.flatMap { twin ->
                 twin?.let { Uni.createFrom().item(it.toView()) }
                     ?: requests.save(entity).call { saved -> audit(saved, "PROPOSED", maker) }.map { it.toView() }
             }
@@ -212,7 +221,7 @@ class LedgerBackfillService(
                         .collect().asList()
                 }
                 .flatMap { outcomes ->
-                    val complete = outcomes.all { it.status == POSTED }
+                    val complete = outcomes.none { it.status == FAILED }
                     val result = json.writeValueAsString(
                         mapOf(
                             "disbursedBefore" to disbursedBefore(entity).toString(),
@@ -220,7 +229,9 @@ class LedgerBackfillService(
                             "at" to OffsetDateTime.now(clock).toString(),
                             "complete" to complete,
                             "loansPosted" to outcomes.count { it.status == POSTED },
-                            "loansFailed" to outcomes.filter { it.status != POSTED }.map { it.loanId },
+                            "loansAlreadyPosted" to outcomes.count { it.status == ALREADY_POSTED },
+                            "loansUnconfirmed" to outcomes.count { it.status == UNCONFIRMED },
+                            "loansFailed" to outcomes.filter { it.status == FAILED }.map { it.loanId },
                         ),
                     )
                     requests.recordExecution(entity.id, result, complete, OffsetDateTime.now(clock))
@@ -246,8 +257,8 @@ class LedgerBackfillService(
                 if (failed) {
                     Uni.createFrom().item(LegOutcome(leg.reference, leg.kind.name, SKIPPED))
                 } else {
-                    ledger.post(LedgerBackfillPlanner.toPosting(leg, domain.partyId, cutover))
-                        .map { LegOutcome(leg.reference, leg.kind.name, POSTED) }
+                    ledger.postReportingReplay(LedgerBackfillPlanner.toPosting(leg, domain.partyId, cutover))
+                        .map { result -> LegOutcome(leg.reference, leg.kind.name, legStatus(result)) }
                         .onFailure().recoverWithItem { e ->
                             failed = true
                             log.warnf("ledger backfill: %s failed for %s: %s", leg.kind, leg.reference, e.message)
@@ -257,17 +268,10 @@ class LedgerBackfillService(
             }
             .collect().asList()
             .map { outcomes ->
-                val posted = outcomes.count { it.status == POSTED }
                 LoanOutcome(
                     loan.loanId,
-                    if (posted ==
-                        outcomes.size
-                    ) {
-                        POSTED
-                    } else {
-                        FAILED
-                    },
-                    posted,
+                    loanStatus(outcomes),
+                    outcomes.count { it.status == POSTED },
                     outcomes.size,
                     outcomes,
                 )
@@ -302,8 +306,24 @@ class LedgerBackfillService(
         const val MAX_LOANS = 10_000
         val EXECUTION_LEASE: Duration = Duration.ofMinutes(15)
         const val POSTED = "POSTED"
+        const val ALREADY_POSTED = "ALREADY_POSTED"
+        const val UNCONFIRMED = "UNCONFIRMED"
         const val FAILED = "FAILED"
         const val SKIPPED = "SKIPPED"
+
+        fun legStatus(result: LedgerPostResult): String = when (result) {
+            LedgerPostResult.POSTED -> POSTED
+            LedgerPostResult.REPLAYED -> ALREADY_POSTED
+            LedgerPostResult.UNCONFIRMED -> UNCONFIRMED
+        }
+
+        /** A loan counts as POSTED only if this run booked at least one of its legs (#10904). */
+        fun loanStatus(legs: List<LegOutcome>): String = when {
+            legs.any { it.status == FAILED || it.status == SKIPPED } -> FAILED
+            legs.any { it.status == POSTED } -> POSTED
+            legs.all { it.status == ALREADY_POSTED } -> ALREADY_POSTED
+            else -> UNCONFIRMED
+        }
     }
 }
 
@@ -315,6 +335,13 @@ private fun refusal(plan: BackfillPlan): String = when {
     else -> "tie-out fails: " + plan.tieOut.filterNot { it.ties }
         .joinToString { "${it.currency} ${it.loansReceivableAfter} != ${it.lendingUnpaidPrincipal}" }
 }
+
+/** Refusal text for a plan another request already signed off or posted (#10904); the resource maps it to 409. */
+private fun alreadySignedOff(other: LedgerBackfillRequestEntity): String =
+    "this plan is already ${other.state} by request ${other.id}" +
+        (other.executedBy?.let { " (executed by $it at ${other.executedAt})" } ?: "") +
+        ": the ledger would replay every leg idempotently and post nothing; a new request is only " +
+        "possible once the book changes"
 
 private fun LedgerBackfillRequestEntity.toView() = BackfillRequestView(
     id = id,
