@@ -15,8 +15,12 @@ import io.micrometer.core.instrument.Timer
  * adapters) each redeclared this as three `private const val` fields purely to dodge detekt's
  * `MagicNumber` rule on the literals passed to `publishPercentiles` — every one of them carried a
  * comment saying so. One definition here means one place to change if the fleet's percentile
- * convention ever does, and it is what `openbank-libs-runtime/detekt-baseline.xml` no longer
- * needs ten near-identical `MagicNumber` waivers for.
+ * convention ever does. Only `DomainMetrics` had actually accumulated an explicit
+ * `openbank-libs-runtime/detekt-baseline.xml` entry for it (3 `MagicNumber` waivers, one per
+ * literal, now removed); the other adapters' `private const val` fields avoided the rule by
+ * declaration (`ignoreConstantDeclaration`) rather than by baseline, so this migration removes 3
+ * waivers here and lets every other service drop its own now-redundant constants without touching
+ * that service's baseline at all.
  */
 object Percentiles {
     const val P50 = 0.5

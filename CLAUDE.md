@@ -411,12 +411,15 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   collapse multi-line signatures; expand wildcard imports rather than hand-wrapping.
 
 ### detekt
-- **`MagicNumber` fires on the fleet-standard percentile triple.** `publishPercentiles(0.5, 0.95, 0.99)`
-  is 3 violations per call site — `DomainMetrics` only escapes via
-  `openbank-libs-runtime/detekt-baseline.xml`, a new per-service adapter has no such cover. Declare
-  `private const val P50/P95/P99` in the adapter's `companion object` (`ignoreConstantDeclaration` is
-  on by default). The `Timer.builder` and `DistributionSummary.builder` call sites usually differ in
-  indentation — a single find-and-replace fixes only one.
+- **`MagicNumber` fires on the fleet-standard percentile triple — use the shared helper, don't
+  redeclare constants.** `publishPercentiles(0.5, 0.95, 0.99)` is 3 violations per call site.
+  `com.openbank.libs.observability.Percentiles` (openbank-libs-runtime) plus the
+  `Timer.Builder`/`DistributionSummary.Builder` extension `standardPercentiles()` (#10932) replaced
+  the ten fleet-wide copies of `private const val P50/P95/P99` — call `.standardPercentiles()`
+  instead of declaring your own constants. Only `DomainMetrics` had ever accumulated an explicit
+  `openbank-libs-runtime/detekt-baseline.xml` waiver for this; the rest avoided the rule via
+  `ignoreConstantDeclaration` on their own now-redundant `private const val` fields, which the
+  helper lets you delete outright rather than baseline.
 - **`LongParameterList` fires AT the threshold, not above it.** `config/detekt/detekt.yml` sets
   `constructorThreshold: 9`, so a 9-parameter constructor is reported — adding a metrics port to an
   8-param endpoint fails the gate. Use field injection
