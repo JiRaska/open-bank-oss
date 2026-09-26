@@ -152,16 +152,20 @@ openbank:
       # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
       enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
-    # EUR is BCBS d368 (April 2016) Annex 2 Table 1. CZK is NOT in that table and is deliberately
-    # absent: its sizes must be taken from the EBA supervisory-outlier-test RTS by the operator
-    # (e.g. OPENBANK_RISK_IRRBB_SHOCK_SIZES="EUR=200/250/100;CZK=<from the RTS>"). Until then CZK
-    # is reported "shock sizes not configured", never shocked with a guess.
+    # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
+    # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),
+    # OJ L 24.4.2024. Annex Part A lists CZK and EUR by name, both 200/250/100 (#10896). The same
+    # EUR values are in BCBS d368 Annex 2 Table 1; CZK is not in d368. The regulation names the six
+    # scenarios (Art. 1(1)) without formulas; the formulas and scalars (x=4, 0.65/0.9, 0.8/0.6) are
+    # BCBS d368 Annex 2 as carried into EBA/GL/2018/02 Annex III, which the regulation builds on
+    # (recital 1). Art. 3(7) floor: -150 bp at immediate maturity, +3 bp per year, 0 % from 50 years,
+    # and an observed rate already below it is kept (PostShockFloor implements exactly that).
+    # A currency outside Annex Part A must be calibrated per Annex Part B, never guessed.
     irrbb:
-      shock-sizes: ${OPENBANK_RISK_IRRBB_SHOCK_SIZES:EUR=200/250/100}
-      shock-source: ${OPENBANK_RISK_IRRBB_SHOCK_SOURCE:BCBS d368 (Apr 2016) Annex 2 Table 1 and shock formulas (x=4)}
-      # Post-shock floor `atZeroBp/slopeBpPerYear` is optional and unset here: d368 leaves floors
-      # to national supervisors (not above zero). Set OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR and
-      # OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE from the applicable supervisory text.
+      shock-sizes: ${OPENBANK_RISK_IRRBB_SHOCK_SIZES:EUR=200/250/100;CZK=200/250/100}
+      shock-source: ${OPENBANK_RISK_IRRBB_SHOCK_SOURCE:Delegated Regulation (EU) 2024/856 Annex Part A (CZK, EUR); scenario formulas BCBS d368 Annex 2 / EBA/GL/2018/02 Annex III (x=4)}
+      post-shock-floor: ${OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR:-150/3}
+      post-shock-floor-source: ${OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE:Delegated Regulation (EU) 2024/856 Art. 3(7)}
     # ADR-0313 phase 1: LCR and NSFR. A VERSIONED parameter set — bump parameter-set-version on any
     # change here; every /liquidity result names the id and version it was computed with.
     # BCBS standard factors: d238 = "Basel III: The Liquidity Coverage Ratio and liquidity risk
