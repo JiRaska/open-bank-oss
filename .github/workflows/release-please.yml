@@ -359,18 +359,12 @@ jobs:
   # .github/scripts/build-release-evidence.sh. The SBOM/docs are *attached to the
   # release, not orphaned* — the model rules.yaml requires.
   #
-  # NON-BLOCKING in v1 (continue-on-error): the release + tag are already cut by the
-  # job above, so an evidence hiccup must never red the release train. Promote to the
-  # enforced rules.yaml: provenance.gate once proven on real releases. Still planned:
-  # native GitHub attestation (private-repo GHAS gate), embedded coverage/test, and
-  # OpenVEX human triage (RELEASE.md "wired vs planned").
   release-evidence:
     name: Release evidence (SBOM + SLSA + VEX bundle)
     needs: release-please
     if: needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 30
-    continue-on-error: true
     permissions:
       contents: write       # upload release assets
       id-token: write       # GitHub OIDC → assume the build-runner role for KMS cosign
@@ -426,8 +420,9 @@ jobs:
           echo "Released components:"; cut -f1-4 released.tsv
           # Gradle task list for components that carry the cyclonedx plugin.
           tasks=""
-          while IFS=$'\t' read -r p comp ver tag upurl; do
-            [ -n "$p" ] && tasks="$tasks :$p:cyclonedxBom"
+          while IFS=$'\t' read -r -a released_fields; do
+            package_path="${released_fields[0]:-}"
+            [ -n "$package_path" ] && tasks="$tasks :$package_path:cyclonedxBom"
           done < released.tsv
           echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
 
@@ -447,7 +442,7 @@ jobs:
 
       - name: Build, sign and attach the release evidence bundle
         run: |
-          set -uo pipefail
+          set -euo pipefail
           # Evidence bundle per released component (ADR-0029 D2 / ADR-0030 D4):
           # CycloneDX SBOM + SLSA provenance + OpenVEX + the bundle manifest, each
           # signed with the AWS KMS cosign key and attached to the GitHub Release.
@@ -477,7 +472,7 @@ jobs:
           sign() { COSIGN_YES=true "$bin" sign-blob --key "$COSIGN_KEY" --output-signature "${1}.sig" "$1"; }
           # Upload one asset via the REST API (gh CLI is absent on part of the runner pool).
           upload_asset() {
-            local upbase="$1" file="$2" code
+            local upbase="$1" tag="$2" file="$3" code release asset_id existing
             code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Content-Type: application/octet-stream" \
@@ -485,7 +480,42 @@ jobs:
               "${upbase}?name=$(basename "$file")")"
             case "$code" in
               201) echo "  uploaded $file" ;;
-              422) echo "::notice::$file already present (HTTP 422) — skipping" ;;
+              422)
+                # A rerun may hit an existing asset name. HTTP 422 alone says nothing
+                # about its bytes; accept it only after proving the stored evidence
+                # matches the current document (or is a valid signature for it).
+                release="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H 'Accept: application/vnd.github+json' \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")" || return 1
+                asset_id="$(jq -er --arg name "$(basename "$file")" \
+                  '[.assets[] | select(.name == $name and .size > 0) | .id] | if length == 1 then .[0] else error("missing, empty or duplicate asset") end' \
+                  <<< "$release")" || { echo "::error::HTTP 422 but $file has no unique nonempty release asset"; return 1; }
+                existing="$(mktemp)"
+                if ! curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H 'Accept: application/octet-stream' -o "$existing" \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"; then
+                  rm -f "$existing"
+                  echo "::error::could not download existing $file after HTTP 422"
+                  return 1
+                fi
+                if [ ! -s "$existing" ]; then
+                  rm -f "$existing"
+                  echo "::error::existing $file is empty after HTTP 422"
+                  return 1
+                fi
+                if [[ "$file" == *.sig ]]; then
+                  COSIGN_YES=true "$bin" verify-blob --key "$COSIGN_KEY" \
+                    --signature "$existing" "${file%.sig}" > /dev/null || {
+                      rm -f "$existing"; echo "::error::existing signature $file does not verify current document"; return 1;
+                    }
+                elif ! cmp -s "$file" "$existing"; then
+                  rm -f "$existing"
+                  echo "::error::existing $file differs from current release evidence"
+                  return 1
+                fi
+                rm -f "$existing"
+                echo "  verified existing $file after HTTP 422"
+                ;;
               *)   echo "::warning::upload of $file failed (HTTP $code)"; return 1 ;;
             esac
           }
@@ -501,26 +531,30 @@ jobs:
               # SBOM from the source tree (package-lock.json etc.) with trivy fs.
               echo "::notice::$p has no gradle SBOM — generated via trivy fs"
             else
-              echo "::warning::no SBOM for $p (no gradle plugin and trivy fs produced none) — skipping $tag"
-              continue
+              echo "::error::no SBOM for $p (no gradle plugin and trivy fs produced none) — cannot verify release $tag"
+              exit 1
             fi
-            sign "$sbom_out" || { echo "::warning::cosign sign-blob failed for $sbom_out"; continue; }
+            [ -s "$sbom_out" ] || { echo "::error::empty SBOM for $tag"; exit 1; }
+            sign "$sbom_out" || { echo "::error::cosign sign-blob failed for $sbom_out"; exit 1; }
 
             # Assemble SLSA provenance + OpenVEX + evidence manifest (references the signed SBOM).
             bash .github/scripts/build-release-evidence.sh "$comp" "$ver" "$tag" "$p" "$sbom_out" \
-              || echo "::warning::evidence assembly failed for $tag"
+              || { echo "::error::evidence assembly failed for $tag"; exit 1; }
 
             assets="$sbom_out ${sbom_out}.sig"
             for doc in "${tag}.slsa.json" "${tag}.vex.json" "${tag}.evidence.json"; do
-              [ -f "$doc" ] || continue
-              sign "$doc" && assets="$assets $doc ${doc}.sig" \
-                || echo "::warning::cosign sign-blob failed for $doc"
+              [ -s "$doc" ] || { echo "::error::required evidence document $doc is missing or empty"; exit 1; }
+              sign "$doc" || { echo "::error::cosign sign-blob failed for $doc"; exit 1; }
+              assets="$assets $doc ${doc}.sig"
             done
 
             if [ -z "$upurl" ]; then
-              echo "::warning::no upload_url for $tag — cannot attach assets"; continue
+              echo "::error::no upload_url for $tag — cannot attach assets"; exit 1
             fi
-            for f in $assets; do upload_asset "$upurl" "$f" || true; done
+            for f in $assets; do
+              [ -s "$f" ] || { echo "::error::required release asset $f is missing or empty"; exit 1; }
+              upload_asset "$upurl" "$tag" "$f"
+            done
             echo "Attached signed evidence bundle to release $tag: $assets"
             echo "$tag" >> provenance_ok.tags
           done < released.tsv
@@ -646,3 +680,35 @@ jobs:
       base64-subjects: ${{ fromJSON(needs.provenance-subjects.outputs.hashes_by_tag)[matrix.tag] }}
       upload-assets: true
       upload-tag-name: ${{ matrix.tag }}
+
+  release-evidence-assets:
+    name: Verify complete release evidence bundles
+    needs: [release-please, release-evidence, provenance-subjects, provenance]
+    if: ${{ always() && needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
+      RP_OUTPUTS: ${{ needs.release-please.outputs.rp_outputs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require successful evidence and provenance jobs
+        run: |
+          for result in '${{ needs.release-evidence.result }}' \
+                        '${{ needs.provenance-subjects.result }}' \
+                        '${{ needs.provenance.result }}'; do
+            if [ "$result" != success ]; then
+              echo "::error::release evidence prerequisite did not succeed ($result)"
+              exit 1
+            fi
+          done
+      - name: Verify required release assets
+        run: >-
+          python3 .github/scripts/check-release-evidence-coverage.py
+          --verify-release-assets
+          --paths-released "$PATHS_RELEASED"
+          --rp-outputs "$RP_OUTPUTS"
+          --repository "$GITHUB_REPOSITORY"

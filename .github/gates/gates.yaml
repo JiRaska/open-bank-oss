@@ -3310,15 +3310,23 @@ gates:
   # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
   # released), same contract as check-pact-provider-replay.py above.
   - id: release-evidence-coverage
-    name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
+    name: "released packages have identities and complete evidence bundles (issue #7597, enforced)"
     group: supplychain
     mode: enforced
-    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    rationale: "Unmapped released packages and tags with missing SBOM/provenance/VEX/signature assets must be explicit failures rather than silent gaps."
     review_after: "2027-08-31"
     min_subjects: 60
-    selftest_inputs: [".github/scripts/check-release-evidence-coverage.py"]
+    selftest_inputs:
+      - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/scripts/test-release-evidence-upload.py"
+      - ".github/scripts/verify-release-evidence-manifest.py"
+      - ".github/scripts/test-verify-release-evidence-manifest.py"
+      - ".github/workflows/release-please.yml"
+      - ".github/workflows/verify-release-evidence.yml"
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
+      python3 .github/scripts/test-release-evidence-upload.py
+      python3 .github/scripts/test-verify-release-evidence-manifest.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
 
@@ -4303,7 +4311,7 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 5   # one git diff + a regex over the PR body
+    budget_seconds: 20   # money-path only: bounded live GitHub read plus local diff
     rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
@@ -4314,10 +4322,9 @@ gates:
       # Editing the body to add the checklist (the documented remediation) only reached this
       # gate after an otherwise-pointless empty commit pushed to re-emit the event (measured
       # 2026-09-06 on #8934: body edited 11:45Z, run at 11:46Z still read the old body).
-      # The live body is the truth the gate means to check; the frozen one is the fallback
-      # when the API is unreachable. One contents-read API call per shard run.
-      LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
-      python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
+      # Read the live body only after the checker proves this PR touches a money path.
+      # The event body remains the fallback when the API is unavailable.
+      python3 .github/scripts/check-security-checklist.py --live-body --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
 
   # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
   # `gh pr create --body-file`, which never applies the template — so the section is absent by

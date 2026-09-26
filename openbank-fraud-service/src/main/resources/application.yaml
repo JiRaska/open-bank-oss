@@ -44,8 +44,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # ADR-0140 online feature store: FeatureStoreConfig @Produces an OnlineFeatureStore from
   # ReactiveRedisDataSource. Quarkus DEACTIVATES that synthetic bean at build time when neither
@@ -162,6 +160,8 @@ mp:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

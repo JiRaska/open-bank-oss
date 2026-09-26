@@ -169,7 +169,7 @@ class BusinessSigningHandlers(
         )
         val after = objectOrNull(signed) ?: return passThrough(signed)
         val out = detail(after, human, SigningPolicySummary.lang(acceptLanguage))
-        if (after.path("status").asText() == "APPROVED" && after.path("kind").asText() == "PAYMENT") {
+        if (after.path("status").asText() == "APPROVED" && after.path("kind").asText() in RELEASABLE_KINDS) {
             out.set<JsonNode>("release", objectMapper.valueToTree(approvals.release(entity, approvalId)))
         }
         return ok(out)
@@ -364,6 +364,9 @@ class BusinessSigningHandlers(
         const val OK = 200
         const val MAX_NAME = 140
         const val MAX_REASON = 500
+
+        /** Held instructions released upstream on their last signature (#10281). */
+        val RELEASABLE_KINDS = setOf("PAYMENT", "STANDING_ORDER", "SDD_MANDATE")
         val IBAN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
         val STATUS_FILTERS = setOf("PENDING", "DONE")
         val MINE_FILTERS = setOf("toSign", "initiated")

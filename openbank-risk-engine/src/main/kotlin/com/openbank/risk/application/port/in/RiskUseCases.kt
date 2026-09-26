@@ -6,6 +6,8 @@ package com.openbank.risk.application.port.`in`
 
 import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.application.port.out.SnapshotRunSummary
+import com.openbank.risk.domain.capital.CapitalParameters
+import com.openbank.risk.domain.capital.CapitalResult
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.cashflow.SnapshotCashFlows
 import com.openbank.risk.domain.curve.CurveIndex
@@ -86,4 +88,12 @@ data class LiquidityAnalysis(val run: SnapshotRun, val parameters: LiquidityPara
 interface LiquidityUseCase {
     /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
     suspend fun analyse(runId: UUID): LiquidityAnalysis
+}
+
+/** Pillar 1 credit-risk RWA and capital ratios of a run under a versioned parameter set (ADR-0313 phase 2). */
+data class CapitalAnalysis(val run: SnapshotRun, val parameters: CapitalParameters, val result: CapitalResult)
+
+interface CapitalUseCase {
+    /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
+    suspend fun analyse(runId: UUID): CapitalAnalysis
 }

@@ -39,6 +39,7 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
                 req.creditorIban, req.creditorName, req.creditorBic,
                 req.amountMinorUnits, req.currency, req.frequency, req.paymentType,
                 req.remittanceInfo, req.startDate, req.endDate,
+                replacesStandingOrderId = req.replacesStandingOrderId,
             ),
         )
         return Response.status(201).entity(order.toResponse()).build()

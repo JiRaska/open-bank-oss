@@ -48,8 +48,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound M2M token for the account-service / party-service name lookup. VoP asks about an
   # account the caller does not own, so it authenticates as the service, not as the payer.
   oidc-client:
@@ -101,6 +99,8 @@ quarkus:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

@@ -124,6 +124,37 @@ prints the outgoing channel. Absent either, this ADR is not delivered.
   approve for it (#10281 item 1): signatures carry the human's party id, never the entity's;
   enrolment to non-natural persons is refused in sca-service.
 
+### Addendum 2026-09-21 — recurring outflows (standing orders, SDD mandates)
+
+A payment was the only thing held, so a JOINT representative could still set up a **recurring**
+outflow alone under `X-Acting-For`: a standing order, or an SDD mandate that lets a creditor pull
+from the company account (#10281). Both now follow the signing policy exactly like a payment —
+same `signing/evaluate`, same `approval-requests` hold, same single-use `release-claim`, released
+to standing-order-service / sdd-service with `Idempotency-Key = approvalId`. `required == 1`
+leaves both routes byte-for-byte as they were (no SCA asked, no approval created). Two new
+releasable approval kinds carry them, `STANDING_ORDER` and `SDD_MANDATE`.
+
+The amount rule is the policy choice this addendum records:
+
+- **Standing order → its per-execution amount** (`amountMinorUnits` in the currency's own
+  exponent). It is what each execution moves and what the policy bands already speak about; a
+  cumulative figure would need a horizon the order does not have (an open-ended order has no
+  total).
+- **SDD mandate → its maximum amount when the mandate carries one, otherwise the strictest
+  rule.** sdd-service stores no maximum today, so every mandate takes the strictest rule. The
+  edge deliberately does not accept a client-stated maximum: a number nothing downstream
+  enforces would let an initiator pick the cheapest band and then be collected against without
+  limit. When sdd-service enforces a per-mandate ceiling, that ceiling becomes the band input.
+- **No trusted-payee shortcut for either.** The trusted-payee cap bounds one payment; a recurring
+  instruction has no cumulative bound, so trust would turn a capped exception into an uncapped,
+  standing one.
+
+Co-signers of an SDD mandate link their SCA to the approval id and payload hash only (its creditor
+is a SEPA creditor identifier, not the IBAN an APPROVAL challenge carries); the hash binds the
+creditor identifier and mandate reference. Changing an existing order's amount or creditor is not
+exposed at the edge today (pause/resume/cancel only), so there is nothing further to hold; a
+future amend route must go through the same hold.
+
 ## Compliance impact
 
 - PCI DSS: not applicable — no card data is stored or processed by the approval flow.

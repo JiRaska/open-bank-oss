@@ -150,6 +150,11 @@ openbank:
     # that API is deployed would stop every business payment. Flip per environment in GitOps.
     business-approvals:
       enforce: ${BUSINESS_APPROVALS_ENFORCE:false}
+    # Client-visible feature flags, published as X-Edge-Features (#10281). standingorders-replace lets an
+    # edit name replacesStandingOrderId; turn it on only after standing-order-service (which does the
+    # atomic swap) is rolled out — an older one would create a second order and cancel nothing.
+    features:
+      standingorders-replace: ${EDGE_FEATURE_STANDINGORDERS_REPLACE:false}
     bank-bic: ${OPENBANK_BANK_BIC:OPENCZPPXXX}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
     party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}
