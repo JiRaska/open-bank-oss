@@ -23,8 +23,11 @@ calls the legacy direct debit, credit or reversal operations.
 
 ## Uncertain outcomes
 
-An exhausted activity retry does not establish whether its remote write committed. Cover remains
-reserved when the outcome is unknown. Reconcile by settlement ID against the hold reference,
+An exhausted activity retry does not establish whether its remote write committed. The settlement
+workflow never releases cover on that uncertainty alone. If the ledger did commit, its confirmed
+journal event can still project the movement and atomically consume the matching cover while the
+settlement remains `LEDGER_STATE_UNKNOWN`. Otherwise the cover remains reserved. Reconcile by
+settlement ID against the hold reference,
 ledger transaction ID, projection markers and outbox delivery before any approved correction.
 Never release a hold merely because the caller timed out. Never reissue the transfer under a new
 idempotency key to clear a stalled row. `BOOKED` confirms the journal, not completion of asynchronous
@@ -55,3 +58,13 @@ already own both balance movements.
 The legacy uncertainty guard uses a Temporal version marker. Existing histories replay their
 previous command sequence; the guard cannot repair already completed settlements. Keep compatible
 workers while old executions remain and reconcile pre-existing ambiguous cases separately.
+
+## Local response-loss proof
+
+The isolated three-service harness at `openbank-infra/scripts/settlement-real-services-e2e.py`
+exercises real OIDC/OPA, Temporal, journal posting and Kafka balance projection. Its
+`--drop-ledger-response` mode loses one reply after the ledger returns `POSTED` and requires the
+retry to resolve to the same journal. `--drop-ledger-response 5` loses all five activity replies and
+requires `LEDGER_STATE_UNKNOWN` with exactly one journal, correctly projected balances and consumed
+cover. These modes verify safe uncertainty handling, not completed operator reconciliation or
+sandbox rollout acceptance. See the adjacent harness README for prerequisites and evidence.

@@ -4,14 +4,18 @@
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import hashlib
+import http.client
+import http.server
 import json
 import os
 import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -23,7 +27,6 @@ from typing import Any
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(tempfile.mkdtemp(prefix="openbank-real-settlement-"))
 OUT.chmod(0o700)
@@ -33,6 +36,87 @@ REQUEST_TIMEOUT_SECONDS = 10
 containers: list[str] = []
 processes: list[subprocess.Popen[str]] = []
 process_logs: list[Any] = []
+response_loss_proxy: LedgerResponseLossProxy | None = None
+
+
+class LedgerResponseLossProxy:
+    """Forward real journal posts, losing a bounded number of successful replies after commit."""
+
+    def __init__(self, ledger_port: int, drop_count: int):
+        self.drop_count = drop_count
+        self.lock = threading.Lock()
+        self.successful_journal_ids: list[str] = []
+        self.dropped_responses = 0
+        proxy = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                if self.path != "/api/v1/journals":
+                    self.send_error(404)
+                    return
+                body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                upstream = http.client.HTTPConnection("127.0.0.1", ledger_port, timeout=REQUEST_TIMEOUT_SECONDS)
+                try:
+                    upstream.request("POST", self.path, body, {
+                        "Content-Type": "application/json",
+                        "Authorization": self.headers.get("Authorization", ""),
+                    })
+                    response = upstream.getresponse()
+                    payload = response.read()
+                    status = response.status
+                    content_type = response.getheader("Content-Type", "application/json")
+                    drop = False
+                    if 200 <= status < 300:
+                        journal = json.loads(payload)
+                        if journal.get("status") != "POSTED":
+                            raise ValueError("Fault injection requires a confirmed POSTED journal")
+                        with proxy.lock:
+                            proxy.successful_journal_ids.append(journal["id"])
+                            if proxy.dropped_responses < proxy.drop_count:
+                                proxy.dropped_responses += 1
+                                drop = True
+                    if drop:
+                        # No synthetic ledger success: the real upstream has returned POSTED.
+                        self.close_connection = True
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                        return
+                    self.send_response(status)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                except (OSError, ValueError, KeyError, http.client.HTTPException):
+                    self.send_error(502, "Local fault proxy upstream failed")
+                finally:
+                    upstream.close()
+
+            def log_message(self, format: str, *args: Any) -> None:
+                pass  # Never retain authorization headers or request payloads.
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    @property
+    def port(self) -> int:
+        return self.server.server_address[1]
+
+    def evidence(self, journal_id: str) -> dict[str, Any]:
+        with self.lock:
+            assert self.dropped_responses == self.drop_count, "Expected committed ledger replies were not lost"
+            expected_posts = 2 if self.drop_count == 1 else 5
+            assert len(self.successful_journal_ids) == expected_posts, "Unexpected settlement retry count"
+            assert set(self.successful_journal_ids) == {journal_id}, "Retry created a different journal"
+            return {
+                "droppedResponses": self.dropped_responses,
+                "successfulUpstreamPosts": len(self.successful_journal_ids),
+                "journalId": journal_id,
+            }
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
 
 
 def run(*args: str, input_text: str | None = None, timeout: int = RUN_TIMEOUT_SECONDS) -> str:
@@ -297,6 +381,13 @@ def runtime_digest(directory: Path) -> str:
 
 
 def main() -> None:
+    global response_loss_proxy
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--drop-ledger-response", nargs="?", const=1, default=0, type=int, choices=(1, 5),
+        help="Lose one committed journal reply, or all five activity attempts",
+    )
+    args = parser.parse_args()
     global postgres
 
     java = java_executable()
@@ -409,6 +500,10 @@ def main() -> None:
     print("Local infrastructure ready; synthetic OIDC operator token issued", flush=True)
 
     service_ports = {name: port() for name in ["ledger", "balance", "settlement"]}
+    ledger_client_port = service_ports["ledger"]
+    if args.drop_ledger_response:
+        response_loss_proxy = LedgerResponseLossProxy(ledger_client_port, args.drop_ledger_response)
+        ledger_client_port = response_loss_proxy.port
     opa_ports = {
         name: start_opa(name, component)
         for name, component in [("ledger", "ledger"), ("balance", "balances"), ("settlement", "payments")]
@@ -436,7 +531,7 @@ def main() -> None:
                 "OPENBANK_TEMPORAL_SERVER_URL": f"127.0.0.1:{temporal_port}",
                 "OPENBANK_TEMPORAL_NAMESPACE": "openbank-settlement",
                 "BALANCE_SERVICE_URL": f"http://127.0.0.1:{service_ports['balance']}",
-                "LEDGER_SERVICE_URL": f"http://127.0.0.1:{service_ports['ledger']}",
+                "LEDGER_SERVICE_URL": f"http://127.0.0.1:{ledger_client_port}",
                 "SETTLEMENT_LEDGER_PROJECTION_ENABLED": "true",
                 "QUARKUS_OTEL_SDK_DISABLED": "true",
             }
@@ -546,9 +641,10 @@ def main() -> None:
     created = request(settlement_endpoint, settlement_body, token)
     settlement_id = created["id"]
     print(f"Originated settlement {settlement_id}", flush=True)
+    expected_status = "LEDGER_STATE_UNKNOWN" if args.drop_ledger_response == 5 else "BOOKED"
     until(
-        lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{settlement_id}'") == "BOOKED",
-        "settlement booked",
+        lambda: sql("settlement", f"SELECT status FROM settlements WHERE id='{settlement_id}'") == expected_status,
+        f"settlement {expected_status}",
         90,
     )
 
@@ -601,6 +697,8 @@ def main() -> None:
         assert expected in service_log, f"Missing authorization evidence for {service}: {expected}"
     assert balances_correct(), "Duplicate request changed balances"
 
+    fault_evidence = response_loss_proxy.evidence(journals[0]["id"]) if response_loss_proxy else None
+    print("Fault injection", json.dumps(fault_evidence), flush=True)
     print("Journals response", json.dumps(journals), flush=True)
     print("Balances", json.dumps(final_balances), flush=True)
     (OUT / "result.json").write_text(
@@ -611,6 +709,8 @@ def main() -> None:
                 "balances": final_balances,
                 "journals": journals,
                 "source": source_metadata,
+                "responseLoss": fault_evidence,
+                "settlementStatus": expected_status,
             },
             indent=2,
         )
@@ -619,6 +719,8 @@ def main() -> None:
 
 
 def cleanup() -> None:
+    if response_loss_proxy:
+        response_loss_proxy.close()
     for process in reversed(processes):
         if process.poll() is None:
             process.terminate()

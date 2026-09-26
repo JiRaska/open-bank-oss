@@ -48,3 +48,24 @@ result records the Git HEAD, whether the working tree was dirty, and SHA-256 dig
 fast-jar runtimes (application, launcher and libraries). This is provenance metadata only; it does not assert that the jars were built from
 that checkout. Service JVMs inherit only `PATH`, `HOME`, `TMPDIR`, `LANG`, and `TZ` before the
 explicit local proof configuration is applied.
+
+## Lost response after ledger commit
+
+```sh
+python3 openbank-infra/scripts/settlement-real-services-e2e.py --drop-ledger-response
+```
+
+This mode routes only the settlement ledger client through a loopback HTTP proxy. The proxy forwards
+real authenticated journal requests and closes the first connection only after the real ledger
+returns a successful `POSTED` journal. Later requests reach the same ledger normally. The proof
+requires at least two successful upstream posts returning the same journal ID, exactly one dropped
+reply, a completed settlement, one journal, final balances of 60/40 CZK and released cover.
+`result.json.responseLoss` records these observations without request bodies or credentials.
+The ordinary mode remains a direct connection. This fault case proves retry after one lost reply;
+it does not prove recovery after exhaustion of all retries or a process crash.
+
+Use `--drop-ledger-response 5` to lose every successful reply across all five Temporal activity
+attempts. This case requires `LEDGER_STATE_UNKNOWN` rather than `BOOKED`, exactly five posts returning
+one journal ID, and the same 60/40 balances with the consumed cover released by projection. It proves
+that exhausted retries preserve uncertainty without refunding a committed transfer. Operator
+reconciliation after that state and process-crash recovery remain separate acceptance cases.
