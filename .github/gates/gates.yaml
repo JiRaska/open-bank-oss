@@ -2903,6 +2903,32 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # #10997: RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash, so a
+  # prefix check written without one (`path.startsWith("v1/")`) is always false and the gate it
+  # guards never runs — fail-closed (every call the filter should have let through is instead
+  # rejected downstream), not a bypass, which is why nothing 5xx's and nothing alerts.
+  # `openbank-psd2-service`'s EidasMtlsFilter, QsealSignatureFilter and BespokeDeprecationFilter
+  # all shipped this way; a mock-based unit test cannot see it because the mock supplies the
+  # exact slash-less string the code expects. Ratchet, not a flat fail: the 3 files measured
+  # 2026-09-26 are baselined per file (count, so a second slash-less site in a baselined file
+  # still fails), and a healed entry is reported stale. #11008 (open) fixes all three; this gate
+  # is what stops a fourth from shipping the same way in the meantime. Advisory until #11008
+  # merges and the fleet has run clean against the tightened check for a full cycle.
+  - id: jaxrs-path-prefix-leading-slash
+    name: "JAX-RS path-prefix literal missing its leading slash (#10997, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 3 files / 6 sites, all in openbank-psd2-service, all covered by open PR #11008"
+    budget_seconds: 15   # ~1.2s locally; generous for a slower runner
+    rationale: "A slash-less UriInfo.path prefix check never matches under RESTEasy Reactive, so the gate it guards silently never runs; this stops a new occurrence while #11008 fixes the 3 known ones."
+    review_after: "2026-12-31"
+    min_subjects: 1000   # 2521 service src/main .kt files scanned 2026-09-26
+    selftest: python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-jaxrs-path-prefix-leading-slash.py", ".github/scripts/jaxrs-path-prefix-leading-slash-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --root .
+
   # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
   # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
   # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.

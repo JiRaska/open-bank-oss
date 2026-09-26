@@ -313,6 +313,16 @@ change_requirements:
     # `referenceId`/`ttlSeconds` — confirmed against `BalanceResource.placeHold`, which reads
     # `body.referenceId` and `body.ttlSeconds` directly. A caller following the published spec
     # cannot construct a valid request.
+  jaxrs_path_prefix_leading_slash:
+    detect: ["uriInfo.path / requestUri.path prefix checks (direct or one-hop local alias) in any openbank-*/src/main whose literal has no leading slash"]
+    require:
+      - "RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash — a prefix
+         check must match against '/v1/...', never 'v1/...' (#10997)"
+      - "no new slash-less prefix site; the per-file baseline only shrinks"
+    gate: jaxrs-path-prefix-leading-slash
+    enforced: advisory
+    target_enforce_date: "2026-12-31"
+    ci_producer: ".github/scripts/check-jaxrs-path-prefix-leading-slash.py"
   db_backup_association:
     detect: ["openbank-infra/gitops/**/*.yaml (kind: Cluster, postgresql.cnpg.io)"]
     require:
