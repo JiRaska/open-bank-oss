@@ -98,7 +98,7 @@ class AnnualStatementDeliveryServiceTest {
             AccountInfo(iban = "CZ6508000000192000145399", productId = UUID.randomUUID())
         val dataSlot = slot<Map<String, Any?>>()
         every { templateUseCase.previewRender(any(), capture(dataSlot)) } returns "<p>2026</p>"
-        coEvery { idempotencyStore.save(any(), any(), any(), any()) } returns Unit
+        coEvery { idempotencyStore.save(any<String>(), any<Int>(), any<String>(), any<Long>()) } returns Unit
         // Explicit, not left to the relaxed mock: `deliver` returns an enum now, and a relaxed
         // mock would invent one — the test would then pass without ever choosing a branch.
         every { deliveryPort.deliver(any(), any(), any(), any()) } returns DeliveryOutcome.DELIVERED
@@ -153,7 +153,7 @@ class AnnualStatementDeliveryServiceTest {
         service.deliverAnnualStatement(command())
 
         verify(exactly = 1) { deliveryPort.deliver(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { idempotencyStore.save(any<String>(), any<Int>(), any<String>(), any<Long>()) }
     }
 
     @Test
@@ -173,7 +173,7 @@ class AnnualStatementDeliveryServiceTest {
         service.deliverAnnualStatement(command())
 
         verify(exactly = 2) { deliveryPort.deliver(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { idempotencyStore.save(any<String>(), any<Int>(), any<String>(), any<Long>()) }
     }
 
     @Test
@@ -195,7 +195,7 @@ class AnnualStatementDeliveryServiceTest {
         service.deliverAnnualStatement(command())
 
         verify(exactly = 0) { deliveryPort.deliver(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { idempotencyStore.save(any<String>(), any<Int>(), any<String>(), any<Long>()) }
     }
 
     @Test
@@ -206,7 +206,7 @@ class AnnualStatementDeliveryServiceTest {
         coEvery { accountLookupPort.findCurrentAccount(partyId) } returns null
         val dataSlot = slot<Map<String, Any?>>()
         every { templateUseCase.previewRender(any(), capture(dataSlot)) } returns "<p></p>"
-        coEvery { idempotencyStore.save(any(), any(), any(), any()) } returns Unit
+        coEvery { idempotencyStore.save(any<String>(), any<Int>(), any<String>(), any<Long>()) } returns Unit
 
         service.deliverAnnualStatement(command().copy(interestRate = null))
 

@@ -42,6 +42,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 |---|---|---|
 | **S**poofing | TPP impersonates party to create consent | OIDC + SCA binding; party identity verified upstream |
 | **T**ampering | Scope/grantee escalation after creation | Immutable scope post-activation; state machine; audit |
+| **T**ampering | A `tppTransactionId` / `X-Request-ID` reused with a different create body is answered with the first consent, so the TPP acts on a consent with other scopes or accounts than it asked for (#10946) | The key is claimed atomically in Redis (`reserve`) together with a SHA-256 fingerprint of method, path and the canonical request body (libs `RequestFingerprints`: sorted keys, null == absent) BEFORE the consent is created. A different body under the key is 409 `IDEMPOTENCY_KEY_REUSED`, a concurrent duplicate is 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`; neither creates anything. A failed create releases its marker. Residual: records stored before the fingerprint existed replay without a check until their TTL lapses; there is no DB-level check, so the binding lasts only as long as the Redis record |
 | **R**epudiation | Party denies granting consent | AuditEvent per transition; SCA evidence retained |
 | **I**nfo disclosure | `validate` leaks consent details to wrong caller | Caller authz (`@Authorize consent.validate` + `@RolesAllowed`); response is a consent-scoped projection (scopes / covered IBANs / frequencyPerDay) to an already-authenticated resource server — no party PII |
 | **D**oS | Consent spam / validate flooding | Rate limit; cache validate decisions briefly |
@@ -56,6 +57,12 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-09-26** — Consent creation binds its idempotency key to a request fingerprint
+  (#10916, #10946). The key is reserved atomically before the consent is created. Same key + same
+  body still replays; same key + different body is now 409 `IDEMPOTENCY_KEY_REUSED` instead of a
+  replay of the first consent, and a concurrent duplicate is 409
+  `IDEMPOTENCY_REQUEST_IN_PROGRESS`. No new endpoint, caller or privilege; the inbound surface
+  gains one error response (409, two codes).
 - **2026-09-07** — Suppression creation is now replay-safe (#8351, ADR-0293). A retried
   `POST /api/v1/suppressions` stacked a second identical active row; `SuppressionService.create`
   now checks the natural key (partyId, scope, value) over active rows and replays the original
