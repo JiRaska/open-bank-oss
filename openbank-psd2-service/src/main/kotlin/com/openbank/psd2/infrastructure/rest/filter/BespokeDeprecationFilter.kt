@@ -20,7 +20,8 @@ import jakarta.ws.rs.ext.Provider
 class BespokeDeprecationFilter : ContainerResponseFilter {
 
     override fun filter(req: ContainerRequestContext, resp: ContainerResponseContext) {
-        if (!req.uriInfo.path.startsWith("open-banking/")) return
+        // UriInfo.path carries a leading slash at runtime; accept both forms (#10997).
+        if (!req.uriInfo.path.removePrefix("/").startsWith("open-banking/")) return
         resp.headers.putSingle("Deprecation", "true")
         resp.headers.putSingle("Sunset", SUNSET)
         resp.headers.add("Link", "</v1>; rel=\"successor-version\"")

@@ -27,7 +27,9 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
 
     @Suppress("LongMethod")
     override fun filter(ctx: ContainerRequestContext) {
-        val path = ctx.uriInfo.path
+        // RESTEasy Reactive's UriInfo.path carries a leading slash ("/v1/..."); normalise once so the
+        // prefix checks below match either form (#10997 — without this the gate never ran).
+        val path = ctx.uriInfo.path.removePrefix("/")
         // Gate both the deprecated bespoke surface (`open-banking/`) and the Berlin Group XS2A
         // surface (`v1/`, ADR-0090) with the same eIDAS QWAC + TPP role check; the sandbox is open.
         val gated = (path.startsWith("open-banking/") && !path.startsWith("open-banking/sandbox/")) ||

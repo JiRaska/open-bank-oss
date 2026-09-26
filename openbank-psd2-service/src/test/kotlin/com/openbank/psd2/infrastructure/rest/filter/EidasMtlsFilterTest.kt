@@ -129,4 +129,36 @@ class EidasMtlsFilterTest {
 
         assertThat(captured.captured.status).isEqualTo(503)
     }
+
+    // #10997: RESTEasy Reactive supplies UriInfo.path WITH a leading slash; both forms must gate.
+    @Test
+    fun `slash-prefixed v1 path without TPP identification aborts with 401`() {
+        val ctx = ctxFor("/v1/accounts", tppIdHeader = null, sslDn = null)
+        val captured = slot<Response>()
+        every { ctx.abortWith(capture(captured)) } returns Unit
+
+        filter.filter(ctx)
+
+        assertThat(captured.captured.status).isEqualTo(401)
+    }
+
+    @Test
+    fun `slash-prefixed payments path requires PISP and sets tppId`() {
+        every { guard.requireAuthorized("tpp-1", "PISP") } returns
+            TppAuthorizationResponse("tpp-1", true, setOf("PISP"), null)
+        val ctx = ctxFor("/v1/payments/sepa-credit-transfers")
+
+        filter.filter(ctx)
+
+        verify(exactly = 1) { ctx.setProperty("tppId", "tpp-1") }
+    }
+
+    @Test
+    fun `slash-prefixed sandbox path is not intercepted`() {
+        val ctx = ctxFor("/open-banking/sandbox/ping", tppIdHeader = null)
+
+        filter.filter(ctx)
+
+        verify(exactly = 0) { ctx.abortWith(any()) }
+    }
 }

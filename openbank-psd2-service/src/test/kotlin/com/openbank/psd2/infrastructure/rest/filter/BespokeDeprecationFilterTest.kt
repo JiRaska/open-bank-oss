@@ -50,4 +50,28 @@ class BespokeDeprecationFilterTest {
         assertThat(headers.getFirst("Sunset")).isEqualTo("Wed, 31 Dec 2031 23:59:59 GMT")
         assertThat(headers["Link"]).contains("</v1>; rel=\"successor-version\"")
     }
+
+    // #10997: the runtime path form carries a leading slash; both forms must be recognised.
+    @Test
+    fun `slash-prefixed open-banking responses get Deprecation and Sunset`() {
+        val req = requestFor("/open-banking/v2/accounts")
+        val resp = mockk<ContainerResponseContext>()
+        val headers = MultivaluedHashMap<String, Any>()
+        every { resp.headers } returns headers
+
+        filter.filter(req, resp)
+
+        assertThat(headers.getFirst("Deprecation")).isEqualTo("true")
+        assertThat(headers.getFirst("Sunset")).isEqualTo("Wed, 31 Dec 2031 23:59:59 GMT")
+    }
+
+    @Test
+    fun `slash-prefixed Berlin v1 responses are left untouched`() {
+        val req = requestFor("/v1/accounts")
+        val resp = mockk<ContainerResponseContext>()
+
+        filter.filter(req, resp)
+
+        verify(exactly = 0) { resp.headers }
+    }
 }

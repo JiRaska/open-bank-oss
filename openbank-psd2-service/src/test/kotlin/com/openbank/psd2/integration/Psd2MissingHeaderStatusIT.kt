@@ -52,7 +52,12 @@ class Psd2MissingHeaderStatusIT {
 
     @Test
     fun `an absent Consent-ID on the AIS accounts read answers 400`() {
-        Given { this } When { get("/open-banking/v2/accounts") } Then { statusCode(400) }
+        // An authorised TPP identity is required since #10997: the eIDAS filter now actually gates
+        // `/open-banking/...`, so without one the request stops at the filter's 401 and never
+        // reaches the parameter binding this test is about.
+        Given {
+            header("X-TPP-ID", FakeTppRegistryRestClient.AUTHORIZED_TPP)
+        } When { get("/open-banking/v2/accounts") } Then { statusCode(400) }
     }
 
     @Test
