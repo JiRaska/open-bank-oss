@@ -6,6 +6,7 @@ package com.openbank.treasury.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.treasury.application.port.`in`.AccrualRun
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
 import com.openbank.treasury.application.port.`in`.DealView
@@ -29,6 +30,7 @@ import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingRules
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
@@ -145,7 +147,14 @@ class TreasuryDealService(
         key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
         val matured = deal.mature(actor, LocalDate.now(clock), clock.instant())
-        val ref = post(PostingRules.maturity(matured), matured.maturityDate, "treasury ${matured.product} maturity")
+        // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
+        // accrued account instead of booking the whole interest to income in one amount.
+        accrueThrough(deal, deal.maturityDate)
+        val ref = post(
+            PostingRules.maturity(matured, accruedSoFar(deal)),
+            matured.maturityDate,
+            "treasury ${matured.product} maturity",
+        )
         val event = DealEvent(
             DealMatured.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -169,7 +178,8 @@ class TreasuryDealService(
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
-        val ref = PostingRules.reversal(reversed, deal.state)
+        val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
+        val ref = PostingRules.reversal(reversed, deal.state, accrued)
             ?.let { post(it, LocalDate.now(clock), "treasury ${deal.product} reversal") }
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
@@ -234,6 +244,44 @@ class TreasuryDealService(
             failures = outcomes.mapNotNull { it.exceptionOrNull() },
         )
     }
+
+    /**
+     * ADR-0315 D5. One deal failing (ledger down) must not stop the pass, and must not be swallowed:
+     * it is counted and returned for the scheduler to log. Idempotent: a day already accrued is
+     * skipped here, and the ledger deduplicates on the per-day key if two passes race.
+     */
+    override suspend fun accrueInterest(asOf: LocalDate): AccrualRun {
+        val outcomes = deals.list(DealState.SETTLED).map { d ->
+            runCatching { accrueThrough(d, minOf(asOf, d.maturityDate)) }
+        }
+        return AccrualRun(
+            journals = outcomes.sumOf { it.getOrDefault(0) },
+            failures = outcomes.mapNotNull { it.exceptionOrNull() },
+        )
+    }
+
+    /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */
+    private suspend fun accrueThrough(deal: Deal, through: LocalDate): Int {
+        var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
+        var posted = 0
+        while (!day.isAfter(through)) {
+            PostingRules.accrual(deal, day)?.let { spec ->
+                deals.recordJournal(post(spec, day, "treasury ${deal.product} accrual $day"))
+                posted++
+            }
+            day = day.plusDays(1)
+        }
+        return posted
+    }
+
+    /** The last day with a recorded accrual; a day that adds nothing posts no journal and is not recorded. */
+    private suspend fun lastAccrued(deal: Deal): LocalDate? = deals.journals(deal.id)
+        .filter { it.event == PostingEvent.ACCRUED }
+        .maxOfOrNull { LocalDate.parse(it.idempotencyKey.substringAfterLast(':')) }
+
+    /** Σ of the posted dailies — exactly the cumulative accrual at the last recorded day. */
+    private suspend fun accruedSoFar(deal: Deal): BigDecimal =
+        lastAccrued(deal)?.let { PostingRules.accruedThrough(deal, it) } ?: BigDecimal.ZERO
 
     private suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): LedgerJournalRef {
         val journalId = ledger.post(spec, entryDate, description)
