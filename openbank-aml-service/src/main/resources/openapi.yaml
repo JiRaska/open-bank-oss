@@ -25,8 +25,10 @@ paths:
       summary: Submit an AML screening case
       description: >-
         Idempotent on the Idempotency-Key header. The key is bound to a fingerprint of the request
-        (method, path, canonical body): a retry with the same body replays the stored 201, reusing
-        the key with a different body is refused with 422 IDEMPOTENCY_KEY_REUSED.
+        (method, path, canonical body) and claimed atomically: a retry with the same body replays
+        the stored 201, reusing the key with a different body is refused with 409
+        IDEMPOTENCY_KEY_REUSED, and a duplicate arriving while the first is still processing is
+        refused with 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
       operationId: createAmlCase
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
@@ -59,10 +61,13 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '422':
+        '409':
           description: >-
-            IDEMPOTENCY_KEY_REUSED — the Idempotency-Key was already used for a different request
-            body.
+            Idempotency-Key conflict (#10916), distinguished by `code`.
+            IDEMPOTENCY_KEY_REUSED — the key was already used for a different request (method,
+            path or canonical body differ); no case is opened and the stored response is not
+            replayed. IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still being processed
+            under this key; retry later.
           content:
             application/json:
               schema:

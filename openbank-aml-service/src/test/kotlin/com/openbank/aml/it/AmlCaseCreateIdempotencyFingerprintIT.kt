@@ -4,13 +4,21 @@
 
 package com.openbank.aml.it
 
+import com.openbank.aml.application.port.`in`.AmlCaseUseCase
+import com.openbank.aml.application.usecase.AmlCaseService
+import io.mockk.coEvery
+import io.mockk.mockk
+import io.quarkus.arc.ClientProxy
+import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.restassured.response.Response
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
@@ -21,7 +29,9 @@ import javax.sql.DataSource
 /**
  * #10916 through real HTTP and real Redis: the Idempotency-Key of `POST /api/v1/aml/cases` is
  * bound to the request it was first used for. A retry replays; the same key with a different body
- * is refused 422 and opens no case; key order and whitespace do not count as a different body.
+ * is refused 409 IDEMPOTENCY_KEY_REUSED and opens no case; key order, whitespace and an explicit
+ * `null` do not count as a different body; a failed create releases the key; and the durable
+ * `aml_cases.request_hash` check still refuses a reused key once the Redis record is gone.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
@@ -29,6 +39,12 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var redis: ReactiveRedisDataSource
+
+    @Inject
+    lateinit var useCase: AmlCaseUseCase
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
@@ -54,7 +70,7 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
-    fun `same key with a different body is refused 422 and opens no case`() {
+    fun `same key with a different body is refused 409 and opens no case`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
         create(key, body(party, "ALERT-A"), expect = 201)
@@ -66,7 +82,7 @@ class AmlCaseCreateIdempotencyFingerprintIT {
         } When {
             post("/api/v1/aml/cases")
         } Then {
-            statusCode(422)
+            statusCode(409)
             body("code", equalTo("IDEMPOTENCY_KEY_REUSED"))
         }
         assertThat(caseCount(party)).isEqualTo(1)
@@ -96,6 +112,88 @@ class AmlCaseCreateIdempotencyFingerprintIT {
             body("id", equalTo(first))
         }
         assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    fun `an explicit null field fingerprints the same as an absent one`() {
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        val first = create(key, body(party, "ALERT-A"), expect = 201)
+        val withNull = body(party, "ALERT-A").replace("}", ""","alertDetail":null}""")
+
+        val replay = post(key, withNull)
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(replay.jsonPath().getString("id")).isEqualTo(first)
+        assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    fun `a failed create releases the key so the same request can be retried`() {
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        val real = ClientProxy.unwrap(useCase) as AmlCaseService
+        val failingOnce = mockk<AmlCaseService>()
+        var calls = 0
+        coEvery { failingOnce.createCase(any()) } coAnswers {
+            check(++calls > 1) { "transient failure on the first create" }
+            real.createCase(firstArg())
+        }
+        QuarkusMock.installMockForType(failingOnce, AmlCaseUseCase::class.java)
+
+        // IllegalStateException is mapped to 422 by libs-runtime; any non-2xx proves the create failed.
+        assertThat(post(key, body(party, "ALERT-A")).statusCode).isEqualTo(422)
+        assertThat(caseCount(party)).isEqualTo(0)
+
+        // Without release() the in-flight marker would hold the key: 409 IN_PROGRESS for 5 minutes.
+        val retry = post(key, body(party, "ALERT-A"))
+        assertThat(retry.statusCode).isEqualTo(201)
+        assertThat(retry.header("X-Idempotency-Replayed")).isNull()
+        assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    fun `after the Redis record is gone a different body under the same key is still refused by the database`() {
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        create(key, body(party, "ALERT-A"), expect = 201)
+        evictRedis(key)
+
+        val reused = post(key, body(party, "ALERT-B"))
+        assertThat(reused.statusCode).isEqualTo(409)
+        assertThat(reused.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_KEY_REUSED")
+        assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    fun `after the Redis record is gone the same body under the same key returns the existing case`() {
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        val first = create(key, body(party, "ALERT-A"), expect = 201)
+        evictRedis(key)
+
+        val again = post(key, body(party, "ALERT-A"))
+        assertThat(again.statusCode).isEqualTo(201)
+        assertThat(again.jsonPath().getString("id")).isEqualTo(first)
+        assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    private fun evictRedis(key: String) {
+        redis.key().del("idempotency:$key").await().indefinitely()
+    }
+
+    private fun post(key: String, json: String): Response = Given {
+        contentType("application/json")
+        header("Idempotency-Key", key)
+        body(json)
+    } When {
+        post("/api/v1/aml/cases")
+    } Extract {
+        response()
     }
 
     private fun body(party: UUID, alertCode: String) =
