@@ -95,8 +95,11 @@ class LendingResource(
         // the pre-existing edge contract), scoped per party. A keyed retry replays the cached 201
         // and never stacks a duplicate SUBMITTED application into the origination graph.
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
+        // #10916: the key is bound to this request's fingerprint — the same key with a different
+        // application answers 422 IDEMPOTENCY_KEY_REUSED instead of replaying the first one.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/lending/applications", request)
         requestKey?.let { key ->
-            idempotencyStore.get(applyIdempotencyKey(request.partyId, key))?.let { cached ->
+            idempotencyStore.lookup(applyIdempotencyKey(request.partyId, key), requestHash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -112,7 +115,13 @@ class LendingResource(
         }
         val body = objectMapper.writeValueAsString(created)
         requestKey?.let { key ->
-            idempotencyStore.save(applyIdempotencyKey(request.partyId, key), HTTP_CREATED, body, APPLY_KEY_TTL_SECONDS)
+            idempotencyStore.save(
+                applyIdempotencyKey(request.partyId, key),
+                requestHash,
+                HTTP_CREATED,
+                body,
+                APPLY_KEY_TTL_SECONDS,
+            )
         }
         return Response.status(HTTP_CREATED).entity(body).type(MediaType.APPLICATION_JSON).build()
     }

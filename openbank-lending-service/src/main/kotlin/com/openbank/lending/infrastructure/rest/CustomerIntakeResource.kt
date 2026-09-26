@@ -86,8 +86,11 @@ class CustomerIntakeResource(
         // the edge supplies Idempotency-Key / X-Request-ID on retries; a keyed retry replays the
         // cached 201 and never stacks a duplicate application. Scoped per party.
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
+        // #10916: bound to the fingerprint of what the CUSTOMER sent (not the application built
+        // below, whose firstDueDate comes from the clock and would differ between retries).
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/lending/intake/applications", request)
         requestKey?.let { key ->
-            idempotencyStore.get("lending:intake-apply:$partyId:$key")?.let { cached ->
+            idempotencyStore.lookup("lending:intake-apply:$partyId:$key", requestHash)?.let { cached ->
                 return Response.status(cached.statusCode)
                     .entity(cached.responseBody)
                     .type(MediaType.APPLICATION_JSON)
@@ -111,7 +114,13 @@ class CustomerIntakeResource(
         }
         val body = objectMapper.writeValueAsString(created)
         requestKey?.let { key ->
-            idempotencyStore.save("lending:intake-apply:$partyId:$key", HTTP_CREATED, body, INTAKE_KEY_TTL_SECONDS)
+            idempotencyStore.save(
+                "lending:intake-apply:$partyId:$key",
+                requestHash,
+                HTTP_CREATED,
+                body,
+                INTAKE_KEY_TTL_SECONDS,
+            )
         }
         return Response.status(HTTP_CREATED).entity(body).type(MediaType.APPLICATION_JSON).build()
     }

@@ -15,7 +15,9 @@ info:
   # 1.26.1 -> 1.27.0: additive — ledger-backfill request history (GET .../requests, GET
   # .../requests/{id}) and proposedAt/decidedAt/executedAt on LedgerBackfillRequestView, for the
   # admin console's finance workspace (#10618).
-  version: 1.27.0
+  # 1.27.0 -> 1.28.0 (#10916): additive — 422 IDEMPOTENCY_KEY_REUSED on both application-submit
+  # operations when a replay key is reused with a different request body.
+  version: 1.28.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -70,6 +72,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/IdempotencyKeyReused'
     get:
       tags: [Lending]
       operationId: listApplications
@@ -133,7 +137,10 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
-          description: Refused by the origination guard (e.g. no active compliance pack)
+          description: >-
+            Refused by the origination guard (e.g. no active compliance pack), or
+            IDEMPOTENCY_KEY_REUSED — the Idempotency-Key (or X-Request-ID) was already used for a
+            different request body, so the stored response is not replayed (#10916).
     get:
       tags: [Lending]
       operationId: listCustomerCreditJourneys
@@ -1200,6 +1207,15 @@ components:
       required: true
       schema: { type: string, format: uuid }
   responses:
+    IdempotencyKeyReused:
+      description: >-
+        IDEMPOTENCY_KEY_REUSED — the Idempotency-Key (or X-Request-ID) was already used for a
+        different request (method, path or canonical body differ), so the stored response is not
+        replayed (#10916).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Forbidden:
       description: Authenticated but denied by the OPA authorization policy (ADR-0034)
       content:

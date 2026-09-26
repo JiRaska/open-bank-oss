@@ -12,12 +12,14 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.security.Principal
@@ -178,6 +180,18 @@ class CustomerIntakeResourceTest {
     }
 
     @Test
+    fun `the same key with a different amount is refused, never replayed as the first application (#10916)`() {
+        val (res, apply) = resource()
+        kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-r", null, request("250000")) }
+
+        assertThatThrownBy {
+            kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-r", null, request("900000")) }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        // The use case never saw the second request.
+        assertThat(apply.lastRequest?.requestedAmount?.amount).isEqualByComparingTo("250000")
+    }
+
+    @Test
     fun `different idempotency keys are two applications, not a replay`() {
         val (res, _) = resource()
         kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-a", null, request()) }
@@ -250,6 +264,15 @@ class CustomerIntakeResourceTest {
         override suspend fun get(key: String): IdempotencyRecord? = saved[key]
         override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) {
             saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now())
+        }
+        override suspend fun save(
+            key: String,
+            requestHash: String,
+            statusCode: Int,
+            responseBody: String,
+            ttlSeconds: Long,
+        ) {
+            saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now(), requestHash)
         }
     }
 }
