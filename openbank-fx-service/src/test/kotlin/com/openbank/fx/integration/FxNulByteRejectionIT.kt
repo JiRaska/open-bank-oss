@@ -4,10 +4,8 @@
 
 package com.openbank.fx.integration
 
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
-import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -42,10 +40,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(FxNulByteRejectionIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(
-    value = PostgresRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_fx_it")],
-)
+@QuarkusTestResource(com.openbank.fx.it.PostgresRedisTestResource::class)
 class FxNulByteRejectionIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
