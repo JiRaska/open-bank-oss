@@ -20,6 +20,7 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.AfterAll
@@ -205,6 +206,18 @@ class LedgerBackfillIT {
             statusCode(200)
         }
         assertThat(state()).isEqualTo("APPROVED")
+
+        // #10904: an approved plan gets no second request that could later run as a no-op "success".
+        Given {
+            contentType("application/json")
+            body("""{"cutoverDate":"$cutover","disbursedBefore":"2020-02-01"}""")
+        } When {
+            post("/api/v1/lending/ledger-backfill/requests")
+        } Then {
+            statusCode(409)
+            body("error", containsString(requestId))
+        }
+        assertThat(count("SELECT count(*) FROM ledger_backfill_request")).isEqualTo(1)
     }
 
     @Test
@@ -254,6 +267,8 @@ class LedgerBackfillIT {
         } Extract { jsonPath() }
         assertThat(body.getBoolean("execution.complete")).isTrue()
         assertThat(state()).isEqualTo("EXECUTED")
+
+        assertReplaysAreNotCountedAsPosted(body)
 
         val journals = mine()
         // The re-run re-sent every leg (replays included) and the ledger kept ONE journal per reference.
@@ -358,6 +373,29 @@ class LedgerBackfillIT {
         sql("DELETE FROM loan_provisioning WHERE loan_id IN ($loans)")
         sql("DELETE FROM loan WHERE id IN ($loans)")
         applicationId?.let { sql("DELETE FROM loan_application WHERE id = '$it'") }
+    }
+
+    /**
+     * #10904: the EUR loan was fully booked by the first run, so every leg is a replay now and the loan
+     * must NOT count as posted. The CZK loan had legs left to book, so it does.
+     */
+    private fun assertReplaysAreNotCountedAsPosted(body: io.restassured.path.json.JsonPath) {
+        val loans = body.getList<Map<String, Any>>("execution.loans").associateBy { it["loanId"] }
+        assertThat(loans.getValue(eurLoan.toString())["status"]).isEqualTo("ALREADY_POSTED")
+        assertThat(loans.getValue(eurLoan.toString())["legsPosted"]).isEqualTo(0)
+        assertThat(loans.getValue(czkLoan.toString())["status"]).isEqualTo("POSTED")
+        val result = dataSource.connection.use { c ->
+            c.prepareStatement("SELECT last_result FROM ledger_backfill_request WHERE id = ?::uuid").use { st ->
+                st.setString(1, requestId)
+                st.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getString(1)
+                }
+            }
+        }
+        val alreadyPosted = Regex("\"loansAlreadyPosted\":(\\d+)").find(result)?.groupValues?.get(1)?.toInt()
+        // >= 1, not == 1: the IT database is shared, so other suites' loans may also be in scope.
+        assertThat(alreadyPosted).isNotNull().isGreaterThanOrEqualTo(1)
     }
 
     private fun state(): String = dataSource.connection.use { c ->
