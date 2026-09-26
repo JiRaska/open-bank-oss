@@ -126,7 +126,7 @@ export function CustomerContextGraph({ evidence, partyName }: {
       </div>
       <span className={styles.feedStatus} role="status"><span aria-hidden="true" className={loading ? styles.loadingDot : styles.liveDot} />{loading
         ? t('Načítám živé zdroje…', 'Loading live sources…')
-        : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} doménových vstupů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} domain feeds`)}</span>
+        : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length - (live.restricted?.length ?? 0))}/${GRAPH_FEEDS} doménových vstupů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length - (live.restricted?.length ?? 0))}/${GRAPH_FEEDS} domain feeds`)}</span>
     </div>
     {!evidence.available && <p role="status" className={styles.warning}>
       {t(
@@ -136,6 +136,9 @@ export function CustomerContextGraph({ evidence, partyName }: {
     </p>}
     {live.unavailable.length > 0 && <p role="status" className={styles.warning}>
       {t('Nedostupné zdroje', 'Unavailable sources')}: {live.unavailable.join(', ')}. {t('Graf je částečný.', 'The graph is partial.')}
+    </p>}
+    {!!live.restricted?.length && <p role="status" className={styles.warning}>
+      {t('Zdroje bez oprávnění', 'Restricted sources')}: {live.restricted.join(', ')}. {t('Odvozená projekce je skrytá.', 'Derived projection evidence is hidden.')}
     </p>}
     <div className={styles.controls}>
       <label>{t('Typ uzlu', 'Node type')}

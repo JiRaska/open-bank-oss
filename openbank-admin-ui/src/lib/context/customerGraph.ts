@@ -172,6 +172,7 @@ export interface LiveCustomerFacts {
   devices: DeviceFact[]
   documents: DocumentFact[]
   unavailable: string[]
+  restricted?: string[]
   truncated: string[]
 }
 
@@ -183,6 +184,9 @@ export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
   const truncated = Array.isArray(value.truncated)
     ? value.truncated.filter((item): item is string => typeof item === 'string')
     : []
+  const restricted = Array.isArray(value.restricted)
+    ? value.restricted.filter((item): item is string => typeof item === 'string')
+    : []
   return {
     accounts: parseAccounts({ data: value.accounts }),
     cards: parseCards(value.cards),
@@ -192,6 +196,7 @@ export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
     devices: parseDevices({ items: value.devices }),
     documents: parseDocuments(value.documents),
     unavailable,
+    restricted,
     truncated,
   }
 }
@@ -199,7 +204,7 @@ export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
 export function emptyLiveCustomerFacts(unavailable: string[] = []): LiveCustomerFacts {
   return {
     accounts: [], cards: [], notifications: [], lendingApplications: [], amlCases: [],
-    devices: [], documents: [], unavailable, truncated: [],
+    devices: [], documents: [], unavailable, restricted: [], truncated: [],
   }
 }
 
@@ -337,7 +342,10 @@ export function buildCustomerGraph(
   const addEdge = (from: string, to: string, relation: string) =>
     edges.push({ id: `${from}:${relation}:${to}`, from, to, relation })
 
-  for (const domain of evidence.domains) {
+  // Projection rows cannot be mapped reliably to a source role. If any source denies this
+  // operator, omit all projection-only evidence while retaining independently authorised facts.
+  const projectionAllowed = !live.restricted?.length
+  for (const domain of projectionAllowed ? evidence.domains : []) {
     const id = `domain:${domain.aggregateType}`
     nodes.push({
       id, kind: 'domain', label: domain.aggregateType, source: 'analytics-sink',
@@ -359,7 +367,7 @@ export function buildCustomerGraph(
     addEdge('customer', id, source === 'card-issuance-service' ? 'CARD_ACCOUNT_REFERENCE' : 'AML_CASE_ACCOUNT_REFERENCE')
     return id
   }
-  for (const accountId of evidence.accountIds) {
+  for (const accountId of projectionAllowed ? evidence.accountIds : []) {
     if (liveAccountIds.has(accountId)) continue
     const id = `account:${accountId}`
     accountNodeIds.add(id)
@@ -500,7 +508,7 @@ export function buildCustomerGraph(
   }
 
   const consentObservations = new Map<string, Customer360Evidence['consents']>()
-  for (const consent of evidence.consents) {
+  for (const consent of projectionAllowed ? evidence.consents : []) {
     const observations = consentObservations.get(consent.consentId) ?? []
     observations.push(consent)
     consentObservations.set(consent.consentId, observations)

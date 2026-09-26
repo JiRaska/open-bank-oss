@@ -128,6 +128,28 @@ describe('Customer context graph', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('omits projection-only evidence when any source rejects this operator', async () => {
+    const result = buildCustomerGraph(evidence, {
+      accounts: [account], cards: [], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: [], restricted: ['cards'], truncated: [],
+    })
+    expect(result.nodes.some(node => node.source === 'analytics-sink')).toBe(false)
+    expect(result.nodes.some(node => node.id === `account:${ACCOUNT_ID}` && node.source === 'account-service')).toBe(true)
+  })
+
+  it('shows the restricted lens without exposing projected nodes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      accounts: [account], cards: [], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: [], restricted: ['cards'], truncated: [],
+    })))
+    graph()
+
+    expect(await screen.findByRole('button', { name: 'Account: CZ12…3456' })).toBeInTheDocument()
+    expect(screen.getByText(/Restricted sources: cards/)).toBeInTheDocument()
+    expect(screen.getByText('6/7 domain feeds')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+  })
+
   it('shows card lifecycle evidence without exposing notification destination or content', async () => {
     installSources()
     graph()
