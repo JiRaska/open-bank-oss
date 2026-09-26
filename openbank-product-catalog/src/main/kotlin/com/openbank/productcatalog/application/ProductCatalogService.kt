@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.application
 
+import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.product.WaiveConditionParser
 import com.openbank.libs.product.WaivePredicate
 import com.openbank.productcatalog.application.port.out.ProductRepository
@@ -319,7 +320,11 @@ data class ProductRequest(
 
 class DuplicateProductCodeException(message: String) : RuntimeException(message)
 
-class ProductUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+// #10911 phase 2: extends the libs-domain base, mapped 409 by ResourceConflictExceptionMapper with
+// the same "CONCURRENT_MODIFICATION" code the deleted local ProductUpdateConflictExceptionMapper
+// used. See ProductCatalogExceptionMapperEquivalenceTest.
+class ProductUpdateConflictException(message: String, cause: Throwable? = null) :
+    ResourceConflictException(message, code = "CONCURRENT_MODIFICATION", cause = cause)
 
 class ProductNotFoundException(message: String) : RuntimeException(message)
 
