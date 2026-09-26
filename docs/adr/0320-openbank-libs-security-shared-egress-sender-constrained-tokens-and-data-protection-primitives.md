@@ -116,7 +116,7 @@ north star (SPIFFE/mesh) and issue #1914. P2's mTLS branch only validates a cert
 token where a TLS client certificate already reaches the service.
 
 Each gate except `check-sender-constrained-endpoints.py` (enforced from the first release of
-`@SenderConstrained`, rule 3 above) starts `advisory` with a baseline and flips to `enforced` once its primitive has one
+`@SenderConstrained` — planned, #10928 — rule 3 above) starts `advisory` with a baseline and flips to `enforced` once its primitive has one
 migrated consumer, per the repo's ratchet convention.
 
 ## Alternatives considered
