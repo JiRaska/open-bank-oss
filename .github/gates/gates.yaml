@@ -2903,6 +2903,27 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # ADR-0318: rounding belongs in libs' RoundingPolicy registry, not in a money-path service's
+  # inline setScale(n, RoundingMode.X). Per-service token counts measured 2026-09-26 are
+  # baselined in the script; a new site OR a stale (now lower) baseline is a finding.
+  # ADVISORY first, per the ADR; enforced once the money-path baseline is empty.
+  - id: money-rounding-inline-ratchet
+    name: "inline RoundingMode/setScale in money-path services ratchet (ADR-0318, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      Money-path services round with both HALF_UP and HALF_EVEN inline, so one amount can round
+      differently depending on which service touched it. ADR-0318 moves the rule into a named
+      RoundingPolicy registry; this ratchet keeps new inline sites from appearing meanwhile.
+    review_after: "2027-03-26"
+    budget_seconds: 30
+    min_subjects: 12   # 25 money-path services measured 2026-09-26; half
+    selftest: python3 .github/scripts/check-money-rounding-inline.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
+    run: |
+      python3 .github/scripts/check-money-rounding-inline.py --root .
+
   # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
   # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
   # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.
