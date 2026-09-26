@@ -83,7 +83,8 @@ class BusinessSigningOpenApiTest {
                 it.name
             },
         )
-        assertThat(schemas.getValue("ApprovalKind")["enum"] as List<String>).containsExactlyElementsOf(
+        // Extensible since #10281: a client must tolerate a kind it does not know.
+        assertThat(schemas.getValue("ApprovalKind")["x-extensible-enum"] as List<String>).containsExactlyElementsOf(
             ApprovalKind.entries.map {
                 it.name
             },

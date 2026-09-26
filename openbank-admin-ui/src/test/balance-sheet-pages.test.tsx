@@ -29,6 +29,7 @@ vi.mock('recharts', () => {
 
 import LedgerBackfillPage from '@/app/balance-sheet/ledger-backfill/page'
 import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
+import SnapshotCapitalPage from '@/app/balance-sheet/snapshots/[id]/capital/page'
 import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
 import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
@@ -159,6 +160,7 @@ describe('snapshots', () => {
     expect(screen.getByText(/USD/)).toBeTruthy()
     expect(screen.getByText(/GL_ACCOUNT positions carry no contract terms/)).toBeTruthy()
     expect(calls.some(c => c.url.includes('/cash-flows?curveSetId=cs-1'))).toBe(true)
+    expect(document.querySelector('a[href="/balance-sheet/snapshots/run-2/capital"]')).not.toBeNull()
   })
 })
 
@@ -292,5 +294,85 @@ describe('Liquidity (LCR / NSFR)', () => {
     await renderPage(<SnapshotLiquidityPage params={Promise.resolve({ id: 'run-4' })} />)
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByTestId('lcr-CZK')).toBeNull()
+  })
+})
+
+const CAP_CZK = {
+  currency: 'CZK',
+  classes: [
+    { exposureClass: 'retail', ead: 10000, rwa: 10000, citations: ['BCBS d424 ¶57 (other retail: 100%)'] },
+    { exposureClass: 'bank', ead: 6500, rwa: 9750, citations: ['BCBS d424 ¶21 Table 7, ¶26, ¶28-29 (SCRA Grade C base: 150%)'] },
+    { exposureClass: 'sovereign-and-central-bank', ead: 20000, rwa: 0, citations: ['BCBS d424 ¶8 (national discretion)'] },
+  ],
+  lines: [{ exposureClass: 'bank', label: 'GL 1500 (bank, GL level)', glAccountCode: '1500', instrumentId: null, ead: 5000,
+    riskWeight: 1.5, rwa: 7500, factorKey: 'rw-bank-scra-grade-c', citation: 'BCBS d424 ¶21 Table 7, ¶26, ¶28-29 (SCRA Grade C base: 150%)' }],
+  totalEad: 36500, totalRwa: 19750,
+  ownFunds: { lines: [], cet1BeforeDeductions: 3500, cet1Deductions: -200, cet1: 3300, at1: 300, tier1: 3600, tier2: 400, total: 4000 },
+}
+const CAP = (opts: { unclassified?: boolean; noCapital?: boolean } = {}) => {
+  const c = opts.noCapital ? { ...CAP_CZK, ownFunds: null } : CAP_CZK
+  const ratio = (r: number, m: number) => ({ ratio: r, minimum: m, meetsMinimum: r >= m, citation: 'BCBS bcbs189 ¶50' })
+  return {
+    runId: 'run-5', asOf: '2026-09-30', provenance: 'synthetic', parameterSetId: 'bcbs-d424-sa', parameterSetVersion: '1',
+    currencies: [c], total: c, ownFundsRequirement: 1580,
+    ratios: opts.noCapital ? null : { cet1: ratio(0.167089, 0.045), tier1: ratio(0.182278, 0.06), total: ratio(0.202532, 0.08) },
+    ratiosNotComputable: opts.noCapital ? 'no own-funds GL account (openbank.risk.capital.sa.classification own-funds-*) is in the snapshot' : null,
+    unclassified: opts.unclassified ? [{ glAccountCode: '1000', glAccountType: 'ASSET', currency: 'CZK', amount: 300, reason: 'GL account not mapped' }] : [],
+    notes: ['credit-risk only: UPPER BOUND'],
+    assumptions: {
+      parameterSetId: 'bcbs-d424-sa', parameterSetVersion: '1', source: 'BCBS d424 (Dec 2017) Part I',
+      scope: 'BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. Pillar 1 credit risk only.',
+      factors: [{ key: 'rw-bank-scra-grade-c', value: 1.5, citation: 'BCBS d424 ¶21 Table 7 (Grade C)' }],
+      classification: {
+        retailTreatment: 'other-retail', bankScraGrade: 'C', domesticCurrency: 'CZK',
+        glAccounts: [{ key: '1500', glClass: 'bank', description: 'Claim on a bank, unrated' }], glAccountTypes: [],
+        choices: ['Every bank exposure is unrated and weighted at SCRA Grade C.'],
+      },
+      exposureValue: 'carrying amount', creditRiskMitigation: 'None applied.', offBalanceSheet: 'None in the snapshot',
+      defaulted: 'IFRS 9 stage 3', ownFunds: '6000-6060', creditRiskOnly: 'credit-risk only: UPPER BOUND', currencyAggregation: 'per currency',
+    },
+  }
+}
+
+describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
+  it('shows RWA by class with citations, the 8% requirement, ratios, the parameter set and the scope', async () => {
+    router = () => json(CAP())
+    await renderPage(<SnapshotCapitalPage params={Promise.resolve({ id: 'run-5' })} />)
+    await screen.findByTestId('total-rwa')
+    expect(calls.every(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-5/capital')).toBe(true)
+    expect(screen.getByTestId('total-rwa').textContent).toMatch(/19[\s\u00a0,.]?750/)
+    expect(screen.getByTestId('requirement').textContent).toMatch(/1[\s\u00a0,.]?580/)
+    expect(screen.getByTestId('ratio-total').textContent).toContain('20')
+    expect(document.querySelectorAll('tr[data-class]').length).toBe(3)
+    expect(screen.getAllByText(/SCRA Grade C base: 150%/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/bcbs-d424-sa v1/)).toBeTruthy()
+    expect(screen.getAllByText(/EU CRR Part Three Title II Chapter 2 not applied/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/UPPER BOUND/).length).toBe(1)
+    expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Unclassified balances|Nezařazené zůstatky/)).toBeNull()
+  })
+
+  it('says why ratios are not computable instead of showing any', async () => {
+    router = () => json(CAP({ noCapital: true }))
+    await renderPage(<SnapshotCapitalPage params={Promise.resolve({ id: 'run-5' })} />)
+    await screen.findByTestId('ratios-not-computable')
+    expect(screen.getByTestId('ratios-not-computable').textContent).toContain('no own-funds GL account')
+    expect(screen.queryByTestId('ratio-total')).toBeNull()
+  })
+
+  it('warns about unclassified balances with their amounts and reason', async () => {
+    router = () => json(CAP({ unclassified: true }))
+    await renderPage(<SnapshotCapitalPage params={Promise.resolve({ id: 'run-5' })} />)
+    await screen.findByText(/Unclassified balances|Nezařazené zůstatky/)
+    expect(document.querySelectorAll('tr[data-unclassified="true"]').length).toBe(1)
+    expect(screen.getByRole('alert').textContent).toContain('1000')
+    expect(screen.getByRole('alert').textContent).toContain('GL account not mapped')
+  })
+
+  it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
+    router = () => json({ error: 'UNTIED', runId: 'run-5', mismatches: [] }, 409)
+    await renderPage(<SnapshotCapitalPage params={Promise.resolve({ id: 'run-5' })} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('total-rwa')).toBeNull()
   })
 })

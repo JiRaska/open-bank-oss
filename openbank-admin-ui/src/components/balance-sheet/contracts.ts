@@ -180,6 +180,52 @@ export const liquiditySchema = z.object({
   }),
 })
 
+// Pillar 1 credit-risk capital, standardised approach (risk-engine GET /snapshots/{id}/capital,
+// ADR-0313 phase 2).
+export const exposureLineSchema = z.object({
+  exposureClass: z.string(), label: z.string(), glAccountCode: z.string().nullable().optional(),
+  instrumentId: z.string().nullable().optional(), ead: money, riskWeight: money, rwa: money,
+  factorKey: z.string(), citation: z.string(),
+})
+const ownFundsSchema = z.object({
+  lines: z.array(z.object({ glAccountCode: z.string(), glClass: z.string(), contribution: money })),
+  cet1BeforeDeductions: money, cet1Deductions: money, cet1: money, at1: money, tier1: money, tier2: money, total: money,
+})
+export const currencyCapitalSchema = z.object({
+  currency: z.string(),
+  classes: z.array(z.object({ exposureClass: z.string(), ead: money, rwa: money, citations: z.array(z.string()) })),
+  lines: z.array(exposureLineSchema),
+  totalEad: money, totalRwa: money,
+  ownFunds: ownFundsSchema.nullable().optional(),
+})
+const capitalRatioSchema = z.object({ ratio: money, minimum: money, meetsMinimum: z.boolean(), citation: z.string() })
+export const capitalSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, parameterSetId: z.string(), parameterSetVersion: z.string(),
+  currencies: z.array(currencyCapitalSchema),
+  total: currencyCapitalSchema.nullable().optional(),
+  ownFundsRequirement: money.nullable().optional(),
+  ratios: z.object({ cet1: capitalRatioSchema, tier1: capitalRatioSchema, total: capitalRatioSchema }).nullable().optional(),
+  ratiosNotComputable: z.string().nullable().optional(),
+  unclassified: z.array(z.object({
+    glAccountCode: z.string().nullable().optional(), glAccountType: z.string().nullable().optional(),
+    currency: z.string(), amount: money, reason: z.string(),
+  })),
+  notes: z.array(z.string()),
+  assumptions: z.object({
+    parameterSetId: z.string(), parameterSetVersion: z.string(), source: z.string(), scope: z.string(),
+    factors: z.array(z.object({ key: z.string(), value: money, citation: z.string() })),
+    classification: z.object({
+      retailTreatment: z.string(), bankScraGrade: z.string(), domesticCurrency: z.string(),
+      glAccounts: z.array(glMappingSchema), glAccountTypes: z.array(glMappingSchema), choices: z.array(z.string()),
+    }),
+    exposureValue: z.string(), creditRiskMitigation: z.string(), offBalanceSheet: z.string(), defaulted: z.string(),
+    ownFunds: z.string(), creditRiskOnly: z.string(), currencyAggregation: z.string(),
+  }),
+})
+
+export type Capital = z.infer<typeof capitalSchema>
+export type CurrencyCapital = z.infer<typeof currencyCapitalSchema>
+
 export type Liquidity = z.infer<typeof liquiditySchema>
 export type CurrencyLiquidity = z.infer<typeof currencyLiquiditySchema>
 export type LiquidityLine = z.infer<typeof liquidityLineSchema>

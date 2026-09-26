@@ -201,14 +201,26 @@ def application_automated(short: str) -> bool | None:
 
     A workload under a manual Application is desired state only: it is not evidence that Argo
     has ever created a pod. Resolve ownership from the source path rather than a display name.
+
+    Parsed with a real YAML load, not a line-oriented regex: `syncPolicy.automated` is valid
+    either as a block mapping (`automated:` alone on its line, nested keys indented below) or as
+    flow-style (`automated: { prune: true, selfHeal: true }`, all on one line) — both are the
+    same YAML value, `{prune: true, selfHeal: true}` vs `None`. A regex anchored on
+    `automated:\\s*$` only matches the block form, so a flow-style Application reads as
+    manual-sync when it is not: `context.yaml` declares `automated: { prune: true, selfHeal:
+    true }` and was rendered into its committed runbook as "WORKLOAD DESIRED — LIVE STATUS
+    UNVERIFIED / no automated sync" — the wrong operational instruction, for a service that IS
+    automated (found via `service-runbook-drift` self-test drift once `incentive.yaml` stopped
+    being a manual-sync example, #10783).
     """
     marker = f"path: openbank-infra/gitops/components/{short}"
     for app in sorted((GITOPS / "apps").glob("*.yaml")):
         text = read(app)
         if marker not in text:
             continue
-        sync_policy = re.search(r"^  syncPolicy:\s*$([\s\S]*?)(?=^\S|\Z)", text, re.M)
-        return bool(sync_policy and re.search(r"^\s+automated:\s*$", sync_policy.group(1), re.M))
+        doc = yaml.safe_load(text) or {}
+        sync_policy = ((doc.get("spec") or {}).get("syncPolicy") or {})
+        return "automated" in sync_policy and sync_policy["automated"] is not None
     return None
 
 
@@ -747,17 +759,74 @@ def self_test() -> int:
              "kubectl scale" not in t)
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
+    # `application_automated()` itself, falsified against a SYNTHETIC fixture rather than a named
+    # real service: which service (if any) is manual-sync is a live rollout fact that drifts —
+    # `incentive` was this fixture until #10783 activated its automated sync, which silently
+    # untested this whole classifier until the fixture below was added (the self-test still
+    # "passed" while the classifier had a live regex bug: see `application_automated`'s
+    # docstring). A synthetic Application, both in flow style (`automated: {...}`, one line) and
+    # block style (`automated:` alone, nested keys below), can never go stale this way.
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture_gitops = Path(tmp)
+        (fixture_gitops / "apps").mkdir()
+        (fixture_gitops / "apps" / "flow-sync.yaml").write_text(
+            "apiVersion: argoproj.io/v1alpha1\n"
+            "kind: Application\n"
+            "metadata: {name: flow-sync, namespace: argocd}\n"
+            "spec:\n"
+            "  source: {path: openbank-infra/gitops/components/flow-sync-fixture}\n"
+            "  syncPolicy:\n"
+            "    automated: {prune: true, selfHeal: true}\n"
+        )
+        (fixture_gitops / "apps" / "block-sync.yaml").write_text(
+            "apiVersion: argoproj.io/v1alpha1\n"
+            "kind: Application\n"
+            "metadata: {name: block-sync, namespace: argocd}\n"
+            "spec:\n"
+            "  source: {path: openbank-infra/gitops/components/block-sync-fixture}\n"
+            "  syncPolicy:\n"
+            "    automated:\n"
+            "      prune: true\n"
+            "      selfHeal: true\n"
+        )
+        (fixture_gitops / "apps" / "manual-sync.yaml").write_text(
+            "apiVersion: argoproj.io/v1alpha1\n"
+            "kind: Application\n"
+            "metadata: {name: manual-sync, namespace: argocd}\n"
+            "spec:\n"
+            "  source: {path: openbank-infra/gitops/components/manual-sync-fixture}\n"
+            "  syncPolicy:\n"
+            "    syncOptions: [ServerSideApply=true]\n"
+        )
+        global GITOPS
+        real_gitops = GITOPS
+        GITOPS = fixture_gitops
+        try:
+            case("flow-style `automated: {...}` on one line is detected as automated",
+                 application_automated("flow-sync-fixture") is True)
+            case("block-style `automated:` with nested keys is detected as automated",
+                 application_automated("block-sync-fixture") is True)
+            case("an Application with no `automated` key at all is manual-sync",
+                 application_automated("manual-sync-fixture") is False)
+            case("a component path owned by no Application resolves to unknown, not manual",
+                 application_automated("no-such-fixture") is None)
+        finally:
+            GITOPS = real_gitops
+
     # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
-    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
-    # automated sync while this exact distinction is under rollout review.
-    if "incentive" in deployed:
-        incentive = render("incentive")
+    # that Argo has ever created a pod. Resolved dynamically (never a hardcoded service name) —
+    # which deployed service, if any, is manual-sync today is a live rollout fact, and hardcoding
+    # one is exactly what went stale when #10783 activated `incentive`'s automated sync.
+    manual_sync_deployed = [x for x in deployed if application_automated(x) is False]
+    if manual_sync_deployed:
+        target = manual_sync_deployed[0]
+        rendered = render(target)
         case("a manual-sync workload is explicitly live-unverified",
-             says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
+             says(rendered, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
         case("a manual-sync workload does not present declared metrics as a live scrape",
-             says(incentive, "live scrape status is unverified"))
-        case("a separate management listener is used for health commands",
-             "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
+             says(rendered, "live scrape status is unverified"))
+    # No `else` that passes: every deployed service being automated-sync is the expected steady
+    # state now, and the synthetic fixture above is what keeps the classifier itself falsifiable.
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)

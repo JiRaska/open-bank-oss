@@ -61,8 +61,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # OUTBOUND M2M for the party-register read that gates device enrolment (#10281 item 1). Without
   # it the call carries no bearer, party-service answers 401, and every enrolment fails closed 503.
@@ -156,6 +154,8 @@ quarkus:
         json: false
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
+      tls:
+        verification: none
       enabled: false
     oidc-client:
       enabled: false

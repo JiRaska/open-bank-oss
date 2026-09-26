@@ -13,7 +13,9 @@ info:
   #        six BCBS d368 scenarios, ΔNII, optional caller-supplied Tier 1. Additive.
   # 1.5.0: LCR / NSFR read GET /snapshots/{id}/liquidity (ADR-0313 phase 1) — BCBS d238 / d295
   #        standard factors from a versioned parameter set. Additive.
-  version: 1.5.0
+  # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
+  #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
+  version: 1.6.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -295,6 +297,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Liquidity'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/capital:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotCapital
+      summary: Pillar 1 credit-risk capital (standardised approach) of a TIED_OUT run
+      description: |
+        Credit-risk risk-weighted assets under the BCBS d424 standardised approach, per exposure
+        class and per position, with the risk weight, its configuration key and its d424
+        paragraph; the own-funds requirement (8% × RWA, bcbs189 ¶50); and CET1 / Tier 1 / Total
+        capital ratios when own funds are in the snapshot (`ratiosNotComputable` says why not).
+        BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. The ratios use
+        CREDIT-RISK RWA only, so they are an upper bound. Per currency; total, requirement and
+        ratios only for a single-currency book. A GL balance the classification does not name is
+        listed in `unclassified` and counted nowhere. Derived on request, never stored.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run's credit-risk RWA, requirement and ratios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capital'
         '401':
           description: Unauthenticated
         '403':
@@ -1137,3 +1175,163 @@ components:
           type: array
           items: {type: string}
         assumptions: {$ref: '#/components/schemas/LiquidityAssumptions'}
+
+    ExposureLine:
+      type: object
+      required: [exposureClass, label, ead, riskWeight, rwa, factorKey, citation]
+      properties:
+        exposureClass:
+          type: string
+          x-extensible-enum: [sovereign-and-central-bank, bank, retail, corporate, defaulted, cash,
+            cash-items-in-collection, other-asset]
+        label: {type: string}
+        glAccountCode: {type: [string, 'null']}
+        instrumentId: {type: [string, 'null']}
+        ead: {type: number}
+        riskWeight: {type: number}
+        rwa: {type: number}
+        factorKey: {type: string}
+        citation: {type: string}
+
+    CurrencyCapital:
+      type: object
+      required: [currency, classes, lines, totalEad, totalRwa]
+      properties:
+        currency: {type: string}
+        classes:
+          type: array
+          items:
+            type: object
+            required: [exposureClass, ead, rwa, citations]
+            properties:
+              exposureClass: {type: string}
+              ead: {type: number}
+              rwa: {type: number}
+              citations:
+                type: array
+                items: {type: string}
+        lines:
+          type: array
+          items: {$ref: '#/components/schemas/ExposureLine'}
+        totalEad: {type: number}
+        totalRwa: {type: number}
+        ownFunds:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              required: [lines, cet1BeforeDeductions, cet1Deductions, cet1, at1, tier1, tier2, total]
+              properties:
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [glAccountCode, glClass, contribution]
+                    properties:
+                      glAccountCode: {type: string}
+                      glClass: {type: string}
+                      contribution: {type: number}
+                cet1BeforeDeductions: {type: number}
+                cet1Deductions: {type: number}
+                cet1: {type: number}
+                at1: {type: number}
+                tier1: {type: number}
+                tier2: {type: number}
+                total: {type: number}
+
+    CapitalRatio:
+      type: object
+      required: [ratio, minimum, meetsMinimum, citation]
+      properties:
+        ratio: {type: number}
+        minimum: {type: number}
+        meetsMinimum: {type: boolean}
+        citation: {type: string}
+
+    CapitalAssumptions:
+      type: object
+      required: [parameterSetId, parameterSetVersion, source, scope, factors, classification, exposureValue,
+        creditRiskMitigation, offBalanceSheet, defaulted, ownFunds, creditRiskOnly, currencyAggregation]
+      properties:
+        parameterSetId: {type: string}
+        parameterSetVersion: {type: string}
+        source: {type: string}
+        scope: {type: string}
+        factors:
+          type: array
+          items:
+            type: object
+            required: [key, value, citation]
+            properties:
+              key: {type: string}
+              value: {type: number}
+              citation: {type: string}
+        classification:
+          type: object
+          required: [retailTreatment, bankScraGrade, domesticCurrency, glAccounts, glAccountTypes, choices]
+          properties:
+            retailTreatment: {type: string}
+            bankScraGrade: {type: string}
+            domesticCurrency: {type: string}
+            glAccounts:
+              type: array
+              items: {$ref: '#/components/schemas/GlMapping'}
+            glAccountTypes:
+              type: array
+              items: {$ref: '#/components/schemas/GlMapping'}
+            choices:
+              type: array
+              items: {type: string}
+        exposureValue: {type: string}
+        creditRiskMitigation: {type: string}
+        offBalanceSheet: {type: string}
+        defaulted: {type: string}
+        ownFunds: {type: string}
+        creditRiskOnly: {type: string}
+        currencyAggregation: {type: string}
+
+    Capital:
+      type: object
+      required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, unclassified, notes,
+        assumptions]
+      properties:
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        provenance: {type: string}
+        parameterSetId: {type: string}
+        parameterSetVersion: {type: string}
+        currencies:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyCapital'}
+        total:
+          oneOf:
+            - {$ref: '#/components/schemas/CurrencyCapital'}
+            - {type: 'null'}
+          description: Present only for a single-currency book
+        ownFundsRequirement:
+          type: [number, 'null']
+          description: min-total-capital-ratio (8%, bcbs189 ¶50) × total credit-risk RWA
+        ratios:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              required: [cet1, tier1, total]
+              properties:
+                cet1: {$ref: '#/components/schemas/CapitalRatio'}
+                tier1: {$ref: '#/components/schemas/CapitalRatio'}
+                total: {$ref: '#/components/schemas/CapitalRatio'}
+        ratiosNotComputable: {type: [string, 'null']}
+        unclassified:
+          type: array
+          items:
+            type: object
+            required: [currency, amount, reason]
+            properties:
+              glAccountCode: {type: [string, 'null']}
+              glAccountType: {type: [string, 'null']}
+              currency: {type: string}
+              amount: {type: number}
+              reason: {type: string}
+        notes:
+          type: array
+          items: {type: string}
+        assumptions: {$ref: '#/components/schemas/CapitalAssumptions'}

@@ -6,6 +6,7 @@ package com.openbank.risk.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
@@ -55,6 +56,9 @@ class RiskResource {
 
     @Inject
     lateinit var liquidity: LiquidityUseCase
+
+    @Inject
+    lateinit var capital: CapitalUseCase
 
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
@@ -145,6 +149,19 @@ class RiskResource {
     @Operation(summary = "LCR and NSFR of a TIED_OUT run with components, caps and assumptions; 409 for an UNTIED one")
     @Authorize(action = "risk.snapshot.read", resource = "#id")
     suspend fun liquidity(@PathParam("id") id: UUID): Response = Response.ok(liquidity.analyse(id).toResponse()).build()
+
+    /**
+     * Pillar 1 credit-risk RWA (BCBS d424 standardised approach), the 8% own-funds requirement and
+     * the capital ratios where own funds are in the snapshot (ADR-0313 phase 2), under the versioned
+     * parameter set `openbank.risk.capital.sa.*`. Same gate as positions: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/capital")
+    @Operation(
+        summary = "Credit-risk RWA (standardised approach), own-funds requirement and ratios; 409 for an UNTIED run",
+    )
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun capital(@PathParam("id") id: UUID): Response = Response.ok(capital.analyse(id).toResponse()).build()
 
     private fun parseCurveSetId(curveSetId: String?): UUID {
         val raw = requireNotNull(curveSetId) { "query parameter 'curveSetId' is required" }
