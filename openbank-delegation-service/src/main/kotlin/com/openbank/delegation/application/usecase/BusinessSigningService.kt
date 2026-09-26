@@ -56,17 +56,32 @@ interface SigningPayloadCodec {
     fun parseObject(json: String): Map<String, Any?>
 }
 
+/**
+ * A held instruction: a PAYMENT, or a recurring outflow (STANDING_ORDER, SDD_MANDATE — #10281).
+ * [amount] is null only for an SDD mandate without a maximum; [creditorIban] only for an SDD
+ * mandate, whose creditor is a SEPA creditor identifier carried in [summaryExtras].
+ */
 data class PaymentApprovalCommand(
     val entityPartyId: UUID,
     val initiatorPartyId: UUID,
     val initiatorScaChallengeId: UUID,
-    val amount: SigningAmount,
-    val creditorIban: String,
+    val amount: SigningAmount?,
+    val creditorIban: String?,
     val creditorName: String?,
     val rail: String,
     val payload: Map<String, Any?>,
     val ttl: Duration?,
-)
+    val kind: ApprovalKind = ApprovalKind.PAYMENT,
+    val summaryExtras: Map<String, Any?> = emptyMap(),
+) {
+    init {
+        require(kind.releasable) { "kind $kind is not a held instruction" }
+        if (kind != ApprovalKind.SDD_MANDATE) {
+            requireNotNull(amount) { "amount is required for $kind" }
+            requireNotNull(creditorIban) { "creditorIban is required for $kind" }
+        }
+    }
+}
 
 data class ReleaseClaim(val claimToken: UUID, val payload: String)
 
@@ -131,6 +146,37 @@ class BusinessSigningService(
         )
     }
 
+    /** The evaluation for a held instruction of [kind] (ADR-0312 addendum, #10281). */
+    suspend fun evaluateFor(
+        kind: ApprovalKind,
+        entityPartyId: UUID,
+        amount: SigningAmount?,
+        creditorIban: String?,
+        rail: String,
+    ): SigningEvaluation {
+        if (kind == ApprovalKind.PAYMENT) {
+            return evaluate(
+                entityPartyId,
+                requireNotNull(amount) { "amount is required" },
+                requireNotNull(creditorIban) { "creditorIban is required" },
+                rail,
+            )
+        }
+        require(kind == ApprovalKind.STANDING_ORDER || kind == ApprovalKind.SDD_MANDATE) {
+            "kind $kind is not evaluated per instruction"
+        }
+        // A standing order always has its per-execution amount; only an SDD mandate may lack one.
+        if (kind == ApprovalKind.STANDING_ORDER) requireNotNull(amount) { "amount is required for a standing order" }
+        val register = liveMandates(entityPartyId)
+        val policy = repository.findPolicy(entityPartyId) ?: SigningPolicy.derived(entityPartyId, register)
+        return SigningPolicyEvaluator.evaluateRecurring(
+            policy = policy,
+            activeSignerIds = register.mapTo(mutableSetOf()) { it.agentPartyId },
+            groups = repository.listGroups(entityPartyId).associateBy { it.id },
+            amount = amount,
+        )
+    }
+
     // ---------------------------------------------------------------- creation
 
     suspend fun createPayment(cmd: PaymentApprovalCommand): ApprovalRequest {
@@ -139,14 +185,14 @@ class BusinessSigningService(
         repository.findBySignatureChallenge(cmd.initiatorScaChallengeId)?.let { existing ->
             if (existing.entityPartyId == cmd.entityPartyId &&
                 existing.initiatorPartyId == cmd.initiatorPartyId &&
-                existing.kind == ApprovalKind.PAYMENT
+                existing.kind == cmd.kind
             ) {
                 return existing
             }
             throw refused(CONFLICT, "SCA_CHALLENGE_USED", "that SCA challenge has already authorised another request")
         }
         val now = clock.instant()
-        val evaluation = evaluate(cmd.entityPartyId, cmd.amount, cmd.creditorIban, cmd.rail)
+        val evaluation = evaluateFor(cmd.kind, cmd.entityPartyId, cmd.amount, cmd.creditorIban, cmd.rail)
         requireEligibleInitiator(cmd.initiatorPartyId, evaluation)
         requireSatisfiable(evaluation)
         when (sca.verifyConsumedInitiatorChallenge(cmd.initiatorScaChallengeId, cmd.initiatorPartyId)) {
@@ -160,17 +206,17 @@ class BusinessSigningService(
         }
         val payload = codec.canonical(cmd.payload)
         val summary = codec.canonical(
-            mapOf(
-                "amount" to cmd.amount.amount.toPlainString(),
-                "currency" to cmd.amount.currency,
-                "creditorIban" to Iban.normalize(cmd.creditorIban),
+            linkedMapOf<String, Any?>(
+                "amount" to cmd.amount?.amount?.toPlainString(),
+                "currency" to cmd.amount?.currency,
+                "creditorIban" to cmd.creditorIban?.let { Iban.normalize(it) },
                 "creditorName" to cmd.creditorName,
                 "rail" to cmd.rail,
-            ),
+            ).apply { putAll(cmd.summaryExtras) }.filterValues { it != null },
         )
         val base = newRequest(
             cmd.entityPartyId,
-            ApprovalKind.PAYMENT,
+            cmd.kind,
             payload,
             summary,
             evaluation,
@@ -390,10 +436,8 @@ class BusinessSigningService(
     suspend fun claimRelease(entityPartyId: UUID, id: UUID): ReleaseClaim {
         val now = clock.instant()
         val request = get(entityPartyId, id)
-        if (request.kind !=
-            ApprovalKind.PAYMENT
-        ) {
-            throw refused(CONFLICT, "NOT_RELEASABLE", "only a payment is released")
+        if (!request.kind.releasable) {
+            throw refused(CONFLICT, "NOT_RELEASABLE", "only a held instruction is released")
         }
         when {
             request.status == ApprovalStatus.RELEASED || request.status == ApprovalStatus.RELEASE_FAILED ->
@@ -483,7 +527,7 @@ class BusinessSigningService(
                     (
                         fresh.status == ApprovalStatus.PENDING ||
                             fresh.status == ApprovalStatus.AWAITING_INITIATOR ||
-                            (fresh.status == ApprovalStatus.APPROVED && fresh.kind == ApprovalKind.PAYMENT)
+                            (fresh.status == ApprovalStatus.APPROVED && fresh.kind.releasable)
                         )
                 if (!expirable) return@transition Transition(fresh, emptyList())
                 val next = fresh.copy(status = ApprovalStatus.EXPIRED)
@@ -517,7 +561,7 @@ class BusinessSigningService(
     ): Transition {
         val payload = codec.parseObject(signed.payload)
         val change: AppliedChange? = when (signed.kind) {
-            ApprovalKind.PAYMENT -> null
+            ApprovalKind.PAYMENT, ApprovalKind.STANDING_ORDER, ApprovalKind.SDD_MANDATE -> null
             ApprovalKind.PAYEE_ADD -> AppliedChange.AddPayee(
                 TrustedPayee(
                     id = Ids.newId(),
@@ -633,8 +677,8 @@ class BusinessSigningService(
             else -> request.eligibleSignerIds + request.initiatorPartyId
         }.sorted()
         val summary = request.summary?.let { codec.parseObject(it) }.orEmpty()
-        val amount = if (request.kind == ApprovalKind.PAYMENT) summary["amount"] as String? else null
-        val currency = if (request.kind == ApprovalKind.PAYMENT) summary["currency"] as String? else null
+        val amount = if (request.kind.releasable) summary["amount"] as String? else null
+        val currency = if (request.kind.releasable) summary["currency"] as String? else null
         val payeeName = (summary["creditorName"] ?: summary["name"]) as String?
         val a = EventArgs(request, actor, recipients, signers, summary, reason, releaseRef, now)
         return when (type) {
@@ -897,16 +941,28 @@ class BusinessSigningService(
         }
     }
 
-    private fun ApprovalRequest.paymentAmount(): SigningAmount? = if (kind != ApprovalKind.PAYMENT) {
+    /**
+     * The amount a co-signer's SCA is dynamically linked to. Null for an administrative change and
+     * for an SDD mandate, whose creditor is a creditor identifier rather than the IBAN an APPROVAL
+     * challenge links to — the payload hash still binds the whole instruction, creditor included.
+     */
+    private fun ApprovalRequest.paymentAmount(): SigningAmount? = if (!kind.releasable ||
+        kind == ApprovalKind.SDD_MANDATE
+    ) {
         null
     } else {
-        summary?.let {
-            codec.parseObject(it)
-        }?.let { SigningAmount((it["amount"] as String).toBigDecimal(), it["currency"] as String) }
+        summary?.let { codec.parseObject(it) }?.let { s ->
+            val amount = s["amount"] as String? ?: return@let null
+            SigningAmount(amount.toBigDecimal(), s["currency"] as String)
+        }
     }
 
-    private fun ApprovalRequest.paymentCreditorIban(): String? =
-        if (kind != ApprovalKind.PAYMENT) null else summary?.let { codec.parseObject(it)["creditorIban"] as String? }
+    /** The IBAN a co-signer's SCA is linked to; an SDD mandate's creditor is no IBAN, so none. */
+    private fun ApprovalRequest.paymentCreditorIban(): String? = if (!kind.releasable || paymentAmount() == null) {
+        null
+    } else {
+        summary?.let { codec.parseObject(it)["creditorIban"] as String? }
+    }
 
     companion object {
         const val FORBIDDEN = 403
