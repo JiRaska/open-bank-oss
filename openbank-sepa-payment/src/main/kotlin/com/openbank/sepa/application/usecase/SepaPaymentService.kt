@@ -4,6 +4,8 @@
 
 package com.openbank.sepa.application.usecase
 
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.iso20022.Pacs004Reader
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
@@ -33,8 +35,15 @@ import java.time.Instant
 import java.util.Locale
 import java.util.UUID
 
-class SepaPaymentNotFoundException(paymentId: UUID) : RuntimeException("SEPA payment not found: $paymentId")
-class InvalidSepaPaymentStateTransitionException(message: String) : RuntimeException(message)
+// #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
+// ResourceNotFoundExceptionMapper handles the 404 (default code "NOT_FOUND", matching the
+// deleted local SepaPaymentNotFoundMapper's ErrorCode.NOT_FOUND.code byte for byte). See
+// SepaPaymentExceptionMapperEquivalenceTest.
+class SepaPaymentNotFoundException(paymentId: UUID) : ResourceNotFoundException("SEPA payment not found: $paymentId")
+
+// Same as above, mapped 409 by ResourceConflictExceptionMapper (default code "CONFLICT",
+// matching the deleted local InvalidSepaPaymentStateTransitionMapper byte for byte).
+class InvalidSepaPaymentStateTransitionException(message: String) : ResourceConflictException(message)
 
 @Suppress("TooManyFunctions", "LongParameterList", "UnusedPrivateMember")
 @ApplicationScoped
