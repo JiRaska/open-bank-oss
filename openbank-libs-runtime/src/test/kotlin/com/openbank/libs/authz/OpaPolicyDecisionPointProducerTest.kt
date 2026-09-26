@@ -28,9 +28,11 @@ class OpaPolicyDecisionPointProducerTest {
     }
 
     @Test
-    fun `producer is a displaceable default and opt-in per service`() {
+    fun `producer is opt-in per service and NOT a displaceable default`() {
         val method = OpaPolicyDecisionPointProducer::class.java.getDeclaredMethod("policyDecisionPoint")
-        assertThat(method.isAnnotationPresent(DefaultBean::class.java)).isTrue()
+        // Deliberately not @DefaultBean: a second PolicyDecisionPoint producer in a service's own
+        // src/main must fail the build as an ambiguous CDI dependency, not be silently displaced.
+        assertThat(method.isAnnotationPresent(DefaultBean::class.java)).isFalse()
         val gate = method.getAnnotation(IfBuildProperty::class.java)
         assertThat(gate.name).isEqualTo(OpaPolicyDecisionPointProducer.ENABLED_PROPERTY)
         assertThat(gate.stringValue).isEqualTo("true")

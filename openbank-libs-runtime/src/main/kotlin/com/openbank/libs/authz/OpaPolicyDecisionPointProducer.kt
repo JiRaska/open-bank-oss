@@ -4,7 +4,6 @@
 
 package com.openbank.libs.authz
 
-import io.quarkus.arc.DefaultBean
 import io.quarkus.arc.properties.IfBuildProperty
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
@@ -17,9 +16,13 @@ import java.time.Duration
  * with the same defaults every per-service `AuthzProducer` copy used. `opa.path` is read from
  * config, never hardcoded, because services point it at their own policy package.
  *
- * Two deliberate qualifiers:
- *  - `@DefaultBean` — any service-level or test-level `PolicyDecisionPoint` bean (an
- *    `@Alternative`, a `@Mock`, a service that keeps its own producer) displaces this one.
+ * Deliberately NOT `@DefaultBean`: a second `PolicyDecisionPoint` producer in a service's
+ * `src/main` (a stale copy of the old per-service `AuthzProducer`, a leftover `@Alternative`)
+ * must fail the build as an ambiguous CDI dependency, loudly, at `quarkusBuild` time — not be
+ * silently displaced in favour of whichever one CDI happens to pick. `@DefaultBean` would have
+ * hidden exactly that mistake.
+ *
+ * One deliberate qualifier:
  *  - `@IfBuildProperty(openbank.authz.opa-pdp-producer.enabled=true)`, OFF when missing — the
  *    libs JAR is on every service's classpath, and several services use `@Authorize` with NO PDP
  *    bean today, where the interceptor's `pdp_unconfigured` branch decides the outcome. An
@@ -43,7 +46,6 @@ class OpaPolicyDecisionPointProducer {
 
     @Produces
     @ApplicationScoped
-    @DefaultBean
     @IfBuildProperty(name = ENABLED_PROPERTY, stringValue = "true", enableIfMissing = false)
     fun policyDecisionPoint(): PolicyDecisionPoint = OpaSidecarPolicyDecisionPoint(
         baseUrl = opaUrl,

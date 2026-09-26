@@ -64,9 +64,11 @@ is the **authentication assurance gate** for payments and consent — defeating 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
-  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), a `@DefaultBean` gated by that build
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
-  it. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
   (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
   behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
   construction site moved from a per-service copy to the shared producer. No new caller, endpoint,

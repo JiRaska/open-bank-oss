@@ -116,8 +116,8 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
-    // OpaPolicyDecisionPointProducerTest reads @DefaultBean / @IfBuildProperty reflectively; an
-    // annotation whose class is absent at runtime is silently dropped, so the test needs arc itself.
+    // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
+    // class is absent at runtime is silently dropped, so the test needs arc itself.
     testImplementation("io.quarkus:quarkus-arc:3.33.2")
     testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
