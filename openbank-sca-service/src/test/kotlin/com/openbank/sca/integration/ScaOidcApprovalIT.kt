@@ -15,7 +15,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
+import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 import java.util.UUID
@@ -81,6 +83,66 @@ class ScaOidcApprovalIT {
     }
 
     @Test
+    fun `real oidc enrollment signs and spends a challenge then revocation fences later decisions`() {
+        val maker = token("sca-oidc-maker")
+        val checker = token("sca-oidc-checker")
+        val party = UUID.randomUUID()
+        val keys = es256()
+        val credentialId = "oidc-lifecycle-${UUID.randomUUID()}"
+        val request = mapOf(
+            "credentialId" to credentialId,
+            "publicKey" to Base64.getEncoder().encodeToString(keys.public.encoded),
+            "algorithm" to "ES256",
+        )
+        val devicePath = "/api/v1/sca/parties/$party/devices"
+        val enrollmentApproval = given().auth().oauth2(maker).contentType("application/json").body(request)
+            .post(devicePath).then().statusCode(202).extract().path<String>("approvalId")
+        decide(checker, enrollmentApproval, 200)
+        val deviceId = given().auth().oauth2(maker).header("X-Approval-Id", enrollmentApproval)
+            .contentType("application/json").body(request).post(devicePath).then().statusCode(201)
+            .extract().path<String>("id")
+        assertThat(enrolled(party)).isEqualTo(1)
+
+        val consumedChallenge = initiateLogin(maker, party)
+        signDecision(maker, consumedChallenge, credentialId, keys, 200)
+        val consumeBody = mapOf("partyId" to party)
+        val services = serviceToken("openbank-services")
+        given().auth().oauth2(services).contentType("application/json").body(consumeBody)
+            .post("/api/v1/sca/challenges/$consumedChallenge/consume").then().statusCode(200)
+        given().auth().oauth2(services).contentType("application/json").body(consumeBody)
+            .post("/api/v1/sca/challenges/$consumedChallenge/consume").then().statusCode(409)
+
+        val cancelledChallenge = initiateLogin(maker, party)
+        signDecision(maker, cancelledChallenge, credentialId, keys, 200)
+        val rejectedAfterRevoke = initiateLogin(maker, party)
+        val revokePath = "$devicePath/$deviceId"
+        val revokeApproval = given().auth().oauth2(maker).delete(revokePath).then().statusCode(202)
+            .extract().path<String>("approvalId")
+        decide(checker, revokeApproval, 200)
+        given().auth().oauth2(maker).header("X-Approval-Id", revokeApproval)
+            .delete(revokePath).then().statusCode(204)
+
+        given().auth().oauth2(maker).get("/api/v1/sca/challenges/$cancelledChallenge").then().statusCode(200)
+            .body("status", equalTo("CANCELLED"))
+        signDecision(maker, rejectedAfterRevoke, credentialId, keys, 403)
+        given().auth().oauth2(maker).get("$devicePath").then().statusCode(200)
+            .body("[0].id", equalTo(deviceId))
+            .body("[0].revokedAt", org.hamcrest.Matchers.notNullValue())
+
+        assertThat(
+            count(
+                "sca_device_decisions",
+                "challenge_id = '$consumedChallenge' OR challenge_id = '$cancelledChallenge'",
+            ),
+        ).isEqualTo(2)
+        assertThat(count("sca_challenges", "id = '$consumedChallenge' AND consumed_at IS NOT NULL")).isEqualTo(1)
+        assertThat(count("sca_challenges", "id = '$cancelledChallenge' AND status = 'CANCELLED'")).isEqualTo(1)
+        assertThat(count("sca_enrolled_devices", "id = '$deviceId' AND revoked_at IS NOT NULL")).isEqualTo(1)
+        assertThat(count("sca_outbox", "aggregate_id = '$deviceId' AND event_type = 'DEVICE_REVOKED'")).isEqualTo(1)
+        assertThat(count("sca_device_decisions", "challenge_id = '$rejectedAfterRevoke'")).isZero()
+    }
+
+    @Test
     fun `missing tampered and unprivileged tokens cannot reach protected writes`() {
         val valid = token("sca-oidc-maker")
         val parts = valid.split('.')
@@ -124,6 +186,35 @@ class ScaOidcApprovalIT {
     private fun decide(token: String, id: String, expected: Int) {
         given().auth().oauth2(token).contentType("application/json").body(mapOf("approve" to true))
             .patch("/api/v1/sca/approvals/$id").then().statusCode(expected)
+    }
+
+    private fun initiateLogin(token: String, party: UUID): String =
+        given().auth().oauth2(token).contentType("application/json").body(
+            mapOf("partyId" to party, "purpose" to "LOGIN", "preferredMethod" to "PUSH_NOTIFICATION"),
+        ).post("/api/v1/sca/challenges").then().statusCode(201).extract().path("id")
+
+    private fun signDecision(token: String, challenge: String, credentialId: String, keys: KeyPair, expected: Int) {
+        val payload = "$challenge|APPROVED||||"
+        val signature = Signature.getInstance("SHA256withECDSA").run {
+            initSign(keys.private)
+            update(payload.toByteArray(Charsets.UTF_8))
+            Base64.getEncoder().encodeToString(sign())
+        }
+        given().auth().oauth2(token).contentType("application/json")
+            .body(mapOf("credentialId" to credentialId, "decision" to "APPROVED", "signature" to signature))
+            .post("/api/v1/sca/challenges/$challenge/decision").then().statusCode(expected)
+    }
+
+    private fun es256(): KeyPair = KeyPairGenerator.getInstance("EC")
+        .apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+
+    private fun count(table: String, predicate: String): Long = dataSource.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT count(*) FROM $table WHERE $predicate").use { rows ->
+                check(rows.next())
+                rows.getLong(1)
+            }
+        }
     }
 
     private fun enrollment(): Map<String, String> {
