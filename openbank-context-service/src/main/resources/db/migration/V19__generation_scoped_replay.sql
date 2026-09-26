@@ -1,7 +1,7 @@
 -- Legacy ledger rows have unknown generation; do not invent generation 1.
 -- Stop and drain all five consumers before migration; restart only generation-aware writers.
 -- Mixed old/new writers and old-binary rollback are unsupported after changing conflict targets.
--- Stop ingestion before migration. Rollback after replay: retain this schema and stop consumers;
+-- Rollback: stop consumers and retain this schema after replay;
 -- restoring global uniqueness would collapse or lose evidence from multiple generations.
 ALTER TABLE context_projection_events ADD COLUMN projection_generation bigint;
 ALTER TABLE context_projection_events DROP CONSTRAINT context_projection_events_pkey;
