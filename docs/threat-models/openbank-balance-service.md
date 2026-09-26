@@ -385,3 +385,35 @@ interleaves a ledger credit between a snapshot read and a hold/overdraft write.
 producer uses the ledger as its sole booked-money writer. Reservation consumption assumes the
 journal transaction reference identifies the covered movement. Authorization, DLQ replay and
 ledger reconciliation remain required operational controls.
+
+
+## Ledger-projection reservation identity
+
+The settlement named M2M client now additionally receives `balance.hold` through
+`service-settlement-balance-cover`. The grant requires the exact settlement service principal
+and the validated user/service-account principal type. This is necessary for payer-cover
+reservation before journal posting; the former debit/credit-only grant rejected that first step.
+Legacy debit/credit grants remain for existing workflow histories. No `balance.holdRelease`,
+initialization, overdraft, reconciliation or approval-decision permission is added. A compromised
+settlement credential can reserve funds as well as perform its existing legacy movements; it
+cannot directly release cover when a journal outcome is uncertain. Ledger projection remains
+the owner of reservation consumption.
+
+Policy tests assert reservation admission, deny other balance actions and unrelated principals,
+and reject the wrong principal type. They do not prove token issuance or the full distributed
+workflow. Roll back this grant only after disabling new ledger-projection originations and
+draining their workflows; otherwise the cover step will be denied again.
+
+## Failed projection records
+
+With projection enabled, malformed JSON and malformed booked-change events fail processing
+and are parked by the configured Kafka dead-letter handler instead of being acknowledged as
+successful. The DLQ explicitly serializes String values without JSON-string wrapping so the
+original payload remains available for diagnosis and controlled replay. Existing topic and
+write ACL declarations are retained. Operators must correct the cause before replay and retain
+the original journal/account/currency identity used for deduplication.
+
+`LedgerProjectionDlqIT` verifies two poison records reach the real broker's DLQ unchanged,
+then a valid event and its acknowledged redelivery apply one booked movement and consume
+matching cover. This does not prove upstream ledger delivery, OIDC enforcement or a full
+settlement workflow.
