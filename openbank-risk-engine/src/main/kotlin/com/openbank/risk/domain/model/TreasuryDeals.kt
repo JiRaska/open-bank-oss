@@ -63,6 +63,15 @@ object TreasuryInstrumentMapper {
     /** Every principal account a money-market deal lives on; carried at contract level when read. */
     val PRINCIPAL_CODES: Set<String> = setOf("1500", "1501", "1510", "2300", "2301")
 
+    /**
+     * Products this mapper can turn into a contract-level instrument. Anything else — e.g.
+     * `FX_SPOT` (#10896), whose principal posts to GL-level FX position accounts 1990/1991/1001/1002
+     * that stay GL-level rather than being carried as a contract-level position — is out of scope
+     * for this engine and must never reach [glAccountCode] or [toInstrument].
+     */
+    val SUPPORTED_PRODUCTS: Set<String> =
+        setOf(TreasuryDeal.MM_PLACEMENT, TreasuryDeal.MM_BORROWING, TreasuryDeal.CNB_DEPOSIT_FACILITY)
+
     fun glAccountCode(product: String, currency: String): String = when (product to currency) {
         TreasuryDeal.MM_PLACEMENT to "CZK" -> "1500"
         TreasuryDeal.MM_PLACEMENT to "EUR" -> "1501"

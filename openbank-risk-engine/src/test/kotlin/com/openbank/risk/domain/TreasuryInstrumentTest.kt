@@ -139,6 +139,37 @@ class TreasuryInstrumentTest {
     }
 
     @Test
+    fun `SUPPORTED_PRODUCTS is exactly the three money-market products the mapper can build`() {
+        assertThat(TreasuryInstrumentMapper.SUPPORTED_PRODUCTS).containsExactlyInAnyOrder(
+            TreasuryDeal.MM_PLACEMENT,
+            TreasuryDeal.MM_BORROWING,
+            TreasuryDeal.CNB_DEPOSIT_FACILITY,
+        )
+    }
+
+    @Test
+    fun `a product outside SUPPORTED_PRODUCTS - eg FX_SPOT - is never handed to the mapper`() {
+        // Defensive per-product filter, the same one dealsOnBook applies: it is never asked to build
+        // an instrument for a product it cannot map. Mirrors the FX_SPOT scope decision (#10896) —
+        // its principal posts to GL-level FX position accounts, so it is correctly excluded here.
+        assertThat("FX_SPOT" !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS).isTrue()
+        assertThat(
+            listOf(deal(product = "FX_SPOT", currency = "EUR"), deal())
+                .filter { it.product in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS }
+                .map { it.product },
+        ).containsExactly(TreasuryDeal.CNB_DEPOSIT_FACILITY)
+    }
+
+    @Test
+    fun `glAccountCode still refuses an unmapped product rather than guessing a GL account`() {
+        assertThat(
+            org.assertj.core.api.Assertions.catchThrowable {
+                TreasuryInstrumentMapper.glAccountCode("FX_SPOT", "EUR")
+            },
+        ).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
     fun `the input hash moves with the deals and is unchanged when the read is off`() {
         val ledger = inputs(tb("1510", "ASSET", "CZK", "10000000.00", "0"))
         val off = InputHash.of(ledger)

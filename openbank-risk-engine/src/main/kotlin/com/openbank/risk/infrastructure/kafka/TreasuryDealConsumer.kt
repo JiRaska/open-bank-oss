@@ -11,6 +11,7 @@ import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.model.TreasuryDeal
+import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
@@ -34,6 +35,13 @@ import java.util.UUID
  * field) fails identically on every replay, so it is logged, counted and acked. A failed WRITE is
  * retried a bounded number of times and RETHROWN, and the channel's configured `failure-strategy`
  * (a per-service dead-letter topic, `application.yaml`) decides what follows.
+ *
+ * A well-formed event for a product this engine does not model (e.g. `FX_SPOT`, #10896 — its
+ * principal posts to GL-level FX position accounts that stay GL-level, never a contract-level
+ * position here, see [TreasuryInstrumentMapper.SUPPORTED_PRODUCTS]) is its own outcome, distinct
+ * from malformed: the event was well-formed, the deal is simply out of scope. It is never written
+ * to the book and never thrown — an unsupported product must not crash instrument building for
+ * every subsequent snapshot.
  */
 @ApplicationScoped
 class TreasuryDealConsumer {
@@ -56,6 +64,15 @@ class TreasuryDealConsumer {
         val event = parse(type, payload)
         if (event == null) {
             count(OUTCOME_MALFORMED)
+            return
+        }
+        if (event.product !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS) {
+            log.infof(
+                "[treasury-deal-in] product '%s' is not modelled by this engine, not stored: %.200s",
+                event.product,
+                payload,
+            )
+            count(OUTCOME_UNSUPPORTED_PRODUCT)
             return
         }
         val changed = try {
@@ -108,6 +125,7 @@ class TreasuryDealConsumer {
         const val OUTCOME_UNCHANGED = "unchanged"
         const val OUTCOME_MALFORMED = "malformed"
         const val OUTCOME_WRITE_ERROR = "write_error"
+        const val OUTCOME_UNSUPPORTED_PRODUCT = "unsupported_product"
 
         /** The four types in treasury's asyncapi; anything else is malformed, never guessed. */
         val STATE_BY_TYPE: Map<String, String> = mapOf(

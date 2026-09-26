@@ -7,6 +7,7 @@ package com.openbank.risk.infrastructure.persistence
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.model.TreasuryDeal
+import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
@@ -25,7 +26,10 @@ class PgTreasuryDealBook(private val pool: Pool) : TreasuryDealBook {
     override suspend fun dealsOnBook(asOf: LocalDate): List<TreasuryDeal> =
         pool.preparedQuery(SELECT).execute(Tuple.of(asOf)).awaitSuspending()
             .mapNotNull { it.toDeal() }
-            .filter { it.onBookAt(asOf) }
+            // Defensive: the consumer already skips a product this engine cannot map (never stores
+            // it), but a row could still exist from before that guard or an out-of-band insert — the
+            // mapper must never be asked to build an instrument for a product it does not know.
+            .filter { it.onBookAt(asOf) && it.product in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS }
 
     override suspend fun apply(event: TreasuryDealEvent): Boolean = pool.preparedQuery(UPSERT).execute(
         Tuple.tuple(

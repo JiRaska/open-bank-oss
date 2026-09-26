@@ -97,6 +97,32 @@ class TreasuryDealConsumerIT {
         assertThat(runBlocking { book.dealsOnBook(maturity) }.map { it.dealId }).doesNotContain(deal)
     }
 
+    @Test
+    fun `an FX_SPOT deal is counted as unsupported, never stored, and does not stop the next deal`() {
+        val source = connector.source<Any>("treasury-deal-in")
+        val fxDeal = UUID.randomUUID()
+        val fxPayload = """
+            {"dealId":"$fxDeal","product":"FX_SPOT","counterpartyId":"CP1","currency":"EUR",
+             "principal":10000.00,"rate":25.30,"valueDate":"$valueDate","maturityDate":"$valueDate",
+             "occurredAt":"2026-09-25T07:40:00Z","sourceService":"treasury-service"}
+        """.trimIndent()
+        val before = outcome("unsupported_product")
+
+        source.send(record("treasury.deal.settled.v1", fxPayload))
+        await { outcome("unsupported_product") >= before + 1.0 }
+
+        // Not stored: no row for the FX deal at all, under either state's SELECT window.
+        assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId })
+            .doesNotContain(fxDeal)
+        assertThat(runBlocking { book.dealsOnBook(valueDate) }.map { it.dealId }).doesNotContain(fxDeal)
+        assertThat(outcome("write_error")).isEqualTo(0.0)
+
+        // The consumer keeps processing: a normal MM deal right after is still stored fine.
+        source.send(record("treasury.deal.settled.v1", payload(""","ledgerJournalId":"${UUID.randomUUID()}"""")))
+        awaitState("SETTLED")
+        assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId }).contains(deal)
+    }
+
     @org.junit.jupiter.api.AfterEach
     fun cleanup() = TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$deal'")
 
