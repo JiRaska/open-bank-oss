@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.TimeoutException
 
 class ContextQueryServiceTest {
     private val now = Instant.parse("2026-09-13T10:00:00Z")
@@ -57,6 +58,82 @@ class ContextQueryServiceTest {
         coVerify(exactly = 0) { pdp.allow(any()) }
         coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
         coVerify { audit.record(match { it.decision == "DENIED" && it.reasonCode == "NO_ACTIVE_ASSIGNMENT" }) }
+    }
+
+    @Test
+    fun `assignment timeout is unavailable and skips policy and data`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } throws TimeoutException()
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) {
+            audit.record(match { it.decision == "UNAVAILABLE" && it.reasonCode == "ASSIGNMENT_UNAVAILABLE" })
+        }
+    }
+
+    @Test
+    fun `failed authorization audit blocks data without another audit attempt`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { audit.record(any()) } throws TimeoutException()
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
+        coVerify(exactly = 1) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { audit.recordDisclosure(any()) }
+    }
+
+    @Test
+    fun `failed denial audit is unavailable without policy or recursive audit`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns false
+        coEvery { audit.record(any()) } throws TimeoutException()
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
+        coVerify(exactly = 1) { audit.record(any()) }
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `assignment cancellation propagates without policy audit or data`(): Unit = runBlocking {
+        val cancellation = CancellationException("request cancelled")
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } throws cancellation
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isSameAs(cancellation)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify(exactly = 0) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `audit cancellation propagates and blocks data`(): Unit = runBlocking {
+        val cancellation = CancellationException("request cancelled")
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { audit.record(any()) } throws cancellation
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isSameAs(cancellation)
+        coVerify(exactly = 1) { audit.record(any()) }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `policy denial remains denied after successful audit`(): Unit = runBlocking {
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(false, policyVersion = "bundle-9")
+
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
+            .isInstanceOf(ContextAccessDenied::class.java)
+        coVerify(exactly = 1) {
+            audit.record(match { it.decision == "DENIED" && it.reasonCode == "POLICY_DENIED" })
+        }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -130,7 +207,7 @@ class ContextQueryServiceTest {
         coEvery { audit.recordDisclosure(any()) } throws IllegalStateException("audit unavailable")
 
         assertThatThrownBy { runBlocking { service.complaint("cmp-1", actor, context) } }
-            .isInstanceOf(IllegalStateException::class.java)
+            .isInstanceOf(ContextAuthorizationUnavailable::class.java)
         coVerify(exactly = 1) { audit.record(match { it.decision == "ALLOWED" }) }
         coVerify(exactly = 1) { audit.recordDisclosure(any()) }
     }

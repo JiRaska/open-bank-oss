@@ -199,13 +199,21 @@ class ContextQueryService(
     ): T {
         val now = clock.instant()
         if (context.purpose != requiredPurpose) {
-            audit.record(entry(actor, context, action, root, "DENIED", null, "PURPOSE_MISMATCH", now))
+            recordAudit(action, entry(actor, context, action, root, "DENIED", null, "PURPOSE_MISMATCH", now))
             decisionMetric(action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
-        val assigned = assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
+        val assigned = try {
+            assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            recordAudit(action, entry(actor, context, action, root, "UNAVAILABLE", null, "ASSIGNMENT_UNAVAILABLE", now))
+            decisionMetric(action, "unavailable", "assignment_unavailable")
+            throw ContextAuthorizationUnavailable()
+        }
         if (!assigned) {
-            audit.record(entry(actor, context, action, root, "DENIED", null, "NO_ACTIVE_ASSIGNMENT", now))
+            recordAudit(action, entry(actor, context, action, root, "DENIED", null, "NO_ACTIVE_ASSIGNMENT", now))
             decisionMetric(action, "denied", "no_active_assignment")
             throw ContextAccessDenied()
         }
@@ -229,17 +237,20 @@ class ContextQueryService(
         } catch (exception: CancellationException) {
             throw exception
         } catch (_: Exception) {
-            audit.record(entry(actor, context, action, root, "UNAVAILABLE", null, "PDP_UNAVAILABLE", now))
+            recordAudit(action, entry(actor, context, action, root, "UNAVAILABLE", null, "PDP_UNAVAILABLE", now))
             decisionMetric(action, "unavailable", "pdp_unavailable")
             throw ContextAuthorizationUnavailable()
         }
         if (!decision.allow) {
-            audit.record(entry(actor, context, action, root, "DENIED", decision.policyVersion, "POLICY_DENIED", now))
+            recordAudit(
+                action,
+                entry(actor, context, action, root, "DENIED", decision.policyVersion, "POLICY_DENIED", now),
+            )
             decisionMetric(action, "denied", "policy_denied")
             throw ContextAccessDenied()
         }
         val allowed = entry(actor, context, action, root, "ALLOWED", decision.policyVersion, "POLICY_ALLOWED", now)
-        audit.record(allowed)
+        recordAudit(action, allowed)
         decisionMetric(action, "allowed", "policy_allowed")
         val result = block()
         result.disclosure?.let { disclosure ->
@@ -249,11 +260,28 @@ class ContextQueryService(
             ) {
                 "invalid disclosure evidence count"
             }
-            audit.recordDisclosure(
-                ContextDisclosureAudit(allowed.id, queryHash(action, root, context), disclosure, clock.instant()),
-            )
+            auditDependency(action) {
+                audit.recordDisclosure(
+                    ContextDisclosureAudit(allowed.id, queryHash(action, root, context), disclosure, clock.instant()),
+                )
+            }
         }
         return result.value
+    }
+
+    private suspend fun recordAudit(action: String, value: ContextReadAudit) = auditDependency(action) {
+        audit.record(value)
+    }
+
+    private suspend fun auditDependency(action: String, block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            decisionMetric(action, "unavailable", "audit_unavailable")
+            throw ContextAuthorizationUnavailable()
+        }
     }
 
     private fun queryHash(action: String, root: String, context: InvestigationContext): String {
