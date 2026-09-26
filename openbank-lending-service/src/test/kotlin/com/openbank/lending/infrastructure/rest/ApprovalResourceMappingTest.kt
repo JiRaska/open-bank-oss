@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.domestic.infrastructure.rest
+package com.openbank.lending.infrastructure.rest
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
@@ -28,15 +28,15 @@ import java.time.OffsetDateTime
  * self-approval propagation, wire DTOs) to `ApprovalEndpointSupport` (libs-runtime, tested by its
  * own `ApprovalEndpointSupportTest` against a real `InMemoryApprovalStore`, #10915). What THIS
  * test covers is the resource's own responsibility: resolving the checker's identity from
- * [SecurityIdentity] rather than the request body, and wiring domestic-payment's
- * roles/annotations (issue #5679, ADR-0227 D2).
+ * [SecurityIdentity] rather than the request body, and wiring lending's roles/annotations. This
+ * service previously had no dedicated `ApprovalResource` unit test (issue #11031).
  */
 class ApprovalResourceMappingTest {
 
     private fun pendingApproval() = PendingApproval(
         id = "appr-1",
-        action = "domestic-payment.transitionStatus",
-        resourceId = "payment-1",
+        action = "lending.disburse",
+        resourceId = "application-1",
         makerId = "maker",
         status = ApprovalStatus.PENDING,
         createdAt = OffsetDateTime.parse("2026-08-19T00:00:00Z"),
@@ -62,7 +62,7 @@ class ApprovalResourceMappingTest {
         val body = response.entity as List<ApprovalResponse>
         assertThat(body).hasSize(1)
         assertThat(body.single().makerId).isEqualTo("maker")
-        assertThat(body.single().createdAt).isEqualTo("2026-08-19T00:00Z")
+        assertThat(body.single().action).isEqualTo("lending.disburse")
     }
 
     @Test
