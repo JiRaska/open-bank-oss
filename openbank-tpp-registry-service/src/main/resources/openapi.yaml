@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: TPP Registry Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Third Party Provider registry — registration, authorization checks, EBA sync, blacklisting.
   license:
     name: Apache-2.0
@@ -55,6 +55,8 @@ paths:
       responses:
         '201':
           description: TPP registered
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
     get:
       tags: [TPP Registry]
       summary: List registered TPPs
@@ -104,6 +106,8 @@ paths:
       responses:
         '200':
           description: TPP blacklisted
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
 
   /api/v1/tpp-registry/sync/eba:
     post:
@@ -118,6 +122,8 @@ paths:
       responses:
         '202':
           description: Sync triggered
+        '409':
+          $ref: '#/components/responses/IdempotencyRequestInProgress'
 
   /api/v1/tpp-registry/sync/state:
     get:
@@ -140,6 +146,24 @@ components:
   responses:
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    IdempotencyConflict:
+      description: >-
+        Idempotency-Key conflict: either IDEMPOTENCY_KEY_REUSED (the key was already used for a
+        different request) or IDEMPOTENCY_REQUEST_IN_PROGRESS (a request with this key is still
+        being processed).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    IdempotencyRequestInProgress:
+      description: >-
+        IDEMPOTENCY_REQUEST_IN_PROGRESS: a request with this Idempotency-Key is still being
+        processed. This endpoint's fingerprint has no request-specific content (method + path
+        only), so IDEMPOTENCY_KEY_REUSED can never be returned here.
       content:
         application/json:
           schema:
