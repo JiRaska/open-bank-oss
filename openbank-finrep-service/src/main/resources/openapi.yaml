@@ -24,7 +24,7 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.9.0
+  version: 1.10.0
 tags:
   - name: FINREP
   - name: COREP
@@ -144,7 +144,14 @@ paths:
         exactly `asOf` (ADR-0313 D6); `evidence` does not apply to it. Row r0010 (TREA), the classes
         the engine does not model and market/operational/CVA risk are always `isDataGap: true`, and
         every credit-risk row is a gap with its reason when no tied snapshot exists or the read is
-        not enabled. Any other template id is rejected.
+        not enabled. `C_72.00` (LCR liquid assets, Delegated Regulation (EU) 2015/61; columns c0010
+        amount / market value and c0040 value according to Article 9, before the Level 2 caps) is
+        read from the risk engine's LCR result of the same TIED_OUT snapshot; `evidence` does not
+        apply to it. Coins and banknotes (r0040) and withdrawable central bank reserves (r0050) are
+        always `isDataGap: true` (the engine does not split them), every value row is a gap with its
+        reason when no tied snapshot exists, the read is not enabled, the book is multi-currency or
+        balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
+        `[row code UNVERIFIED]` in their label. Any other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
         never plugs capital as assets minus liabilities. With no recognised capital source every
@@ -158,7 +165,7 @@ paths:
           in: path
           required: true
           description: EBA COREP template identifier
-          schema: { type: string, enum: [C_01.00, C_02.00] }
+          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00] }
         - name: asOf
           in: query
           required: false

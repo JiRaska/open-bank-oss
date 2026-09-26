@@ -314,6 +314,291 @@
       }
     },
     {
+      "description": "GET the LCR liquid assets of a TIED_OUT run",
+      "providerStates": [
+        {
+          "name": "a TIED_OUT risk snapshot with an LCR result exists at the report date"
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v1/risk/snapshots/${runId}/liquidity",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots/0190a4c0-0000-7000-8000-00000000c020/liquidity"
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-06-30",
+          "currencies": [
+            {
+              "currency": "CZK",
+              "lcr": {
+                "hqla": {
+                  "level1": 1000.0,
+                  "level2a": 0.0,
+                  "level2b": 0.0,
+                  "lines": [
+                    {
+                      "afterHaircut": 1000.0,
+                      "haircut": 0,
+                      "level": "L1",
+                      "marketValue": 1000.0
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "parameterSetId": "bcbs-d238-d295",
+          "parameterSetVersion": "2",
+          "runId": "0190a4c0-0000-7000-8000-00000000c020",
+          "total": {
+            "currency": "CZK",
+            "lcr": {
+              "hqla": {
+                "level1": 1000.0,
+                "level2a": 0.0,
+                "level2b": 0.0,
+                "lines": [
+                  {
+                    "afterHaircut": 1000.0,
+                    "haircut": 0,
+                    "level": "L1",
+                    "marketValue": 1000.0
+                  }
+                ]
+              }
+            }
+          },
+          "unclassified": [
+            {
+              "glAccountCode": "9999"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.currencies": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.level1": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.level2a": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.level2b": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].afterHaircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].haircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].level": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].marketValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.parameterSetId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.parameterSetVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.total.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.level1": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.level2a": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.level2b": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].afterHaircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].haircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].level": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].marketValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.unclassified": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.unclassified[*].glAccountCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the risk snapshot runs with no identity",
       "providerStates": [
         {

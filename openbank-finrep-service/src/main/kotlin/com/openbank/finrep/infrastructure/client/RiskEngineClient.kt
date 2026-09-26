@@ -8,6 +8,10 @@ import com.openbank.finrep.application.port.out.RiskCapitalLookup
 import com.openbank.finrep.application.port.out.RiskCapitalPort
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
+import com.openbank.finrep.application.port.out.RiskHqlaLine
+import com.openbank.finrep.application.port.out.RiskLiquidityLookup
+import com.openbank.finrep.application.port.out.RiskLiquidityPort
+import com.openbank.finrep.application.port.out.RiskLiquidityResult
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
@@ -46,6 +50,10 @@ interface RiskEngineRestClient {
     @GET
     @Path("/{id}/capital")
     fun capital(@PathParam("id") id: String): Uni<CapitalResponse>
+
+    @GET
+    @Path("/{id}/liquidity")
+    fun liquidity(@PathParam("id") id: String): Uni<LiquidityResponse>
 }
 
 data class SnapshotRunSummaryResponse(val id: String, val asOf: String, val recordedAt: String, val status: String)
@@ -72,8 +80,38 @@ data class CapitalResponse(
     val unclassified: List<UnclassifiedBalanceResponse>,
 )
 
+/** One HQLA line of the risk engine's LCR (only the fields C 72.00 reads). */
+data class HqlaLineResponse(
+    val level: String,
+    val marketValue: BigDecimal,
+    val haircut: BigDecimal,
+    val afterHaircut: BigDecimal,
+)
+
+/** Level sums are after haircut and BEFORE the Level 2 caps (the risk engine's d238 Annex 1 ¶5 inputs). */
+data class HqlaResponse(
+    val lines: List<HqlaLineResponse>,
+    val level1: BigDecimal,
+    val level2a: BigDecimal,
+    val level2b: BigDecimal,
+)
+
+data class LcrResponse(val hqla: HqlaResponse)
+
+data class CurrencyLiquidityResponse(val currency: String, val lcr: LcrResponse)
+
+data class LiquidityResponse(
+    val runId: String,
+    val asOf: String,
+    val parameterSetId: String,
+    val parameterSetVersion: String,
+    val currencies: List<CurrencyLiquidityResponse>,
+    val total: CurrencyLiquidityResponse?,
+    val unclassified: List<UnclassifiedBalanceResponse>,
+)
+
 /**
- * [RiskCapitalPort] over the risk engine. Picks the MOST RECENTLY RECORDED TIED_OUT run whose
+ * [RiskCapitalPort] and [RiskLiquidityPort] over the risk engine. Picks the MOST RECENTLY RECORDED TIED_OUT run whose
  * `asOf` is exactly the report date: an UNTIED run is never a source (ADR-0314 D3), and a run for
  * another date is not this report's. Behind `openbank.finrep.risk-engine.enabled` (default off)
  * until the finrep identity, its risk-engine read grant and the network edge are deployed: while
@@ -84,14 +122,12 @@ class RiskEngineCapitalAdapter(
     @RestClient private val client: RiskEngineRestClient,
     @ConfigProperty(name = "openbank.finrep.risk-engine.enabled", defaultValue = "false")
     private val enabled: Boolean,
-) : RiskCapitalPort {
+) : RiskCapitalPort,
+    RiskLiquidityPort {
 
     override suspend fun capitalAt(asOf: LocalDate): RiskCapitalLookup {
         if (!enabled) return RiskCapitalLookup.unavailable(DISABLED_REASON)
-        val run = client.listRuns(RUN_LIST_LIMIT).awaitSuspending().runs
-            .filter { it.status == TIED_OUT && it.asOf == asOf.toString() }
-            .maxByOrNull { it.recordedAt }
-            ?: return RiskCapitalLookup.unavailable(NO_SNAPSHOT_REASON)
+        val run = tiedOutRunAt(asOf) ?: return RiskCapitalLookup.unavailable(NO_SNAPSHOT_REASON)
         val c = client.capital(run.id).awaitSuspending()
         return RiskCapitalLookup.found(
             RiskCapitalResult(
@@ -108,7 +144,45 @@ class RiskEngineCapitalAdapter(
         )
     }
 
+    override suspend fun liquidityAt(asOf: LocalDate): RiskLiquidityLookup {
+        if (!enabled) return RiskLiquidityLookup.unavailable(DISABLED_REASON_LIQUIDITY)
+        val run = tiedOutRunAt(asOf) ?: return RiskLiquidityLookup.unavailable(NO_SNAPSHOT_REASON_LIQUIDITY)
+        val l = client.liquidity(run.id).awaitSuspending()
+        val hqla = l.total?.lcr?.hqla
+        return RiskLiquidityLookup.found(
+            RiskLiquidityResult(
+                runId = l.runId,
+                asOf = LocalDate.parse(l.asOf),
+                parameterSetId = l.parameterSetId,
+                parameterSetVersion = l.parameterSetVersion,
+                currency = l.total?.currency,
+                lines = hqla?.lines.orEmpty().map {
+                    RiskHqlaLine(it.level, it.marketValue, it.haircut, it.afterHaircut)
+                },
+                level1 = hqla?.level1,
+                level2a = hqla?.level2a,
+                level2b = hqla?.level2b,
+                currencyCount = l.currencies.size,
+                unclassifiedBalances = l.unclassified.size,
+            ),
+        )
+    }
+
+    /**
+     * The one run-selection rule for every risk-engine template: the MOST RECENTLY RECORDED
+     * TIED_OUT run at exactly [asOf], or null.
+     */
+    private suspend fun tiedOutRunAt(asOf: LocalDate): SnapshotRunSummaryResponse? =
+        client.listRuns(RUN_LIST_LIMIT).awaitSuspending().runs
+            .filter { it.status == TIED_OUT && it.asOf == asOf.toString() }
+            .maxByOrNull { it.recordedAt }
+
     private companion object {
+        const val DISABLED_REASON_LIQUIDITY =
+            "The risk-engine read is not enabled for finrep (openbank.finrep.risk-engine.enabled), so no " +
+                "liquid-asset figure is available."
+        const val NO_SNAPSHOT_REASON_LIQUIDITY =
+            "No TIED_OUT risk-engine snapshot exists at the report date, so no liquid-asset figure can be stated."
         const val TIED_OUT = "TIED_OUT"
         const val DISABLED_REASON =
             "The risk-engine read is not enabled for finrep (openbank.finrep.risk-engine.enabled), so no " +

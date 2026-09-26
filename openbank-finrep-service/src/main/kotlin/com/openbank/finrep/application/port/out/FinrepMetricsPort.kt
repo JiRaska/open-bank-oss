@@ -77,6 +77,6 @@ enum class TemplateFailureReason {
     /** The ledger trial-balance hop failed, so no report can be produced at all. An outage. */
     LEDGER_UNAVAILABLE,
 
-    /** The risk-engine capital hop failed (C 02.00, ADR-0313 D6), so that report cannot be produced. */
+    /** The risk-engine capital or liquidity hop failed (C 02.00 / C 72.00, ADR-0313 D6), so that report cannot be produced. */
     RISK_ENGINE_UNAVAILABLE,
 }

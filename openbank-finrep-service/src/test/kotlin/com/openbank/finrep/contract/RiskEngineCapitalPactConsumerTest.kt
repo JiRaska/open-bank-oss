@@ -18,8 +18,13 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.finrep.application.port.out.RiskCapitalLookup
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
+import com.openbank.finrep.application.port.out.RiskHqlaLine
+import com.openbank.finrep.application.port.out.RiskLiquidityLookup
+import com.openbank.finrep.application.port.out.RiskLiquidityResult
 import com.openbank.finrep.domain.mapper.C0200Mapper
+import com.openbank.finrep.domain.mapper.C7200Mapper
 import com.openbank.finrep.infrastructure.client.CapitalResponse
+import com.openbank.finrep.infrastructure.client.LiquidityResponse
 import com.openbank.finrep.infrastructure.client.RiskEngineRestClient
 import com.openbank.finrep.infrastructure.client.SnapshotRunListResponse
 import io.restassured.RestAssured.given
@@ -31,8 +36,8 @@ import org.junit.jupiter.api.extension.ExtendWith
 import java.time.LocalDate
 
 /**
- * Consumer-driven contract for the risk engine's snapshot list and Pillar 1 capital result that
- * COREP C 02.00 reads (ADR-0313 D6). The committed pact is replayed by the risk engine's
+ * Consumer-driven contract for the risk engine's snapshot list, Pillar 1 capital result and LCR
+ * liquid assets that COREP C 02.00 and C 72.00 read (ADR-0313 D6). The committed pact is replayed by the risk engine's
  * `RiskEnginePactProviderVerificationTest` (`@PactFolder`), the half that catches a wrong path.
  *
  * Paths are LITERALS on the interaction side and reflected off [RiskEngineRestClient] on the request
@@ -94,6 +99,30 @@ class RiskEngineCapitalPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-risk-engine")
+    fun liquidityPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(LIQUIDITY_STATE)
+        .uponReceiving("GET the LCR liquid assets of a TIED_OUT run")
+        .pathFromProviderState(
+            "$RISK_SNAPSHOTS_PATH/\${runId}/liquidity",
+            "$RISK_SNAPSHOTS_PATH/$EXAMPLE_RUN_ID/liquidity",
+        )
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonBody { o ->
+                o.uuid("runId", java.util.UUID.fromString(EXAMPLE_RUN_ID))
+                o.stringValue("asOf", REPORTING_DATE)
+                o.stringType("parameterSetId", "bcbs-d238-d295")
+                o.stringType("parameterSetVersion", "2")
+                o.eachLike("currencies") { c -> currencyLiquidity(c) }
+                o.`object`("total") { t -> currencyLiquidity(t) }
+                o.minArrayLike("unclassified", 0, 1) { u -> u.stringType("glAccountCode", "9999") }
+            }.build(),
+        )
+        .toPact()
+
     /**
      * The negative half (ADR-0279): with no identity the risk engine must refuse the read. A
      * contract of successes alone stays green when the provider stops enforcing authentication.
@@ -117,6 +146,24 @@ class RiskEngineCapitalPactConsumerTest {
             k.decimalType("rwa", 0.00)
         }
         c.decimalType("totalRwa", 0.00)
+    }
+
+    private fun currencyLiquidity(c: au.com.dius.pact.consumer.dsl.LambdaDslObject) {
+        c.stringType("currency", "CZK")
+        c.`object`("lcr") { lcr ->
+            lcr.`object`("hqla") { h ->
+                // A tied book may hold no liquid asset at all, so the list may be empty.
+                h.minArrayLike("lines", 0, 1) { l ->
+                    l.stringType("level", "L1")
+                    l.decimalType("marketValue", 1000.00)
+                    l.numberType("haircut", 0)
+                    l.decimalType("afterHaircut", 1000.00)
+                }
+                h.decimalType("level1", 1000.00)
+                h.decimalType("level2a", 0.00)
+                h.decimalType("level2b", 0.00)
+            }
+        }
     }
 
     @Test
@@ -169,7 +216,44 @@ class RiskEngineCapitalPactConsumerTest {
         assertThat(other.gapReason).contains("unclassified in risk-engine snapshot ${c.runId}")
     }
 
+    @Test
+    @PactTestFor(pactMethod = "liquidityPact")
+    fun `the liquidity result feeds a C 72_00 render`(mockServer: MockServer) {
+        assertThat(liquidityPath).isEqualTo("$RISK_SNAPSHOTS_PATH/{id}/liquidity")
+        val body = given().baseUri(mockServer.getUrl()).get(liquidityPath.replace("{id}", EXAMPLE_RUN_ID))
+            .then().statusCode(200).extract().asString()
+        val l = json.readValue<LiquidityResponse>(body)
+        val total = checkNotNull(l.total)
+        val hqla = total.lcr.hqla
+        val template = C7200Mapper.map(
+            RiskLiquidityLookup.found(
+                RiskLiquidityResult(
+                    runId = l.runId,
+                    asOf = LocalDate.parse(l.asOf),
+                    parameterSetId = l.parameterSetId,
+                    parameterSetVersion = l.parameterSetVersion,
+                    currency = total.currency,
+                    lines = hqla.lines.map { RiskHqlaLine(it.level, it.marketValue, it.haircut, it.afterHaircut) },
+                    level1 = hqla.level1,
+                    level2a = hqla.level2a,
+                    level2b = hqla.level2b,
+                    currencyCount = l.currencies.size,
+                    unclassifiedBalances = l.unclassified.size,
+                ),
+            ),
+            LocalDate.parse(REPORTING_DATE),
+        )
+        assertThat(hqla.lines.single().level).isEqualTo("L1")
+        assertThat(hqla.level1).isEqualByComparingTo("1000.00")
+        // The example carries one unclassified balance, so the render must refuse the liquid-asset
+        // totals and say why: proves `unclassified` is read, not merely parsed.
+        val totalRow = template.cells.single { it.rowRef == "r0010" && it.colRef == "c0040" }
+        assertThat(totalRow.isDataGap).isTrue()
+        assertThat(totalRow.gapReason).contains("unclassified in risk-engine snapshot ${l.runId}")
+    }
+
     private companion object {
+        const val LIQUIDITY_STATE = "a TIED_OUT risk snapshot with an LCR result exists at the report date"
         const val STATE = "a TIED_OUT risk snapshot exists at the report date"
         const val NO_IDENTITY = "no valid identity is presented"
         const val HTTP_UNAUTHORIZED = 401
@@ -185,6 +269,10 @@ class RiskEngineCapitalPactConsumerTest {
 
         val runsPath: String = RiskEngineRestClient::class.java.getAnnotation(Path::class.java).value
         val capitalPath: String = listOf(runsPath, capitalMethod.getAnnotation(Path::class.java).value)
+            .joinToString("/") { it.trim('/') }.let { "/$it" }
+        private val liquidityMethod =
+            RiskEngineRestClient::class.java.getDeclaredMethod("liquidity", String::class.java)
+        val liquidityPath: String = listOf(runsPath, liquidityMethod.getAnnotation(Path::class.java).value)
             .joinToString("/") { it.trim('/') }.let { "/$it" }
         val limitParam: String = listMethod.parameterAnnotations[0].filterIsInstance<QueryParam>().single().value
     }

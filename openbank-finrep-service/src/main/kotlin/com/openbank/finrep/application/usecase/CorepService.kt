@@ -11,11 +11,13 @@ import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
 import com.openbank.finrep.application.port.out.RiskCapitalPort
+import com.openbank.finrep.application.port.out.RiskLiquidityPort
 import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.C0100Mapper
 import com.openbank.finrep.domain.mapper.C0200Mapper
+import com.openbank.finrep.domain.mapper.C7200Mapper
 import com.openbank.finrep.domain.model.CorepTemplate
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
@@ -24,7 +26,8 @@ import java.time.LocalDate
 /**
  * COREP report generation (ADR-0097 Phase 2). C 01.00 (Own Funds) is mapped from the ledger's
  * trial balance; C 02.00 (Own Funds Requirements) from the risk engine's Pillar 1 result for a
- * TIED_OUT snapshot at the report date (ADR-0313 D6). Every other COREP template (C 05.01
+ * TIED_OUT snapshot at the report date (ADR-0313 D6); C 72.00 (LCR liquid assets) from the same
+ * snapshot's LCR liquid-asset result. Every other COREP template (C 05.01
  * transitional provisions, etc.) is out of scope.
  *
  * The rendered return deliberately carries **flagged data gaps** rather than silent omissions
@@ -37,6 +40,7 @@ class CorepService(
     private val ledgerPort: LedgerPort,
     private val metrics: FinrepMetricsPort,
     private val riskCapital: RiskCapitalPort,
+    private val riskLiquidity: RiskLiquidityPort,
 ) : CorepUseCase {
 
     override suspend fun getTemplate(query: GetCorepTemplateQuery): CorepTemplate {
@@ -48,6 +52,7 @@ class CorepService(
                 C0100Mapper.map(it.lines, query.asOf)
             }
             C0200Mapper.TEMPLATE_ID -> C0200Mapper.map(capital(query.asOf), query.asOf)
+            C7200Mapper.TEMPLATE_ID -> C7200Mapper.map(liquidity(query.asOf), query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
                 throw IllegalArgumentException("Unknown or unimplemented COREP template: ${query.templateId}")
@@ -74,6 +79,15 @@ class CorepService(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun capital(asOf: LocalDate) = try {
         riskCapital.capitalAt(asOf)
+    } catch (e: Exception) {
+        metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.RISK_ENGINE_UNAVAILABLE)
+        throw e
+    }
+
+    /** Count-and-rethrow, as for capital: no C 72.00 can be produced without the risk engine. */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun liquidity(asOf: LocalDate) = try {
+        riskLiquidity.liquidityAt(asOf)
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.RISK_ENGINE_UNAVAILABLE)
         throw e

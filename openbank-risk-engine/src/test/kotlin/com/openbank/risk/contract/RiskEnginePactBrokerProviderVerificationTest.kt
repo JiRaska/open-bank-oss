@@ -73,4 +73,8 @@ class RiskEnginePactBrokerProviderVerificationTest {
 
     @State(CapitalPactState.NAME)
     fun tiedOutRun(): Map<String, Any> = CapitalPactState.seed(ledger)
+
+    /** C 72.00's liquidity interaction reads the same seeded run (the same book and report date). */
+    @State(CapitalPactState.LIQUIDITY_NAME)
+    fun tiedOutRunWithLiquidity(): Map<String, Any> = CapitalPactState.seed(ledger)
 }
