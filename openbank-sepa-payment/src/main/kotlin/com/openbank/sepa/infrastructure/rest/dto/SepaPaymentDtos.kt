@@ -27,8 +27,9 @@ data class CreateSepaPaymentRequest(
     val remittanceInfo: String?,
     val endToEndId: String?,
 ) {
-    fun toCommand(idempotencyKey: String) = CreateSepaPaymentCommand(
+    fun toCommand(idempotencyKey: String, requestHash: String? = null) = CreateSepaPaymentCommand(
         idempotencyKey = idempotencyKey,
+        requestHash = requestHash,
         type = SepaPaymentType.valueOf(type),
         debtorAccountId = debtorAccountId,
         debtorIban = debtorIban,
