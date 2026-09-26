@@ -1553,6 +1553,26 @@
       "defaultClientScopes": ["openid", "profile", "email", "roles"]
     },
     {
+      "clientId": "openbank-ops-cli",
+      "name": "Operator CLI scripts (PKCE, full access tokens)",
+      "description": "Dedicated public client for operator scripts (issue #10905) so they stop borrowing apicurio-registry's client identity; loopback redirect only, no direct grants, no lightweight tokens.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://127.0.0.1/*"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300",
+        "client.use.lightweight.access.token.enabled": "false"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
       "clientId": "openbao",
       "name": "OpenBao (SSO)",
       "enabled": true,
