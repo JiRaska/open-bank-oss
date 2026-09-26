@@ -2913,6 +2913,8 @@ gates:
     name: "raw java.net.http.HttpClient construction in services does not grow (ADR-0320 P1, advisory)"
     group: kotlin
     mode: advisory
+    verified: "2026-09-26 — measured 29 raw sites in 29 service files; advisory until SafeHttpClient has one migrated consumer (ADR-0320)"
+    budget_seconds: 20   # 0.4s locally; generous for a slower runner
     rationale: "Every raw HttpClient is an outbound path with no SSRF allowlist or resolved-address check; this forbids new ones while the existing 29 migrate to SafeHttpClient."
     review_after: "2027-03-31"
     min_subjects: 1000   # 2319 service src/main files scanned 2026-09-26; findings may reach zero

@@ -209,6 +209,15 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  raw_http_client_construction:
+    detect: ["java.net.http.HttpClient.newBuilder() / HttpClient.newHttpClient() in any openbank-*/src/main outside openbank-libs-*"]
+    require:
+      - "outbound HTTP goes through com.openbank.libs.security.SafeHttpClient (ADR-0320 P1: host allowlist, resolved-address check, pinned connection, no redirects)"
+      - "no new raw construction site; the per-file baseline only shrinks"
+    gate: raw-http-client-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0320: enforce once P1 has one migrated consumer
+    ci_producer: ".github/scripts/check-raw-http-client.py"
   openapi_request_schema_conformance:
     detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
     require:
