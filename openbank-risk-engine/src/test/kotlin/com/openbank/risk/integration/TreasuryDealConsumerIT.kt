@@ -80,6 +80,9 @@ class TreasuryDealConsumerIT {
         source.send(record(null, payload()))
         source.send(record("treasury.deal.settled.v1", """{"dealId":"$deal"}"""))
         source.send(record("treasury.deal.settled.v1", payload()))
+        // The three malformed sends above are processed asynchronously by the consumer; without a
+        // wait here, the counter assertions below race the consumer and can read fewer than 3.
+        awaitOutcomeAtLeast("malformed", 3.0)
 
         val onBook = runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.single { it.dealId == deal }
         assertThat(onBook.state).isEqualTo("SETTLED")
@@ -100,6 +103,8 @@ class TreasuryDealConsumerIT {
     private fun awaitState(expected: String) = await { current()?.state == expected }
 
     private fun awaitRate() = await { current()?.rate != null }
+
+    private fun awaitOutcomeAtLeast(name: String, min: Double) = await { outcome(name) >= min }
 
     private fun current() =
         runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.singleOrNull { it.dealId == deal }
