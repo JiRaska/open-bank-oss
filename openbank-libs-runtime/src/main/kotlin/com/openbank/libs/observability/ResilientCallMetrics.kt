@@ -4,6 +4,7 @@
 
 package com.openbank.libs.observability
 
+import com.openbank.libs.resilience.ResilienceProfiles
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
@@ -26,8 +27,10 @@ import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenExce
  * of every consumer of openbank-libs-runtime, including the ones that make no resilient call.
  *
  * One series, tagged only with closed low-cardinality sets:
- * `openbank.resilient.call.failures{adapter,outcome}` where `outcome` is exactly `breaker_open`
- * or `call_failed`. The adapter name is a compile-time constant per call site, never a URL or an
+ * `openbank.resilient.call.failures{adapter,outcome,profile}` where `outcome` is exactly
+ * `breaker_open` or `call_failed`, and `profile` is one of the ADR-0321 [ResilienceProfiles.ALL]
+ * names or `none` for an adapter that has not declared one (anything outside the closed set is
+ * recorded as `none`, never passed through). The adapter name is a compile-time constant per call site, never a URL or an
  * id — an unbounded tag here would be a cardinality incident on the money path.
  */
 @ApplicationScoped
@@ -45,7 +48,7 @@ class ResilientCallMetrics {
      * Called per ATTEMPT, from inside the `@CircuitBreaker`-annotated method, so the counts line up
      * with what fault tolerance actually saw rather than with the single exception that escaped.
      */
-    fun recordFailure(adapter: String, error: Throwable) {
+    fun recordFailure(adapter: String, error: Throwable, profile: String = PROFILE_NONE) {
         val registry = reg() ?: return
         registry.counter(
             "openbank.resilient.call.failures",
@@ -53,13 +56,18 @@ class ResilientCallMetrics {
             adapter,
             "outcome",
             outcomeOf(error),
+            "profile",
+            profileTag(profile),
         ).increment()
     }
 
     private fun outcomeOf(error: Throwable): String =
         if (error is CircuitBreakerOpenException) OUTCOME_BREAKER_OPEN else OUTCOME_CALL_FAILED
 
+    private fun profileTag(profile: String): String = if (profile in ResilienceProfiles.ALL) profile else PROFILE_NONE
+
     companion object {
+        const val PROFILE_NONE = "none"
         const val OUTCOME_BREAKER_OPEN = "breaker_open"
         const val OUTCOME_CALL_FAILED = "call_failed"
     }

@@ -4,6 +4,7 @@
 
 package com.openbank.libs.observability
 
+import com.openbank.libs.resilience.ResilienceProfiles
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
@@ -37,11 +38,33 @@ class ResilientCallMetricsTest {
         m.recordFailure("sanctions", CircuitBreakerOpenException("open"))
 
         fun count(outcome: String) = registry
-            .counter("openbank.resilient.call.failures", "adapter", "sanctions", "outcome", outcome)
-            .count()
+            .counter(
+                "openbank.resilient.call.failures",
+                "adapter",
+                "sanctions",
+                "outcome",
+                outcome,
+                "profile",
+                ResilientCallMetrics.PROFILE_NONE,
+            ).count()
 
         assertThat(count(ResilientCallMetrics.OUTCOME_CALL_FAILED)).isEqualTo(2.0)
         assertThat(count(ResilientCallMetrics.OUTCOME_BREAKER_OPEN)).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `the ADR-0321 profile is a closed tag and an unknown name is recorded as none`() {
+        val registry = SimpleMeterRegistry()
+        val m = metrics(registry)
+
+        m.recordFailure("ledger", IllegalStateException("500"), ResilienceProfiles.MONEY_SYNC)
+        m.recordFailure("ledger", IllegalStateException("500"), "https://ledger/api/v1/postings/42")
+
+        val profiles = registry.find("openbank.resilient.call.failures").counters()
+            .associate { it.id.getTag("profile") to it.count() }
+        assertThat(profiles).isEqualTo(
+            mapOf(ResilienceProfiles.MONEY_SYNC to 1.0, ResilientCallMetrics.PROFILE_NONE to 1.0),
+        )
     }
 
     @Test

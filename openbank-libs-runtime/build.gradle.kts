@@ -144,6 +144,11 @@ dependencies {
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
+    // KeyedCallFilterClientTest drives the REAL Quarkus REST client engine (the JAX-RS client under
+    // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
+    // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
+    // Test-only; already in gradle/verification-metadata.xml because every service resolves it.
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client:3.38.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

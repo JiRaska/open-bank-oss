@@ -64,7 +64,8 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 
 **D2 — Declaration.** A profile is a set of Kotlin constants in openbank-libs-runtime
 (`com.openbank.libs.resilience`) used as the annotation arguments, plus a marker annotation
-`@ResilienceProfile("money-sync")` on the adapter method (not yet implemented, #10930).
+`@ResilienceProfile("money-sync")` on the adapter method (catalogue, marker and the keyed-only
+classifiers below delivered in `com.openbank.libs.resilience`; no adapter adopts them yet, #10930).
 
 The `money-sync` rule "retry only when the call carries an idempotency key" is a *runtime*
 property of the call, which static annotation constants cannot express. It is implemented with
@@ -97,8 +98,8 @@ custom interceptor or SmallRye FT's programmatic `TypedGuard` API were rejected 
 move the policy out of the annotation the `resilience-profile` gate reads. Per-environment tuning uses
 MicroProfile FT's own config override (`<class>/<method>/Timeout/value`) — never a new literal.
 A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")`, visible beside the
-call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation does not exist yet; it lands
-with the profile catalogue (#10930).
+call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation exists in libs-runtime; the gate that reads it
+has not landed (#10930).
 
 **D3 — Metrics.** Every profiled adapter records through `ResilientCallMetrics`, which gains a
 closed `profile` tag next to `adapter` and `outcome`. Breaker state and bulkhead rejections come
