@@ -209,6 +209,15 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  money_rounding_inline_construction:
+    detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
+    require:
+      - "rounding goes through com.openbank.libs.domain.money.RoundingPolicy (ADR-0318: a named, registered policy instead of an inline mode)"
+      - "no new inline site; the per-service baseline only shrinks"
+    gate: money-rounding-inline-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
+    ci_producer: ".github/scripts/check-money-rounding-inline.py"
   openapi_request_schema_conformance:
     detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
     require:
