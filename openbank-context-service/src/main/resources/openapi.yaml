@@ -571,7 +571,11 @@ components:
       properties:
         principalId: { type: string, minLength: 1, maxLength: 200 }
         caseId: { type: string, minLength: 1, maxLength: 200 }
-        purpose: { type: string, minLength: 1, maxLength: 80 }
+        purpose:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: FRAUD_INVESTIGATION requires caseId equal to the source Fraud case UUID and rootRef equal to fraud-case:caseId.
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
         rootRef:

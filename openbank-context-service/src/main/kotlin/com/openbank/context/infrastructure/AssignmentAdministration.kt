@@ -179,6 +179,7 @@ class AssignmentAdministrationService(
                 when (request.purpose) {
                     "AUTHORIZATION_REVIEW" -> "delegation:${UUID.fromString(root.removePrefix("delegation:"))}"
                     "AML_INVESTIGATION" -> "aml-case:${UUID.fromString(root.removePrefix("aml-case:"))}"
+                    "FRAUD_INVESTIGATION" -> "fraud-case:${UUID.fromString(root.removePrefix("fraud-case:"))}"
                     "KYB_OWNERSHIP_REVIEW" -> "kyb-case:${UUID.fromString(root.removePrefix("kyb-case:"))}"
                     "LENDING_EXPOSURE_REVIEW" -> "lending-loan:${UUID.fromString(root.removePrefix("lending-loan:"))}"
                     "INCIDENT_IMPACT" -> "incident:${UUID.fromString(root.removePrefix("incident:"))}"
@@ -302,6 +303,8 @@ class AssignmentAdministrationService(
             require(root.startsWith("aml-case:") && root.length == AML_CASE_ROOT_LENGTH) { "invalid AML case root" }
             val id = UUID.fromString(root.removePrefix("aml-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the AML source case" }
+        } else if (request.purpose == "FRAUD_INVESTIGATION") {
+            validateFraudRoot(request)
         } else if (request.purpose == "KYB_OWNERSHIP_REVIEW") {
             val root = requireNotNull(request.rootRef) { "KYB_OWNERSHIP_REVIEW requires a KYB case root" }
             require(root.startsWith("kyb-case:") && root.length == KYB_CASE_ROOT_LENGTH) {
@@ -310,12 +313,7 @@ class AssignmentAdministrationService(
             val id = UUID.fromString(root.removePrefix("kyb-case:"))
             require(request.caseId == id.toString()) { "the investigation case must match the KYB source case" }
         } else if (request.purpose == "LENDING_EXPOSURE_REVIEW") {
-            val root = requireNotNull(request.rootRef) { "LENDING_EXPOSURE_REVIEW requires a Lending loan root" }
-            require(root.startsWith("lending-loan:") && root.length == LENDING_LOAN_ROOT_LENGTH) {
-                "invalid Lending loan root"
-            }
-            val id = UUID.fromString(root.removePrefix("lending-loan:"))
-            require(request.caseId == id.toString()) { "the investigation case must match the Lending loan" }
+            validateLendingRoot(request)
         } else if (request.purpose == "INCIDENT_IMPACT") {
             val root = requireNotNull(request.rootRef) { "INCIDENT_IMPACT requires an incident root" }
             require(root.startsWith("incident:") && root.length == INCIDENT_ROOT_LENGTH) { "invalid incident root" }
@@ -330,6 +328,24 @@ class AssignmentAdministrationService(
         } else {
             require(request.rootRef == null) { "root scope is not supported for this purpose" }
         }
+    }
+
+    private fun validateLendingRoot(request: ProposeAssignmentRequest) {
+        val root = requireNotNull(request.rootRef) { "LENDING_EXPOSURE_REVIEW requires a Lending loan root" }
+        require(root.startsWith("lending-loan:") && root.length == LENDING_LOAN_ROOT_LENGTH) {
+            "invalid Lending loan root"
+        }
+        val id = UUID.fromString(root.removePrefix("lending-loan:"))
+        require(request.caseId == id.toString()) { "the investigation case must match the Lending loan" }
+    }
+
+    private fun validateFraudRoot(request: ProposeAssignmentRequest) {
+        val root = requireNotNull(request.rootRef) { "FRAUD_INVESTIGATION requires a Fraud case root" }
+        require(root.startsWith("fraud-case:") && root.length == FRAUD_CASE_ROOT_LENGTH) {
+            "invalid Fraud case root"
+        }
+        val id = UUID.fromString(root.removePrefix("fraud-case:"))
+        require(request.caseId == id.toString()) { "the investigation case must match the Fraud source case" }
     }
 
     private fun audit(p: AssignmentProposalEntity, action: String, actor: String, assignmentId: UUID?) =
@@ -376,6 +392,7 @@ class AssignmentAdministrationService(
     private companion object {
         const val DELEGATION_ROOT_LENGTH = 47
         const val AML_CASE_ROOT_LENGTH = 45
+        const val FRAUD_CASE_ROOT_LENGTH = 47
         const val KYB_CASE_ROOT_LENGTH = 45
         const val LENDING_LOAN_ROOT_LENGTH = 49
         const val INCIDENT_ROOT_LENGTH = 45
@@ -393,6 +410,7 @@ class AssignmentAdministrationService(
                 "INCIDENT_IMPACT",
                 "AUTHORIZATION_REVIEW",
                 "AML_INVESTIGATION",
+                "FRAUD_INVESTIGATION",
                 "KYB_OWNERSHIP_REVIEW",
                 "LENDING_EXPOSURE_REVIEW",
             )
