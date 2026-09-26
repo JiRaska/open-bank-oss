@@ -22,8 +22,12 @@ const lens = __ENV.CONTEXT_PERF_LENS;
 const profile = __ENV.CONTEXT_PERF_PROFILE || "smoke";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const graphLatency = new Trend("context_graph_read_ms", true);
-const responseStatuses = new Counter("context_http_response_status");
-const responseStatusBuckets = new Set([0, 200, 204, 400, 401, 403, 404, 429, 500, 503]);
+const responseStatusCodes = [0, 200, 204, 400, 401, 403, 404, 429, 500, 503];
+const responseStatusCounters = Object.fromEntries(responseStatusCodes.map((status) => [
+  status,
+  new Counter(`context_http_response_status_${status}`),
+]));
+const otherResponseStatuses = new Counter("context_http_response_status_other");
 
 const scenarios = profile === "capacity" ? {
   authorized_graph_reads: {
@@ -162,9 +166,7 @@ export default function () {
     redirects: 0,
     timeout: "2s",
   });
-  responseStatuses.add(1, {
-    status: responseStatusBuckets.has(response.status) ? String(response.status) : "other",
-  });
+  (responseStatusCounters[response.status] || otherResponseStatuses).add(1);
   graphLatency.add(response.timings.duration);
 
   let body = null;
