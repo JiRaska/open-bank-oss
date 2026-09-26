@@ -31,7 +31,8 @@ import java.time.ZoneOffset
  * Binds an `Idempotency-Key` to its request fingerprint. The Redis commands are backed by an
  * in-memory map so save -> encode -> decode -> compare genuinely round-trips. The three Lua
  * scripts are emulated here by the fake below (single-threaded, so atomic by construction); the
- * Lua text itself is exercised only against a real Redis.
+ * Lua text itself runs against a real Valkey in [RedisIdempotencyStoreIT], which is the source of
+ * truth: if this fake and that IT ever disagree, the IT is right and the fake must change.
  *
  * Negative case, measured: deleting the `stored != requestHash` throw in
  * `IdempotencyStore.lookup` turns `same key with a different payload is refused` red (the old
