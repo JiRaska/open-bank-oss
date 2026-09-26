@@ -1,0 +1,18 @@
+-- #10916: bind the durable Idempotency-Key dedupe to the request it was first used for.
+--
+-- account_idempotency (V14) keys on the Idempotency-Key alone and outlives the Redis idempotency
+-- record, so after that record expires or is evicted a key reused for a DIFFERENT account
+-- opening used to be answered with the first account. request_hash stores the SHA-256 request
+-- fingerprint (RequestFingerprints.of: method + path + canonical body, 64 lowercase hex chars)
+-- the key was first used with; AccountService refuses a key whose stored hash differs (409
+-- IDEMPOTENCY_KEY_REUSED). Rows written before this migration, and opens with no HTTP request
+-- (onboarding), keep NULL and keep the replay-by-key behaviour.
+--
+-- V30, not V28: open PR #9430 claims V28/V29 for this service.
+--
+-- Nullable, no default, no backfill: a metadata-only change on Postgres, no table rewrite.
+--
+-- Rollback: `ALTER TABLE account_idempotency DROP COLUMN request_hash;` and delete this file's row
+-- from flyway_schema_history — only after rolling back the code, since the entity maps the column.
+-- Data lost on rollback: only the fingerprints (the service returns to key-only dedupe).
+ALTER TABLE account_idempotency ADD COLUMN request_hash VARCHAR(64);

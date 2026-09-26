@@ -27,10 +27,11 @@ import java.util.UUID
 @ApplicationScoped
 class AccountIdempotencyRepository(private val clock: Clock) :
     PanacheRepositoryBase<AccountIdempotencyEntity, String> {
-    fun persistInTransaction(key: String, accountId: UUID): io.smallrye.mutiny.Uni<Void> {
+    fun persistInTransaction(key: String, accountId: UUID, requestHash: String?): io.smallrye.mutiny.Uni<Void> {
         val e = AccountIdempotencyEntity().also {
             it.idempotencyKey = key
             it.accountId = accountId
+            it.requestHash = requestHash
             it.createdAt = Instant.now(clock)
         }
         return persist(e).replaceWithVoid()
@@ -116,6 +117,7 @@ class AccountRepositoryImpl(
         account: Account,
         primaryPocket: CurrencyPocket,
         idempotencyKey: String,
+        requestHash: String?,
     ): Account {
         val entity = account.toEntity()
         // Audit timestamps come from the injected Clock here, same as save() (ADR-0100 / #540):
@@ -131,10 +133,14 @@ class AccountRepositoryImpl(
         return Panache.withTransaction {
             persist(entity)
                 .flatMap { pocketRepository.persistInTransaction(primaryPocket) }
-                .flatMap { idempotencyRepository.persistInTransaction(idempotencyKey, entity.id) }
+                .flatMap { idempotencyRepository.persistInTransaction(idempotencyKey, entity.id, requestHash) }
                 .replaceWith(entity)
         }.awaitSuspending().toDomain()
     }
+
+    override suspend fun findIdempotencyRequestHash(idempotencyKey: String): String? = Panache.withSession {
+        idempotencyRepository.find("idempotencyKey", idempotencyKey).firstResult()
+    }.awaitSuspending()?.requestHash
 
     override suspend fun findByIdempotencyKey(idempotencyKey: String): Account? {
         val accountId = Panache.withSession {

@@ -80,13 +80,19 @@ class AccountConcurrencyIT {
 
         val responses = race(n) { openRequest(partyId, idempotencyKey) }
 
-        // The loser path must resolve to the winner's account — never a second account
-        // (silent double effect: two IBANs, two AccountCreated events) and never a 5xx.
+        // Never a second account (silent double effect: two IBANs, two AccountCreated events) and
+        // never a 5xx. Since #10916 the REST layer claims the key atomically, so a contender that
+        // arrives while the winner is still executing answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS
+        // (retry later); one that arrives after it finished replays the winner's 201.
         assertThat(responses.map { it.statusCode })
             .describedAs("statuses %s", responses.map { "${it.statusCode}: ${it.body.asString().take(120)}" })
-            .containsOnly(201)
-        assertThat(responses.map { it.jsonPath().getString("id") }.toSet())
-            .describedAs("every contender must see the SAME account")
+            .containsOnly(201, 409)
+            .contains(201)
+        responses.filter { it.statusCode == 409 }.forEach {
+            assertThat(it.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_REQUEST_IN_PROGRESS")
+        }
+        assertThat(responses.filter { it.statusCode == 201 }.map { it.jsonPath().getString("id") }.toSet())
+            .describedAs("every successful contender must see the SAME account")
             .hasSize(1)
 
         assertThat(accountsOfParty(partyId)).hasSize(1)
