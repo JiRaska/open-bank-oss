@@ -15,6 +15,7 @@ import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.util.UUID
 import javax.sql.DataSource
@@ -22,8 +23,9 @@ import javax.sql.DataSource
 /**
  * #10916 through real HTTP and real Redis: the idempotency key of `POST /api/v1/consents`
  * (tppTransactionId, else X-Request-ID) is bound to the request it was first used for. A retry
- * replays; the same key with a different body is refused 422 and creates nothing; key order and
- * whitespace do not count as a different body.
+ * replays; the same key with a different body is refused 409 IDEMPOTENCY_KEY_REUSED and creates
+ * nothing; key order, whitespace and an explicit `null` do not count as a different body; a create
+ * that fails releases its reservation.
  */
 @QuarkusTest
 @QuarkusTestResource(ConsentPostgresRedisTestResource::class)
@@ -56,7 +58,7 @@ class ConsentCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
-    fun `same key with a different body is refused 422 and creates nothing`() {
+    fun `same key with a different body is refused 409 and creates nothing`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
         create(key, body(party, "ACCOUNTS_READ"), expect = 201)
@@ -68,7 +70,7 @@ class ConsentCreateIdempotencyFingerprintIT {
         } When {
             post("/api/v1/consents")
         } Then {
-            statusCode(422)
+            statusCode(409)
             body("code", equalTo("IDEMPOTENCY_KEY_REUSED"))
         }
         assertThat(consentCount(party)).isEqualTo(1)
@@ -83,7 +85,8 @@ class ConsentCreateIdempotencyFingerprintIT {
         val reordered = """
             {  "validTo" : "$VALID_TO",  "scopes":[ "ACCOUNTS_READ" ],
                "accountIbans":["CZ6508000000192000145399"], "granteeName":"IT TPP",
-               "granteeType":"TPP",    "granteeId":"tpp-it-idem", "partyId":"$party" }
+               "granteeType":"TPP",    "granteeId":"tpp-it-idem", "partyId":"$party",
+               "redirectUri": null }
         """.trimIndent()
 
         Given {
@@ -97,6 +100,35 @@ class ConsentCreateIdempotencyFingerprintIT {
             header("X-Idempotency-Replayed", "true")
             body("id", equalTo(first))
         }
+        assertThat(consentCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `a create that fails releases the key so a retry is not stuck in progress`() {
+        val party = UUID.randomUUID()
+        val key = "idem-${UUID.randomUUID()}"
+        // ADR-0205 D1: mixing a GDPR-only scope with an SCA scope is refused by the use case,
+        // i.e. AFTER the key was reserved.
+        val mixed = body(party, "ACCOUNTS_READ").replace("[\"ACCOUNTS_READ\"]", "[\"ACCOUNTS_READ\",\"TELEMETRY_RUM\"]")
+        val statuses = (1..2).map {
+            Given {
+                contentType("application/json")
+                header("X-Request-ID", key)
+                body(mixed)
+            } When {
+                post("/api/v1/consents")
+            } Then {
+                body("code", not(equalTo("IDEMPOTENCY_REQUEST_IN_PROGRESS")))
+            } Extract {
+                statusCode()
+            }
+        }
+        // Same refusal both times — not 409 IDEMPOTENCY_REQUEST_IN_PROGRESS on the retry.
+        assertThat(statuses).allMatch { it >= 400 && it != 409 }
+        assertThat(statuses[1]).isEqualTo(statuses[0])
+        // The corrected request may reuse the key — no stale marker binds it to the failed body.
+        create(key, body(party, "ACCOUNTS_READ"), expect = 201)
         assertThat(consentCount(party)).isEqualTo(1)
     }
 

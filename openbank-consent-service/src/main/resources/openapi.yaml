@@ -31,7 +31,8 @@ paths:
         `X-Idempotency-Replayed: true` and creates nothing a second time (ADR-0293). Both are
         optional today — requests without either are accepted but not deduplicated. The key is
         bound to a fingerprint of the request (method, path, canonical body); reusing it with a
-        different body is refused with 422 IDEMPOTENCY_KEY_REUSED.
+        different body is refused with 409 IDEMPOTENCY_KEY_REUSED, and a retry arriving while the
+        first request is still executing is refused with 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
       operationId: createConsent
       parameters:
         - name: X-Request-ID
@@ -55,10 +56,11 @@ paths:
                 $ref: '#/components/schemas/ConsentResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '422':
+        '409':
           description: >-
             IDEMPOTENCY_KEY_REUSED — the tppTransactionId / X-Request-ID was already used for a
-            different request body.
+            different request body; or IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still
+            being processed under this key. Nothing is created in either case.
           content:
             application/json:
               schema:

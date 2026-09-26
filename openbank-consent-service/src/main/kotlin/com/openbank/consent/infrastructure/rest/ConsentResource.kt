@@ -4,9 +4,7 @@
 
 package com.openbank.consent.infrastructure.rest
 
-import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
 import com.openbank.consent.application.port.`in`.CheckConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
@@ -23,8 +21,11 @@ import com.openbank.consent.infrastructure.rest.dto.CreateConsentRequest
 import com.openbank.consent.infrastructure.rest.dto.RevokeConsentRequest
 import com.openbank.consent.infrastructure.rest.dto.ValidateConsentRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
-import com.openbank.libs.idempotency.RequestFingerprint
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
@@ -39,6 +40,8 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
@@ -80,37 +83,48 @@ class ConsentResource(
         val idempotencyKey = request.tppTransactionId?.takeIf { it.isNotBlank() }
             ?: xRequestId?.takeIf { it.isNotBlank() }
 
-        val requestHash = fingerprint(canonicalMapper, "POST", CONSENTS_PATH, request)
-        idempotencyKey?.let { key ->
-            val storeKey = consentCreateKey(request.granteeId, request.partyId, key)
-            idempotencyStore.lookup(storeKey, requestHash)?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
+        val command = CreateConsentCommand(
+            partyId = request.partyId,
+            granteeId = request.granteeId,
+            granteeType = request.granteeType,
+            granteeName = request.granteeName,
+            scopes = request.scopes,
+            accountIbans = request.accountIbans,
+            validTo = request.validTo,
+            redirectUri = request.redirectUri,
+            tppTransactionId = request.tppTransactionId ?: xRequestId,
+            ipAddress = null,
+            userAgent = null,
+        )
+        // #10916: the key is bound to the request it was first used for and claimed atomically
+        // BEFORE the consent is created — a different body is Mismatch, a concurrent duplicate is
+        // InFlight, and neither creates anything. A failed create releases the claim.
+        val storeKey = idempotencyKey?.let { consentCreateKey(request.granteeId, request.partyId, it) }
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", CONSENTS_PATH, request)
+        if (storeKey != null) {
+            when (val reservation = idempotencyStore.reserve(storeKey, requestHash)) {
+                is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                    .entity(reservation.record.responseBody)
                     .type(MediaType.APPLICATION_JSON)
                     .header("X-Idempotency-Replayed", "true")
                     .build()
+                ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+                ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+                ReserveResult.Reserved -> Unit
             }
         }
-
-        val consent = createConsent.createConsent(
-            CreateConsentCommand(
-                partyId = request.partyId,
-                granteeId = request.granteeId,
-                granteeType = request.granteeType,
-                granteeName = request.granteeName,
-                scopes = request.scopes,
-                accountIbans = request.accountIbans,
-                validTo = request.validTo,
-                redirectUri = request.redirectUri,
-                tppTransactionId = request.tppTransactionId ?: xRequestId,
-                ipAddress = null,
-                userAgent = null,
-            ),
-        )
+        var completed = false
+        val consent = try {
+            createConsent.createConsent(command).also { completed = true }
+        } finally {
+            if (!completed && storeKey != null) {
+                withContext(NonCancellable) { idempotencyStore.release(storeKey, requestHash) }
+            }
+        }
         val responseBody = ConsentResponse.from(consent)
-        idempotencyKey?.let { key ->
+        if (storeKey != null) {
             idempotencyStore.save(
-                consentCreateKey(request.granteeId, request.partyId, key),
+                storeKey,
                 requestHash = requestHash,
                 statusCode = 201,
                 responseBody = objectMapper.writeValueAsString(responseBody),
@@ -241,13 +255,6 @@ class ConsentResource(
         return ConsentCheckResponse(granted = granted)
     }
 
-    /** Sorted-key copy of the service mapper, used only for [fingerprint]. */
-    private val canonicalMapper: ObjectMapper by lazy {
-        objectMapper.copy()
-            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-    }
-
     private fun consentCreateKey(granteeId: String, partyId: UUID, requestId: String) =
         "consent:create:$granteeId:$partyId:$requestId"
 
@@ -255,14 +262,6 @@ class ConsentResource(
         const val CONSENTS_PATH = "/api/v1/consents"
     }
 }
-
-/**
- * Binds the idempotency key to the request it was first used for (#10916): the deserialised
- * DTO re-serialised with sorted keys, so JSON whitespace and key order do not change the hash
- * while any field value does. Top-level to keep [ConsentResource] under detekt's function cap.
- */
-private fun fingerprint(canonicalMapper: ObjectMapper, method: String, path: String, body: Any): String =
-    RequestFingerprint.of(method, path, canonicalMapper.writeValueAsString(body))
 
 /**
  * The whole answer: a boolean. No consent id, no scopes, no validity window — a caller that
