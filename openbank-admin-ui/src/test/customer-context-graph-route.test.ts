@@ -219,7 +219,7 @@ describe('Customer graph live overlay route', () => {
 
     const previous = await selectCustomerGraphFacts(selectedParty)
     expect(previous.accounts.map(account => account.id)).toEqual(['previous-account'])
-    await expect(selectCustomerGraphFacts(selectedParty)).rejects.toThrow('403')
+    await expect(selectCustomerGraphFacts(selectedParty)).rejects.toThrow('Graph access denied')
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 

@@ -95,6 +95,15 @@ describe('Customer context graph', () => {
     expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
   })
 
+  it('hides projected graph evidence when the live authorization check is denied', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403 } as Response)))
+    graph()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Access to the context graph was denied.')
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Customer: Oldřich Vaněk' })).not.toBeInTheDocument()
+  })
+
   it('connects live accounts, products, cards and interactions to the customer', async () => {
     const fetchMock = installSources()
     graph()

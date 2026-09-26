@@ -5,6 +5,10 @@ import { parseLiveCustomerFacts, type LiveCustomerFacts } from '@/lib/context/cu
 const inflight = new Map<string, Promise<LiveCustomerFacts>>()
 let selected: { partyId: string; facts: Promise<LiveCustomerFacts> } | null = null
 
+export class GraphAccessDeniedError extends Error {
+  constructor() { super('Graph access denied') }
+}
+
 /** Starts and retains one live snapshot for the party currently selected on Customer 360. */
 export function selectCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> {
   if (selected) inflight.delete(selected.partyId)
@@ -34,6 +38,7 @@ function requestCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> 
   const request = fetch(`/api/customer-360/${encodeURIComponent(partyId)}/graph`, {
     cache: 'no-store', signal: AbortSignal.timeout(5_000),
   }).then(async response => {
+    if (response.status === 401 || response.status === 403) throw new GraphAccessDeniedError()
     if (!response.ok) throw new Error(String(response.status))
     return parseLiveCustomerFacts(await response.json())
   }).finally(() => {
