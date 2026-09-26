@@ -15,7 +15,7 @@ export default function SettlementLookupPage() {
   const router = useRouter()
   const [id, setId] = useState('')
   const [invalid, setInvalid] = useState(false)
-  return <AuthGuard permission="approvals:view">
+  return <AuthGuard permission="settlements:view">
     <PageHeader title={t('Ověřit stav settlementu', 'Check settlement state')}
       subtitle={t('Použijte identifikátor převodu z odpovědi na jeho vytvoření, nikoli identifikátor schválení.', 'Use the transfer ID from the origination response, not the approval ID.')}
       actions={<Link href="/approvals" className={`btn btn-secondary ${styles.action}`}>{t('Zpět do fronty', 'Back to queue')}</Link>} />

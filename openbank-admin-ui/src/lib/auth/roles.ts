@@ -60,6 +60,8 @@ export const PERMISSIONS = {
   // Closings (EoD/EoM close cockpit, ADR-0069 D3) — the manual catch-up trigger
   // mirrors statement-service's CloseRunResource POST gate (ROLE_OPERATOR/ADMIN)
   "closings:run":             [ROLES.ADMIN, ROLES.OPERATOR],
+  // Settlement reconciliation mirrors the human operator/admin read API.
+  "settlements:view":     [ROLES.ADMIN, ROLES.OPERATOR],
   // Payments
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
@@ -311,6 +313,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions', '/merchants']],
   ['payment-rails:view', ['/swift', '/clearing', '/sdd']],
+  ['settlements:view', ['/settlements']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['cards:view', ['/cards']],

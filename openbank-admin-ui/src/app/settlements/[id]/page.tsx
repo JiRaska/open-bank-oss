@@ -12,7 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 export default function SettlementDetailPage() {
   const { t } = useLanguage()
   const { id } = useParams<{ id: string }>()
-  return <AuthGuard permission="approvals:view">
+  return <AuthGuard permission="settlements:view">
     <PageHeader title={t('Stav settlementu', 'Settlement state')}
       actions={<Link href="/settlements" className={`btn btn-secondary ${styles.action}`}>{t('Vyhledat jiný převod', 'Find another transfer')}</Link>} />
     <SettlementStatusPanel key={id} id={id} />

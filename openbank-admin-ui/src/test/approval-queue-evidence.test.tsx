@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ApprovalsPage from '@/app/approvals/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { parseAgentProposalList, parseApprovalInbox } from '@/lib/approvals/evidence'
+import { APPROVAL_DOMAINS, parseAgentProposalList, parseApprovalInbox } from '@/lib/approvals/evidence'
 
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { email: 'checker@example.test', roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
@@ -25,12 +25,7 @@ const proposal = {
   decisionReason: null,
   modelId: null,
 }
-const sourceNames = [
-  'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
-  'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
-  'delegation', 'agent',
-]
-const inbox = { items: [], sources: Object.fromEntries(sourceNames.map(name => [name, 'ok'])) }
+const inbox = { items: [], sources: Object.fromEntries(APPROVAL_DOMAINS.map(name => [name, 'ok'])) }
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })

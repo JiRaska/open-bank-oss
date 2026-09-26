@@ -11,6 +11,7 @@ vi.mock('@/auth', () => ({
 }))
 
 import { auth } from '@/auth'
+import { parseApprovalInbox } from '@/lib/approvals/evidence'
 
 const SESSION = { user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } }
 
@@ -141,6 +142,8 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
+    // Exercise the UI's real consumer against the route's output, not an independent fixture.
+    expect(parseApprovalInbox(body)).toEqual(body)
     // D-1, C-1, J-1, W-1 and SP-1 all sit at 11:00 (domestic-payment, clearing, ledger, swift,
     // sepaPayment); F-1 and I-1 both sit at 11:30 (fx before sepa-instant) — both ties resolved
     // by the stable-sort's concat order in route.ts. N-1 sits at 10:30, between L-1 and the
