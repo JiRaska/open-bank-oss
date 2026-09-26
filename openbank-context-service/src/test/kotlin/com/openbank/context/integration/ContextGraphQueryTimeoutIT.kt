@@ -68,7 +68,7 @@ class ContextGraphQueryTimeoutIT {
     @Test
     @Suppress("LongMethod", "NestedBlockDepth") // Real-DB fixture and cleanup must bracket both assertions.
     fun `bounded root query merges both directions once and excludes expired evidence`() {
-        val root = "complaint:${UUID.randomUUID()}"
+        val root = "incident:${UUID.randomUUID()}"
         val target = "transaction:${UUID.randomUUID()}"
         val other = "transaction:${UUID.randomUUID()}"
         val asOf = Instant.now().minusSeconds(30)
@@ -90,7 +90,7 @@ class ContextGraphQueryTimeoutIT {
                         """INSERT INTO context_nodes
                           (node_row_id,node_key,bank_scope,projection_generation,namespace,node_type,
                            source_system,source_ref,display_label,classification,valid_from,recorded_at,source_version)
-                          VALUES (?,?,?,?,'COMPLAINT','Synthetic','test',?,?,'INTERNAL',?,?,1)""",
+                          VALUES (?,?,?,?,'INCIDENT','Synthetic','test',?,?,'INTERNAL',?,?,1)""",
                     ).use { statement ->
                         statement.setObject(1, UUID.randomUUID())
                         statement.setString(2, key)
@@ -113,7 +113,7 @@ class ContextGraphQueryTimeoutIT {
                         """INSERT INTO context_edges
                           (edge_id,bank_scope,projection_generation,namespace,from_key,to_key,relation_type,
                            source_system,evidence_ref,valid_from,valid_to,recorded_at,source_version)
-                          VALUES (?,?,?,'COMPLAINT',?,?,'CONNECTED','test',?,?,?,?,1)""",
+                          VALUES (?,?,?,'INCIDENT',?,?,'CONNECTED','test',?,?,?,?,1)""",
                     ).use { statement ->
                         statement.setObject(1, fixture.id)
                         statement.setString(2, bank)
@@ -158,7 +158,7 @@ class ContextGraphQueryTimeoutIT {
 
     private fun graphRead(root: String, asOf: Instant, edges: Int) = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async {
-            graph.neighborhood(ContextNamespace.COMPLAINT, root, asOf, 10, edges)
+            graph.neighborhood(ContextNamespace.INCIDENT, root, asOf, 10, edges)
         }.asUni()
     }
 

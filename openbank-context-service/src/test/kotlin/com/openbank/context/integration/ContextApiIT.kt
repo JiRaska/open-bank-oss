@@ -2,6 +2,7 @@
 package com.openbank.context.integration
 
 import com.openbank.context.infrastructure.AssignmentAdministrationService
+import com.openbank.context.infrastructure.ComplaintProjectionConsumer
 import com.openbank.context.infrastructure.ContextAuditCommitment
 import com.openbank.context.infrastructure.ContextReadAuditEntity
 import com.openbank.context.infrastructure.IncidentProjectionConsumer
@@ -53,12 +54,26 @@ class ContextApiIT {
     @Inject
     lateinit var incidentProjection: IncidentProjectionConsumer
 
+    @Inject
+    lateinit var complaintProjection: ComplaintProjectionConsumer
+
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `maker checker assignment grants access and revocation removes it immediately`() {
         val reference = "CMP-ACCESS-${UUID.randomUUID()}"
         val caseId = "case-access-${UUID.randomUUID()}"
-        seedNode("complaint:$reference", "COMPLAINT", "Complaint $reference")
+        onVertxContext {
+            complaintProjection.consume(
+                complaintEvent(
+                    UUID.randomUUID(),
+                    reference,
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    1,
+                ),
+            )
+        }
         val request =
             ProposeAssignmentRequest(
                 ACTOR,
@@ -180,11 +195,19 @@ class ContextApiIT {
     fun `complaint lens reads bounded evidence and records the authorized access`() {
         val reference = UUID.randomUUID().toString()
         val root = "complaint:$reference"
-        val payment = "payment:${UUID.randomUUID()}"
         seedAssignment(CASE, PURPOSE, root)
-        seedNode(root, "COMPLAINT", "Complaint $reference")
-        seedNode(payment, "PAYMENT", "Payment evidence")
-        seedEdge(root, payment, "TRACES")
+        onVertxContext {
+            complaintProjection.consume(
+                complaintEvent(
+                    UUID.randomUUID(),
+                    reference,
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    1,
+                ),
+            )
+        }
 
         given()
             .header("X-Investigation-Case-Id", CASE)
@@ -192,8 +215,8 @@ class ContextApiIT {
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
             .body("root", equalTo(root))
-            .body("nodes.size()", equalTo(2))
-            .body("edges.size()", equalTo(1))
+            .body("nodes.size()", equalTo(4))
+            .body("edges.size()", equalTo(3))
 
         assertThat(auditDecisions(root)).containsExactly("ALLOWED")
         assertThat(auditDecisions(root, null)).isEmpty()
@@ -204,8 +227,8 @@ class ContextApiIT {
         assertThat(auditCommitments(root, null)).isEmpty()
         assertThat(auditCommitments(root, "another-bank")).isEmpty()
         assertThat(disclosureRows(root)).hasSize(1)
-        assertThat(disclosureRows(root).single().first).isEqualTo(3)
-        assertThat(disclosureRows(root).single().second).contains("node:test:", "evidence:")
+        assertThat(disclosureRows(root).single().first).isEqualTo(7)
+        assertThat(disclosureRows(root).single().second).contains("node:dispute-service:", "complaint:")
         assertThat(disclosureRows(root, null)).isEmpty()
         assertThat(disclosureRows(root, "another-bank")).isEmpty()
         assertAuditEvidenceImmutable(root)
@@ -570,34 +593,6 @@ class ContextApiIT {
         assertThat(count(table, "$column = ?", value)).isEqualTo(expected)
     }
 
-    private fun complaintEvent(
-        complaintId: UUID,
-        reference: String,
-        accountId: UUID,
-        transactionId: UUID,
-        disputeId: UUID,
-        sourceVersion: Long,
-    ) = """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
-        """"eventType":"complaint.received",""" +
-        """"sourceService":"dispute-service","complaintId":"$complaintId",""" +
-        """"reference":"$reference","status":"RECEIVED",""" +
-        """"occurredAt":"$NOW","accountId":"$accountId","transactionId":"$transactionId",""" +
-        """"disputeId":"$disputeId"}"""
-
-    private fun incidentEvent(
-        incidentId: UUID,
-        sourceVersion: Long,
-        services: List<String>,
-        status: String = "OPEN",
-    ): String {
-        val affectedServices = services.joinToString(",") { "\"$it\"" }
-        return """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
-            """"eventType":"ICT_INCIDENT_STATUS_CHANGED",""" +
-            """"sourceService":"security-scanner","occurredAt":"$NOW","incident":{"id":"$incidentId",""" +
-            """"severity":"P1_CRITICAL","status":"$status","affectedServices":[$affectedServices],""" +
-            """"detectedAt":"$NOW","updatedAt":"$NOW"}}"""
-    }
-
     private fun domesticPaymentEvent(paymentId: UUID, revision: Long, status: String): String {
         val eventType = if (revision == 1L) "DOMESTIC_PAYMENT_CREATED" else "DOMESTIC_PAYMENT_STATUS_CHANGED"
         val statusField = if (revision == 1L) "\"status\":\"$status\"" else "\"newStatus\":\"$status\""
@@ -703,8 +698,37 @@ class ContextApiIT {
         const val PURPOSE = "PAYMENT_COMPLAINT"
 
         // Lifecycle fixtures add seconds per revision; keep every event before the default asOf query.
-        val NOW: Instant = Instant.now().minusSeconds(60)
     }
+}
+
+private val NOW: Instant = Instant.now().minusSeconds(60)
+
+private fun complaintEvent(
+    complaintId: UUID,
+    reference: String,
+    accountId: UUID,
+    transactionId: UUID,
+    disputeId: UUID,
+    sourceVersion: Long,
+) = """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
+    """"eventType":"complaint.received",""" +
+    """"sourceService":"dispute-service","complaintId":"$complaintId",""" +
+    """"reference":"$reference","status":"RECEIVED",""" +
+    """"occurredAt":"$NOW","accountId":"$accountId","transactionId":"$transactionId",""" +
+    """"disputeId":"$disputeId"}"""
+
+private fun incidentEvent(
+    incidentId: UUID,
+    sourceVersion: Long,
+    services: List<String>,
+    status: String = "OPEN",
+): String {
+    val affectedServices = services.joinToString(",") { "\"$it\"" }
+    return """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
+        """"eventType":"ICT_INCIDENT_STATUS_CHANGED",""" +
+        """"sourceService":"security-scanner","occurredAt":"$NOW","incident":{"id":"$incidentId",""" +
+        """"severity":"P1_CRITICAL","status":"$status","affectedServices":[$affectedServices],""" +
+        """"detectedAt":"$NOW","updatedAt":"$NOW"}}"""
 }
 
 class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {

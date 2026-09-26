@@ -12,6 +12,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.hibernate.reactive.mutiny.Mutiny
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -49,7 +50,16 @@ class ComplaintProjectionConsumer(
             }
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected complaint event source" }
             val event = parse(root)
-            sessions.withTransaction { session, _ -> project(session, event) }
+            sessions.withTransaction { session, _ ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult.flatMap {
+                        session.createNativeQuery(
+                            "select set_config('statement_timeout', :timeout, true)",
+                            String::class.java,
+                        )
+                            .setParameter("timeout", "${timeoutMs}ms").singleResult
+                    }.flatMap { project(session, event) }
+            }
                 .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", "complaint", "outcome", "projected").increment()
             projectionLagSeconds.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
@@ -62,7 +72,48 @@ class ComplaintProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> = mutation(
+    private fun project(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> =
+        appendRevision(session, event).flatMap { projectCurrent(session, event) }
+
+    /** Every delivered revision is retained even when it is older than the current projection. */
+    private fun appendRevision(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> = mutation(
+        session,
+        """INSERT INTO context_complaint_revisions
+            (bank_scope, projection_generation, complaint_id, source_version, reference, event_key,
+             event_type, status, account_id, transaction_id, dispute_id, occurred_at, content_hash)
+            VALUES (:bank, :generation, :id, :version, :reference, :eventKey, :type, :status,
+                    :accountId, :transactionId, :disputeId, :occurredAt, :hash)
+            ON CONFLICT (bank_scope, projection_generation, complaint_id, source_version) DO NOTHING
+        """.trimIndent(),
+        mapOf(
+            "bank" to bankScope,
+            "generation" to projectionGeneration,
+            "id" to UUID.fromString(event.complaintId),
+            "version" to event.sourceVersion,
+            "reference" to event.reference,
+            "eventKey" to event.eventKey,
+            "type" to event.eventType,
+            "status" to event.status,
+            "accountId" to event.accountId?.let(UUID::fromString),
+            "transactionId" to event.transactionId?.let(UUID::fromString),
+            "disputeId" to event.disputeId?.let(UUID::fromString),
+            "occurredAt" to event.occurredAt,
+            "hash" to event.contentHash,
+        ),
+    ).flatMap {
+        session.createNativeQuery(
+            """SELECT content_hash FROM context_complaint_revisions
+               WHERE bank_scope = :bank AND projection_generation = :generation
+                 AND complaint_id = :id AND source_version = :version
+            """.trimIndent(),
+            String::class.java,
+        ).setParameter("bank", bankScope).setParameter("generation", projectionGeneration)
+            .setParameter("id", UUID.fromString(event.complaintId)).setParameter("version", event.sourceVersion)
+            .singleResult.invoke { stored -> check(stored == event.contentHash) { "conflicting complaint revision" } }
+            .replaceWithVoid()
+    }
+
+    private fun projectCurrent(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> = mutation(
         session,
         """INSERT INTO context_projection_events
                 (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
@@ -180,7 +231,7 @@ class ComplaintProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
+    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any?>): Uni<Int> {
         val query = session.createNativeMutationQuery(sql)
         values.forEach { (name, value) -> query.setParameter(name, value) }
         return query.executeUpdate()
@@ -215,6 +266,7 @@ class ComplaintProjectionConsumer(
         return ComplaintProjectionEvent(
             complaintId = id,
             reference = reference,
+            eventType = eventType,
             status = status,
             sourceVersion = version,
             occurredAt = occurredAt,
@@ -271,6 +323,7 @@ private data class ProjectionEdge(
 private data class ComplaintProjectionEvent(
     val complaintId: String,
     val reference: String,
+    val eventType: String,
     val status: String,
     val sourceVersion: Long,
     val occurredAt: Instant,
@@ -278,6 +331,12 @@ private data class ComplaintProjectionEvent(
     val transactionId: String?,
     val disputeId: String?,
 ) {
+    val contentHash: String = listOf(
+        complaintId, reference, eventType, status, sourceVersion.toString(), occurredAt.toString(),
+        accountId.orEmpty(), transactionId.orEmpty(), disputeId.orEmpty(),
+    ).joinToString("") { "${it.length}:$it" }.toByteArray(StandardCharsets.UTF_8).let { bytes ->
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    }
     val complaintKey = "complaint:$reference"
     val eventKey = "complaint:$complaintId:$sourceVersion"
     val complaintNode = node(complaintKey, "COMPLAINT", complaintId, "Complaint $reference · $status", "RESTRICTED")

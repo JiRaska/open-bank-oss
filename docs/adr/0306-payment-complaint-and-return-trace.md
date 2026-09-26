@@ -73,13 +73,22 @@ Complaint events now carry a versioned contract and stable account, transaction 
 references. Complaint lifecycle mutations increment a database-backed aggregate revision under a
 row lock and commit the revision plus event in the existing transactional outbox. Domestic-payment
 events now also carry a database-backed aggregate revision. A dedicated projector consumes the
-created and status-changed records idempotently. The current projection retains only the newest
-complaint-root node and replaces its direct links on a newer revision; the event ledger retains
-version metadata, not the complete prior root and link snapshot. Consequently, a historical
-`asOf` read after a correction cannot yet reproduce the complaint evidence shown before that
-correction. Before calling this lens a reproducible historical trace, retain source-versioned
-complaint observations and their link validity without overwriting prior evidence, then prove
-pre- and post-correction reads (including out-of-order delivery) against source fixtures.
+created and status-changed records idempotently. Complaint graph-input revisions are now retained in
+an append-only, bank-scoped snapshot table, including their exact account, transaction and dispute
+references and a normalized graph-input digest. Category, channel and complaint deadlines are not copied
+into this graph snapshot; their authoritative detail remains in dispute-service. Duplicate
+projected revisions are idempotent; conflicting
+contents for the same revision fail atomically. Out-of-order older revisions remain available
+without rolling back the current projection. Complaint `asOf` reads select the highest source
+revision whose event time is at or before the requested time and reconstruct its root and direct
+links, then reuse the bounded rail/booking traversal. The immutable receipt timestamp is exposed
+separately. This is source-event-time history, not a claim about what the investigator knew at
+that time: complaint reads do not yet support a `knownAt` cutoff. Missing retained snapshots
+return no complaint graph; overwritten pre-migration evidence is not reconstructed from the
+current-state rows. Controlled replay from complete retained source events is required to restore
+older complaint roots. Retention/erasure operations for these restricted snapshots still need an
+approved operational lifecycle before production activation. Lifecycle evidence owned by other
+projectors and the full trace's historical reproducibility remain separate acceptance work.
 The fixed complaint query follows only `CONCERNS_TRANSACTION` and an allow-listed directed lifecycle
 second hop, plus source/prefix/relation allow-listed booking-transaction and ledger-journal hops, so
 it cannot pivot from a shared transaction into another complaint. `TransactionInitiated` carries the

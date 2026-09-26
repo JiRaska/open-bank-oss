@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.10.0
+  version: 1.10.1
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/lending-loans/{loanId}/access:
@@ -336,6 +336,12 @@ paths:
     get:
       operationId: getComplaintContext
       summary: Read a bounded payment-complaint context graph
+      description: >-
+        The complaint root and direct references use the highest retained source revision
+        effective at asOf (source event time). Receipt time is returned separately; this
+        endpoint does not reconstruct what was known at that time. Current case assignment
+        and policy are rechecked even for historical reads. Missing retained revisions
+        return 404; overwritten pre-migration evidence is never inferred from current rows.
       parameters:
         - $ref: '#/components/parameters/reference'
         - $ref: '#/components/parameters/caseId'
@@ -345,7 +351,7 @@ paths:
         '200': { description: Authorized bounded neighborhood; a source-confirmed SEPA return may include a REVERSAL_TRANSACTION node and REVERSED_BY edge when transaction-service returned a reversal ID }
         '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
-        '404': { description: Root not projected }
+        '404': { description: No retained complaint revision effective at asOf }
         '503': { description: Authorization decision unavailable }
   /api/v1/context/incidents/{reference}/impact:
     get:

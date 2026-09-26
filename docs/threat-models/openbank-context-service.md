@@ -51,6 +51,22 @@ Complaint context may return opaque typed references and evidence links to assig
 Incident impact returns aggregate counts by node type. It never returns affected identifiers;
 identifier drill-down requires a separate future action, assignment and audit trail.
 
+### Complaint revision history
+
+Complaint corrections retain source-versioned graph-input snapshots with opaque account,
+transaction and dispute IDs, event time, receipt time and a normalized graph-input digest.
+Same-revision conflicts roll back the transaction; older deliveries cannot replace the
+latest current projection. Append-only triggers and forced bank-scoped RLS protect the
+snapshot table, and the reader sets its scope transaction-locally with the same SQL timeout.
+Historical reads still require a current exact-root assignment, purpose, OPA and durable
+disclosure audit. They cannot pivot into another complaint through a shared transaction.
+
+The selected complaint revision is effective at source event time; it does not prove what
+was known then. Pre-migration overwritten evidence cannot be backfilled from current rows,
+and linked payment projectors still require their own historical reproducibility proof.
+This increases retained restricted references: governed retention/restriction/erasure and
+replay operations remain production prerequisites. No bulk history export is introduced.
+
 ## Delegation source history
 
 The authority-history endpoint adds root-scoped assignments and an append-only source observation

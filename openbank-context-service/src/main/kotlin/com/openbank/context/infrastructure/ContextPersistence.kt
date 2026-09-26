@@ -316,8 +316,8 @@ class ContextGraphRepository(
         require(maxNodes in 1..MAX_GRAPH_NODES && maxEdges in 1..MAX_GRAPH_EDGES) {
             "Graph read limits exceed the approved bounded-query policy"
         }
-        val rootNode = findRoot(namespace, root, asOf) ?: return null
-        val firstHop = findRootEdges(namespace, root, asOf, maxEdges + 1)
+        val graphRoot = resolveGraphRoot(namespace, root, asOf, maxEdges + 1) ?: return null
+        val firstHop = graphRoot.edges
         val paymentEvidence = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
             val transactionKeys = firstHop.filter {
                 it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
@@ -369,14 +369,29 @@ class ContextGraphRepository(
         }
         val edges = firstHop + paymentEvidence + reversalEvidence + ledgerEvidence + clearingEvidence
         val boundedEdges = edges.take(maxEdges)
-        val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
-        val nodes = findNodes(namespace, keys, asOf)
+        val keys = graphRoot.boundedKeys(boundedEdges, maxNodes)
+        val nodes = graphRoot.mergeNodes(keys, findNodes(namespace, keys, asOf))
         return ContextNeighborhood(
             root,
             nodes.map { it.domain() },
             boundedEdges.filter { it.fromKey in keys && it.toKey in keys }.map { it.domain() },
             edges.size > maxEdges || nodes.size >= maxNodes,
         )
+    }
+
+    private suspend fun resolveGraphRoot(
+        namespace: ContextNamespace,
+        root: String,
+        asOf: Instant,
+        edgeLimit: Int,
+    ): GraphNeighborhoodRoot? {
+        if (namespace == ContextNamespace.COMPLAINT) {
+            val snapshot = ComplaintSnapshotReader(sessions, bankScope, projectionGeneration, queryTimeoutMs)
+                .find(root, asOf) ?: return null
+            return GraphNeighborhoodRoot(snapshot.root.key, snapshot.edges, snapshot)
+        }
+        val rootNode = findRoot(namespace, root, asOf) ?: return null
+        return GraphNeighborhoodRoot(rootNode.key, findRootEdges(namespace, root, asOf, edgeLimit))
     }
 
     private suspend fun findRoot(namespace: ContextNamespace, root: String, asOf: Instant): ContextNodeEntity? =
