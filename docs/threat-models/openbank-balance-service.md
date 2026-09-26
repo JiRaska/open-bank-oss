@@ -361,3 +361,20 @@ journal transaction reference identifies the covered movement. Authorization, DL
 ledger reconciliation remain required operational controls.
 
 - **2026-09-21** — **Two per-service identities on the balance writes (#10486 batch 2).** `service-transaction-balance-hold` (`service-account-openbank-transaction`: `balance.hold` + `balance.holdRelease`) and `service-settlement-balance-move` (`service-account-openbank-settlement`: `balance.debit` + `balance.credit`), each gated on `input.principal.id`. No RBAC change: `BalanceResource` already admits `ROLE_API` on all four writes, which means OPA was — and is — the whole control for any ROLE_API caller; `balance_rest_ext_test.rego` now proves another ROLE_API service account is DENIED all four, each identity is denied every other balance action (incl. `initialize`, `overdraftLimit`, `reconciliation.run`, `approval.decide`), and neither rule admits the shared client. Removing either `principal.id` line turns 3 tests red. `AUTHZ_ENFORCE` is `"true"` for balance-service in gitops. Rollback: revert together with the callers.
+
+## Ledger-projection reservation identity
+
+The settlement named M2M client now additionally receives `balance.hold` through
+`service-settlement-balance-cover`. The grant requires the exact settlement service principal
+and the validated user/service-account principal type. This is necessary for payer-cover
+reservation before journal posting; the former debit/credit-only grant rejected that first step.
+Legacy debit/credit grants remain for existing workflow histories. No `balance.holdRelease`,
+initialization, overdraft, reconciliation or approval-decision permission is added. A compromised
+settlement credential can reserve funds as well as perform its existing legacy movements; it
+cannot directly release cover when a journal outcome is uncertain. Ledger projection remains
+the owner of reservation consumption.
+
+Policy tests assert reservation admission, deny other balance actions and unrelated principals,
+and reject the wrong principal type. They do not prove token issuance or the full distributed
+workflow. Roll back this grant only after disabling new ledger-projection originations and
+draining their workflows; otherwise the cover step will be denied again.
