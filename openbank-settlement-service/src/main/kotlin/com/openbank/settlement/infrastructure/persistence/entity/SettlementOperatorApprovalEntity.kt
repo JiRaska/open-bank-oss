@@ -26,6 +26,9 @@ class SettlementOperatorApprovalEntity : PanacheEntityBase() {
     @Column(name = "resource_id")
     var resourceId: String? = null
 
+    @Column(name = "proposal_id")
+    var proposalId: UUID? = null
+
     @Column(name = "maker_id", nullable = false)
     lateinit var makerId: String
 

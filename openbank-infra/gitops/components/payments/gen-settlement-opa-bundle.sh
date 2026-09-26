@@ -42,7 +42,7 @@ allowed_reasons contains "operator-settlement-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action in {"settlement.create", "settlement.approval.read", "settlement.approval.decide"}
+	input.action in {"settlement.proposal.create", "settlement.create", "settlement.approval.read", "settlement.approval.decide"}
 	not startswith(input.principal.id, "service-account-")
 }
 

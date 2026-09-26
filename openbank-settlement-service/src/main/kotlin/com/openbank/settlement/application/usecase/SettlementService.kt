@@ -67,6 +67,13 @@ class SettlementService(
         val id = UUID.nameUUIDFromBytes("settlement:${command.idempotencyKey}".toByteArray())
         val existing = settlementRepository.findById(id)
         val settlement = existing ?: createPending(command, id)
+        // Validate both an existing row and the winner of a concurrent insert before any dispatch.
+        require(
+            settlement.payerAccountId == command.payerAccountId &&
+                settlement.payeeAccountId == command.payeeAccountId &&
+                settlement.amount.compareTo(command.amount) == 0 &&
+                settlement.currency == command.currency,
+        ) { "Idempotency key is already bound to a different settlement instruction" }
         // `created` vs `replayed` on the ACCEPTANCE of a request — nothing has moved yet at this
         // point, so the metric deliberately does not claim a settlement.
         metrics.settlementOriginated(

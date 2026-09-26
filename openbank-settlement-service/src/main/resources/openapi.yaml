@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Settlement Service
-  version: 1.8.0
+  version: 1.9.0
   description: Settlement orchestration service (ADR-0101 P3)
 paths:
   /api/v1/settlements:
@@ -29,6 +29,9 @@ paths:
           description: 'Not authorized. Requires SERVICE/OPERATOR/ADMIN (RBAC) and
             an allow decision from the fine-grained `settlement.create` OPA policy,
             enforced as of ADR-0034 Phase 5 (issue #266).'
+        '400':
+          description: Invalid instruction, or the idempotency key belongs to a different
+            payer, payee, amount or currency.
         '202':
           description: Four-eyes approval is required; no settlement or workflow has
             been created.
@@ -148,7 +151,8 @@ components:
           format: uuid
         amount:
           type: string
-          description: Positive decimal amount, e.g. 250.00
+          description: Positive decimal amount with at most 15 integer and 4 fractional
+            digits, e.g. 250.00. Excess trailing zeroes are accepted; rounding is never applied.
         currency:
           type: string
           minLength: 3
@@ -236,6 +240,16 @@ components:
       - makerId
       - createdAt
       properties:
+        proposalId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Immutable proposal identity returned on detail reads; absent for legacy approvals.
+        instruction:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/CreateSettlementRequest'
+          description: Complete server-stored instruction returned on authorized detail reads.
         id:
           type: string
         action:

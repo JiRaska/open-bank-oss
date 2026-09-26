@@ -34,6 +34,8 @@ class SettlementFourEyesFlowIT {
         val before = approvalCount()
         for (body in listOf(
             instruction + ("amount" to 0),
+            instruction + ("amount" to "321.456789"),
+            instruction + ("amount" to "1000000000000000"),
             instruction + ("currency" to "bad"),
             instruction + ("idempotencyKey" to ""),
             instruction + ("payeeAccountId" to instruction.getValue("payerAccountId")),
@@ -69,6 +71,13 @@ class SettlementFourEyesFlowIT {
     @Order(3)
     @TestSecurity(user = "settlement-checker", roles = ["ROLE_OPERATOR"])
     fun `checker must supply the same complete instruction`() {
+        val detail = given().get("$BASE/approvals/$approvalId").then().statusCode(200).extract()
+        assertThat(detail.path<String>("proposalId")).isNotBlank()
+        assertThat(detail.path<String>("instruction.idempotencyKey")).isEqualTo(instruction["idempotencyKey"])
+        assertThat(detail.path<String>("instruction.payerAccountId")).isEqualTo(instruction["payerAccountId"])
+        assertThat(detail.path<String>("instruction.payeeAccountId")).isEqualTo(instruction["payeeAccountId"])
+        assertThat(detail.path<String>("instruction.currency")).isEqualTo(instruction["currency"])
+        assertThat(detail.path<String>("instruction.amount").toBigDecimal()).isEqualByComparingTo("40")
         given().contentType("application/json").body("{}")
             .patch("$BASE/approvals/$approvalId").then().statusCode(400)
         given().contentType("application/json").body("{\"approve\":null}")
@@ -128,6 +137,60 @@ class SettlementFourEyesFlowIT {
         assertThat(settlementCount()).isEqualTo(1)
     }
 
+    @Test
+    @Order(8)
+    @TestSecurity(user = "settlement-maker", roles = ["ROLE_OPERATOR"])
+    fun `maker proposes a different instruction with an already used key`() {
+        conflictingApprovalId = given().contentType("application/json")
+            .body(instruction + ("amount" to 42)).post(BASE)
+            .then().statusCode(202).extract().path("approvalId")
+        assertThat(settlementCount()).isEqualTo(1)
+    }
+
+    @Test
+    @Order(9)
+    @TestSecurity(user = "settlement-checker", roles = ["ROLE_OPERATOR"])
+    fun `checker approves the changed instruction for the conflict proof`() {
+        given().contentType("application/json")
+            .body(mapOf("approve" to true, "instruction" to (instruction + ("amount" to 42))))
+            .patch("$BASE/approvals/$conflictingApprovalId").then().statusCode(200)
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "settlement-maker", roles = ["ROLE_OPERATOR"])
+    fun `approved changed instruction still cannot reuse an existing settlement key`() {
+        given().contentType("application/json").header("X-Approval-Id", conflictingApprovalId)
+            .body(instruction + ("amount" to 42)).post(BASE).then().statusCode(400)
+        assertThat(settlementCount()).isEqualTo(1)
+        val persistedAmount = dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT amount FROM settlements WHERE payer_account_id = ?").use { statement ->
+                statement.setObject(1, UUID.fromString(instruction.getValue("payerAccountId") as String))
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    rows.getBigDecimal(1)
+                }
+            }
+        }
+        assertThat(persistedAmount).isEqualByComparingTo("40")
+    }
+
+    @Test
+    @Order(11)
+    @TestSecurity(user = "settlement-maker", roles = ["ROLE_OPERATOR"])
+    fun `reviewable amount preserves decimal digits beyond JavaScript number precision`() {
+        val precise = instruction + mapOf(
+            "idempotencyKey" to "precise-${UUID.randomUUID()}",
+            "amount" to "999999999999999.99",
+        )
+        val id = given().contentType("application/json").body(precise)
+            .post(BASE).then().statusCode(202).extract().path<String>("approvalId")
+        val amount = given().get("$BASE/approvals/$id").then().statusCode(200)
+            .extract().path<String>("instruction.amount")
+        assertThat(amount).isEqualTo("999999999999999.99")
+        assertThat(settlementCount()).isEqualTo(1)
+    }
+
     private fun decide(reviewed: Map<String, Any>, expected: Int) {
         given().contentType("application/json").body(mapOf("approve" to true, "instruction" to reviewed))
             .patch("$BASE/approvals/$approvalId").then().statusCode(expected)
@@ -165,6 +228,7 @@ class SettlementFourEyesFlowIT {
     private companion object {
         const val BASE = "/api/v1/settlements"
         var approvalId = ""
+        var conflictingApprovalId = ""
         val instruction: Map<String, Any> = mapOf(
             "idempotencyKey" to "approval-proof-${UUID.randomUUID()}",
             "payerAccountId" to UUID.randomUUID().toString(),

@@ -21,6 +21,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import io.temporal.testing.TestWorkflowEnvironment
 import io.temporal.worker.Worker
 import kotlinx.coroutines.runBlocking
@@ -28,6 +29,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
@@ -130,7 +132,13 @@ class SettlementServiceOriginateTest {
 
         val result = runBlocking {
             service.originate(
-                OriginateSettlementCommand("dup-key", UUID.randomUUID(), UUID.randomUUID(), BigDecimal("10.00"), "CZK"),
+                OriginateSettlementCommand(
+                    "dup-key",
+                    existing.payerAccountId,
+                    existing.payeeAccountId,
+                    BigDecimal("10.0"),
+                    "CZK",
+                ),
             )
         }
 
@@ -138,6 +146,83 @@ class SettlementServiceOriginateTest {
         coVerify(exactly = 0) { repo.create(any()) }
         assertThat(originatedCount("replayed")).isEqualTo(1.0)
         assertThat(originatedCount("created")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `same key with a different instruction never starts the existing pending workflow`() {
+        assertConflictingInstructionRejected(concurrent = false)
+    }
+
+    @Test
+    fun `concurrent insert winner with a different instruction never starts its workflow`() {
+        assertConflictingInstructionRejected(concurrent = true)
+    }
+
+    private fun assertConflictingInstructionRejected(concurrent: Boolean) {
+        val command = OriginateSettlementCommand(
+            "conflicting-key",
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            BigDecimal.TEN,
+            "CZK",
+        )
+        val winner = Settlement(
+            id = UUID.nameUUIDFromBytes("settlement:${command.idempotencyKey}".toByteArray()),
+            payerAccountId = command.payerAccountId,
+            payeeAccountId = command.payeeAccountId,
+            amount = command.amount,
+            currency = command.currency,
+            status = SettlementStatus.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+        )
+        val changedInstructions = listOf(
+            command.copy(payerAccountId = UUID.randomUUID()),
+            command.copy(payeeAccountId = UUID.randomUUID()),
+            command.copy(amount = BigDecimal("10.01")),
+            command.copy(currency = "EUR"),
+        )
+        changedInstructions.forEach { changed ->
+            if (concurrent) {
+                coEvery { repo.findById(winner.id) } returnsMany listOf(null, winner)
+                coEvery { repo.create(any()) } throws IllegalStateException("duplicate primary key")
+            } else {
+                coEvery { repo.findById(winner.id) } returns winner
+            }
+            val failure = assertThrows<IllegalArgumentException> {
+                runBlocking { service.originate(changed) }
+            }
+            assertThat(failure).hasMessage("Idempotency key is already bound to a different settlement instruction")
+        }
+        // settle() must not even select a queue, including for an orphaned PENDING winner.
+        verify(exactly = 0) { temporalConfig.taskQueue() }
+        coVerify(exactly = if (concurrent) changedInstructions.size else 0) { repo.create(any()) }
+        assertThat(originatedCount("created")).isZero()
+        assertThat(originatedCount("replayed")).isZero()
+    }
+
+    @Test
+    fun `commands reject amounts that would round or overflow before persistence`() {
+        for (amount in listOf("0.00001", "1000000000000000", "1E+100", "-1", "0")) {
+            assertThrows<IllegalArgumentException> {
+                OriginateSettlementCommand(
+                    "invalid-amount",
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    BigDecimal(amount),
+                    "CZK",
+                )
+            }
+        }
+        val maximum = OriginateSettlementCommand(
+            "exact-maximum",
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            BigDecimal("999999999999999.999900"),
+            "CZK",
+        )
+        assertThat(maximum.amount).isEqualByComparingTo("999999999999999.9999")
+        coVerify(exactly = 0) { repo.create(any()) }
     }
 
     @Test

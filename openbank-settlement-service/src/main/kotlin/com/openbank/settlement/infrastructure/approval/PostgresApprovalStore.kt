@@ -12,6 +12,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.settlement.infrastructure.persistence.SettlementOutboxRepositoryImpl
 import com.openbank.settlement.infrastructure.persistence.entity.SettlementOperatorApprovalEntity
+import com.openbank.settlement.infrastructure.persistence.entity.SettlementOperatorProposalEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepositoryBase
 import io.smallrye.mutiny.Uni
@@ -28,6 +29,7 @@ class PostgresApprovalStore(
     private val outbox: SettlementOutboxRepositoryImpl,
     private val mapper: ObjectMapper,
     private val clock: Clock,
+    private val proposals: SettlementProposalStore,
 ) : ApprovalStore,
     PanacheRepositoryBase<SettlementOperatorApprovalEntity, UUID> {
     override suspend fun create(
@@ -52,7 +54,35 @@ class PostgresApprovalStore(
             it.expiresAt = now.plusSeconds(ttlSeconds)
         }
         return Panache.withTransaction {
-            persistAndFlush(entity).flatMap { appendEvidence(entity, makerId, now) }
+            proposals.findForMaker(makerId, requireNotNull(resourceId)).flatMap { proposal ->
+                checkNotNull(proposal) { "A durable reviewed instruction is required" }
+                check(proposal.instruction().approvalFingerprint == resourceId) { "Proposal binding is invalid" }
+                entity.proposalId = proposal.id
+                persistAndFlush(entity).flatMap { appendEvidence(entity, makerId, now) }
+            }
+        }.awaitSuspending()
+    }
+
+    suspend fun proposalForApproval(id: String): SettlementOperatorProposalEntity? {
+        val key = parseId(id) ?: return null
+        return Panache.withSession {
+            findById(key).flatMap { approval ->
+                val proposalId = approval?.proposalId
+                if (approval == null || proposalId == null || !approval.expiresAt.isAfter(OffsetDateTime.now(clock))) {
+                    Uni.createFrom().nullItem<SettlementOperatorProposalEntity>()
+                } else {
+                    proposals.findById(proposalId).map { proposal ->
+                        check(
+                            proposal != null &&
+                                proposal.makerId == approval.makerId &&
+                                proposal.instruction().approvalFingerprint == approval.resourceId,
+                        ) {
+                            "Proposal binding is invalid"
+                        }
+                        proposal
+                    }
+                }
+            }
         }.awaitSuspending()
     }
 
@@ -81,6 +111,11 @@ class PostgresApprovalStore(
             require(decidedBy.isNotBlank()) { "Checker is required" }
             if (entity.makerId == decidedBy) throw SelfApprovalNotAllowedException(entity.makerId)
             requireStatus(entity, ApprovalStatus.PENDING)
+            if (approve) {
+                requireNotNull(entity.proposalId) {
+                    "Legacy approval has no reviewable instruction; reject it and resubmit"
+                }
+            }
             entity.status = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED
             entity.decidedBy = decidedBy
             entity.decidedAt = now
@@ -89,6 +124,7 @@ class PostgresApprovalStore(
 
     override suspend fun markExecuted(id: String): PendingApproval? = transition(id) { entity, now ->
         requireStatus(entity, ApprovalStatus.APPROVED)
+        requireNotNull(entity.proposalId) { "Legacy approval has no reviewable instruction; resubmit the operation" }
         entity.status = ApprovalStatus.EXECUTED
         entity.claimedAt = now
         entity.makerId

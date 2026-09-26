@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.settlement.infrastructure.approval.SettlementProposalStore
 import com.openbank.settlement.it.PostgresTestResource
 import com.openbank.settlement.it.SettlementOpaTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -50,9 +51,55 @@ class SettlementOperatorApprovalDurabilityIT {
 
     @Inject lateinit var store: ApprovalStore
 
+    @Inject lateinit var proposals: SettlementProposalStore
+
     @Inject lateinit var dataSource: DataSource
 
     @Inject lateinit var mapper: ObjectMapper
+
+    @Test
+    fun `concurrent captures reuse one immutable proposal for the same maker`(): Unit = runBlocking {
+        val maker = "capture-${UUID.randomUUID()}"
+        val captured = (1..8).map {
+            async(Dispatchers.IO) { onContext { proposals.capture(instruction, maker) }.id }
+        }.awaitAll()
+        assertThat(captured.distinct()).hasSize(1)
+        val other = onContext { proposals.capture(instruction, "$maker-other") }
+        assertThat(other.id).isNotEqualTo(captured.first())
+        assertThatThrownBy {
+            execute("UPDATE settlement_operator_proposals SET amount = '41' WHERE id = '${other.id}'")
+        }.hasMessageContaining("immutable")
+    }
+
+    @Test
+    fun `approval cannot exist without a captured instruction`() {
+        val maker = "no-proposal-${UUID.randomUUID()}"
+        assertThatThrownBy {
+            onContext { store.create("settlement.create", instruction.approvalFingerprint, maker, 3600) }
+        }.hasStackTraceContaining("durable reviewed instruction")
+        assertThat(count("SELECT count(*) FROM settlement_operator_approvals WHERE maker_id = '$maker'")).isZero()
+    }
+
+    @Test
+    fun `approval cannot be rebound to another makers identical instruction`() {
+        val approval = create()
+        val other = onContext { proposals.capture(instruction, "other-${UUID.randomUUID()}") }
+        assertThatThrownBy {
+            execute("UPDATE settlement_operator_approvals SET proposal_id = '${other.id}' WHERE id = '${approval.id}'")
+        }.hasMessageContaining("settlement_approval_proposal_binding")
+        assertThat(status(approval.id)).isEqualTo("PENDING")
+    }
+
+    @Test
+    fun `legacy approval without instruction can only be rejected`() {
+        val approval = create()
+        execute("UPDATE settlement_operator_approvals SET proposal_id = NULL WHERE id = '${approval.id}'")
+        decide(approval.id, 400)
+        assertThat(status(approval.id)).isEqualTo("PENDING")
+        given().contentType("application/json").body(mapOf("approve" to false))
+            .patch("/api/v1/settlements/approvals/${approval.id}").then().statusCode(200)
+        assertThat(status(approval.id)).isEqualTo("REJECTED")
+    }
 
     @Test
     fun `the checker decision and authorization claim retain distinct audit facts`() {
@@ -113,6 +160,7 @@ class SettlementOperatorApprovalDurabilityIT {
     @Test
     fun `audit insertion failure rolls back approval creation`() {
         val maker = "test-create-${UUID.randomUUID()}"
+        onContext { proposals.capture(instruction, maker) }
         val constraint = constraintName()
         execute(
             "ALTER TABLE settlement_outbox ADD CONSTRAINT $constraint CHECK " +
@@ -211,6 +259,7 @@ class SettlementOperatorApprovalDurabilityIT {
     }
 
     private fun create(): PendingApproval = onContext {
+        proposals.capture(instruction, "durability-maker")
         store.create("settlement.create", instruction.approvalFingerprint, "durability-maker", 3600)
     }
 

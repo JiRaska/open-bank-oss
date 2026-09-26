@@ -152,13 +152,13 @@ class SettlementAuditAtomicityIT {
 
     @Test
     @TestSecurity(user = "test-settlement-operator", roles = ["ROLE_OPERATOR"])
-    fun `origination audit uses the stored decimal rather than the unpersisted input`() {
+    fun `origination audit preserves the accepted decimal value`() {
         val response = given().contentType("application/json").body(
             mapOf(
                 "idempotencyKey" to UUID.randomUUID().toString(),
                 "payerAccountId" to UUID.randomUUID(),
                 "payeeAccountId" to UUID.randomUUID(),
-                "amount" to "321.456789",
+                "amount" to "321.456800",
                 "currency" to "CZK",
             ),
         ).post("/api/v1/settlements").then().statusCode(201).extract().asString()

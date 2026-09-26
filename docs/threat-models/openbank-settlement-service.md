@@ -491,3 +491,20 @@ against the original idempotency key; it never justifies a new key or a blind mo
 The operator gate covers origination. It does not add exemptions or broader grants to automated
 ledger posting, and it remains separately activated after target-environment acceptance. Local HTTP
 policy tests with test identities are not evidence of deployed OIDC, BFF or reviewer UX acceptance.
+
+Reviewable instructions are separate immutable proposal rows, with UUID identity and maker ownership;
+the fingerprint is an integrity binding, not an ownership key. The outer human-only proposal action
+authorizes capture before the injected execution bean enforces `settlement.create`. No financial
+state changes during capture. The approval transaction includes a composite foreign key to the exact
+proposal/maker/fingerprint tuple and the outbox evidence, so it cannot commit a dangling or cross-maker
+approval. Snapshot updates are rejected by the database. Authorized approval detail reads return the
+stored instruction; decision input must match its binding. Legacy approvals without a snapshot fail
+closed for approval and execution while remaining rejectable.
+
+Capture and approval creation are separate transactions: an interruption can leave an unreferenced
+proposal, which has no authority to execute. Raw instructions remain private service data, not copied
+into OPA resources or audit-event payloads. Retention handling for orphan captures and referenced
+financial evidence is a separate activation condition; expiring authorization is not permission to
+erase evidence or retain all raw payloads indefinitely.
+
+Reviewable proposal amounts are transmitted as decimal text so a browser cannot round the approved instruction. Both REST decoding and application commands reject amounts that would round or overflow the settlement database column; trailing zeroes alone do not alter the numeric value. Reusing an idempotency key with another payer, payee, numeric amount or currency fails before workflow dispatch, including concurrent insert collisions.

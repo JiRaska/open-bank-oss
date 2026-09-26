@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonFormat
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -11,13 +12,18 @@ import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.domain.model.validateSettlementAmount
+import com.openbank.settlement.infrastructure.approval.SettlementProposalStore
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -40,14 +46,30 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Settlements", description = "Interbank settlement origination")
-class SettlementResource(private val settlementUseCase: SettlementUseCase) {
+class SettlementResource(
+    private val execution: SettlementApprovedExecution,
+    private val proposals: SettlementProposalStore,
+    private val identity: SecurityIdentity,
+    @param:ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false") private val fourEyes: Boolean,
+) {
 
     @POST
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "settlement.create", resource = "#request.approvalFingerprint")
+    @Authorize(action = "settlement.proposal.create", resource = "#request.approvalFingerprint")
     @Operation(summary = "Originate a settlement and start its workflow")
     suspend fun originate(request: CreateSettlementRequest?): Response {
         requireNotNull(request) { "a request body is required" }
+        if (fourEyes) proposals.capture(request, identity.principal.name)
+        return execution.originate(request)
+    }
+}
+
+/** The injected CDI boundary retains the original gate immediately before the financial write. */
+@ApplicationScoped
+class SettlementApprovedExecution(private val settlementUseCase: SettlementUseCase) {
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "settlement.create", resource = "#request.approvalFingerprint")
+    suspend fun originate(request: CreateSettlementRequest): Response {
         val settlement = settlementUseCase.originate(
             OriginateSettlementCommand(
                 idempotencyKey = request.idempotencyKey,
@@ -67,6 +89,7 @@ data class CreateSettlementRequest(
     val idempotencyKey: String,
     val payerAccountId: UUID,
     val payeeAccountId: UUID,
+    @get:JsonFormat(shape = JsonFormat.Shape.STRING)
     val amount: BigDecimal,
     val currency: String,
 ) {
@@ -74,7 +97,7 @@ data class CreateSettlementRequest(
     // instruction must neither create a pending approval nor consume an approved one.
     init {
         require(idempotencyKey.isNotBlank()) { "idempotencyKey must not be blank" }
-        require(amount > BigDecimal.ZERO) { "amount must be positive" }
+        validateSettlementAmount(amount)
         require(CURRENCY_CODE.matches(currency)) { "currency must be an uppercase 3-letter ISO-4217 code" }
         require(payerAccountId != payeeAccountId) { "payer and payee accounts must differ" }
     }

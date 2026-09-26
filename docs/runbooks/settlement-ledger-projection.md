@@ -123,9 +123,10 @@ same amount. Changing any business instruction requires a new approval.
 
 A different authenticated operator reviews the full proposed instruction and submits it with
 `approve: true` in `PATCH /api/v1/settlements/approvals/{id}` as the `instruction` object.
-The server compares its binding to the maker's pending request. The checker must obtain and review
-that complete instruction through the operator workflow; the queue's opaque `resourceId` hash alone
-is insufficient to decide. Rejection uses `approve: false` and may omit the instruction.
+The server compares its binding to the maker's pending request. The authorized detail endpoint
+returns `proposalId` and the complete stored `instruction`; the checker reviews and submits that
+snapshot. The queue's opaque `resourceId` hash alone is insufficient to decide.
+Rejection uses `approve: false` and may omit the instruction.
 `GET /api/v1/settlements/approvals` lists pending approvals; `GET .../{id}` reads one unexpired record.
 Neither read grants authorization to execute it.
 
@@ -144,3 +145,22 @@ keys to bind state events to settlements and approval events to approval records
 outbox. Keep new origination enforcement disabled until the target maker/checker, expiry, concurrent
 claim, audit rollback and real OIDC tests pass. Activation of this operator gate does not require
 adding a four-eyes exemption to the settlement worker's downstream journal calls.
+
+V7 captures immutable instructions per maker and fingerprint, with a separate proposal UUID.
+The outer human proposal permission permits capture only; the existing `settlement.create`
+interceptor on the execution bean still gates the financial operation. Approval creation commits
+its composite proposal/maker/fingerprint reference together with its audit event. A failure before
+that transaction can leave an unreferenced proposal, but cannot create an approval without a stored
+instruction or move money. Concurrent captures reuse the same maker's snapshot without updating it.
+The foreign key protects referenced proposal evidence from deletion, and a database trigger refuses
+snapshot updates. Authorization expiry does not delete this evidence.
+
+Existing approvals without a proposal remain readable and rejectable, but cannot be approved or
+consumed by the new writer. Drain or reject them and resubmit the full instruction before activation.
+Sandbox acceptance still requires the complete operator UI/BFF flow and approved retention handling
+for both referenced proposal evidence and unreferenced captures; local backend proofs do not cover
+those conditions. Do not enable the operator gate until they are established.
+
+A repeated origination key must carry the same payer, payee, numeric amount and currency. A mismatch returns HTTP 400 before workflow dispatch, including a concurrent insert collision. Do not change the key to retry an uncertain transfer; reconcile the original settlement first. Decimal scale alone (for example `10.0` versus `10.00`) does not change the instruction.
+
+The reviewable instruction returns `amount` as decimal text. Preserve it as text through the operator UI. Origination accepts up to 15 integer and 4 fractional digits, ignoring insignificant trailing zeroes; excess precision or range returns HTTP 400 before a proposal or settlement is created. This storage limit does not certify downstream rail or currency acceptance.

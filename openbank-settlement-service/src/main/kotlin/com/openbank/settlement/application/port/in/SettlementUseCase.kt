@@ -6,13 +6,15 @@ package com.openbank.settlement.application.port.`in`
 
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.domain.model.validateSettlementAmount
 import java.math.BigDecimal
 import java.util.UUID
 
 /**
  * Request to originate a new settlement between two customer accounts. [idempotencyKey] is a
- * caller-supplied dedup token: re-submitting the same key is a no-op that returns the original
- * settlement (no second debit/credit), so a client retry can never double-settle.
+ * caller-supplied dedup token: re-submitting the same key with the same instruction returns the
+ * original settlement (no second debit/credit). A changed payer, payee, amount or currency is
+ * rejected before workflow dispatch, including when a concurrent insert wins the key.
  */
 data class OriginateSettlementCommand(
     val idempotencyKey: String,
@@ -20,7 +22,11 @@ data class OriginateSettlementCommand(
     val payeeAccountId: UUID,
     val amount: BigDecimal,
     val currency: String,
-)
+) {
+    init {
+        validateSettlementAmount(amount)
+    }
+}
 
 interface SettlementUseCase {
     /**

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: settlement-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a5c353af6a614854"
+    openbank.tech/policy-checksum: "648fb3cf45352a8c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -611,7 +611,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	input.action in {"settlement.create", "settlement.approval.read", "settlement.approval.decide"}
+    	input.action in {"settlement.proposal.create", "settlement.create", "settlement.approval.read", "settlement.approval.decide"}
     	not startswith(input.principal.id, "service-account-")
     }
 

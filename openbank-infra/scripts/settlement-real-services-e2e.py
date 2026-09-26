@@ -715,9 +715,18 @@ def main() -> None:
         approval_id = str(uuid.UUID(pending["approvalId"]))
         assert sql("settlement", "SELECT count(*) FROM settlements") == before
         decision_url = f"{settlement_endpoint}/approvals/{approval_id}"
+        detail = request(decision_url, token=checker_token)
+        proposal_id = str(uuid.UUID(detail["proposalId"]))
+        assert detail["id"] == approval_id and detail["makerId"] == "proof-operator"
+        reviewed_instruction = detail["instruction"]
+        assert isinstance(reviewed_instruction["amount"], str), "Reviewable amounts must be exact decimal text"
+        assert Decimal(reviewed_instruction["amount"]) == Decimal(str(instruction["amount"]))
+        assert {k: v for k, v in reviewed_instruction.items() if k != "amount"} == {
+            k: v for k, v in instruction.items() if k != "amount"
+        }, "Stored proposal differs from the maker's instruction"
         expect_http_status(decision_url, 400, {}, checker_token, method="PATCH")
         expect_http_status(decision_url, 400, {"approve": None}, checker_token, method="PATCH")
-        decision = {"approve": True, "instruction": instruction}
+        decision = {"approve": True, "instruction": detail["instruction"]}
         expect_http_status(decision_url, 403, decision, token, method="PATCH")
         changed = {"approve": True, "instruction": dict(instruction, amount=instruction["amount"] + 1)}
         expect_http_status(decision_url, 400, changed, checker_token, method="PATCH")
@@ -729,7 +738,8 @@ def main() -> None:
         states = json.loads(sql("settlement", "SELECT json_agg(payload::jsonb->>'status' ORDER BY id) "
                                f"FROM settlement_outbox WHERE aggregate_id='{approval_id}'"))
         assert states == ["PENDING", "APPROVED", "EXECUTED"], states
-        approval_evidence.append({"approvalId": approval_id, "settlementId": result["id"], "states": states})
+        approval_evidence.append({"approvalId": approval_id, "proposalId": proposal_id,
+                                  "settlementId": result["id"], "states": states})
         return result
 
     crash_evidence = None
