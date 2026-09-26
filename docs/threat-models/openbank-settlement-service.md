@@ -522,3 +522,11 @@ grants cannot admit a service identity to settlement or approval reads. A return
 link requires the existing row to match the complete stored instruction; an idempotency-key
 collision with a different instruction is reported as a conflict with no link. Expired,
 consumed and conflicting read paths must not start workflows or append decision events.
+
+Explicit `POST /api/v1/settlements/approvals` uses the human-only proposal permission and the
+same immutable capture, binding and transactional approval evidence. It never invokes financial
+execution, independently of `authz.four-eyes.enforce` and any supplied `X-Approval-Id`. The maker
+comes from authenticated server identity. A 202 receipt is only a pending decision, never a funds
+reservation or transfer. Repeated submissions may create distinct approvals for one proposal;
+clients must reconcile ambiguous responses rather than automatically retry. Origination retains
+its existing feature-flag behavior and must not be presented as proposal-only submission.

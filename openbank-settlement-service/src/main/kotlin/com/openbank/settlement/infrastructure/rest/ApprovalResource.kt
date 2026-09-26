@@ -9,6 +9,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.infrastructure.approval.PostgresApprovalStore
 import com.openbank.settlement.infrastructure.approval.SettlementApprovalHistory
+import com.openbank.settlement.infrastructure.approval.SettlementProposalStore
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -16,12 +17,14 @@ import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.PATCH
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import java.net.URI
 
 /** A distinct checker decides; the maker retries the bound operation with X-Approval-Id. */
 @Path("/api/v1/settlements/approvals")
@@ -33,7 +36,25 @@ class ApprovalResource(
     private val identity: SecurityIdentity,
     private val settlements: SettlementUseCase,
     private val history: SettlementApprovalHistory,
+    private val proposals: SettlementProposalStore,
 ) {
+    /** Proposal submission cannot call financial execution, regardless of the four-eyes flag. */
+    @POST
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "settlement.proposal.create", resource = "#request.approvalFingerprint")
+    suspend fun propose(request: CreateSettlementRequest?): Response {
+        requireNotNull(request) { "a request body is required" }
+        val maker = identity.principal.name
+        val proposal = proposals.capture(request, maker)
+        val approval = approvals.create("settlement.create", request.approvalFingerprint, maker)
+        return Response.accepted(
+            approval.toResponse().copy(proposalId = proposal.id.toString(), instruction = proposal.instruction()),
+        )
+            .location(URI.create("/api/v1/settlements/approvals/${approval.id}"))
+            .header("Cache-Control", "no-store")
+            .build()
+    }
+
     @GET
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "settlement.approval.read", resource = "")

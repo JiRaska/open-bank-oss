@@ -243,6 +243,22 @@ class SettlementFourEyesFlowIT {
         given().get("$BASE/approvals/$approvalId").then().statusCode(401)
     }
 
+    @Test
+    @Order(15)
+    @TestSecurity(user = "settlement-maker", roles = ["ROLE_OPERATOR"])
+    fun `explicit proposal submission also stays pending with enforcement on`() {
+        val before = settlementCount()
+        val id = given().contentType("application/json")
+            .body(instruction + ("idempotencyKey" to "proposal-only-${UUID.randomUUID()}"))
+            .post("$BASE/approvals").then().statusCode(202).header("Cache-Control", "no-store")
+            .extract().path<String>("id")
+        val detail = given().get("$BASE/approvals/$id").then().statusCode(200).extract()
+        assertThat(detail.path<String>("status")).isEqualTo("PENDING")
+        assertThat(detail.path<String>("proposalId")).isNotBlank()
+        assertThat(detail.path<String>("settlementCorrelation")).isEqualTo("NOT_OBSERVED")
+        assertThat(settlementCount()).isEqualTo(before)
+    }
+
     private fun decide(reviewed: Map<String, Any>, expected: Int) {
         given().contentType("application/json").body(mapOf("approve" to true, "instruction" to reviewed))
             .patch("$BASE/approvals/$approvalId").then().statusCode(expected)
