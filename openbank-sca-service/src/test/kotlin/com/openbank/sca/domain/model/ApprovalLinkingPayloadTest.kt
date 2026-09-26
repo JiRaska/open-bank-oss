@@ -61,6 +61,43 @@ class ApprovalLinkingPayloadTest {
     }
 
     @Test
+    fun `standing-order approval links like a payment - per-execution amount, currency, creditor IBAN`() {
+        // What delegation-service consumes with for kind STANDING_ORDER, and what the app signs.
+        val dl = DynamicLinkingData(
+            amount = "1500.00",
+            currency = "CZK",
+            creditorIban = "CZ6508000000192000145399",
+            creditorName = "Pronajímatel",
+            reference = null,
+            approvalRequestId = approval,
+            payloadSha256 = sha,
+        )
+        assertThat(bytes(dl)).isEqualTo(
+            "0f8fad5b-d9cb-469f-a165-70867728950e|APPROVED|APPROVAL|7c9e6679-7425-40de-944b-e07fc1f90ae7|" +
+                "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08|1500.00|CZK|CZ6508000000192000145399",
+        )
+    }
+
+    @Test
+    fun `SDD-mandate approval links the approval id and payload hash only`() {
+        // An SDD mandate has no amount and its creditor is no IBAN: no payment segments at all.
+        val dl =
+            DynamicLinkingData(
+                null,
+                null,
+                null,
+                "Energie a.s.",
+                null,
+                approvalRequestId = approval,
+                payloadSha256 = sha,
+            )
+        assertThat(bytes(dl)).isEqualTo(
+            "0f8fad5b-d9cb-469f-a165-70867728950e|APPROVED|APPROVAL|7c9e6679-7425-40de-944b-e07fc1f90ae7|" +
+                "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        )
+    }
+
+    @Test
     fun `amount canonical form - two fractional digits, dot, no grouping, over-precision refused`() {
         assertThat(canonicalAmount("1000")).isEqualTo("1000.00")
         assertThat(canonicalAmount("250.5")).isEqualTo("250.50")
