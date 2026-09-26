@@ -804,3 +804,21 @@ decision use first; the additive projection table may remain until its consumer 
   none — response-plumbing de-duplication only; `AuthorizeInterceptor`, OPA policy evaluation and
   the Keycloak token validation path are untouched. Rollback: restore the deleted
   QuarkusUnauthorizedExceptionMapper class; no data or config migration involved.
+
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** `AccountNotFoundExceptionMapper`/`AccountUpdateConflictExceptionMapper` are deleted;
+  `AccountNotFoundException`/`AccountUpdateConflictException` now extend
+  `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
+  by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,
+  unused, by #10923). Both exceptions keep their own domain-specific `code`
+  (`ACCOUNT_NOT_FOUND`/`CONCURRENT_MODIFICATION`) via the base class's `code` constructor
+  parameter, so status, `code` and `message` are byte-identical to the deleted mappers' output —
+  verified by `AccountExceptionMapperEquivalenceTest`. Only `traceId`'s source changes (random UUID
+  → the correlation MDC), which #10911 phase 1 established is not part of the wire contract.
+  `AuthorizationNotFoundExceptionMapper`/`AuthorizationNotOnAccountExceptionMapper` are
+  DELIBERATELY left alone: both render a shared, fixed message
+  (`"Authorization not found on this account"`) rather than `exception.message`, to avoid an
+  existence oracle across accounts — migrating to the lib base (which renders `exception.message`)
+  would leak that distinction onto the wire. **Risk class:** none — response-plumbing
+  de-duplication only; no endpoint, authorization or booking logic changes. Rollback: restore the
+  deleted mapper classes and revert the exception base classes.

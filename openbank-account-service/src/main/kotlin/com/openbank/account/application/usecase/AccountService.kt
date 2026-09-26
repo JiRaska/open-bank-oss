@@ -44,6 +44,8 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.observability.DomainMetrics
 import io.vertx.pgclient.PgException
@@ -569,15 +571,24 @@ class AccountService(
     }
 }
 
-class AccountNotFoundException(message: String) : RuntimeException(message)
+// #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
+// ResourceNotFoundExceptionMapper handles the 404, keeping the domain-specific "ACCOUNT_NOT_FOUND"
+// code the deleted local AccountNotFoundExceptionMapper used — byte-for-byte identical status,
+// code and message. See AccountExceptionMapperEquivalenceTest.
+class AccountNotFoundException(message: String) : ResourceNotFoundException(message, code = "ACCOUNT_NOT_FOUND")
 
 /**
  * A lifecycle update raced a concurrent modification of the same account (#465): the caller's
  * domain object was read at a version the row no longer has. Dedicated type (not
  * IllegalStateException — that has two competing mappers, libs 422 vs service, picked
  * non-deterministically per request; see issue #526) mapped to 409.
+ *
+ * #10911/#11059 phase 3: extends the libs-domain base, keeping the domain-specific
+ * "CONCURRENT_MODIFICATION" code the deleted local AccountUpdateConflictExceptionMapper used —
+ * byte-for-byte identical status, code and message. See AccountExceptionMapperEquivalenceTest.
  */
-class AccountUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class AccountUpdateConflictException(message: String, cause: Throwable? = null) :
+    ResourceConflictException(message, code = "CONCURRENT_MODIFICATION", cause = cause)
 
 /**
  * Closing an account with money still in any of its currency pockets would strand that money —
