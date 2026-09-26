@@ -209,6 +209,20 @@ describe('Customer graph live overlay route', () => {
     clearSelectedCustomerGraphFacts(selectedParty)
   })
 
+  it('rechecks graph access and evidence when selecting the same customer again', async () => {
+    const selectedParty = '66666666-6666-4666-8666-666666666666'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ accounts: [{ id: 'previous-account' }], unavailable: [] }))
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    const previous = await selectCustomerGraphFacts(selectedParty)
+    expect(previous.accounts.map(account => account.id)).toEqual(['previous-account'])
+    await expect(selectCustomerGraphFacts(selectedParty)).rejects.toThrow('403')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('does not reuse an in-flight snapshot after leaving a customer selection', async () => {
     const selectedParty = '33333333-3333-4333-8333-333333333333'
     const resolvers: Array<(value: Response) => void> = []
