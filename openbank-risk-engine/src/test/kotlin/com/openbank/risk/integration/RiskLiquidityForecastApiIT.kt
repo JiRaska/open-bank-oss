@@ -75,7 +75,9 @@ class RiskLiquidityForecastApiIT {
         assertThat(body["horizonDays"].asInt()).isEqualTo(90)
         assertThat(body["dailyDays"].asInt()).isEqualTo(30)
         assertThat(body["model"]["id"].asText()).isEqualTo("nmd-linear-core")
-        assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d238-d295")
+        // eu-2015-61-crr2 is the configured default (#11005, ADR-0313 phase 1 EU parameter sets);
+        // its L1 haircut is 0% same as BCBS's, so the HQLA stock value below is unaffected.
+        assertThat(body["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
         assertThat(body["assumptions"].map { it["key"].asText() }).contains("new-business-not-modelled")
 
         val czk = body["currencies"].single()
