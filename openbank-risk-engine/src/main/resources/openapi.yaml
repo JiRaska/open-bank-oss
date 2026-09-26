@@ -359,7 +359,8 @@ paths:
         (liabilities to non-bank clients and others with maturity up to 2 years, excluding
         liabilities to banks subject to minimum reserves and to the ČNB) per currency, the
         requirement at the configured rate (2%), the balance on the ČNB current account as
-        holdings, and holdings minus requirement. Minimum reserves are unremunerated since
+        holdings, and holdings minus requirement. While no GL account is mapped as the ČNB current
+        account, holdings, surplus and shortfall are null and `holdingsNotStated` says why. Minimum reserves are unremunerated since
         2023-10-05. Parameters come from the versioned set `openbank.risk.min-reserves.*`, named on
         the result. One snapshot day: reserves are held on average over the maintenance period, so
         the surplus is indicative, not a compliance verdict. A GL balance the classification does
@@ -1396,7 +1397,7 @@ components:
     MinReserves:
       type: object
       required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, holdingCurrency,
-        holdings, totalHoldings, remunerationRate, remuneration, excluded, unclassified, notes, assumptions]
+        remunerationRate, remuneration, excluded, unclassified, notes, assumptions]
       properties:
         runId: {type: string, format: uuid}
         asOf: {type: string, format: date}
@@ -1418,15 +1419,21 @@ components:
               requirement: {type: number}
         holdingCurrency: {type: string}
         holdings:
-          type: array
+          type: [array, 'null']
           items: {$ref: '#/components/schemas/ReserveLine'}
-        totalHoldings: {type: number}
+          description: Null when no GL account is mapped as the ČNB current account (see holdingsNotStated)
+        totalHoldings:
+          type: [number, 'null']
+          description: Null when holdings are not stated; never a stand-in zero
+        holdingsNotStated:
+          type: [string, 'null']
+          description: Why holdings, surplus and shortfall are not stated; null when they are
         requirement:
           type: [number, 'null']
           description: Present only for a book entirely in the holding currency (no FX conversion yet)
         surplus:
           type: [number, 'null']
-          description: Holdings minus requirement; negative is a shortfall. Null when requirement is.
+          description: Holdings minus requirement; negative is a shortfall. Null when requirement or holdings is.
         remunerationRate: {type: number}
         remuneration: {type: number}
         excluded:

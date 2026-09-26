@@ -113,21 +113,24 @@ data class MinReserveResult(
     val currencies: List<CurrencyReserveBase>,
     /** The single book currency, when there is exactly one; else null and no comparison is made. */
     val totalCurrency: String?,
-    val holdings: List<ReserveLine>,
+    /** Null when no GL account is mapped as the ČNB current account: see [holdingsNotStated]. */
+    val holdings: List<ReserveLine>?,
+    /** Why holdings (and so the surplus) are not stated; null when they are. */
+    val holdingsNotStated: String?,
     val holdingCurrency: String,
     val excluded: List<ExcludedLine>,
     val unclassified: List<UnclassifiedReserveBalance>,
     val remunerationRate: BigDecimal,
     val notes: List<String>,
 ) {
-    val totalHoldings: BigDecimal get() = holdings.sumOf { it.amount }
+    val totalHoldings: BigDecimal? get() = holdings?.sumOf { it.amount }
 
     /** Requirement in the holding currency; null when the book has any other currency (no FX conversion). */
     val requirement: BigDecimal? get() =
         totalCurrency?.takeIf { it == holdingCurrency }?.let { c -> currencies.single { it.currency == c }.requirement }
 
-    /** Holdings − requirement: positive is a surplus, negative a shortfall; null when [requirement] is. */
-    val surplus: BigDecimal? get() = requirement?.let { totalHoldings.subtract(it) }
+    /** Holdings − requirement: positive is a surplus, negative a shortfall; null when either side is. */
+    val surplus: BigDecimal? get() = requirement?.let { r -> totalHoldings?.subtract(r) }
 
     val remuneration: BigDecimal get() = (requirement ?: BigDecimal.ZERO).multiply(remunerationRate, BigMath.MC)
 }
@@ -151,6 +154,11 @@ object MinimumReserves {
         "Minimum reserves are held on AVERAGE over the ČNB maintenance period; this is one snapshot day, so the " +
             "surplus / shortfall is indicative, not a compliance verdict. The maintenance-period calendar is not modelled."
 
+    const val HOLDINGS_NOT_STATED =
+        "No ledger GL account is mapped as the bank's current account at the ČNB (classification reserve-holding), " +
+            "and the ledger chart has none; 1510 is the ČNB deposit facility, which does not hold reserves. " +
+            "Holdings, surplus and shortfall are therefore not stated rather than reported as zero."
+
     const val CURRENCY_NOTE =
         "The base is reported per currency. Comparing it with holdings needs one currency; the engine has no " +
             "conversion to CZK yet, so requirement vs holdings is reported only for a CZK-only book."
@@ -168,12 +176,15 @@ object MinimumReserves {
                 PositionKind.GL_ACCOUNT -> acc.glAccount(p)
             }
         }
+        // A zero is only stated when an account exists that could hold a non-zero balance (ADR-0097).
+        val holdingsStated = ReserveClass.RESERVE_HOLDING in params.glAccounts.values
         val bookCurrencies = positions.map { it.currency }.distinct().sorted()
         val single = bookCurrencies.singleOrNull()
         return MinReserveResult(
             currencies = bookCurrencies.map { CurrencyReserveBase(it, acc.baseLines(it), params.rate) },
             totalCurrency = single,
-            holdings = acc.holdings,
+            holdings = acc.holdings.takeIf { holdingsStated },
+            holdingsNotStated = HOLDINGS_NOT_STATED.takeUnless { holdingsStated },
             holdingCurrency = params.holdingCurrency,
             excluded = acc.excluded,
             unclassified = acc.unclassified,

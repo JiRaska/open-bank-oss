@@ -59,20 +59,31 @@ class MinimumReservesTest {
     }
 
     @Test
-    fun `the CNB deposit facility 1510 is not a reserve holding, so the requirement is a shortfall`() {
+    fun `no CNB current account mapped - holdings and surplus not stated, 1510 facility is no holding`() {
         val r = MinimumReserves.compute(listOf(customer("-1000.00"), gl("1510", "ASSET", "4000.00")), params)
-        assertThat(r.holdings).isEmpty()
-        assertThat(r.totalHoldings).isEqualByComparingTo("0")
-        assertThat(r.surplus).isEqualByComparingTo("-20.00")
+        assertThat(r.requirement).isEqualByComparingTo("20.00")
+        assertThat(r.holdings).isNull()
+        assertThat(r.totalHoldings).isNull()
+        assertThat(r.surplus).isNull()
+        assertThat(r.holdingsNotStated).isEqualTo(MinimumReserves.HOLDINGS_NOT_STATED)
         assertThat(r.excluded.single().reserveClass).isEqualTo(ReserveClass.NOT_A_HOLDING)
     }
 
     @Test
-    fun `the balance on a CNB current account counts as holdings and gives the surplus`() {
+    fun `with a CNB current account mapped, its balance is holdings and gives the surplus`() {
         val withAccount = params.copy(glAccounts = params.glAccounts + ("1599" to ReserveClass.RESERVE_HOLDING))
         val r = MinimumReserves.compute(listOf(customer("-1000.00"), gl("1599", "ASSET", "50.00")), withAccount)
+        assertThat(r.holdingsNotStated).isNull()
         assertThat(r.totalHoldings).isEqualByComparingTo("50.00")
         assertThat(r.surplus).isEqualByComparingTo("30.00")
+    }
+
+    @Test
+    fun `with a CNB current account mapped but no balance, a zero holding is stated and the shortfall is real`() {
+        val withAccount = params.copy(glAccounts = params.glAccounts + ("1599" to ReserveClass.RESERVE_HOLDING))
+        val r = MinimumReserves.compute(listOf(customer("-1000.00")), withAccount)
+        assertThat(r.totalHoldings).isEqualByComparingTo("0")
+        assertThat(r.surplus).isEqualByComparingTo("-20.00")
     }
 
     @Test

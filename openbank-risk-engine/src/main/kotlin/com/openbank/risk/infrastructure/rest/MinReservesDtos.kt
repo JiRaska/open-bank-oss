@@ -53,8 +53,10 @@ data class MinReservesResponse(
     val parameterSetVersion: String,
     val currencies: List<ReserveBaseDto>,
     val holdingCurrency: String,
-    val holdings: List<ReserveLineDto>,
-    val totalHoldings: BigDecimal,
+    /** Null (with [holdingsNotStated]) when no GL account is mapped as the ČNB current account. */
+    val holdings: List<ReserveLineDto>?,
+    val totalHoldings: BigDecimal?,
+    val holdingsNotStated: String?,
     /** Present only for a book entirely in the holding currency. */
     val requirement: BigDecimal?,
     /** Holdings − requirement; negative is a shortfall. Null when [requirement] is. */
@@ -89,8 +91,9 @@ fun MinReservesAnalysis.toResponse(): MinReservesResponse = MinReservesResponse(
         )
     },
     holdingCurrency = result.holdingCurrency,
-    holdings = result.holdings.map { it.toDto() },
-    totalHoldings = result.totalHoldings.reserveMoney(),
+    holdings = result.holdings?.map { it.toDto() },
+    totalHoldings = result.totalHoldings?.reserveMoney(),
+    holdingsNotStated = result.holdingsNotStated,
     requirement = result.requirement?.reserveMoney(),
     surplus = result.surplus?.reserveMoney(),
     remunerationRate = result.remunerationRate,

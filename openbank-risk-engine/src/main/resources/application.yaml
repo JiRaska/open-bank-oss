@@ -365,7 +365,8 @@ openbank:
         # deposit control 2100-2103 and always join the base (liabilities to non-bank clients).
         #
         # HOLDINGS: the ledger chart (ledger-service db/migration V1..V29) has NO current account at
-        # the ČNB, so no account is mapped reserve-holding and holdings read 0 until one exists.
+        # the ČNB, so no account is mapped reserve-holding and holdings / surplus are NOT STATED (null,
+        # with holdingsNotStated) until one exists — never a stand-in zero.
         # 1510 "Deposit Facility at CNB" (V29) is the ČNB overnight DEPOSIT FACILITY, a separate
         # instrument from the current account on which reserves are held: never a reserve holding.
         # 1000 / 1001 / 1002 are cash and nostro balances at commercial banks: not the ČNB account.

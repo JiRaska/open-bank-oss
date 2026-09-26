@@ -51,7 +51,7 @@ class RiskMinReservesApiIT {
 
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
-    fun `a tied CZK book gets base, 2 percent requirement, zero holdings and a shortfall`() {
+    fun `a tied CZK book gets base and 2 percent requirement, with holdings not stated`() {
         ledger.inputs = LedgerInputs(
             asOf = Fixtures.AS_OF,
             trialBalance = listOf(
@@ -75,9 +75,11 @@ class RiskMinReservesApiIT {
         assertThat(czk["base"].decimalValue()).isEqualByComparingTo("1500.00") // customer deposits only
         assertThat(czk["rate"].decimalValue()).isEqualByComparingTo("0.02")
         assertThat(body["requirement"].decimalValue()).isEqualByComparingTo("30.00")
-        // 1510 is the ČNB deposit facility, not the current account: no holdings
-        assertThat(body["totalHoldings"].decimalValue()).isEqualByComparingTo("0")
-        assertThat(body["surplus"].decimalValue()).isEqualByComparingTo("-30.00")
+        // no GL is the ČNB current account (1510 is the deposit facility): not stated, never a zero
+        assertThat(body["holdings"].isNull).isTrue()
+        assertThat(body["totalHoldings"].isNull).isTrue()
+        assertThat(body["surplus"].isNull).isTrue()
+        assertThat(body["holdingsNotStated"].asText()).contains("current account at the ČNB")
         assertThat(body["remuneration"].decimalValue()).isEqualByComparingTo("0")
         assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).containsExactly("2200")
         assertThat(body["excluded"].map { it["glAccountCode"].asText() })
