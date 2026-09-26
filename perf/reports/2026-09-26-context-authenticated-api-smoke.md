@@ -1,0 +1,25 @@
+# Context authenticated API smoke — 2026-09-26
+
+## Scope and result
+
+Runtime under test: Context head `a20da39c7d1794d6c30a51b18180341cedf20e5b`, packaged JVM application, custom `perf` runtime profile. Authentication and OPA enforcement were enabled; neither `%test` nor `%dev` security overrides were used.
+
+The existing `perf/k6/context-graph-read-baseline.js` complaint smoke profile completed successfully: two minutes, 1→5→0 virtual users, 13,162 requests, 52,648 successful checks, zero failed requests/checks. Mean graph latency was 35.12 ms, median 24.56 ms, p95 91.65 ms, maximum 676.62 ms. Both configured latency thresholds (p95 <300 ms and p99 <1000 ms) passed; p99 was not separately exported as a percentile. Observed throughput averaged 109.64 requests/s in this closed-loop smoke; this is **not** a constant-arrival-rate capacity result.
+
+Every measured request used a signed Keycloak user token and a live root-scoped PAYMENT_COMPLAINT assignment, called the real OPA policy, and returned a nonempty bounded graph with three nodes and two edges. A synthetic source event was published through Kafka and processed by the normal complaint projector. All test identities, case references and domain identifiers were synthetic.
+
+## Authorization and persistence proof
+
+Before measurement, one ROLE_ADMIN user proposed the assignment through HTTP (201), and a distinct ROLE_ADMIN user approved it through HTTP (200, APPROVED). The assigned ROLE_COMPLIANCE reader received 200. A valid token without the graph role received 403; the compliance reader with an unassigned case received 403; an anonymous request received 401. Negative responses contained no graph evidence.
+
+The application database role was explicitly NOSUPERUSER and NOBYPASSRLS. The run used the repository's forced bank RLS and explicit bank/generation predicates. After the completed run, database inspection found 13,163 ALLOWED decisions, 13,163 completed disclosure records, 13,164 audit commitments and 13,163 disclosure commitments. This includes one authorized preflight and one audited assignment denial, alongside the 13,162 measured successful reads. The role-level denial and anonymous rejection happen before application graph querying.
+
+## Environment and limitations
+
+Disposable local dependencies: PostgreSQL 16.3, Kafka native 4.2.0, Keycloak 26.6.3 and OPA 1.17.0, with all published ports restricted to loopback. OPA loaded shared agent/REST policies, their governed data and the Context extension. Keycloak development startup was used only for the disposable synthetic realm; this does not certify production identity deployment. The Context JVM ran on Java 25, matching the packaged class-file version.
+
+The fixture is deliberately small and proves the authenticated API path, not annual-volume headroom. It does not establish 1x/10x stored-volume performance, five-minute constant 100 RPS capacity, other graph lenses, source-service mTLS integration, sandbox deployment, or the money-path workload impact budget. Those acceptance conditions remain open.
+
+Commitment relay export was not enabled: local decisions, disclosures and outbox commits were verified, but delivery into the Audit service was not. Two startup emitter-wiring errors preceded application readiness and must be investigated separately before claiming enabled relay delivery. A malformed initial synthetic event with the wrong source-service literal was rejected before the corrected valid event was projected; it was not a successful ingestion sample.
+
+Credentials and tokens stayed in restricted temporary files and are excluded from this report and the repository.
