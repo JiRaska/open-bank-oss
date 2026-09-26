@@ -15,7 +15,9 @@ import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -69,6 +71,16 @@ class DocumentPactBrokerProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    /**
+     * The class-level `@TestSecurity` authenticates every request, which would turn a consumer's
+     * 401/403 interaction green-by-accident into a mismatch — or, worse, hide a provider that
+     * stopped enforcing authz. For [NO_IDENTITY_STATE] the test identity is cleared in
+     * `verifyPacts`, so the request arrives anonymous, exactly as the consumer encoded it. Same
+     * handling as the folder twin, [DocumentPactProviderVerificationTest].
+     */
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -78,6 +90,9 @@ class DocumentPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        if (context?.interaction?.providerStates?.any { it.name == NO_IDENTITY_STATE } == true) {
+            testIdentity.setTestIdentity(null)
+        }
         context?.verifyInteraction()
     }
 
@@ -99,5 +114,19 @@ class DocumentPactBrokerProviderVerificationTest {
     @State("the template preview renderer is available")
     fun statePreviewRendererAvailable() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Same negative-auth handler as the folder twin — see its KDoc. Both twins must serve every
+     * `@State` set (issue #9752), or a consumer interaction encoding this state verifies on the
+     * folder twin and never reaches the broker, so `can-i-deploy` never sees it.
+     */
+    @State(NO_IDENTITY_STATE)
+    fun noIdentity() {
+        // Intentionally empty: the state IS the absence of an identity (see verifyPacts).
+    }
+
+    private companion object {
+        const val NO_IDENTITY_STATE = "no valid identity is presented"
     }
 }
