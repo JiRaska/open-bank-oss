@@ -3,6 +3,7 @@
 
 package com.openbank.casecoordinator.infrastructure.observability
 
+import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.MultiGauge
@@ -72,8 +73,7 @@ class CaseCoordinatorMetricsService {
         val timer = haltLatencyTimers.computeIfAbsent(key) { (cc, dm) ->
             Timer.builder("openbank.casecoordinator.halt_latency_seconds")
                 .description("Time from kill-switch event to case halt confirmation")
-                .publishPercentiles(P50, P95, P99)
-                .publishPercentileHistogram()
+                .standardPercentiles()
                 .serviceLevelObjectives(
                     Duration.ofSeconds(SIXTY_SECONDS),
                     Duration.ofSeconds(ONE_HUNDRED_TWENTY_SECONDS),
@@ -100,9 +100,6 @@ class CaseCoordinatorMetricsService {
     }
 
     private companion object {
-        const val P50 = 0.5
-        const val P95 = 0.95
-        const val P99 = 0.99
         const val SIXTY_SECONDS: Long = 60
         const val ONE_HUNDRED_TWENTY_SECONDS: Long = 120
         const val ONE_HUNDRED_EIGHTY_SECONDS: Long = 180

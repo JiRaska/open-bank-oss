@@ -5,6 +5,7 @@
 package com.openbank.mcp.infrastructure.observability
 
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.observability.standardPercentiles
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.port.out.CallerIdentitySource
 import com.openbank.mcp.application.port.out.McpMetricsPort
@@ -78,8 +79,7 @@ class McpMetricsAdapter(private val registry: MeterRegistry?) : McpMetricsPort {
         Timer.builder("openbank.mcp.tool_call.duration")
             .tag("service", SERVICE)
             .tag("tool", tool)
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .description("End-to-end MCP tool-call latency, including the PDP round-trip")
             .register(r)
             .record(duration)
@@ -109,10 +109,5 @@ class McpMetricsAdapter(private val registry: MeterRegistry?) : McpMetricsPort {
 
     companion object {
         private const val SERVICE = "mcp"
-
-        // The fleet-standard percentile set (libs DomainMetrics publishes the same three).
-        private const val P50 = 0.5
-        private const val P95 = 0.95
-        private const val P99 = 0.99
     }
 }

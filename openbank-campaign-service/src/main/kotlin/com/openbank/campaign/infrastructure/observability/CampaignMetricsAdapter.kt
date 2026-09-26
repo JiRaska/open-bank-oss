@@ -10,6 +10,7 @@ import com.openbank.campaign.application.port.out.SendHandoffOutcome
 import com.openbank.campaign.application.port.out.StepResolution
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.EnrolmentState
+import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
@@ -165,14 +166,6 @@ private fun terminalCounter(registry: MeterRegistry, state: EnrolmentState): Cou
 
 private fun enrolTimer(registry: MeterRegistry): Timer = Timer.builder(CampaignMetricsAdapter.ENROL_DURATION_METRIC)
     .tag("service", CampaignMetricsAdapter.SERVICE)
-    .publishPercentiles(P50_PCT, P95_PCT, P99_PCT)
-    .publishPercentileHistogram()
+    .standardPercentiles()
     .description("Time to run one whole campaign enrolment sweep, segment evaluation included")
     .register(registry)
-
-// The fleet-standard percentile set (libs DomainMetrics publishes the same three). Declared as
-// constants because detekt MagicNumber fires on each literal passed to publishPercentiles — three
-// violations per call site — and top-level because the builder that uses them is top-level.
-private const val P50_PCT = 0.5
-private const val P95_PCT = 0.95
-private const val P99_PCT = 0.99

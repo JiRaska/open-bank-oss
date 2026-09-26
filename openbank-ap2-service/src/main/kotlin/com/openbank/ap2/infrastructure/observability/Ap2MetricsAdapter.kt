@@ -8,6 +8,7 @@ import com.openbank.ap2.application.port.out.Ap2AuthorizationOutcome
 import com.openbank.ap2.application.port.out.Ap2MetricsPort
 import com.openbank.ap2.application.port.out.MandateSignatureOutcome
 import com.openbank.ap2.domain.MandateKind
+import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
@@ -76,8 +77,7 @@ class Ap2MetricsAdapter(private val registry: MeterRegistry?) : Ap2MetricsPort {
         Timer.builder("openbank.ap2.mandate.verification.duration")
             .tag("service", SERVICE)
             .tag("kind", kindTag)
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .description("Time to verify one AP2 mandate, both stages")
             .register(r)
             .record(duration)
@@ -108,10 +108,5 @@ class Ap2MetricsAdapter(private val registry: MeterRegistry?) : Ap2MetricsPort {
 
     companion object {
         private const val SERVICE = "ap2"
-
-        // The fleet-standard percentile set (libs DomainMetrics publishes the same three).
-        private const val P50 = 0.5
-        private const val P95 = 0.95
-        private const val P99 = 0.99
     }
 }
