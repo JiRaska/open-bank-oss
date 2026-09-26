@@ -16,6 +16,14 @@ spec.loader.exec_module(guard)
 
 
 class SupplyChainTest(unittest.TestCase):
+    def test_personal_model_credential_is_rejected_in_every_workflow(self):
+        for name in ('agent-review.yml', 'other.yml'):
+            doc = {'jobs': {'test': {'steps': [{
+                'run': 'echo ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}',
+            }]}}}
+            self.assertIn('personal model subscription credential is forbidden in workflows',
+                          guard.findings(name, doc))
+
     def test_tags_fail_for_steps_and_reusable_jobs(self):
         for job in ({'uses': 'owner/action@v1'}, {'steps': [{'uses': 'actions/checkout@v4'}]}):
             self.assertTrue(guard.findings('example.yml', {'jobs': {'test': job}}))

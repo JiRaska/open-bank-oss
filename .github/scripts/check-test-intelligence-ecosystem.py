@@ -698,6 +698,7 @@ def check(root: Path) -> list[str]:
         errors.append("fleet has no executed trace-contract evidence pilot")
 
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
+    artifact_lookup = text(root / ".github/scripts/find-latest-main-artifacts.py")
     for needle, message in (
         ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
         ("-name 'run.json'", "admin deployment does not accept the root run-envelope artifact layout"),
@@ -708,9 +709,9 @@ def check(root: Path) -> list[str]:
         ("github.event.workflow_run.head_sha", "admin deployment cannot inspect the exact workflow-run source commit"),
         ("authorize-admin-ui-deploy-source.sh", "admin deployment bypasses its source-ancestry guard"),
         ("needs.deploy-source.outputs.proceed == 'true'", "privileged admin image build bypasses the deploy-source guard"),
-        ("latest_main_artifact", "admin deployment cannot select main-only service evidence"),
-        ("per_page=100&page=${page}",
-         "admin deployment can stage a PR artifact as deployed-main evidence"),
+        ("find-latest-main-artifacts.py", "admin deployment cannot select main-only service evidence"),
+        ("if ! python3 .github/scripts/find-latest-main-artifacts.py",
+         "admin deployment ignores an artifact inventory failure"),
         ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
@@ -729,6 +730,14 @@ def check(root: Path) -> list[str]:
         ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
+            errors.append(message)
+    for needle, message in (
+        ('workflow_run.get("head_branch") == "main"', "artifact lookup accepts non-main evidence"),
+        ("len(artifacts) < PER_PAGE", "artifact lookup blindly scans exhausted result pages"),
+        ("raise ArtifactApiError", "artifact lookup conflates API failure with absence"),
+        ("--self-test", "artifact lookup has no regression harness"),
+    ):
+        if needle not in artifact_lookup:
             errors.append(message)
     deploy_source_guard = text(root / ".github/scripts/authorize-admin-ui-deploy-source.sh")
     for needle, message in (
