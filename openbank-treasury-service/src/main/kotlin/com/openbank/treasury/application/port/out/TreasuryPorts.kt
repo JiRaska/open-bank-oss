@@ -69,6 +69,9 @@ interface DealRepository {
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
 
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
+
+    /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
+    suspend fun recordJournal(journal: LedgerJournalRef)
 }
 
 interface CounterpartyRepository {

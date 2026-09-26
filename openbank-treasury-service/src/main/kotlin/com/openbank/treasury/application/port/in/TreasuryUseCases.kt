@@ -49,6 +49,9 @@ data class CurrencyPosition(
 
 data class SimulatedMarketRun(val moved: Int, val failures: List<Throwable>)
 
+/** One daily-accrual pass (ADR-0315 D5): journals posted and per-deal failures, none swallowed. */
+data class AccrualRun(val journals: Int, val failures: List<Throwable>)
+
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
     /**
@@ -71,4 +74,7 @@ interface TreasuryDealUseCase {
 
     /** One pass of the simulated market (ADR-0315 D9): settle and mature everything due. */
     suspend fun runSimulatedMarket(): SimulatedMarketRun
+
+    /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
+    suspend fun accrueInterest(asOf: LocalDate): AccrualRun
 }

@@ -30,7 +30,9 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -197,6 +199,26 @@ class DealRepositoryImpl(
             ).list()
         }.awaitSuspending()
         return rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
+    }
+
+    /**
+     * Idempotent on the key: an accrual pass and a maturity can record the same day concurrently.
+     * The ledger already deduplicated the journal; here the loser of the unique-key race only
+     * confirms the winner's row exists instead of failing the pass.
+     */
+    override suspend fun recordJournal(journal: LedgerJournalRef) {
+        val recorded = suspend {
+            Panache.withSession { journals.find("idempotencyKey", journal.idempotencyKey).count() }.awaitSuspending() >
+                0
+        }
+        if (recorded()) return
+        try {
+            Panache.withTransaction { persistJournal(journal) }.awaitSuspending()
+        } catch (e: PersistenceException) {
+            if (!recorded()) throw e
+        } catch (e: PgException) {
+            if (!recorded()) throw e
+        }
     }
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
