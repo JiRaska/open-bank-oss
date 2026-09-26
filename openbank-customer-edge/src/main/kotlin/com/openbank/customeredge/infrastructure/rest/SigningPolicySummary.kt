@@ -106,9 +106,28 @@ object SigningPolicySummary {
                 "Remove account $iban $name from trusted accounts — payments to it follow the signing rules again"
             }
             "POLICY_CHANGE" -> if (lang == Lang.CS) "Změna pravidel podepisování" else "Change of signing rules"
+            "STANDING_ORDER", "SDD_MANDATE" -> recurringSummary(
+                approval.path("kind").asText(),
+                payload,
+                iban,
+                name,
+                lang,
+            )
             else -> approval.path("kind").asText()
         }
     }
+
+    /** The recurring outflows held since #10281: a standing order, or a direct-debit mandate. */
+    private fun recurringSummary(kind: String, payload: JsonNode, iban: String, name: String, lang: Lang): String =
+        if (kind == "STANDING_ORDER") {
+            val amount = money(payload.path("amount"), payload.path("currency").textOrNull())?.format(lang).orEmpty()
+            val text = if (lang == Lang.CS) "Trvalý příkaz $amount na účet" else "Standing order of $amount to"
+            "$text $iban $name".trim()
+        } else {
+            val creditor = payload.path("creditorIdentifier").textOrNull().orEmpty()
+            val text = if (lang == Lang.CS) "Souhlas s inkasem pro" else "Direct-debit mandate for"
+            "$text $name $creditor".trim()
+        }
 
     data class Money(val amount: BigDecimal, val currency: String?) {
         fun format(lang: Lang): String {

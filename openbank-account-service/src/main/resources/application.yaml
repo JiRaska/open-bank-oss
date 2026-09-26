@@ -56,8 +56,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # M2M client for outbound service-to-service calls made WITHOUT an inbound user token
   # (the welcome-bonus grant is fired from a Kafka consumer). client_credentials grant on
@@ -81,8 +79,6 @@ quarkus:
         secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
       grant:
         type: client
-    tls:
-      verification: none
 
   redis:
     hosts: redis://localhost:6379
@@ -258,12 +254,17 @@ mp:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%test":

@@ -151,6 +151,23 @@ Trust boundaries:
 
 ## 6. Change log
 
+- **2026-09-21** — Standing orders and SDD mandates follow the business signing policy (#10281,
+  ADR-0312 addendum). `POST /customer/v1/standing-orders` and `POST /customer/v1/sdd/mandates`
+  under `X-Acting-For` now go through `holdForApproval` like the four payment rails: a policy
+  needing more than one signature consumes the initiator's SCA (optional `X-SCA-Challenge-Id`,
+  required only then), holds the exact upstream body and answers 202; a policy that cannot be
+  evaluated answers 503 rather than creating the instruction on one signature. The release targets
+  are a closed enum (`PaymentRail.STANDING_ORDER` / `SDD_MANDATE`), never a URL from data, and the
+  sign route releases every kind in `RELEASABLE_KINDS`. Personal (no `X-Acting-For`) and
+  `required == 1` calls are unchanged. Proven by `BusinessRecurringApprovalIT`.
+  **Feature publication.** `EdgeFeaturesFilter` adds `X-Edge-Features: standingorders.replace` to
+  `GET`/`POST /customer/v1/standing-orders` responses only while `EdgeFeatures.replaceEnabled()` (config
+  `openbank.edge.features.standingorders-replace`, default off) holds, and the same switch makes the edge
+  refuse `replacesStandingOrderId` with 501 otherwise: an older standing-order-service would ignore the
+  field, create a second order and cancel nothing (double debit), so the route and the header cannot
+  disagree. Enable it only after standing-order-service is rolled out. Proven by `EdgeFeaturesHeaderIT`
+  and `EdgeFeaturesOffIT`.
+
 - **2026-09-19** — **Business multi-signature payments and signing routes (#10281, E-8).** New
   customer routes under `X-Acting-For` (mandate-checked, fail-closed): signing policy read and change,
   trusted payees list, add and remove, and approvals list, detail, sign and reject. There is also

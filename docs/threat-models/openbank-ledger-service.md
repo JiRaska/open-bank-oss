@@ -535,3 +535,15 @@ set) apply equally to the new `ledger.approval.decide` action.
   leaves 1001 untouched and treasury's CZK postings fail with 422 rather than land elsewhere.
   **STRIDE-T:** no validation or posting path changes — the accounts are ordinary leaves under the
   same currency-match and balance checks, written only through `postJournal`.
+- **2026-09-26** — **`POST /api/v1/journals` answers `Idempotent-Replayed: true|false` (#10904).**
+  A replayed idempotency key got the same 201 and the same body as the original posting, so a
+  caller could not tell a posting from a no-op. The lending ledger backfill proved the harm: a second
+  request replayed all 352 legs, booked nothing, and still reported 44 loans as posted. The use case
+  now returns whether the key was already posted, from both the sequential replay and the
+  concurrent-race recovery, and the resource sets the header. Status code and body are unchanged.
+  **STRIDE-I:** the header tells the caller only whether a key it supplied itself was already
+  posted. It is set solely on the authenticated create path (`ROLE_API`/`ROLE_OPERATOR`, then
+  per-identity rego), and answering at all already required a balanced, valid request, so it is no
+  oracle over other callers' keys beyond what the unchanged replay body already returned.
+  **STRIDE-R:** it strengthens non-repudiation, because a caller's audit record can now tell "posted"
+  from "already posted". No validation, posting, lock or outbox path changes. Rollback: drop the header.

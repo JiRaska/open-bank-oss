@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.0...lending-service-v0.37.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **lending:** stop counting idempotent replays as posted in the ledger backfill ([#10938](https://github.com/JiRaska/open-bank-oss/issues/10938)) ([a28de17](https://github.com/JiRaska/open-bank-oss/commit/a28de17cd76c5203622236b02b2bb005c840f098))
+
 ## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.36.0...lending-service-v0.37.0) (2026-09-25)
 
 
