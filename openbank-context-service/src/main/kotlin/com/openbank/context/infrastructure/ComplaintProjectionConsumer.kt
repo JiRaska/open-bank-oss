@@ -116,12 +116,13 @@ class ComplaintProjectionConsumer(
     private fun projectCurrent(session: Mutiny.Session, event: ComplaintProjectionEvent): Uni<Void> = mutation(
         session,
         """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
+                (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
+                VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
         """.trimIndent(),
         mapOf(
             "bankScope" to bankScope,
+            "generation" to projectionGeneration,
             "eventKey" to event.eventKey,
             "source" to SOURCE_SERVICE,
             "aggregateRef" to event.complaintKey,
@@ -208,7 +209,7 @@ class ComplaintProjectionConsumer(
              valid_from, valid_to, recorded_at, source_version)
             VALUES (:id, :bankScope, :generation, 'COMPLAINT', :fromKey, :toKey, :relation,
                     :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (edge_id) DO UPDATE SET
+            ON CONFLICT (bank_scope, projection_generation, edge_id) DO UPDATE SET
               evidence_ref = EXCLUDED.evidence_ref,
               valid_from = EXCLUDED.valid_from,
               valid_to = NULL,

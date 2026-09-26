@@ -80,12 +80,13 @@ class DomesticPaymentProjectionConsumer(
             mutation(
                 session,
                 """INSERT INTO context_projection_events
-                    (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                    VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
-                    ON CONFLICT (bank_scope, event_key) DO NOTHING
+                    (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
+                    VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                    ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
                 """.trimIndent(),
                 mapOf(
                     "bankScope" to bankScope,
+                    "generation" to projectionGeneration,
                     "eventKey" to event.eventKey,
                     "source" to SOURCE_SERVICE,
                     "aggregateRef" to event.paymentKey,
@@ -147,7 +148,7 @@ class DomesticPaymentProjectionConsumer(
              source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version)
             VALUES (:id, :bankScope, :generation, 'COMPLAINT', :fromKey, :toKey, :relation,
                     :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (edge_id) DO NOTHING
+            ON CONFLICT (bank_scope, projection_generation, edge_id) DO NOTHING
         """.trimIndent(),
         mapOf(
             "id" to edge.id,

@@ -174,3 +174,23 @@ lifecycle safeguard complements the server's assignment, OPA and read-audit chec
 - [ADR-0085](0085-complaints-handling.md)
 - [ADR-0117](0117-dispute-and-complaint-lifecycle.md)
 - [Implementation roadmap #9945](https://github.com/JiRaska/open-bank-oss/issues/9945)
+
+
+### Generation-scoped rebuild transition
+
+The event ledger records the configured projection generation for new ingestion. Legacy rows keep
+NULL generation because their original configured generation cannot be established from the ledger.
+They remain evidence and do not suppress reconstruction into a named generation. Retained legacy
+incident digests are checked by aggregate and revision before any new generation write: matching
+content can rebuild; conflicting content is rejected; a missing digest remains explicitly unverifiable.
+Incident revision
+uniqueness and edge primary keys are scoped by bank and generation, preserving existing edge IDs.
+
+This is a coordinated writer transition: stop and drain all five affected consumers before V19,
+apply the migration, and start only generation-aware writers. Mixed old/new writers are unsupported
+because old conflict targets no longer match the new scoped constraints. Do not roll back to an
+old writer against this schema. After any multi-generation ingestion, stop consumers and retain the
+expanded schema; collapsing the ledger or edge keys would lose evidence. Runtime configuration and
+controlled replay approval remain prerequisites; the migration does not activate replay or switch
+the reader generation. Reconstruction tests must cover nodes, relationships, duplicate delivery,
+legacy evidence preservation and incident conflicts, not merely event-ledger row counts.

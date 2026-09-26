@@ -20,9 +20,11 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
+import jakarta.persistence.IdClass
 import jakarta.persistence.Table
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
+import java.io.Serializable
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -75,16 +77,29 @@ class ContextNodeEntity : PanacheEntityBase() {
     var sourceVersion: Long = 0
 }
 
+data class ContextEdgeIdentity(
+    var id: UUID? = null,
+    var bankScope: String? = null,
+    var projectionGeneration: Long = 1,
+) : Serializable {
+    private companion object {
+        const val serialVersionUID: Long = 1L
+    }
+}
+
 @Entity
+@IdClass(ContextEdgeIdentity::class)
 @Table(name = "context_edges")
 class ContextEdgeEntity : PanacheEntityBase() {
     @Id
     @Column(name = "edge_id")
     lateinit var id: UUID
 
+    @Id
     @Column(name = "bank_scope")
     lateinit var bankScope: String
 
+    @Id
     @Column(name = "projection_generation")
     var projectionGeneration: Long = 1
 

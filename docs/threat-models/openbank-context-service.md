@@ -212,3 +212,13 @@ Scale the context deployment to zero to stop routes and projections; source serv
 paths continue independently. Before any real projection or audit record exists, migrations can be
 rolled back in reverse order. After adoption, retain projection, assignment and audit tables for
 evidence retention and rebuild a new generation instead of deleting the active one.
+
+
+Generation replay retains unknown legacy ledger provenance as NULL and never assigns it to an
+active generation. Retained legacy incident digests are checked before a new generation write by source aggregate
+and revision; a conflict rolls back without graph or ledger rows. Missing legacy digests remain
+unverifiable rather than being represented as verified. New idempotency identities, incident revision constraints and ORM edge
+identities include bank and generation. V19 requires a drained, coordinated writer transition;
+old binaries must not run against the new conflict targets. Replay still requires controlled
+source retention and generation configuration and does not independently grant access to any
+graph. Existing authorization and bank-scoped readers continue to apply.

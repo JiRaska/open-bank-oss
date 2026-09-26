@@ -59,17 +59,36 @@ class IncidentProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
+    private fun project(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = session.createNativeQuery(
+        "SELECT COALESCE(content_digest, '') FROM context_projection_events " +
+            "WHERE bank_scope = :bank AND projection_generation IS NULL " +
+            "AND source_system = :source AND aggregate_ref = :aggregate AND source_version = :version",
+        String::class.java,
+    ).setParameter("bank", bankScope).setParameter("source", SOURCE_SERVICE)
+        .setParameter("aggregate", event.rootKey).setParameter("version", event.sourceVersion)
+        .resultList.invoke { digests ->
+            digests.forEach { digest ->
+                if (digest.isEmpty()) {
+                    meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "legacy_digest_unavailable")
+                        .increment()
+                } else {
+                    require(digest == event.contentDigest) { "conflicting legacy ICT incident revision replay" }
+                }
+            }
+        }.flatMap { projectCurrent(session, event) }
+
+    private fun projectCurrent(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
         session,
         """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at,
+                (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at,
                  content_digest)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt,
+                VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt,
                         :digest)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
+                ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
         """.trimIndent(),
         mapOf(
             "bankScope" to bankScope,
+            "generation" to projectionGeneration,
             "eventKey" to event.eventKey,
             "source" to SOURCE_SERVICE,
             "aggregateRef" to event.rootKey,
@@ -91,16 +110,24 @@ class IncidentProjectionConsumer(
     private fun verifyReplay(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> =
         session.createNativeQuery(
             "SELECT COALESCE(content_digest, '') FROM context_projection_events " +
-                "WHERE bank_scope = :bankScope AND event_key = :eventKey",
+                "WHERE bank_scope = :bankScope AND projection_generation = :generation " +
+                "AND event_key = :eventKey",
             String::class.java,
-        ).setParameter("bankScope", bankScope).setParameter("eventKey", event.eventKey).singleResult.flatMap { stored ->
-            if (stored.isEmpty()) {
-                meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "legacy_digest_unavailable").increment()
-            } else {
-                require(stored == event.contentDigest) { "conflicting ICT incident revision replay" }
+        ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+            .setParameter("eventKey", event.eventKey).singleResult.flatMap { stored ->
+                if (stored.isEmpty()) {
+                    meters.counter(
+                        METRIC_EVENTS,
+                        "stream",
+                        "incident",
+                        "outcome",
+                        "legacy_digest_unavailable",
+                    ).increment()
+                } else {
+                    require(stored == event.contentDigest) { "conflicting ICT incident revision replay" }
+                }
+                Uni.createFrom().voidItem()
             }
-            Uni.createFrom().voidItem()
-        }
 
     private fun upsertIncident(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Int> = upsertNode(
         session,
@@ -133,7 +160,7 @@ class IncidentProjectionConsumer(
                          source_system, evidence_ref, valid_from, recorded_at, source_version)
                         VALUES (:id, :bankScope, :generation, 'INCIDENT', :root, :serviceKey, 'AFFECTS_SERVICE',
                                 :source, :evidence, :validFrom, :recordedAt, :version)
-                        ON CONFLICT (edge_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at,
+                        ON CONFLICT (bank_scope, projection_generation, edge_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at,
                           source_version = EXCLUDED.source_version
                         WHERE context_edges.source_version < EXCLUDED.source_version
                     """.trimIndent(),
@@ -241,9 +268,6 @@ class IncidentProjectionConsumer(
         )
     }
 
-    private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
-    private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
-
     private companion object {
         const val SOURCE_SERVICE = "security-scanner"
         const val SCHEMA_VERSION = 1L
@@ -260,6 +284,9 @@ class IncidentProjectionConsumer(
         )
     }
 }
+
+private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
+private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
 
 private fun incidentDigest(payload: String): String = MessageDigest.getInstance("SHA-256")
     .digest(payload.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
