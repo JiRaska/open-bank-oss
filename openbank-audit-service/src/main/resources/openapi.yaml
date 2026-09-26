@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.7.0
+  version: 1.8.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -231,7 +231,9 @@ paths:
       operationId: verifyAnchors
       description: >
         Recomputes each anchor digest, verifies its signature, and confirms the attested chain
-        head still matches the live chain. Detects a wholesale rewrite of the log that the
+        head still matches the live chain. A stored digest mismatch or non-INTACT captured
+        chain status also returns BROKEN with a distinct reason; a valid signature over a broken
+        checkpoint is not evidence of forgery. Detects a wholesale rewrite of the log that the
         internal hash-chain walk alone cannot.
       security:
         - bearerAuth: []
@@ -354,14 +356,14 @@ components:
         status:
           type: string
           enum: [INTACT, BROKEN, UNVERIFIED, NO_ANCHORS]
-          description: INTACT only when every anchor's signature and attested head verify; UNVERIFIED means a signature or historical key cannot be verified, and NO_ANCHORS means no independent evidence exists.
+          description: INTACT only when every anchor's stored digest, signature and attested head verify and its captured chainStatus is INTACT; UNVERIFIED means a signature or historical key cannot be verified, and NO_ANCHORS means no independent evidence exists.
         anchorCount:
           type: integer
           format: int64
         verifiedCount:
           type: integer
           format: int64
-          description: Anchors whose signature and attested head both verified.
+          description: Anchors whose stored digest, signature and attested head verified and whose captured chainStatus is INTACT.
         unsignedCount:
           type: integer
           format: int64
@@ -405,6 +407,12 @@ components:
         headHashMismatch:
           type: boolean
           description: The attested head hash no longer matches the live chain (rewrite).
+        anchorDigestMismatch:
+          type: boolean
+          description: The stored anchor digest differs from the recomputed checkpoint digest.
+        capturedChainNotIntact:
+          type: boolean
+          description: The checkpoint did not attest an INTACT chain at capture time, even if its signature is valid.
 
     AccessLogEntryResponse:
       type: object

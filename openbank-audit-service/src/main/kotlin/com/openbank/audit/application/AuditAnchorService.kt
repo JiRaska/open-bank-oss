@@ -158,15 +158,20 @@ class AuditAnchorService(
             anchor.chainedCount,
             anchor.chainStatus,
             anchor.signedAt,
-        ).toByteArray(Charsets.UTF_8)
-        val signatureOk = anchor.signature?.let { signer.verify(digest, it, anchor.keyId) }
+        )
+        val digestMismatch = digest != anchor.anchorDigest
+        val capturedChainNotIntact = anchor.chainStatus != STATUS_INTACT
+        val signatureOk = anchor.signature?.let { signer.verify(digest.toByteArray(Charsets.UTF_8), it, anchor.keyId) }
         val headMatches = anchor.lastEntryId?.let { auditRepo.recordHashOf(it) } == anchor.lastRecordHash
-        if (signatureOk == false || !headMatches) {
+        val checkpointInvalid = digestMismatch || capturedChainNotIntact
+        if (signatureOk == false || !headMatches || checkpointInvalid) {
             return AnchorCheckResult.Broken(
                 AnchorBreak(
                     lastEntryId = anchor.lastEntryId,
                     signatureInvalid = signatureOk == false,
                     headHashMismatch = !headMatches,
+                    anchorDigestMismatch = digestMismatch,
+                    capturedChainNotIntact = capturedChainNotIntact,
                 ),
             )
         }
@@ -207,8 +212,14 @@ data class AnchorVerification(
     val firstBroken: AnchorBreak?,
 )
 
-/** The first anchor whose signature or attested head failed verification. */
-data class AnchorBreak(val lastEntryId: UUID?, val signatureInvalid: Boolean, val headHashMismatch: Boolean)
+/** The first checkpoint whose digest, captured chain status, signature or head failed verification. */
+data class AnchorBreak(
+    val lastEntryId: UUID?,
+    val signatureInvalid: Boolean,
+    val headHashMismatch: Boolean,
+    val anchorDigestMismatch: Boolean = false,
+    val capturedChainNotIntact: Boolean = false,
+)
 
 /** Public material needed to verify KMS-backed anchor signatures independently of the audit database. */
 data class AnchorVerificationKey(val keyId: String, val algorithm: String, val publicKeyPem: String)

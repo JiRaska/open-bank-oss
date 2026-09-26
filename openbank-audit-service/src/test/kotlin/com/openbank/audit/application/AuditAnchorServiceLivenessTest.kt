@@ -116,7 +116,17 @@ class AuditAnchorServiceLivenessTest {
             keyId = "legacy-hmac",
             signedAt = Instant.parse("2026-08-16T05:00:00Z"),
         )
-        coEvery { anchorRepository.all() } returns listOf(anchor)
+        coEvery { anchorRepository.all() } returns listOf(
+            anchor.copy(
+                anchorDigest = AuditAnchor.digest(
+                    anchor.lastEntryId,
+                    anchor.lastRecordHash,
+                    anchor.chainedCount,
+                    anchor.chainStatus,
+                    anchor.signedAt,
+                ),
+            ),
+        )
         every { signer.verify(any(), any(), "legacy-hmac") } returns null
         coEvery { auditRepository.recordHashOf(anchor.lastEntryId!!) } returns anchor.lastRecordHash
 

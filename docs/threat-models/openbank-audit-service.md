@@ -53,3 +53,14 @@ existing enforcement setting and role/action policy are unchanged by this wiring
 The real-services settlement proof with `--with-audit` uses enforced authorization and the generated
 audit bundle, then checks complete outbox-to-audit payload correspondence and the authenticated
 integrity endpoint. It does not attest the deployed enforcement setting or external signed anchors.
+
+## Online checkpoint verification consistency
+
+Online verification compares the recomputed checkpoint digest with the stored digest and
+requires the captured chain status to be INTACT before counting the checkpoint as verified.
+It reports digest mismatch and a non-intact captured chain separately from signature failure:
+a correctly signed broken checkpoint is evidence of the producer's observation, not evidence
+of signature forgery. This aligns operational results with the independent verifier's rejection
+of such checkpoints. Unsigned coherent checkpoints and unavailable historical keys remain
+UNVERIFIED. These checks do not establish external custody, completeness of an export or
+retention guarantees; independent verification remains necessary.
