@@ -312,6 +312,26 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the risk snapshot runs with no identity",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {

@@ -94,6 +94,21 @@ class RiskEngineCapitalPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The negative half (ADR-0279): with no identity the risk engine must refuse the read. A
+     * contract of successes alone stays green when the provider stops enforcing authentication.
+     */
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-risk-engine")
+    fun anonymousListRefusedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_IDENTITY)
+        .uponReceiving("GET the risk snapshot runs with no identity")
+        .path(RISK_SNAPSHOTS_PATH)
+        .query("limit=$RUN_LIST_LIMIT")
+        .method("GET")
+        .willRespondWith()
+        .status(HTTP_UNAUTHORIZED)
+        .toPact()
+
     private fun currency(c: au.com.dius.pact.consumer.dsl.LambdaDslObject) {
         c.stringType("currency", "CZK")
         c.eachLike("classes") { k ->
@@ -113,6 +128,13 @@ class RiskEngineCapitalPactConsumerTest {
         val run = json.readValue<SnapshotRunListResponse>(body).runs.single()
         assertThat(run.status).isEqualTo("TIED_OUT")
         assertThat(LocalDate.parse(run.asOf)).isEqualTo(LocalDate.parse(REPORTING_DATE))
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousListRefusedPact")
+    fun `an anonymous read of the run list is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).queryParam(limitParam, RUN_LIST_LIMIT)
+            .get(runsPath).then().statusCode(HTTP_UNAUTHORIZED)
     }
 
     @Test
@@ -149,6 +171,8 @@ class RiskEngineCapitalPactConsumerTest {
 
     private companion object {
         const val STATE = "a TIED_OUT risk snapshot exists at the report date"
+        const val NO_IDENTITY = "no valid identity is presented"
+        const val HTTP_UNAUTHORIZED = 401
         const val RISK_SNAPSHOTS_PATH = "/api/v1/risk/snapshots"
         const val REPORTING_DATE = "2026-06-30"
         const val EXAMPLE_RUN_ID = "0190a4c0-0000-7000-8000-00000000c020"

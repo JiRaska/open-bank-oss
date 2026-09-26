@@ -15,6 +15,7 @@ import com.openbank.risk.integration.RiskSnapshotApiIT
 import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -45,6 +46,9 @@ class RiskEnginePactBrokerProviderVerificationTest {
     @Inject
     lateinit var ledger: FakeLedgerPort
 
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -54,7 +58,17 @@ class RiskEnginePactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The class-level @TestSecurity would authenticate the negative interaction and turn its
+        // expected 401 into a 200 mismatch, or hide a provider that stopped enforcing authn.
+        if (context?.interaction?.providerStates?.any { it.name == CapitalPactState.NO_IDENTITY } == true) {
+            testIdentity.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(CapitalPactState.NO_IDENTITY)
+    fun noIdentity() {
+        // Intentionally empty: the state IS the absence of an identity (see verifyPacts).
     }
 
     @State(CapitalPactState.NAME)

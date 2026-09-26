@@ -16,6 +16,7 @@ import com.openbank.risk.integration.RiskSnapshotApiIT
 import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
@@ -51,6 +52,9 @@ class RiskEnginePactProviderVerificationTest {
     @Inject
     lateinit var ledger: FakeLedgerPort
 
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -60,7 +64,17 @@ class RiskEnginePactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The class-level @TestSecurity would authenticate the negative interaction and turn its
+        // expected 401 into a 200 mismatch, or hide a provider that stopped enforcing authn.
+        if (context?.interaction?.providerStates?.any { it.name == CapitalPactState.NO_IDENTITY } == true) {
+            testIdentity.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(CapitalPactState.NO_IDENTITY)
+    fun noIdentity() {
+        // Intentionally empty: the state IS the absence of an identity (see verifyPacts).
     }
 
     @State(CapitalPactState.NAME)
@@ -76,6 +90,9 @@ class RiskEnginePactProviderVerificationTest {
  */
 object CapitalPactState {
     const val NAME = "a TIED_OUT risk snapshot exists at the report date"
+
+    /** The negative-auth state: the request carries no identity and must be refused 401. */
+    const val NO_IDENTITY = "no valid identity is presented"
     private const val REPORTING_DATE = "2026-06-30"
 
     fun seed(ledger: FakeLedgerPort): Map<String, Any> {
