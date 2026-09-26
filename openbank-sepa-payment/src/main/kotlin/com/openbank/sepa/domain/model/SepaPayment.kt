@@ -54,6 +54,8 @@ data class SepaPayment(
     val completedAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Monotonic aggregate revision persisted with every lifecycle transition. */
+    val revision: Long = 0,
     val transactionId: UUID? = null,
 ) {
     fun transitionTo(
@@ -90,6 +92,7 @@ data class SepaPayment(
                 else -> completedAt
             },
             updatedAt = now,
+            revision = revision + 1,
         )
     }
 

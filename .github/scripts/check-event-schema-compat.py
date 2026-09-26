@@ -506,13 +506,59 @@ def self_test() -> int:
          compare_json_schema("s.schema.json", doc_schema_old, doc_schema_branch_removed),
          True, "removed from the schema")
 
+    # SCOPE (#6253): which files are event contracts at all. Each case is a real repo path.
+    def selected(name: str, path: str, want: bool) -> None:
+        got = is_event_json_schema(path)
+        if got != want:
+            fails.append(f"{name}: is_event_json_schema({path!r}) = {got}, want {want}")
+
+    selected("the contracts-repo convention is in scope",
+             "openbank-contracts/openbank-document-service/schema/document-event.schema.json", True)
+    selected("an in-service event-schemas/ contract is in scope (the #6253 gap)",
+             "openbank-product-catalog/src/main/resources/event-schemas/catalog-change-event-v1.schema.json", True)
+    selected("a catalog-pack product definition is NOT an event contract",
+             "openbank-product-catalog/src/main/resources/catalog-packs/banking/loan-v2.schema.json", False)
+    selected("the governance manifest schema is NOT an event contract",
+             "openbank-libs/governance/governance.schema.json", False)
+    selected("a helm values schema is NOT an event contract",
+             "openbank-product-catalog/helm/product-catalog/values.schema.json", False)
+
+    # ...and the comparator can actually read the newly covered shape (a flat object envelope, not
+    # document-event's oneOf): removing a required field of the real CatalogChangeEvent is breaking.
+    catalog_old = _json.dumps({
+        "title": "Catalog change event v1", "type": "object",
+        "required": ["eventId", "eventType"],
+        "properties": {"eventId": {"type": "string"}, "eventType": {"type": "string"}},
+    })
+    catalog_new = _json.dumps({
+        "title": "Catalog change event v1", "type": "object",
+        "required": ["eventType"],
+        "properties": {"eventType": {"type": "string"}},
+    })
+    case("removing eventId from a flat catalog-change envelope is breaking",
+         compare_json_schema("e.schema.json", catalog_old, catalog_new), True, "eventId removed")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: event schema compatibility is falsifiable (17 cases)")
+    print("self-test ok: event schema compatibility is falsifiable (23 cases)")
     return 0
+
+
+# Where a JSON Schema EVENT CONTRACT lives. `/schema/` is the openbank-contracts convention
+# (document-event). `/event-schemas/` is the in-service one: product-catalog's live
+# CatalogChangeEvent v1 envelope, written through the outbox, sits at
+# src/main/resources/event-schemas/ and matched neither — so a removed or newly required property
+# in it was compared by nothing (#6253). Deliberately NOT every `*.schema.json`: catalog-pack
+# product definitions, governance.schema.json and helm values.schema.json are not event contracts,
+# and "a removed property breaks consumers" is the wrong rule for them.
+EVENT_JSON_SCHEMA_DIRS = ("/schema/", "/event-schemas/")
+
+
+def is_event_json_schema(path: str) -> bool:
+    return path.endswith(".schema.json") and any(d in path for d in EVENT_JSON_SCHEMA_DIRS)
 
 
 def main() -> int:
@@ -535,7 +581,7 @@ def main() -> int:
             if old_text is not None:
                 findings.extend(compare_avsc(path, old_text, new_text))
             continue
-        if path.endswith(".schema.json") and "/schema/" in path:
+        if is_event_json_schema(path):
             old_text = git_show(args.base, path)
             try:
                 new_text = open(path, encoding="utf-8").read()

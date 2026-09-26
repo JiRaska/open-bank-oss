@@ -30,7 +30,7 @@ triaging an incident that starts on `sdd`.
 
 ## Health & probes
 
-- Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
+- Readiness: `TCP :8129` · Liveness: `GET :8086/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `sdd`); dashboards in Grafana.
 - Logs: `kubectl logs -n sdd deploy/sdd-service -f`, or Loki
   `{namespace="sdd"}`.

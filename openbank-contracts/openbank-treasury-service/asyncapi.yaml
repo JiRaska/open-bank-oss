@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+# Everything below is DERIVED from the code that runs — the payload classes in
+# `TreasuryEventPayloads.kt` and `KafkaTreasuryOutboxEventPublisher`, which emits them verbatim.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Treasury Service — deal events
+  version: 1.0.0
+  description: |
+    Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings and
+    the ČNB overnight deposit facility.
+
+    **Transactional outbox.** Events are written to `treasury_outbox` in the same transaction as
+    the deal row, its timeline entry and its ledger journal reference, and dispatched afterwards
+    (`TreasuryOutboxDispatcher`, `KafkaTreasuryOutboxEventPublisher`). A published event always
+    corresponds to a committed change — and, for settled / matured / reversed, to a journal the
+    ledger has already accepted (`ledgerJournalId`).
+
+    **Money-path topic.** audit-service subscribes (`audit-money-path-subscription`). The risk
+    engine may consume it as `MONEY_MARKET_DEAL` instruments (ADR-0314 D4); today the risk engine
+    reads the treasury GL accounts from the trial balance instead.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: "Strimzi cluster `openbank-cluster` in `messaging`; mTLS, per-service KafkaUser (`treasury-service`)."
+
+channels:
+  treasuryDealEvents:
+    address: openbank.treasury.deal.events
+    title: Treasury deal lifecycle
+    description: |
+      `openbank-infra/gitops/components/treasury/kafka-topic.yaml`. A change feed, not a source of
+      truth: a consumer rebuilding a projection seeds from `GET /api/v1/treasury/deals`.
+
+      **Partitioning key: `aggregateId`** = the deal id (`OutboxKafkaHeaders.partitionKey`), so
+      every event about one deal stays ordered.
+    messages:
+      DealBooked:
+        $ref: '#/components/messages/DealBooked'
+      DealSettled:
+        $ref: '#/components/messages/DealSettled'
+      DealMatured:
+        $ref: '#/components/messages/DealMatured'
+      DealReversed:
+        $ref: '#/components/messages/DealReversed'
+
+operations:
+  publishTreasuryDealEvents:
+    action: send
+    channel:
+      $ref: '#/channels/treasuryDealEvents'
+    summary: treasury-service publishes money-market deal lifecycle events.
+
+components:
+  messages:
+    DealBooked:
+      name: treasury.deal.booked.v1
+      summary: "A second person approved the deal (four-eyes). Nothing has posted yet."
+      payload:
+        $ref: '#/components/schemas/DealBooked'
+    DealSettled:
+      name: treasury.deal.settled.v1
+      summary: "Principal exchanged on the value date; the settlement journal is in the ledger."
+      payload:
+        $ref: '#/components/schemas/DealSettled'
+    DealMatured:
+      name: treasury.deal.matured.v1
+      summary: "Principal and ACT/360 interest repaid; the maturity journal is in the ledger."
+      payload:
+        $ref: '#/components/schemas/DealMatured'
+    DealReversed:
+      name: treasury.deal.reversed.v1
+      summary: "A booked or settled deal was undone; a settled one by an offsetting journal."
+      payload:
+        $ref: '#/components/schemas/DealReversed'
+
+  schemas:
+    ProductType:
+      type: string
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY]
+
+    SourceService:
+      type: string
+      const: treasury-service
+      description: The producer's own attribution claim; audit-service would otherwise derive one.
+
+    DealBooked:
+      type: object
+      description: "Constructor properties of `DealBooked` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, counterpartyId, currency, principal, rate, valueDate, maturityDate, createdBy, approvedBy, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string }
+        currency: { type: string, enum: [CZK, EUR] }
+        principal: { type: number }
+        rate: { type: number, description: 'Annual percentage, ACT/360' }
+        valueDate: { type: string, format: date }
+        maturityDate: { type: string, format: date }
+        createdBy: { type: string }
+        approvedBy: { type: string, description: 'Never equal to createdBy (four-eyes, enforced in the domain and the database).' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    DealSettled:
+      type: object
+      description: "Constructor properties of `DealSettled` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, counterpartyId, currency, principal, valueDate, maturityDate, ledgerJournalId, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string }
+        currency: { type: string, enum: [CZK, EUR] }
+        principal: { type: number }
+        valueDate: { type: string, format: date }
+        maturityDate: { type: string, format: date }
+        ledgerJournalId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    DealMatured:
+      type: object
+      description: "Constructor properties of `DealMatured` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, counterpartyId, currency, principal, interest, maturityDate, ledgerJournalId, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string }
+        currency: { type: string, enum: [CZK, EUR] }
+        principal: { type: number }
+        interest: { type: number, description: 'ACT/360, 2 dp half-up' }
+        maturityDate: { type: string, format: date }
+        ledgerJournalId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    DealReversed:
+      type: object
+      description: "Constructor properties of `DealReversed` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, counterpartyId, currency, principal, reversedBy, reason, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string }
+        currency: { type: string, enum: [CZK, EUR] }
+        principal: { type: number }
+        reversedBy: { type: string }
+        reason: { type: string }
+        ledgerJournalId:
+          type: [string, 'null']
+          format: uuid
+          description: Null when reversed from BOOKED, before anything had posted.
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }

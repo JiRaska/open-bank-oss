@@ -57,6 +57,9 @@ class DocumentEntity {
     @field:Column(name = "idempotency_key")
     var idempotencyKey: String? = null
 
+    @field:Column(name = "sealed_sha256")
+    var sealedSha256: String? = null
+
     @field:Column(name = "retain_until")
     var retainUntil: LocalDate? = null
 

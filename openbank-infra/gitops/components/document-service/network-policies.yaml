@@ -47,10 +47,21 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: kyb
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
           port: 8143
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

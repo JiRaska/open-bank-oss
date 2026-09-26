@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for account-service's mTLS read of party-service (8443, client auth
+# REQUIRED): the business-account catch-up's party list read. Same shape as sca-internal-tls and
+# delegation-internal-tls: tls.crt/tls.key identify account-service, ca.crt trusts party-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: account-internal-tls
+  namespace: accounts
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: account-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: account-service.accounts.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -68,6 +68,7 @@ class SignatureCeremonyService(
             status = CeremonyStatus.DRAFT,
             signatureLevel = cmd.signatureLevel,
             createdAt = Instant.now(clock),
+            parallel = cmd.parallel,
         ).open()
         return ceremonyRepo.save(ceremony)
     }
@@ -176,7 +177,7 @@ class SignatureCeremonyService(
         } else {
             document
         }
-        documentRepo.save(pending.markSigned())
+        documentRepo.save(pending.markSigned().sealed(Document.sha256(sealed)))
     }
 
     companion object {

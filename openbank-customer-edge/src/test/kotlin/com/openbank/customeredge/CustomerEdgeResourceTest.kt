@@ -1351,7 +1351,7 @@ class CustomerEdgeResourceTest {
         val body = """{"debitAccountId":"$acct","creditorIban":"CZ123","creditorName":"Landlord",""" +
             """"amountMinorUnits":1500000,"currency":"CZK","frequency":"MONTHLY",""" +
             """"paymentType":"DOMESTIC","startDate":"2026-07-01"}"""
-        val resp = soResourceFor(upstream, caller).createStandingOrder(body, null)
+        val resp = soResourceFor(upstream, caller).createStandingOrder(body, null, null)
         assertThat(resp.status).isEqualTo(403)
         verify(exactly = 0) { upstream.post(match { it.contains("/standing-orders") }, any(), any()) }
     }
@@ -1370,7 +1370,7 @@ class CustomerEdgeResourceTest {
         val body = """{"debitAccountId":"$acct","creditorIban":"CZ123","creditorName":"Landlord",""" +
             """"amountMinorUnits":1500000,"currency":"CZK","frequency":"MONTHLY",""" +
             """"paymentType":"DOMESTIC","startDate":"2026-07-01"}"""
-        val resp = soResourceFor(upstream, caller).createStandingOrder(body, "idem-1")
+        val resp = soResourceFor(upstream, caller).createStandingOrder(body, "idem-1", null)
         assertThat(resp.status).isEqualTo(201)
         val node = mapper.readTree(forwarded!!)
         assertThat(node.get("partyId").asText()).isEqualTo(caller.toString())

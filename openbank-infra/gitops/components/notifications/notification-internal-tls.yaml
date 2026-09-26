@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for notification-service's mTLS read of party-service (8443, client
+# auth REQUIRED) — the #3581 EMAIL envelope-address resolution. Same shape as aml-internal-tls and
+# delegation-internal-tls: tls.crt/tls.key identify notification-service, ca.crt trusts party-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: notification-internal-tls
+  namespace: notifications
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: notification-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: notification-service.notifications.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

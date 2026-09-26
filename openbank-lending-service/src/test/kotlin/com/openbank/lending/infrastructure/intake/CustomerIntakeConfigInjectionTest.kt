@@ -4,7 +4,14 @@
 
 package com.openbank.lending.infrastructure.intake
 
+import com.openbank.lending.domain.model.Loan
+import com.openbank.lending.domain.model.LoanStatus
+import com.openbank.lending.infrastructure.adapter.ConservativeRiskParameterSource
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
+import com.openbank.libs.domain.identifiers.LoanApplicationId
+import com.openbank.libs.domain.identifiers.LoanId
+import com.openbank.libs.domain.money.Money
+import com.openbank.libs.lending.AmortizationMethod
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -12,6 +19,9 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.util.UUID
 
 /**
  * Does configuration actually reach [CustomerIntakeConfig]?
@@ -58,6 +68,7 @@ class CustomerIntakeConfigInjectionTest {
             // A second test class with a different @TestProfile forces another full Quarkus boot,
             // and the lending test task already OOM'd on this PR when it had two.
             "lending.origination.auto-approve" to "true",
+            "lending.risk.allow-demonstration-model" to "true",
         )
     }
 
@@ -66,6 +77,9 @@ class CustomerIntakeConfigInjectionTest {
 
     @Inject
     lateinit var origination: OriginationConfig
+
+    @Inject
+    lateinit var riskParameters: ConservativeRiskParameterSource
 
     @Test
     fun `every field comes from configuration, not from the Kotlin constructor defaults`() {
@@ -96,5 +110,24 @@ class CustomerIntakeConfigInjectionTest {
         assertThat(origination.autoApprove)
             .describedAs("lending.origination.auto-approve set to true in the profile")
             .isTrue()
+    }
+
+    @Test
+    fun `demonstration risk opt in reaches the CDI adapter`() {
+        val loan = Loan(
+            id = LoanId.random(),
+            applicationId = LoanApplicationId.random(),
+            partyId = UUID.fromString("44444444-4444-4444-4444-444444444444"),
+            principal = Money.of("12000.00", "EUR"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = LocalDate.parse("2026-06-30"),
+            status = LoanStatus.ACTIVE,
+            disbursedAt = OffsetDateTime.parse("2026-01-15T10:00:00Z"),
+            createdAt = OffsetDateTime.parse("2026-01-15T10:00:00Z"),
+        )
+        val inputs = riskParameters.parametersFor(loan, Money.of("10000.00", "EUR")).await().indefinitely()
+        assertThat(inputs.modelVersion).isEqualTo(ConservativeRiskParameterSource.MODEL_VERSION)
     }
 }

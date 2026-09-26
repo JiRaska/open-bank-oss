@@ -71,7 +71,7 @@ class FxOutboxAtomicityIT {
 
     class NoDispatchInMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("fx-events-out") +
+            InMemoryConnector.switchOutgoingChannelsToInMemory("fx-events-out", "fx-fixing-out") +
                 mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = InMemoryConnector.clear()

@@ -75,6 +75,12 @@ object PartyChange {
         "address" to { p: Party -> p.address },
         "discoverable" to { p: Party -> p.discoverable },
         "consentMarketing" to { p: Party -> p.consentMarketing },
+        // Derived from the personal AML profile. Recorded as changed, never material: they are not
+        // identity data, and the AML declaration event carries its own risk facts for EDD routing.
+        "pepFlag" to { p: Party -> p.pepFlag },
+        "pepCategory" to { p: Party -> p.pepCategory },
+        "fatcaStatus" to { p: Party -> p.fatcaStatus },
+        "crsStatus" to { p: Party -> p.crsStatus },
     )
 
     fun classify(before: Party, after: Party): PartyChangeClassification {

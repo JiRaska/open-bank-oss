@@ -25,7 +25,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DelegationEducation } from '@/components/delegations/DelegationEducation'
-import { RoleCatalog } from '@/components/delegations/RoleCatalog'
+import { LazyRoleCatalog } from '@/components/delegations/LazyRoleCatalog'
 import {
   EffectiveAccess,
   isEffectiveAccessPayload,
@@ -322,7 +322,7 @@ export default function DelegationsPage() {
         </>
       )}
 
-      <RoleCatalog />
+      <LazyRoleCatalog />
     </div>
   )
 }

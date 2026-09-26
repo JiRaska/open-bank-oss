@@ -37,9 +37,9 @@ aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS 
 docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" -t "$IMAGE" --push openbank-infra/docker/keycloak
 echo "==> pushed ${IMAGE}"
 
-# Sign + attest with Cosign (ADR-0029/0030 D4). Kyverno runs two independent Enforce
-# policies at admission: verify-openbank-image-signatures rejects an unsigned image, and
-# verify-openbank-image-sbom-attestation rejects a signed-but-unattested one. This script
+# Sign + attest with Cosign (ADR-0029/0030 D4). Kyverno's verify-openbank-image-sbom-attestation
+# (Enforce) verifies BOTH at admission — it rejects an unsigned image and a signed-but-unattested
+# one (the signature check was a separate policy until #9805). This script
 # previously only signed, so every keycloak build produced an image that passed the first
 # gate and failed the second — latent until a pod rescheduled, which is what took admin-ui
 # login down on 2026-07-16.

@@ -62,13 +62,14 @@ test.describe('term-deposit account opening', () => {
     await expect(page.locator('#account-currency')).toHaveValue('CZK')
 
     await page.locator('#account-legal-name').fill('Test Customer')
-    await page.locator('form').evaluate(form => {
-      const accountForm = form as HTMLFormElement
-      accountForm.requestSubmit()
-      accountForm.requestSubmit()
-    })
-
-    await expect(page).toHaveURL(`/accounts/${accountId}`)
+    await Promise.all([
+      page.waitForURL(`/accounts/${accountId}`, { timeout: 15_000 }),
+      page.locator('form').evaluate(form => {
+        const accountForm = form as HTMLFormElement
+        accountForm.requestSubmit()
+        accountForm.requestSubmit()
+      }),
+    ])
     expect(accountOpeningPosts).toHaveLength(1)
     expect(accountOpeningPosts[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
     expect(accountOpeningPosts[0].body).toMatchObject({

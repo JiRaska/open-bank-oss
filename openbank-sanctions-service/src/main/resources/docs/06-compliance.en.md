@@ -11,7 +11,7 @@
 | **AMLD 6 (EU 2018/1673)** | Enhanced AML obligations; 10-year record retention | All `SanctionsCheck` records retained 10 years; GDPR erasure overridden |
 | **PSD2 (EU 2015/2366)** | Execution of payment transactions | Sanctions check is a mandatory gate before payment execution (ADR-0032) |
 | **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | `FATF_HIGH_RISK` list flags transfers to/from high-risk countries |
-| **CNB Decree 163/2014** | Czech National Bank domestic requirements | `CNB_DOMESTIC` list for Czech-specific designations |
+| **Act No. 1/2023 Coll.** | Czech national sanctions list kept by MZV | `CNB_DOMESTIC` list (imported from `cz_national_sanctions`) |
 | **GDPR (EU 2016/679)** | PII in screening requests (name, DoB, identifiers) | PII masked in logs; Art. 6(1)(c) legal obligation basis; erasure overridden by AMLD |
 | **DORA (EU 2022/2554)** | Operational resilience for financial services | Health probes, audit events, outbox guarantee, SLO, runbooks |
 

@@ -37,7 +37,9 @@ class RegistryLookupService : RegistryLookupUseCase {
         val now = Instant.now(clock)
         cache.find(identifier, now.minus(cacheTtl))?.let { return it }
         val fetched = registry.lookup(identifier, cmd?.declared) ?: return null
-        cache.put(fetched)
+        // The sandbox demo entity is never cached: switching it off must stop serving it at once,
+        // not only after the extract TTL runs out.
+        if (fetched.source != RegistryExtract.SANDBOX_DEMO_SOURCE) cache.put(fetched)
         return fetched
     }
 }

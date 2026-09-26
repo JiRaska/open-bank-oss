@@ -78,17 +78,19 @@ class DomesticPaymentOutboxAtomicityIT {
         assertThat(rows)
             .describedAs("exactly one domestic_payment_outbox row for payment %s", paymentId)
             .hasSize(1)
-        val (paymentXmin, outboxXmin, eventType) = rows.single()
-        assertThat(eventType).isEqualTo("domestic.payment.created")
-        assertThat(outboxXmin)
+        val evidence = rows.single()
+        assertThat(evidence.eventType).isEqualTo("domestic.payment.created")
+        assertThat(evidence.aggregateRevision).isEqualTo(1)
+        assertThat(evidence.payload).contains("\"aggregateRevision\":1")
+        assertThat(evidence.outboxXmin)
             .describedAs(
                 "the domestic_payments row and its outbox row must carry the SAME Postgres xmin — " +
                     "different values mean two transactions wrote them, so one can commit without " +
                     "the other (payment xmin=%s, outbox xmin=%s)",
-                paymentXmin,
-                outboxXmin,
+                evidence.paymentXmin,
+                evidence.outboxXmin,
             )
-            .isEqualTo(paymentXmin)
+            .isEqualTo(evidence.paymentXmin)
     }
 
     /**
@@ -101,13 +103,20 @@ class DomesticPaymentOutboxAtomicityIT {
         assertThat(writersOf(UUID.randomUUID())).isEmpty()
     }
 
-    private data class WriterPair(val paymentXmin: String, val outboxXmin: String, val eventType: String)
+    private data class WriterPair(
+        val paymentXmin: String,
+        val outboxXmin: String,
+        val eventType: String,
+        val aggregateRevision: Long,
+        val payload: String,
+    )
 
     /** The transaction ids (`xmin`) that wrote the aggregate row and each of its outbox rows. */
     private fun writersOf(paymentId: UUID): List<WriterPair> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
-            SELECT p.xmin::text AS payment_xmin, o.xmin::text AS outbox_xmin, o.event_type
+            SELECT p.xmin::text AS payment_xmin, o.xmin::text AS outbox_xmin, o.event_type,
+                   p.aggregate_revision, o.payload
             FROM domestic_payments p
             JOIN domestic_payment_outbox o ON o.aggregate_id = p.payment_id
             WHERE p.payment_id = ?
@@ -116,7 +125,15 @@ class DomesticPaymentOutboxAtomicityIT {
             statement.setObject(1, paymentId)
             statement.executeQuery().use { rows ->
                 generateSequence { if (rows.next()) rows else null }
-                    .map { WriterPair(it.getString(1), it.getString(2), it.getString(3)) }
+                    .map {
+                        WriterPair(
+                            it.getString(1),
+                            it.getString(2),
+                            it.getString(3),
+                            it.getLong(4),
+                            it.getString(5),
+                        )
+                    }
                     .toList()
             }
         }

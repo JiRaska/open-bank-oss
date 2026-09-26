@@ -63,6 +63,7 @@ spec:
       - campaign
       - communication
       - consent
+      - context
       - control-liveness-sentinel
       - customer-edge
       - delegation
@@ -82,6 +83,7 @@ spec:
       - kyc
       - ledger
       - lending
+      - loyalty
       - kyb
       - notifications
       - onboarding
@@ -92,12 +94,14 @@ spec:
       - psd2
       - referral
       - release-steward
+      - risk
       - sanctions
       - sca
       - sdd
       - security-scanner
       - statements
       - tpp-registry
+      - treasury
       - wealth
   podMetricsEndpoints:
     - port: management

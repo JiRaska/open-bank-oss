@@ -28,7 +28,7 @@ enum class WithholdingTreatment {
     EXEMPT,
 
     /** Non-CZK interest — withholding deferred pending §38 ČNB conversion (ADR-0033 §E). */
-    DEFERRED_FX
+    DEFERRED_FX,
 }
 
 /** Tax residency of the beneficial owner. Drives the default non-resident rate path. */
@@ -52,7 +52,7 @@ data class TaxProfile(
     val residency: TaxResidency,
     val treatyRate: BigDecimal? = null,
     val nonCooperatingState: Boolean = false,
-    val exemptCode: String? = null
+    val exemptCode: String? = null,
 ) {
     companion object {
         /**
@@ -73,7 +73,7 @@ data class WithholdingResult(
     val taxAmount: BigDecimal,
     val netAmount: BigDecimal,
     val treatment: WithholdingTreatment,
-    val exemptCode: String? = null
+    val exemptCode: String? = null,
 )
 
 /** Remittance lifecycle of a recorded withholding (ADR-0033 §D/§F). */
@@ -88,7 +88,7 @@ enum class WithholdingTaxStatus {
     RECONCILED,
 
     /** The paired capitalization was reversed; this withholding is voided (ADR-0033 §F). */
-    REVERSED
+    REVERSED,
 }
 
 /**

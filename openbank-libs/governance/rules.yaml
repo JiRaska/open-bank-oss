@@ -1036,6 +1036,17 @@ money_path_services:
                                             # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
                                             # without the cardholder's SCA today — add a verb here when one ships.
                                             # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+  - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                            # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                            # a journal through ledger's POST /api/v1/journals. Threat model:
+                                            # docs/threat-models/openbank-treasury-service.md.
+                                            # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                            # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                            # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                            # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                            # needs an X-Approval-Id round-trip the deal's own
+                                            # PENDING_APPROVAL state already is. Writes are human-only in
+                                            # treasury_rest_ext.rego.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -1585,8 +1596,8 @@ provenance:
     # therefore it was verified".
     basis: declared_images_not_running_pods
     enforcement_rule: >-
-      No image-provenance policy (verify-openbank-image-signatures,
-      verify-openbank-image-sbom-attestation, or any successor) may be set to
+      No image-provenance policy (verify-openbank-image-sbom-attestation, which since
+      2026-09-13 also carries the image-signature check, or any successor) may be set to
       validationFailureAction: Enforce while this gate fails. A graduation PR must cite a
       green run of it. An unattested image is never rejected at the moment it is created --
       only later, at a reschedule nobody scheduled -- so a passing gate is the ONLY evidence
@@ -1864,6 +1875,32 @@ temporal_worker_switch_naming:
   # to `openbank.lending.worker.enabled` in the same audit follow-up that introduced the gate;
   # the allowlist mechanism stays (and fails stale in either direction) for the next exception
   # that genuinely cannot be renamed.
+
+ci_watches:
+  lane_scoped_population: true
+  # A watch that asserts a verdict about ONE lane of a workflow (one trigger event, one
+  # subject) must draw its population from that lane only. Drawn from every lane, it is green
+  # about a different subject and reads the thing it exists to catch as background noise.
+  #
+  # Measured 2026-09-13 on auto-deploy-red-watch.yml (#9130): ten consecutive SCHEDULED
+  # auto-deploy failures over 27 hours, no fleet-health issue, the watch green throughout. Its
+  # population was the three newest completed runs of any event, and auto-deploy's `push` lane
+  # (the services one merge touched) lands green between scheduled ticks —
+  # `2271 schedule ✗ | 2270 schedule ✗ | 2269 push ✓` was `stuck = false`. Worse, the not-stuck
+  # branch closed an open issue on ANY green run, so a lucky escalation would have been tidied
+  # away by the next merge while money-path services stayed pinned. The watch's own issue text
+  # describes exactly that trap.
+  #
+  # Rule: filter the population to the lane (server-side where the API allows it), bound the
+  # query (a watch that paginates history to look at three runs is the rate-limit outage it
+  # reports on — this one was failing on the installation limit the same morning), close only
+  # on the same lane's green, and keep the decision in a script with a --self-test whose
+  # known-positive is the interleaved fixture.
+  #
+  # Whether the other watches (main-red-watch, service-build-stall-watch,
+  # merged-past-red-check-watch) share this class is a thing to MEASURE, not assert: each has
+  # a different trigger shape and main-red-watch already filters on head_branch + event.
+  ci_producer: .github/scripts/detect-auto-deploy-stuck.py   # gate auto-deploy-red-watch-declaration
 
 scheduled_methods:
   no_runblocking_in_scheduled_body: true
@@ -3246,6 +3283,23 @@ authz:
     ROLE_COMMS_APPROVER:
       grant:
         - commstyle.approval.read
+    # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+    # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+    # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+    # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+    # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+    # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+    # here on purpose: every treasury action, the reads included, is granted in
+    # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+    # treasury depends on this matrix.
+    ROLE_RISK:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
+    ROLE_FINANCE:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
 # `data.rules.shared_m2m_write_prohibition.reasons`, and gen-rules-opa-data.py selects only
@@ -3543,13 +3597,20 @@ pr_file_overlap:
     - "openbank-infra/gitops/"
 
 # ---------------------------------------------------------------------------
-# AGENT CASE COLLABORATION (ADR-0271 proposal; no live grants)
+# AGENT CASE COLLABORATION (ADR-0271 bounded shadow grant)
 #
 # This matrix is an independent authorization boundary, intersected with each
 # principal's agents.yaml case_capabilities by the case-coordinator-only OPA bundle.
-# Empty is intentional: the policy and PEP may be reviewed without silently creating
-# a production grant. Every entry requires a separate authorization review.
-agent_case_capability_matrix: []
+# Every entry requires a separate authorization review. The first grant is deliberately
+# restricted to the incident-response SHADOW rollout; HITL and every other class still deny.
+agent_case_capability_matrix:
+  - agent_id: rca-investigator
+    capabilities: [case.join, case.contribute]
+    case_class: INCIDENT_RESPONSE
+    delivery_mode: SHADOW
+    enabled: true
+    rollout_id: incident-triage-shadow-2026-08-20
+    max_signals_per_case: 8
 
 # ---------------------------------------------------------------------------
 # AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)

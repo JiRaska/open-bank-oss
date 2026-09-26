@@ -23,7 +23,7 @@ Tato služba přímo implementuje několik povinností DORA:
 | čl. 10 | Detekce anomálií | Naplánované 30minutové skeny detekují regrese; CRITICAL zjištění spouštějí alerty |
 | čl. 11 | Odezva & obnova | Životní cyklus `IctIncident` (OPEN→RESOLVED), sledování RTO/RPO |
 | čl. 17 | Reportování ICT incidentů | Kompletní workflow reportování incidentů: `POST /ict-incidents` → `PATCH /status` → `POST /regulatory-report` |
-| čl. 23 | Reportování dohledovým orgánům | `regulatoryReportId` propojuje s podáním ČNB; záznam je pouze in-memory (viz omezení níže) |
+| čl. 23 | Reportování dohledovým orgánům | `regulatoryReportId` propojuje s podáním ČNB; incident a předání eventu se ukládají atomicky |
 | čl. 24 | ICT risk testing | OWASP Top 10 automated test suite jako test digitální operační odolnosti |
 | čl. 28 | Riziko třetích stran | Sondy skeneru zahrnují služby s integrací třetích stran (Keycloak, Kafka health) |
 

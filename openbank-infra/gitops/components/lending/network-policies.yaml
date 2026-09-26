@@ -50,10 +50,15 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: risk
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
           port: 8126
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

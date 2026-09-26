@@ -5,7 +5,7 @@
 package com.openbank.lending.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -14,6 +14,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import org.jboss.resteasy.reactive.RestResponse
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -23,12 +24,14 @@ import java.util.UUID
  * system of record for money movements. Mirrors the contract the transaction-service already uses
  * (`POST /api/v1/journals`), which is the platform's only ledger ingestion surface.
  *
- * A service bearer token is injected by [OidcClientRequestReactiveFilter]; the call is guarded by
+ * A service bearer token is injected by the named oidc-client `m2m`; the call is guarded by
  * [LedgerCallGuard] (retry/timeout/circuit-breaker).
  */
 @RegisterRestClient(configKey = "ledger-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-lending` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/journals")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -36,6 +39,10 @@ interface LedgerRestClient {
 
     @POST
     fun postJournal(request: PostJournalRequest): Uni<JournalResponse>
+
+    /** Same call, keeping the response headers: `Idempotent-Replayed` says whether it booked (#10904). */
+    @POST
+    fun postJournalWithHeaders(request: PostJournalRequest): Uni<RestResponse<JournalResponse>>
 }
 
 data class PostJournalRequest(

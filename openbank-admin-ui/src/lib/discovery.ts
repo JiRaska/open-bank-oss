@@ -82,6 +82,7 @@ const NS_GROUP: Record<string, ServiceGroup> = {
   referral:           'platform',    // referral-service (ADR-0266 MGM attribution)
   kyb:                'compliance',  // kyb-service (ADR-0284 legal-entity onboarding)
   communication:      'platform',    // communication-service (ADR-0285 Communication Studio)
+  context:            'compliance',  // context-service (ADR-0303 investigation graph)
 }
 
 export function inCluster(): boolean {

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: case-coordinator-agent
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "e7477333d70228ee"
+    openbank.tech/policy-checksum: "b088e22701be573d"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -612,6 +612,19 @@ data:
     - id: kyb-analyst
       case_capabilities:
       - case.join
-    grants: []
+    - id: rca-investigator
+      case_capabilities:
+      - case.contribute
+      - case.join
+    grants:
+    - agent_id: rca-investigator
+      capabilities:
+      - case.join
+      - case.contribute
+      case_class: INCIDENT_RESPONSE
+      delivery_mode: SHADOW
+      enabled: true
+      rollout_id: incident-triage-shadow-2026-08-20
+      max_signals_per_case: 8
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/case_collaboration", "agents", "case_collaboration"]}

@@ -50,14 +50,26 @@ test('filters the live infrastructure map and keeps a DOWN state semantically ex
 
 for (const theme of ['light', 'dark'] as const) {
   test(`keeps the semantic topology legible and accessible in ${theme} mode`, async ({ page }) => {
-    await page.goto('/infrastructure/topology')
-    await page.locator('html').evaluate((element, selectedTheme) => {
-      element.classList.toggle('dark', selectedTheme === 'dark')
+    await page.addInitScript(selectedTheme => {
+      window.localStorage.setItem('ob-admin-theme', selectedTheme)
     }, theme)
+    await page.goto('/infrastructure/topology')
+    await expect(page.getByRole('heading', { name: 'Infrastructure Topology' })).toBeVisible()
+
+    const root = page.locator('html')
+    const themeToggleLabel = theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'
+    await expect(page.getByRole('button', { name: themeToggleLabel })).toBeVisible()
+    if (theme === 'dark') {
+      await expect(root).toHaveClass(/\bdark\b/)
+      await expect(root).toHaveCSS('color-scheme', 'dark')
+    } else {
+      await expect(root).not.toHaveClass(/\bdark\b/)
+    }
 
     const topology = page.locator('main').getByRole('button', { name: 'ArgoCD' })
     await expect(topology).toBeVisible()
     await topology.click()
+    await expect(topology).toHaveAttribute('aria-pressed', 'true')
 
     const details = page.getByRole('region', { name: 'Infrastructure component details' })
     await expect(details).toBeVisible()

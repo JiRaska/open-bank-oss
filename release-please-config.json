@@ -125,6 +125,24 @@
     "openbank-campaign-service": {
       "release-type": "simple"
     },
+    "openbank-incentive-service": {
+      "component": "incentive-service",
+      "exclude-paths": [
+        "openbank-incentive-service/src/test"
+      ]
+    },
+    "openbank-referral-service": {
+      "component": "referral-service",
+      "exclude-paths": [
+        "openbank-referral-service/src/test"
+      ]
+    },
+    "openbank-case-coordinator-agent": {
+      "component": "case-coordinator-agent",
+      "exclude-paths": [
+        "openbank-case-coordinator-agent/src/test"
+      ]
+    },
     "openbank-card-issuance-service": {
       "component": "card-issuance-service",
       "exclude-paths": [
@@ -135,12 +153,6 @@
       "component": "card-processing-service",
       "exclude-paths": [
         "openbank-card-processing-service/src/test"
-      ]
-    },
-    "openbank-case-coordinator-agent": {
-      "component": "case-coordinator-agent",
-      "exclude-paths": [
-        "openbank-case-coordinator-agent/src/test"
       ]
     },
     "openbank-clearing-service": {
@@ -167,6 +179,18 @@
         "openbank-consent-service/src/test"
       ]
     },
+    "openbank-kyb-service": {
+      "component": "kyb-service",
+      "exclude-paths": [
+        "openbank-kyb-service/src/test"
+      ]
+    },
+    "openbank-delegation-service": {
+      "component": "delegation-service",
+      "exclude-paths": [
+        "openbank-delegation-service/src/test"
+      ]
+    },
     "openbank-control-liveness-sentinel": {
       "component": "control-liveness-sentinel",
       "exclude-paths": [
@@ -183,12 +207,6 @@
       "component": "customer-edge",
       "exclude-paths": [
         "openbank-customer-edge/src/test"
-      ]
-    },
-    "openbank-delegation-service": {
-      "component": "delegation-service",
-      "exclude-paths": [
-        "openbank-delegation-service/src/test"
       ]
     },
     "openbank-devops-agent": {
@@ -219,12 +237,6 @@
       "component": "domestic-payment",
       "exclude-paths": [
         "openbank-domestic-payment/src/test"
-      ]
-    },
-    "openbank-engagement-service": {
-      "component": "engagement-service",
-      "exclude-paths": [
-        "openbank-engagement-service/src/test"
       ]
     },
     "openbank-finops-agent": {
@@ -263,22 +275,10 @@
         "openbank-governance-auditor/src/test"
       ]
     },
-    "openbank-incentive-service": {
-      "component": "incentive-service",
-      "exclude-paths": [
-        "openbank-incentive-service/src/test"
-      ]
-    },
     "openbank-interest-service": {
       "component": "interest-service",
       "exclude-paths": [
         "openbank-interest-service/src/test"
-      ]
-    },
-    "openbank-kyb-service": {
-      "component": "kyb-service",
-      "exclude-paths": [
-        "openbank-kyb-service/src/test"
       ]
     },
     "openbank-kyc-service": {
@@ -297,12 +297,6 @@
       "component": "lending-service",
       "exclude-paths": [
         "openbank-lending-service/src/test"
-      ]
-    },
-    "openbank-loyalty-service": {
-      "component": "loyalty-service",
-      "exclude-paths": [
-        "openbank-loyalty-service/src/test"
       ]
     },
     "openbank-mcp-service": {
@@ -345,12 +339,6 @@
       "component": "psd2-service",
       "exclude-paths": [
         "openbank-psd2-service/src/test"
-      ]
-    },
-    "openbank-referral-service": {
-      "component": "referral-service",
-      "exclude-paths": [
-        "openbank-referral-service/src/test"
       ]
     },
     "openbank-release-steward": {
@@ -440,10 +428,40 @@
         "openbank-vop-service/src/test"
       ]
     },
+    "openbank-engagement-service": {
+      "component": "engagement-service",
+      "exclude-paths": [
+        "openbank-engagement-service/src/test"
+      ]
+    },
+    "openbank-loyalty-service": {
+      "component": "loyalty-service",
+      "exclude-paths": [
+        "openbank-loyalty-service/src/test"
+      ]
+    },
     "openbank-wealth-service": {
       "component": "wealth-service",
       "exclude-paths": [
         "openbank-wealth-service/src/test"
+      ]
+    },
+    "openbank-context-service": {
+      "component": "context-service",
+      "exclude-paths": [
+        "openbank-context-service/src/test"
+      ]
+    },
+    "openbank-risk-engine": {
+      "component": "risk-engine",
+      "exclude-paths": [
+        "openbank-risk-engine/src/test"
+      ]
+    },
+    "openbank-treasury-service": {
+      "component": "treasury-service",
+      "exclude-paths": [
+        "openbank-treasury-service/src/test"
       ]
     }
   }

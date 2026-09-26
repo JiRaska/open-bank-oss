@@ -1,0 +1,32 @@
+# Loyalty domain: loyalty-service (the Lístek ledger, ADR-0282) + its single-owner CNPG Postgres +
+# OIDC ExternalSecret + Kafka mTLS identity + internal TLS certificate + the openbank.loyalty.events
+# topic. Not money-path. Closes the "released, deployed nowhere" state of #9800.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loyalty
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/loyalty
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: loyalty
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

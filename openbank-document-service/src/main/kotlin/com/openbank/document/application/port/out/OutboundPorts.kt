@@ -8,6 +8,7 @@ import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentTemplate
 import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import java.math.BigDecimal
 import java.util.UUID
 
 /**
@@ -214,9 +215,31 @@ interface ProductCatalogPort {
      * omitting the clause, never to blocking the signature.
      */
     suspend fun findProduct(productId: UUID): ProductInfo?
+
+    /**
+     * The product's own fee list, for the business fee schedule (SAZEBNIK_PO). [productRef] is any
+     * reference product-catalog resolves (canonical UUID, semantic code or `prod-NNN` alias).
+     * Null when the catalogue is unreachable or does not know the product — the caller decides
+     * what that means; a fee schedule is a binding annex, so the business-agreement flow refuses
+     * to render one without real fee data rather than printing an empty table.
+     */
+    suspend fun findFeeSchedule(productRef: String): ProductFeeSchedule?
 }
 
 data class ProductInfo(val name: String?, val code: String)
+
+/** One fee line exactly as product-catalog publishes it. */
+data class ProductFee(
+    val name: String,
+    val amount: BigDecimal,
+    val currency: String,
+    val frequency: String,
+    val description: String?,
+    val waiveCondition: String?,
+)
+
+/** A product's identity plus its published fee list. */
+data class ProductFeeSchedule(val name: String?, val code: String, val currency: String?, val fees: List<ProductFee>)
 
 /**
  * Read-only lookup into `openbank-party-service`, scoped to what RAMCOVA_SMLOUVA's `{{party.*}}`

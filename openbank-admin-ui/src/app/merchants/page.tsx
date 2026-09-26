@@ -788,6 +788,8 @@ function MerchantLogo({ merchant }: { merchant: Merchant }) {
         alt={merchant.cleanName}
         width={32}
         height={32}
+        loading="lazy"
+        decoding="async"
         style={{ objectFit: 'contain' }}
       />
     </div>

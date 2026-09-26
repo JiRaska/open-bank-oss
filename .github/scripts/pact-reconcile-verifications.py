@@ -81,6 +81,7 @@ import base64
 import json
 import os
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -123,6 +124,34 @@ def broker_error_message(reason, url: str, detail: str) -> str:
     if len(detail) > HTTP_ERROR_DETAIL_CHARS:
         detail = detail[:HTTP_ERROR_DETAIL_CHARS] + "\u2026"
     return f"{reason} for {redact_origin(url)}" + (f" \u2014 {detail}" if detail else "")
+
+
+PACTICIPANT_NOT_FOUND = re.compile(r"Pacticipant (\S+?) not found")
+
+
+def missing_pacticipant(error: Exception, consumer: str, provider: str) -> str | None:
+    """Which side of the edge the broker says does not exist, or None if that is not the error.
+
+    #9776. The broker answers a matrix query for a pacticipant that has never published anything
+    with HTTP 400 and `{"errors":["Pacticipant <name> not found"]}`. That is not a broker failure
+    and not a stranded pact: it is the same "never published" state `has_branch_version` already
+    classifies, reached one call earlier. Counting it as an error left the edge permanently
+    unevaluated and indistinguishable from an outage — two days of runs could not say why, and
+    after #9818 printed the body the answer was this sentence.
+
+    Deliberately narrow. Only a 400/404, only this exact sentence, and only when the named
+    pacticipant is EXACTLY one side of this edge — a name that merely contains the provider's
+    name, or a "not found" about something else, stays an error. Anything wider would let a real
+    broker fault be quietly reclassified as a benign state, which is the one direction this
+    reconciler must never drift.
+    """
+    if not isinstance(error, urllib.error.HTTPError) or error.code not in (400, 404):
+        return None
+    for name in PACTICIPANT_NOT_FOUND.findall(str(error)):
+        name = name.strip('"\',')
+        if name in (consumer, provider):
+            return name
+    return None
 
 
 def http_json(url, user, password, timeout=30):
@@ -284,11 +313,23 @@ def main() -> int:
     password = os.environ.get("PACT_BROKER_PASSWORD", "")
 
     owed, failing, unpublished, cannot_publish, errors = {}, [], {}, {}, 0
+    consumer_unpublished = []
     branch_cache = {}
     for consumer, provider in edges:
         try:
             s = matrix_summary(args.broker, consumer, provider, user, password, args.branch)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as e:
+            missing = missing_pacticipant(e, consumer, provider)
+            if missing == provider:
+                # Never published at all: the same state as "no main version", one call earlier.
+                branch_cache[provider] = False
+                unpublished.setdefault(provider, []).append(consumer)
+                continue
+            if missing == consumer:
+                # The consumer's pact was never published, so there is nothing for the provider
+                # to verify and nothing this reconciler could dispatch to change that.
+                consumer_unpublished.append(f"{consumer} -> {provider}")
+                continue
             # Do NOT treat an unreachable broker as "needs verification": that would
             # dispatch the fleet on an outage. Count it and surface it instead.
             sys.stderr.write(f"::warning::{consumer} -> {provider}: broker query failed: {e}\n")
@@ -329,6 +370,12 @@ def main() -> int:
             f"broker — building it cannot publish a result, so its consumers "
             f"({', '.join(sorted(cannot_publish[p]))}) would stay unverified and this "
             f"would re-dispatch every cycle. It needs the @PactBroker half."
+        )
+    for pair in consumer_unpublished:
+        print(
+            f"  CONSUMER NEVER PUBLISHED, not dispatching: {pair} — the broker has no such "
+            f"consumer pacticipant, so no pact exists for the provider to verify. The committed "
+            f"pact file is not on the broker yet."
         )
     for p in sorted(unpublished):
         print(
@@ -526,6 +573,41 @@ def self_test() -> int:
     if not trunc_ok:
         bad.append("truncation")
 
+    # #9776: "Pacticipant X not found" is never-published, not a broker failure — but ONLY for
+    # this exact sentence about exactly one side of this edge.
+    print("\nself-test: an unknown pacticipant is classified, anything else stays an error")
+    def http_err(code, body):
+        return urllib.error.HTTPError(
+            "https://b/matrix", code, broker_error_message("Bad Request", "https://b/matrix?q", body), {}, None,
+        )
+    live = '{"errors":["Pacticipant openbank-case-coordinator-agent not found"]}'
+    classify = [
+        (http_err(400, live), "openbank-case-coordinator-agent",
+         "the live #9776 answer names the PROVIDER as never published"),
+        (http_err(400, '{"errors":["Pacticipant openbank-admin-ui not found"]}'), "openbank-admin-ui",
+         "a missing CONSUMER is named as the consumer"),
+        (http_err(400, '{"errors":["Pacticipant openbank-case-coordinator-agent-v2 not found"]}'), None,
+         "a name that merely CONTAINS the provider is not this edge"),
+        (http_err(400, '{"errors":["Version 1.2.3 not found"]}'), None,
+         "a different 'not found' stays an error"),
+        # The discriminating case: a DIFFERENT sentence that still ends with an edge side's name
+        # right before "not found". Without the "Pacticipant " anchor this would be misread as a
+        # never-published provider and silently stop counting a real broker fault.
+        (http_err(400, '{"errors":["Branch main for openbank-case-coordinator-agent not found"]}'), None,
+         "an edge name in a non-Pacticipant sentence stays an error"),
+        (http_err(500, live), None, "the same sentence on a 5xx stays an error — a fault is a fault"),
+        (urllib.error.URLError("Connection refused"), None, "a transport failure stays an error"),
+    ]
+    for err, want, why in classify:
+        got = missing_pacticipant(err, "openbank-admin-ui", "openbank-case-coordinator-agent")
+        okmark = "ok " if got == want else "BAD"
+        print(f"  {okmark} {why:70s} -> {got}")
+        if got != want:
+            bad.append(why)
+
+    # The floor run-gates holds this gate to: every decision case evaluated above. An emptied
+    # table must not pass as a clean one.
+    gatelib.subjects(len(cases) + len(checks) + len(dispatch_cases) + 1 + len(classify))
     if bad:
         print("\n::error::self-test FAILED: " + "; ".join(bad))
         return 1

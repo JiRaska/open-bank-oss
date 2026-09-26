@@ -18,6 +18,8 @@ data class JournalPostedEvent(
     val entryDate: LocalDate,
     val lineCount: Int,
     override val occurredAt: Instant,
+    /** Explicit producer attribution for consumers sharing the ledger topic. */
+    val sourceService: String = "ledger-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "JournalEntry"
     override val eventType = "JournalPosted"

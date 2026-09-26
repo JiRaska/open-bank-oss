@@ -9,39 +9,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { THEME_STORAGE_KEY, initialTheme, useTheme } from '@/lib/theme/useTheme'
+import { THEME_COOKIE_KEY, THEME_STORAGE_KEY, initialTheme, ThemeProvider, useTheme } from '@/lib/theme/useTheme'
+import { parseTheme } from '@/lib/theme/theme'
 
 beforeEach(() => {
   window.localStorage.clear()
+  document.cookie = `${THEME_COOKIE_KEY}=; Path=/; Max-Age=0`
   document.documentElement.classList.remove('dark')
 })
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   document.documentElement.classList.remove('dark')
+  document.cookie = `${THEME_COOKIE_KEY}=; Path=/; Max-Age=0`
 })
 
 describe('theme switch', () => {
   it('defaults to light when the operator has never chosen', () => {
     expect(initialTheme()).toBe('light')
-    renderHook(() => useTheme())
+    renderThemeHook()
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 
   it('applies the dark class to the document root — the thing nothing did before', () => {
-    const { result } = renderHook(() => useTheme())
+    const { result } = renderThemeHook()
     act(() => { result.current.toggle() })
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(result.current.theme).toBe('dark')
   })
 
   it('persists the choice and restores it on a later mount', () => {
-    const first = renderHook(() => useTheme())
+    const first = renderThemeHook()
     act(() => { first.result.current.toggle() })
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
+    expect(document.cookie).toContain(`${THEME_COOKIE_KEY}=dark`)
 
     document.documentElement.classList.remove('dark')
-    renderHook(() => useTheme())
+    renderThemeHook()
     expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 
@@ -54,7 +58,7 @@ describe('theme switch', () => {
       key() { return null },
       length: 0,
     })
-    const { result } = renderHook(() => useTheme())
+    const { result } = renderThemeHook()
     expect(result.current.theme).toBe('light')
     act(() => { result.current.toggle() })
     expect(document.documentElement.classList.contains('dark')).toBe(true)
@@ -64,11 +68,24 @@ describe('theme switch', () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'DROP TABLE themes')
     expect(initialTheme()).toBe('light')
   })
+
+  it('uses the server-readable cookie before local storage to avoid a theme flash', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    document.cookie = `${THEME_COOKIE_KEY}=dark; Path=/; SameSite=Lax`
+    expect(initialTheme()).toBe('dark')
+  })
+
+  it('keeps parsing strict at the server/client boundary', () => {
+    expect(parseTheme('dark')).toBe('dark')
+    expect(parseTheme('light')).toBe('light')
+    expect(parseTheme('system')).toBeNull()
+  })
 })
 
 describe('the header exposes the switch', () => {
   it('offers a labelled, toggleable control', () => {
-    render(React.createElement(LanguageProvider, null, React.createElement(HeaderProbe)))
+    render(React.createElement(ThemeProvider, { initialTheme: initialTheme() },
+      React.createElement(LanguageProvider, null, React.createElement(HeaderProbe))))
     const button = screen.getByRole('button', { name: 'Switch to the dark theme' })
     expect(button.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(button)
@@ -86,5 +103,12 @@ function HeaderProbe() {
     'aria-label': theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme',
     'aria-pressed': theme === 'dark',
     onClick: toggle,
+  })
+}
+
+function renderThemeHook() {
+  const selected = initialTheme()
+  return renderHook(() => useTheme(), {
+    wrapper: ({ children }) => React.createElement(ThemeProvider, { initialTheme: selected }, children),
   })
 }

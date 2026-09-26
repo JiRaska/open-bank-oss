@@ -1,14 +1,21 @@
 # Runbook 0011 — Kyverno admission rollback (supply-chain verification policies)
 
-**Scope:** the two `Enforce` supply-chain ClusterPolicies reject a *legitimate* workload at
+**Scope:** the `Enforce` supply-chain ClusterPolicy rejects a *legitimate* workload at
 admission and you need it running now.
 
 | policy | what it requires | file |
 | --- | --- | --- |
-| `verify-openbank-image-signatures` | a valid Cosign signature (KMS public key + Rekor tlog) | `openbank-infra/gitops/components/kyverno/verify-images-policy.yaml` |
-| `verify-openbank-image-sbom-attestation` | a `cyclonedx` attestation on the same image | `openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml` |
+| `verify-openbank-image-sbom-attestation` | a valid Cosign signature **and** a `cyclonedx` attestation on the same image, both against the KMS public key — one `verifyImages` entry | `openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml` |
 
-Both match **`kind: Pod`** with `imageReferences: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*`,
+**Until 2026-09-13 these were two policies** (`verify-openbank-image-signatures` held the signature
+check). They were folded into one because Kyverno v1.12.5 keeps a single verification status per
+image and lets whichever verify policy is evaluated last decide it for all of them — so an Audit
+policy could deny and an Enforce failure could be admitted, depending on Go map order (#9805 item
+4). A third policy, `verify-openbank-image-slsa-provenance` (Audit), was removed from admission for
+the same reason. Both return as separate policies after the Kyverno upgrade that scopes verdicts
+per policy (>= v1.19.0).
+
+It matches **`kind: Pod`** with `imageReferences: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*`,
 so they select every openbank service pod in every namespace — measured 2026-08-13: **74 of 416
 running pods across 46 namespaces**. There is no namespace exclusion. `failurePolicy: Ignore`, so a
 webhook that is *down* fails open; a webhook that is *up and says no* fails closed.
@@ -29,12 +36,13 @@ An admission denial names the policy and the rule:
 ```
 admission webhook "validate.kyverno.svc-fail" denied the request:
   policy Pod/<ns>/<name> for resource violation:
-    verify-openbank-image-signatures:
-      verify-cosign-signature: 'failed to verify image ...: .../openbank-<svc>:<tag>: no signatures found'
+    verify-openbank-image-sbom-attestation:
+      verify-cyclonedx-sbom-attestation: 'failed to verify image ...: .../openbank-<svc>:<tag>: no signatures found'
 ```
 
-Read the **policy name** out of that message — the two policies fail with different text
-(`no signatures found` vs `no matching attestations`) and need different fixes. If nothing is
+Read the **error text** out of that message — it is one policy and one rule now, so the policy
+name no longer tells you which artifact is missing. `no signatures found` means the image signature,
+`no matching attestations` means the SBOM attestation; they need different fixes. If nothing is
 denied, this is not your problem: check the alerts instead
 (`KyvernoAdmissionDenied`, `KyvernoEnforcePolicyBlocking` in
 `openbank-infra/gitops/components/observability/prometheus-rules-kyverno.yaml`).
@@ -65,14 +73,18 @@ Three failure shapes have actually happened here. They look identical at the pod
   workflow that could rebuild an attested runner image needed a runner. See the header of
   `openbank-infra/gitops/components/kyverno/arc-runner-image-exception.yaml`, which records the
   incident and its root-cause fixes (#963, #1051). **If the blocked workload is part of the build or
-  deploy path, go straight to §3b — you cannot rebuild your way out.**
+  deploy path, go straight to §3b — you cannot rebuild your way out.** (The ARC runner exception
+  that recorded that incident was deleted on 2026-09-13 once the runner image verified on its own;
+  its history is in git: `git log --follow -- openbank-infra/gitops/components/kyverno/arc-runner-image-exception.yaml`.)
 
 ## 3. Get unblocked
 
 ### 3a. Preferred — a scoped `PolicyException` (narrow, reversible, leaves Enforce on)
 
-Model it on `arc-runner-image-exception.yaml`: namespaced, matched to `kind: Pod` in that one
-namespace, listing only the offending policy/rule names. This is strictly better than dropping the
+Model it on `pricing-image-exception.yaml`: namespaced, matched to `kind: Pod` in that one
+namespace, listing the policy/rule names. Note the cost of the fold: an exception can no longer
+waive the SBOM attestation while keeping the signature check — the rule is one rule, so excepting
+it waives both for that namespace. This is strictly better than dropping the
 policy, because every other namespace stays protected.
 
 Write it as a gitops file with a header stating **why, when, and the removal condition**, then
@@ -83,9 +95,11 @@ so from experience.
 
 Only when the blast radius is fleet-wide or the deadlock in §2 applies.
 
-Edit **one** policy's `spec.validationFailureAction` from `Enforce` to `Audit` in its gitops file
-and sync. They are deliberately **separate** ClusterPolicies (the #770 lesson) — dropping the SBOM
-rule does not weaken signature verification, so drop only the one that is denying.
+Edit the policy's `spec.validationFailureAction` from `Enforce` to `Audit` in its gitops file and
+sync. **This is coarser than it used to be:** the signature and SBOM checks were deliberately
+separate ClusterPolicies (the #770 lesson) so that dropping one did not weaken the other, and on
+Kyverno v1.12.5 that separation made the verdict nondeterministic (#9805). Until the upgrade,
+dropping this policy to Audit drops **both** checks. Prefer §3a whenever the blast radius allows it.
 
 `Audit` blocks nothing, but it is not "off": violations keep landing in PolicyReports, which is
 exactly the worklist you need for §4.
@@ -178,3 +192,5 @@ Five rules, each of which this gate broke:
   referrer signatures; fixed by pinning cosign v2 tag-based signatures)
 - #1197 — the `.att` manifest rewrite / ALL-match vs any-match trap
 - #1915 — the issue this runbook closes out
+- #9805 item 4 — why the verify policies are folded into one on Kyverno v1.12.5, and why an Audit
+  verify policy could deny

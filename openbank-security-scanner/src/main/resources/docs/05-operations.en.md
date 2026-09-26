@@ -83,7 +83,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 | Availability | 99.5% (lower than money-path — not customer-facing) | `up{service="security-scanner"}` |
 | Scheduled scan completion | < 90 s for 27 services | `security_scan_duration_seconds` |
 | Latency p95 GET /report | < 50 ms | in-memory cache |
-| ICT incident API p95 | < 200 ms | in-memory write + direct Kafka emit |
+| ICT incident API p95 | < 200 ms | atomic incident + outbox write |
 
 ## Runbooks
 
@@ -113,13 +113,14 @@ Likely a network policy or DNS issue.
 
 ### ICT incident event missing downstream
 
-Incidents are emitted straight to Kafka with no outbox, so a failed publish leaves no local record
-to retry from (#4709).
+Incident transitions remain in `ict_incident_outbox` until the relay marks them sent. Production
+dispatch stays off during the migration rehearsal and is enabled only after the schema and broker
+authorization checks pass.
 
-1. Check the emitter for errors: `kubectl logs -l app=security-scanner | grep ict-incident-events-out`
+1. Check relay errors and `openbank_outbox_backlog{service="security-scanner"}`.
 2. Check the broker: `kcat -L -b kafka:9092`
 3. Confirm the topic received it: read the tail of `openbank.security.ict.incident`.
-4. If the publish was lost, re-report the incident through `POST /api/v1/ict-incidents`.
+4. Inspect `ict_incident_outbox` status and retry the relay; do not create a duplicate incident.
 
 ### Scan results empty after a restart
 

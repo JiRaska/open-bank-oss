@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.1...notification-service-v0.34.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.0...notification-service-v0.33.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **notification:** point EMAIL recipient resolution at party-service, not localhost ([#10382](https://github.com/JiRaska/open-bank-oss/issues/10382)) ([c0fbf06](https://github.com/JiRaska/open-bank-oss/commit/c0fbf068d4ac6fcd60b835c1a169ee7266e5bc2f)), closes [#10372](https://github.com/JiRaska/open-bank-oss/issues/10372)
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.32.0...notification-service-v0.33.0) (2026-09-19)
+
+
+### Features
+
+* **notification:** notify co-signers of multi-signature approvals ([#10313](https://github.com/JiRaska/open-bank-oss/issues/10313)) ([2fc178a](https://github.com/JiRaska/open-bank-oss/commit/2fc178a40d6d397796f212c4f6b11bc518d8ce35))
+
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.31.1...notification-service-v0.32.0) (2026-09-13)
+
+
+### Features
+
+* **delegation:** add customer recertification workflow ([#9215](https://github.com/JiRaska/open-bank-oss/issues/9215)) ([eb207f0](https://github.com/JiRaska/open-bank-oss/commit/eb207f06ee2367511d3cf99da284a6b2f62ed392))
+
+## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.31.0...notification-service-v0.31.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **notification:** dead-letter delegation-events-in, which would wedge on any dispatch failure ([#8457](https://github.com/JiRaska/open-bank-oss/issues/8457)) ([e8e8ed9](https://github.com/JiRaska/open-bank-oss/commit/e8e8ed93a789d1056e310b18d8c672dd566a9273))
+* **notification:** guard notification_outbox created_at plausibility at INSERT ([#9315](https://github.com/JiRaska/open-bank-oss/issues/9315)) ([dc09c39](https://github.com/JiRaska/open-bank-oss/commit/dc09c397d62215ef78a63e41c728f6af5c78a79e))
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.1...notification-service-v0.31.0) (2026-09-08)
 
 

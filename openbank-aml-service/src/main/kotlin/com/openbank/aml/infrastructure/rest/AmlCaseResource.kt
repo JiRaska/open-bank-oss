@@ -14,9 +14,12 @@ import com.openbank.aml.infrastructure.rest.dto.UpdateAmlDecisionRequest
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -42,8 +45,18 @@ class AmlCaseResource(
     private val objectMapper: ObjectMapper,
 ) {
 
+    // Field-injected (not a constructor parameter) so the request-scoped identity is read per call.
+    @Inject
+    lateinit var identity: SecurityIdentity
+
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    // #10486 batch 3: ROLE_API admits the payment/FX services' OWN machine principals, which open a
+    // case when a screening gate refers a transfer. ROLE_API is held by every service account, so
+    // it is narrowed twice: by identity in aml_rest_ext.rego (`service-aml-case-create-m2m`) and,
+    // because aml-service still runs AUTHZ_ENFORCE=false (advisory), by [requireNamedMachineCaller]
+    // here, which refuses any ROLE_API-only caller not on [AML_CASE_CREATE_CALLERS].
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_API")
+    @Authorize(action = "amlCase.create")
     @Operation(summary = "Submit an AML screening case")
     suspend fun createCase(
         request: CreateAmlCaseRequest,
@@ -53,6 +66,7 @@ class AmlCaseResource(
         // libs-runtime maps IllegalArgumentException to 400 (#526, #3624).
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
+        requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
 
@@ -111,4 +125,31 @@ class AmlCaseResource(
     @Operation(summary = "Update AML case decision")
     suspend fun updateDecision(@PathParam("caseId") caseId: UUID, request: UpdateAmlDecisionRequest): Response =
         Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
+}
+
+/** Staff roles `createCase` admitted before #10486; a caller holding one needs no identity check. */
+private val AML_CASE_CREATE_STAFF_ROLES = setOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+
+/**
+ * #10486 batch 3: the machine principals that open AML cases, each authenticating as its OWN
+ * Keycloak client (ROLE_API only). Mirrors `service-aml-case-create-m2m` in aml_rest_ext.rego; the
+ * two must list the same principals (`AmlCaseCreateCallerGuardTest` pins this set).
+ */
+internal val AML_CASE_CREATE_CALLERS = setOf(
+    "service-account-openbank-domestic-payment",
+    "service-account-openbank-sepa-payment",
+    "service-account-openbank-sepa-instant",
+    "service-account-openbank-fx",
+)
+
+/**
+ * A caller that reached `createCase` through ROLE_API alone must be one of [AML_CASE_CREATE_CALLERS].
+ * This is the enforcing half while aml-service runs OPA advisory: without it, ROLE_API — held by
+ * every service account in the realm — would let any of them open a case.
+ */
+internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
+    if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole)) return
+    if (identity.principal?.name !in AML_CASE_CREATE_CALLERS) {
+        throw ForbiddenException("caller is not a named AML case-open service")
+    }
 }

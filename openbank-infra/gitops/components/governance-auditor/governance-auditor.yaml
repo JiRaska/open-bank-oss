@@ -79,6 +79,10 @@ spec:
               value: http://litellm.ai-platform.svc:4000
             - name: TEMPORAL_NAMESPACE
               value: openbank-governance
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
           resources:
             requests:
               cpu: 100m

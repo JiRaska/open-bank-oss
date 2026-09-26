@@ -15,6 +15,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.casecoordinator.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -51,6 +52,12 @@ import javax.sql.DataSource
  * tried first and rejected on evidence: with parent and subclass both present, Quarkus fails with
  * `TestInstantiationException` and the sibling's own tests go red. Duplication is the shape every
  * other pair in the fleet uses.
+ *
+ * The negative-auth interaction must also be served by this broker twin so its state set matches
+ * the `@PactFolder` twin (`pact-twin-state-parity`, #9752). The class-level `@TestSecurity`
+ * authenticates every request by default, so [verifyPacts] clears the test identity when the
+ * interaction declares [NEGATIVE_AUTH_STATE], exactly as `TransactionPactProviderVerificationTest`
+ * does for its negative M2M pacts.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -67,6 +74,9 @@ class CaseCoordinatorPactBrokerProviderVerificationTest {
     @Inject
     lateinit var dataSource: DataSource
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     @BeforeEach
     fun before(context: PactVerificationContext) {
         context.target = HttpTestTarget("localhost", port.toInt())
@@ -77,6 +87,12 @@ class CaseCoordinatorPactBrokerProviderVerificationTest {
 
     @State("a closed case with a thread exists")
     fun seedClosedCase() = seedCase(status = "CLOSED", contestedRate = "0.5")
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidIdentity() {
+        // Intentionally empty: the state IS the absence of an authenticated identity, which the
+        // corresponding consumer interactions assert returns 401 Unauthorized.
+    }
 
     private fun seedCase(status: String, contestedRate: String) {
         val caseUuid = UUID.nameUUIDFromBytes(WORKFLOW_ID.toByteArray(StandardCharsets.UTF_8))
@@ -151,6 +167,9 @@ class CaseCoordinatorPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun pactVerificationTestTemplate(context: PactVerificationContext) {
+        if (context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context.verifyInteraction()
     }
 

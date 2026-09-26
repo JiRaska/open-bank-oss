@@ -149,6 +149,10 @@ jobs:
         name: Reject stale or self-generated deploy source
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # `gh pr list` below runs only on the recovery path (a deploy branch for this SHA
+          # already exists). Without a token gh exits non-zero under `set -e`, so that path —
+          # the one that exists to re-admit a stuck build — was the one that could not run.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"
@@ -257,7 +261,7 @@ jobs:
         # Sets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN in env.
         # The role has ECR push + KMS sign permissions.
         # See "Stub AWS profile" step below for why a stub ~/.aws/config entry is also needed.
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1

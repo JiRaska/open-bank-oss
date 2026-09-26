@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: Apache-2.0
+// A successful resolver task alone does not prove every dependency was resolved.
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+
+// Buildscript/plugin dependencies are intentionally excluded from the submitted
+// application graph. Check the critical Kover transitive here instead, on the
+// classpath that actually loads in every service build (GHSA-27j2-h3m2-8237).
+def verifyBuildscriptFreeMarker = { project ->
+    project.buildscript.configurations.getByName('classpath').incoming.resolutionResult.allComponents.each { component ->
+        def module = component.moduleVersion
+        if (module?.group != 'org.freemarker' || module?.name != 'freemarker') {
+            return
+        }
+        def match = module.version =~ /^(\d+)\.(\d+)\.(\d+)$/
+        if (!match.matches()) {
+            throw new GradleException("Cannot verify buildscript FreeMarker version: ${module.version}")
+        }
+        def numbers = (1..3).collect { match[0][it] as int }
+        if (numbers[0] < 2 || (numbers[0] == 2 && (numbers[1] < 3 ||
+                (numbers[1] == 3 && numbers[2] < 35)))) {
+            throw new GradleException("Vulnerable buildscript FreeMarker: ${module.version}; require 2.3.35 or newer")
+        }
+    }
+}
+
+gradle.beforeProject { project ->
+    // This task also makes the exact production check runnable against a local
+    // Maven fixture without setup-gradle's dependency-graph plugin.
+    project.tasks.register('VerifyBuildscriptFreeMarker') {
+        doLast { verifyBuildscriptFreeMarker(project) }
+    }
+    project.tasks.configureEach { task ->
+        if (task.name == 'ForceDependencyResolutionPlugin_resolveProjectDependencies') {
+            task.dependsOn('VerifyBuildscriptFreeMarker')
+            task.doLast {
+                def excluded = java.util.regex.Pattern.compile(System.getenv('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') ?: '')
+                def configurations = project.configurations.findAll {
+                    it.canBeResolved && !excluded.matcher(it.name).matches()
+                }
+                def unresolved = []
+                configurations.each { configuration ->
+                    configuration.incoming.resolutionResult.allDependencies.each { dependency ->
+                        if (dependency instanceof UnresolvedDependencyResult) {
+                            unresolved.add("${project.path}:${configuration.name}: ${dependency.attempted.displayName}")
+                        }
+                    }
+                }
+                if (!unresolved.empty) {
+                    throw new GradleException('Incomplete dependency graph: ' + unresolved.unique().sort().join('; '))
+                }
+                def directory = System.getenv('DEPENDENCY_GRAPH_COVERAGE_DIR')
+                def sha = System.getenv('GITHUB_DEPENDENCY_GRAPH_SHA')
+                if (!directory || !sha) {
+                    throw new GradleException('Missing dependency graph receipt identity')
+                }
+                def digest = java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(project.path.getBytes('UTF-8')).encodeHex().toString()
+                def receipt = new File(directory, digest + '.json')
+                if (receipt.exists()) {
+                    throw new GradleException('Duplicate dependency graph project receipt: ' + project.path)
+                }
+                receipt.text = JsonOutput.toJson([
+                    version: 1,
+                    sha: sha,
+                    project: project.path,
+                    configurations: configurations.collect { it.name }.sort(),
+                ])
+            }
+        }
+    }
+}

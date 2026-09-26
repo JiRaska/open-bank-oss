@@ -23,7 +23,8 @@ What the wiring looks like now:
 - `PartyEvents` (domain) builds the flat JSON envelope. It is the WIRE CONTRACT — the same field
   names, order and flat shape the direct emitter produced — pinned by
   `PartyEventEnvelopeContractTest` and by the provider-side pacts.
-- `PartyRepository.save/update/anonymize` have event-carrying overloads. The impl chains
+- `PartyRepository.save/anonymize` have event-carrying overloads, and `modify` (the only full-state
+  update) always carries one. The impl chains
   `outboxRepository.persistInTransaction(...)` inside the SAME `Panache.withTransaction` block as
   the state change, so the row and the event commit together or neither does.
 - The direct emitter and its `party-events-out` channel are **removed**. `party-outbox-out`

@@ -5,6 +5,7 @@
 package com.openbank.standingorder.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -31,7 +32,9 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-standing-order` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 interface TransactionServiceClient {
 
     @POST

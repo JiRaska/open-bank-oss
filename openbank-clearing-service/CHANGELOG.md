@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.2...clearing-service-v0.11.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.1...clearing-service-v0.11.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.0...clearing-service-v0.11.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **ledger:** give ledger an mTLS listener and point clearing + interest at it ([#10397](https://github.com/JiRaska/open-bank-oss/issues/10397)) ([4e21311](https://github.com/JiRaska/open-bank-oss/commit/4e21311eac1a431c3670d0f4c86ccb38d762e3ba))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.1...clearing-service-v0.11.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.0...clearing-service-v0.10.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **clearing:** guard clearing_outbox created_at plausibility at INSERT ([#9294](https://github.com/JiRaska/open-bank-oss/issues/9294)) ([13e6ee0](https://github.com/JiRaska/open-bank-oss/commit/13e6ee0e4e3180c903e7119414b2169cf90828b4))
+* **clearing:** replay-safe payment submit + ADR-0298 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9402](https://github.com/JiRaska/open-bank-oss/issues/9402)) ([21b8066](https://github.com/JiRaska/open-bank-oss/commit/21b8066308339c86b5dce67d0a44f87110b2d99c))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.1...clearing-service-v0.10.0) (2026-09-08)
 
 

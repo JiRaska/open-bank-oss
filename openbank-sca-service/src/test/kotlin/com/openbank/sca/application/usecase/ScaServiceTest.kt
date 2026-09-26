@@ -17,6 +17,7 @@ import com.openbank.sca.application.port.out.DeviceAssertionVerifier
 import com.openbank.sca.application.port.out.EnrolledDeviceRepository
 import com.openbank.sca.application.port.out.OtpGenerator
 import com.openbank.sca.application.port.out.OtpStore
+import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
@@ -62,6 +63,7 @@ class ScaServiceTest {
     private val enrolledDeviceRepository = mockk<EnrolledDeviceRepository>()
     private val decisionStore = mockk<ScaDecisionStore>()
     private val assertionVerifier = mockk<DeviceAssertionVerifier>()
+    private val partyTypeLookup = mockk<PartyTypeLookup>()
     private val objectMapper = ObjectMapper()
     private val metrics = mockk<DomainMetrics>(relaxed = true)
 
@@ -69,6 +71,7 @@ class ScaServiceTest {
 
     @BeforeEach
     fun setUp() {
+        coEvery { partyTypeLookup.partyType(any()) } returns "INDIVIDUAL"
         service = ScaService(
             repository = repository,
             otpGenerator = otpGenerator,
@@ -78,6 +81,7 @@ class ScaServiceTest {
             enrolledDeviceRepository = enrolledDeviceRepository,
             decisionStore = decisionStore,
             assertionVerifier = assertionVerifier,
+            partyTypeLookup = partyTypeLookup,
             objectMapper = objectMapper,
             metrics = metrics,
             idempotencyTtlSeconds = 300L,

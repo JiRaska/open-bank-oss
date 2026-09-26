@@ -73,6 +73,22 @@ PUBLISHED_CREDENTIAL_USERS = {"demo@openbank.local"}
 # never from /users — so a snapshot that did not ask for them simply has none.
 SERVICE_ACCOUNT_PREFIX = "service-account-"
 
+# Realm roles that make an M2M identity an operator. `rest.rego`'s `matrix-allows` turns every
+# role_action_matrix entry into a permit for any HUMAN holding the role, and Keycloak
+# service-accounts are classified HUMAN — so one of these on a service account is a fleet-wide
+# grant to a machine. #10486: `service-account-openbank-services` held ROLE_OPERATOR live while
+# the template grants only ROLE_API, and this script reported it as a ::warning:: that left the
+# job green, so the drift detector read as parity. A privileged grant the template does not make
+# is now an ::error:: (job fails -> KeycloakRealmDrift), for declared AND undeclared accounts.
+PRIVILEGED_REALM_ROLES = {"ROLE_OPERATOR", "ROLE_ADMIN"}
+
+# Client roles are namespaced `<clientId>/<role>` on both sides so a client role can never
+# collide with a realm role of the same name.
+CLIENT_ROLE_SEP = "/"
+
+# Marker put into a principal's live set when its capture included client-role mappings.
+CLIENT_CAPTURED = "\x00client-roles-captured"
+
 
 def keycloak_builtins(realm: str) -> set:
     """Roles the server assigns itself. Never in a template; excluded from both sides."""
@@ -106,8 +122,8 @@ def template_users(root: pathlib.Path) -> tuple:
             if not name:
                 raise SystemExit(f"{p}: a user entry has no `username`")
             roles = set(u.get("realmRoles") or [])
-            for client_roles in (u.get("clientRoles", {}) or {}).values():
-                roles |= set(client_roles or [])
+            for client, client_roles in (u.get("clientRoles", {}) or {}).items():
+                roles |= {f"{client}{CLIENT_ROLE_SEP}{r}" for r in client_roles or []}
             users[name] = roles
         out.setdefault(realm, {}).update(users)
     return out, open_registration
@@ -123,6 +139,17 @@ def load_live(spec: str) -> tuple:
     users = {}
     if isinstance(doc, dict):
         for name, roles in doc.items():
+            if isinstance(roles, dict):
+                # Structured capture (#10486): {"realmRoles": [...], "clientRoles": {client: [...]}}.
+                # Only this shape carries client-role mappings; the flat list shape means the
+                # capture did not look at them, and the comparison then leaves them unchecked.
+                s = {r if isinstance(r, str) else r.get("name") for r in roles.get("realmRoles") or []}
+                for client, crs in (roles.get("clientRoles") or {}).items():
+                    s |= {f"{client}{CLIENT_ROLE_SEP}{r if isinstance(r, str) else r.get('name')}"
+                          for r in crs or []}
+                s.add(CLIENT_CAPTURED)
+                users[name] = s
+                continue
             users[name] = {r if isinstance(r, str) else r.get("name") for r in roles or []}
     elif isinstance(doc, list):
         for entry in doc:
@@ -149,9 +176,16 @@ def compare(realm: str, declared: dict, live: dict, open_registration: bool = Fa
     # than assumed, so an older capture degrades to "unchecked" instead of to a false finding.
     saw_service_accounts = any(u.startswith(SERVICE_ACCOUNT_PREFIX) for u in live)
 
+    privileged = []
     for user in sorted(set(declared) | set(live)):
         want = (declared.get(user) or set()) - builtins
         have = live.get(user)
+        if have is not None:
+            if CLIENT_CAPTURED not in have:
+                # Client mappings were not captured for this principal: compare realm roles only
+                # rather than report every template client role as a missing grant.
+                want = {r for r in want if CLIENT_ROLE_SEP not in r}
+            have = have - {CLIENT_CAPTURED}
         if have is None:
             # Declared but absent live. The sibling reports missing ROLES; a missing USER is the
             # same class and equally invisible until someone tries to log in as them.
@@ -170,6 +204,17 @@ def compare(realm: str, declared: dict, live: dict, open_registration: bool = Fa
             under[user] = sorted(want)
             continue
         have = have - builtins
+        is_sa = user.startswith(SERVICE_ACCOUNT_PREFIX)
+        bad = sorted((have - want) & PRIVILEGED_REALM_ROLES) if is_sa else []
+        if bad:
+            privileged.append(user)
+            findings.append(
+                f"::error::[{realm}] service account `{user}` holds {bad} which the realm "
+                f"template {'does not grant it' if user in declared else 'does not declare it at all'}"
+                f" (template: {sorted(want)}). A service account is classified HUMAN by the authz "
+                f"interceptor, so every role_action_matrix entry for {bad} is a grant to this "
+                f"machine identity — remove the live mapping or declare it in the template",
+            )
         if user not in declared:
             undeclared.append(user)
             # In a self-registration realm this is the product working. Still counted in the
@@ -184,7 +229,9 @@ def compare(realm: str, declared: dict, live: dict, open_registration: bool = Fa
         extra, missing = sorted(have - want), sorted(want - have)
         if extra:
             over[user] = extra
-            if user in PUBLISHED_CREDENTIAL_USERS:
+            if bad and not set(extra) - set(bad):
+                pass  # already reported above as ::error::
+            elif user in PUBLISHED_CREDENTIAL_USERS:
                 findings.append(
                     f"::error::[{realm}] user `{user}` has PUBLISHED credentials and holds "
                     f"{extra} which the realm template does not grant it — anyone holding those "
@@ -209,7 +256,42 @@ def compare(realm: str, declared: dict, live: dict, open_registration: bool = Fa
         "undeclaredUsers": sorted(undeclared),
         "undeclaredUsersReported": not open_registration,
         "uncheckedPrincipals": sorted(unchecked),
+        "privilegedServiceAccountDrift": privileged,
     }
+
+
+def rego_service_account_clients(root: pathlib.Path) -> set:
+    """Clients whose service account a non-test policy names (`service-account-<client>`)."""
+    import re
+
+    pat = re.compile(r"service-account-([a-z0-9][a-z0-9-]*[a-z0-9])")
+    out = set()
+    for p in root.rglob("*.rego"):
+        if p.name.endswith("_test.rego") or {".git", "node_modules", "build"} & set(p.parts):
+            continue
+        out |= set(pat.findall(p.read_text()))
+    return out
+
+
+def compare_client_scopes(realm: str, referenced: set, live_scopes: dict) -> tuple:
+    """LIVE default client scopes of every rego-referenced client must include `profile`.
+
+    #10486: principal.id reaches the policy from `preferred_username`, which a client_credentials
+    token carries only through the `profile` scope. The template is held to this statically
+    (check-rego-service-account-profile-scope.py); this is the same rule against the RUNNING
+    realm, which `--import-realm` stopped feeding the day it first came up.
+    """
+    findings, missing = [], []
+    for client in sorted(referenced & set(live_scopes)):
+        if "profile" not in live_scopes[client]:
+            missing.append(client)
+            findings.append(
+                f"::error::[{realm}] client `{client}` has no `profile` default scope in the live "
+                f"realm ({sorted(live_scopes[client])}) — its tokens carry no preferred_username, "
+                f"so every rego rule keyed on `service-account-{client}` never matches",
+            )
+    return findings, {"checkedClients": sorted(referenced & set(live_scopes)),
+                      "missingProfileScope": missing}
 
 
 def self_test() -> int:
@@ -271,6 +353,44 @@ def self_test() -> int:
     check("absent service account is unchecked, not a finding",
           f == [] and r["uncheckedPrincipals"] == ["service-account-x"])
 
+    # 7. #10486 known-positive, in the LIVE shape: the shared client's service account holds
+    #    ROLE_OPERATOR the template does not grant. Must be an ::error:: (fails the job), not the
+    #    ::warning:: that let the 2026-09-21 run complete green.
+    f, r = compare(
+        "openbank",
+        {"service-account-openbank-services": {"ROLE_API"}},
+        {"service-account-openbank-services": {"ROLE_API", "ROLE_OPERATOR", "default-roles-openbank"}},
+    )
+    check("privileged SA over-grant must be an error",
+          any(x.startswith("::error::") and "ROLE_OPERATOR" in x for x in f))
+    check("…and listed in privilegedServiceAccountDrift",
+          r["privilegedServiceAccountDrift"] == ["service-account-openbank-services"])
+
+    # 7b. an UNDECLARED service account holding ROLE_ADMIN is also an error
+    f, r = compare("openbank", {}, {"service-account-ghost": {"ROLE_ADMIN"}})
+    check("undeclared privileged SA must be an error", any(x.startswith("::error::") for x in f))
+
+    # 7c. a non-privileged SA over-grant stays a warning; a HUMAN with ROLE_OPERATOR is not "SA"
+    f, r = compare("openbank", {"service-account-x": {"ROLE_API"}},
+                   {"service-account-x": {"ROLE_API", "ROLE_VIEWER"}})
+    check("non-privileged SA over-grant is a warning", f and all("::warning::" in x for x in f))
+
+    # 7d. client-role mappings, when captured, are compared; when not captured, not invented
+    f, r = compare("openbank", {"service-account-x": {"ROLE_API"}},
+                   {"service-account-x": {"ROLE_API", CLIENT_CAPTURED, "realm-management/manage-users"}})
+    check("captured extra client role is an over-grant",
+          r["overGranted"] == {"service-account-x": ["realm-management/manage-users"]})
+    f, r = compare("openbank", {"service-account-x": {"ROLE_API", "c/r"}},
+                   {"service-account-x": {"ROLE_API"}})
+    check("uncaptured client roles are not reported missing", f == [])
+
+    # 8. live default scopes: a referenced client without `profile` is an error
+    f, r = compare_client_scopes("openbank", {"openbank-edge", "openbank-services"},
+                                 {"openbank-edge": ["openid", "roles"],
+                                  "openbank-services": ["openid", "profile", "roles"]})
+    check("live client without profile must be an error",
+          r["missingProfileScope"] == ["openbank-edge"] and f[0].startswith("::error::"))
+
     # 6. an empty capture is a failure, never a clean realm — the difference between "this realm
     #    has no users" and "the credential was wrong" is the difference between silence and alarm
     import tempfile
@@ -288,7 +408,7 @@ def self_test() -> int:
         sys.stderr.write(f"::error::self-test FAILED: {name}\n")
     if failures:
         return 1
-    print(f"self-test OK ({10 - len(failures)}/10 cases)")
+    print("self-test OK (17/17 cases)")
     return 0
 
 
@@ -301,6 +421,13 @@ def main() -> int:
         default=[],
         metavar="REALM=PATH",
         help="live user role-mapping snapshot; PATH may be - for stdin. Repeatable.",
+    )
+    ap.add_argument(
+        "--live-client-scopes",
+        action="append",
+        default=[],
+        metavar="REALM=PATH",
+        help="live {clientId: [default scope names]} snapshot (#10486). Repeatable.",
     )
     ap.add_argument("--self-test", action="store_true", help="run the falsifiability harness")
     ap.add_argument(
@@ -333,6 +460,19 @@ def main() -> int:
         f, r = compare(realm, declared.get(realm, {}), live[realm], realm in open_registration)
         findings += f
         report["realms"][realm] = r
+
+    if args.live_client_scopes:
+        referenced = rego_service_account_clients(root)
+        for spec in args.live_client_scopes:
+            realm, _, path = spec.partition("=")
+            f, r = compare_client_scopes(realm, referenced, json.loads(pathlib.Path(path).read_text()))
+            findings += f
+            report.setdefault("clientScopes", {})[realm] = r
+    else:
+        report["clientScopes"] = {"status": "unchecked — no --live-client-scopes snapshot"}
+
+    report["privilegedServiceAccountDriftCount"] = sum(
+        len(r.get("privilegedServiceAccountDrift", [])) for r in report["realms"].values())
 
     for line in findings:
         sys.stderr.write(line + "\n")

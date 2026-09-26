@@ -127,6 +127,15 @@ const thresholdBackedState = (claimedState, rawObservation, retainedObservation)
   return claimedState
 }
 
+// #7451. Re-derive `matched` from the two SHAs rather than trusting the envelope's boolean: an
+// attestation whose verdict disagrees with its own evidence is dropped, not rendered.
+const SHA = /^[0-9a-f]{7,40}$/
+const validBuildAttestation = value => Boolean(value) && typeof value === 'object'
+  && typeof value.requestedSha === 'string' && SHA.test(value.requestedSha)
+  && (value.observedSha === null || (typeof value.observedSha === 'string' && SHA.test(value.observedSha)))
+  && typeof value.matched === 'boolean'
+  && value.matched === (value.observedSha !== null && value.observedSha.startsWith(value.requestedSha))
+
 const retainActionableFailure = (previous, next, validRecovery) =>
   previous?.state === 'failed' && next.state !== 'failed' && !validRecovery ? previous : next
 
@@ -254,6 +263,7 @@ function runEnvelope(component) {
         observedAt: run.run?.observedAt ?? observedAt(file),
         source: item.source, environment: 'ci', detail: item.detail, run: provenance,
         ...(normalized.variant ? { variant: normalized.variant } : {}),
+        ...(validBuildAttestation(normalized.buildAttestation) ? { buildAttestation: normalized.buildAttestation } : {}),
         ...(normalized.thresholdResults ? { thresholdResults: normalized.thresholdResults } : {}),
       }
     })],
@@ -850,6 +860,7 @@ function syntheticJourneys() {
             thresholdResults: evidence.thresholdResults,
           } : {}),
           ...(provenance ? { run: provenance } : {}),
+          ...(validBuildAttestation(evidence.buildAttestation) ? { buildAttestation: evidence.buildAttestation } : {}),
         }
         if (evidence.variant) {
           const variants = latestVariants.get(journeyId) ?? new Map()

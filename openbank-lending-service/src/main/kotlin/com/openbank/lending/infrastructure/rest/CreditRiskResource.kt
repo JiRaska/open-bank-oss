@@ -70,6 +70,12 @@ class CreditRiskResource(private val insight: CreditRiskInsightUseCase, private 
         insight.portfolio(limit)
 
     @GET
+    @Path("/portfolio/summary")
+    @Operation(summary = "Whole active book by currency with same-date evidence completeness")
+    @Authorize(action = "lending.list", resource = "")
+    fun portfolioSummary() = insight.portfolioSummary(LocalDate.now(clock))
+
+    @GET
     @Path("/policy")
     @Operation(
         summary = "The credit policy bundle the engine evaluates as of a date",

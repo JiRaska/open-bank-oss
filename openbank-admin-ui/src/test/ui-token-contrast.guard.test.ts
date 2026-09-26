@@ -62,7 +62,6 @@ const OBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--danger', '--danger-bg'], // 3.44:1
   ['--danger', '--surface'], // 3.76:1
   ['--danger', '--surface-1'], // 3.76:1
-  ['--accent', '--accent-bg'], // 3.99:1
 ]
 
 // Pairs that fail arithmetically but which that sweep did not observe — mostly combinations nobody
@@ -142,21 +141,11 @@ const UNOBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--danger', '--success-bg'], // 3.57:1
   ['--danger', '--surface-2'], // 3.6:1
   ['--danger', '--bg'], // 3.61:1
-  ['--accent', '--surface-4'], // 3.62:1
   ['--danger', '--warning-bg'], // 3.63:1
   ['--info', '--surface'], // 3.68:1
   ['--info', '--surface-1'], // 3.68:1
   ['--warning-text', '--sidebar-bg'], // 3.85:1
-  ['--accent', '--surface-3'], // 4.08:1
-  ['--accent', '--danger-bg'], // 4.08:1
-  ['--accent', '--info-bg'], // 4.1:1
-  ['--accent', '--success-bg'], // 4.24:1
-  ['--accent', '--surface-2'], // 4.27:1
-  ['--accent', '--bg'], // 4.28:1
-  ['--accent', '--warning-bg'], // 4.31:1
-  ['--accent', '--sidebar-bg'], // 4.33:1
-  ['--accent', '--surface'], // 4.47:1
-  ['--accent', '--surface-1'], // 4.47:1
+  ['--accent', '--sidebar-bg'], // content accent is not sidebar body text
 ]
 
 const UNOBSERVED_DARK: ReadonlyArray<readonly [string, string]> = [
@@ -222,11 +211,16 @@ describe('admin UI token contrast', () => {
     // (e.g. --success #10b981 on --success-bg = 2.41:1 on /day-end and /system/health).
     const tones = ['--success', '--warning', '--danger', '--info', '--accent']
     const missingSurfaces = surfaces.filter(n => !SURFACE_TOKENS.includes(n as never))
-    // --text-inverse is excluded by design: it exists to sit on a solid accent/tone fill, not on any
-    // token in SURFACE_TOKENS, so including it would assert 12 pairs nobody writes.
+    // Inverse text belongs on solid fills, not any light content surface. The dedicated strong
+    // accent pair is asserted below instead of adding invented cross-product combinations.
     const missingTexts = [...texts, ...tones]
-      .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
+      .filter(n => n !== '--text-inverse' && n !== '--accent-strong-text' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
     expect({ missingSurfaces, missingTexts }).toEqual({ missingSurfaces: [], missingTexts: [] })
+  })
+
+  it.each(['light', 'dark'] as const)('%s: text on the strong accent fill is AA', theme => {
+    const tokens = { ...declarations(':root'), ...(theme === 'dark' ? declarations('\\.dark') : {}) }
+    expect(contrast(resolve(tokens, '--accent-strong-text'), resolve(tokens, '--accent-strong'))).toBeGreaterThanOrEqual(AA)
   })
 
   // Ported from the light-theme guard #9788 added, which this file subsumes: if the arithmetic is

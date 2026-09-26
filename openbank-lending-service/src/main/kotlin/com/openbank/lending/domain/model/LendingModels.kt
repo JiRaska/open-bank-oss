@@ -117,6 +117,8 @@ data class LoanApplication(
     val partyId: UUID,
     val requestedAmount: Money,
     val nominalAnnualRate: BigDecimal,
+    /** ADR-0314 D5: fixed or floating, and if floating, how. Carried onto the [Loan] at booking. */
+    val rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     val termPeriods: Int,
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod = AmortizationMethod.ANNUITY,
@@ -138,6 +140,7 @@ data class LoanApplication(
     val packVersion: Int? = null,
     val verifiedIncomeMonthly: Money? = null,
     val existingDebtServiceMonthly: Money? = null,
+    val existingDebtOutstanding: Money? = null,
     val ageYears: Int? = null,
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
@@ -148,6 +151,8 @@ data class LoanApplication(
     val policyVersions: String? = null,
     val decisionInputHash: String? = null,
     val decidedEngineAt: OffsetDateTime? = null,
+    val decisionDsti: BigDecimal? = null,
+    val decisionDti: BigDecimal? = null,
     val catalogSnapshot: CatalogLoanSnapshot? = null,
 )
 
@@ -158,6 +163,8 @@ data class Loan(
     val partyId: UUID,
     val principal: Money,
     val nominalAnnualRate: BigDecimal,
+    /** ADR-0314 D5. [nominalAnnualRate] is the rate currently applied; for FLOATING it is index + spread at the last reset. */
+    val rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     val termPeriods: Int,
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod,
@@ -230,6 +237,7 @@ data class LoanApplicationRequest(
     val partyId: UUID,
     val requestedAmount: Money,
     val nominalAnnualRate: BigDecimal,
+    val rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     val termPeriods: Int,
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod = AmortizationMethod.ANNUITY,
@@ -238,6 +246,7 @@ data class LoanApplicationRequest(
     val productType: String? = null,
     val verifiedIncomeMonthly: Money? = null,
     val existingDebtServiceMonthly: Money? = null,
+    val existingDebtOutstanding: Money? = null,
     val ageYears: Int? = null,
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
@@ -344,4 +353,4 @@ data class LoanProvisioningRecord(
 )
 
 /** Outcome of one scheduled IFRS 9 provisioning pass over the live book. */
-data class ProvisioningRunOutcome(val period: String, val loansAssessed: Int, val journalsPosted: Int)
+data class ProvisioningRunOutcome(val period: String, val loansAssessed: Int, val journalsQueued: Int)

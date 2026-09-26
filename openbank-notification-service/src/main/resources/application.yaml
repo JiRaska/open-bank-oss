@@ -257,6 +257,26 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.consent.events.notification.dlq
+      # #10281: multi-signature approval notifications (ApprovalNotificationConsumer) — the one
+      # consumer of the topic delegation-service's outbox publishes approval lifecycle events on.
+      # client.id / group.id / auto.offset.reset are dotted keys YAML cannot carry (issue #686).
+      # They live in application.properties, baked into the SAME image as this channel, rather
+      # than the gitops msg-override ConfigMap: naming a channel there before an image serving it
+      # is deployed is an SRMSG00071 boot failure (msg-channel-image-parity), and without them the
+      # channel would run under an ACL-denied default group and consume nothing.
+      approval-events-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.approval-events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # The consumer retries in-process and then fails its Uni; SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel. Explicit topic, NESTED form: the
+        # dotted leaf `dead-letter-queue.topic:` is quoted by the YAML source and never read (#686).
+        # KafkaTopic CR: openbank-infra/gitops/components/kafka/kafka-dlq-topics.yaml; Write ACL:
+        # components/notifications/kafka-notification-mtls.yaml.
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.notification.approval-events-in
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —
@@ -386,3 +406,23 @@ openbank:
         private-key: ${APNS_PRIVATE_KEY:}
         # true → APNs sandbox host (debug builds); false → production.
         sandbox: ${APNS_SANDBOX:false}
+"%prod":
+  quarkus:
+    # EMAIL envelope-address resolution (#3581) reads party-service. Production uses a named TLS
+    # bucket over party-service's private-CA mTLS listener (8443, client auth REQUIRED), the same
+    # shape as aml-service and delegation-service. Local/test fixtures speak plain HTTP, so this
+    # stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      party-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      party-service:
+        tls-configuration-name: party-authority

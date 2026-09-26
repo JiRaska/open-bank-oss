@@ -4,6 +4,7 @@
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kover)
     id("openbank.static-analysis")
     // Same gap as openbank-simulation (see the pins file's own comment): force() is
     // project-local, so a project(...) consumer's force never reaches this module's OWN
@@ -125,4 +126,21 @@ tasks.test {
 kotlin {
     jvmToolchain(25)
     compilerOptions { freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property") }
+}
+
+// Measured 2026-09-26 over two independent `koverXmlReport` runs (both 51.57% LINE, no
+// variance observed): floor set to floor(min(run1, run2)) - 2 per the fleet's flaky-koverVerify
+// ratchet convention (koverVerify has been observed to vary run-to-run on other modules, e.g.
+// consent-service ~10% of runs). Ratchet-only: never lower this.
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 49
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
 }

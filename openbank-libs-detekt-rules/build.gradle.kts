@@ -8,6 +8,7 @@
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kover)
     id("openbank.static-analysis")
     `java-library`
 }
@@ -41,4 +42,21 @@ tasks.test {
 
 kotlin {
     jvmToolchain(21)
+}
+
+// Measured 2026-09-26 over two independent `koverXmlReport` runs (both 80.26% LINE, no
+// variance observed): floor set to floor(min(run1, run2)) - 2 per the fleet's flaky-koverVerify
+// ratchet convention (koverVerify has been observed to vary run-to-run on other modules, e.g.
+// consent-service ~10% of runs). Ratchet-only: never lower this.
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 78
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
 }

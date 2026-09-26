@@ -9,9 +9,10 @@ import jakarta.enterprise.context.ApplicationScoped
 /**
  * ADR-0148 prompt-registry loader, mirroring `openbank-agent-service`'s
  * `RegisteredPromptTemplates` exactly (same classpath-packaging convention,
- * `build.gradle.kts`'s `processResources`). Currently used only for the `style.v1`
- * git-registered baseline `PublishedStyleProvider` falls back to (ADR-0285 D5) — NOT yet for
- * `core.v1`/`style.v1` composition into the live system prompt itself. See
+ * `build.gradle.kts`'s `processResources`). Loads the `style.v1` git-registered baseline
+ * (ADR-0285 D5); nothing composes it into the live system prompt yet. The unwired
+ * communication-service style client that used it as a fallback was removed (#10383) — the
+ * `core.v1`/`style.v1` cutover will reintroduce the read together with its URL. See
  * `openbank-libs/governance/prompts/registry.yaml`'s own `customer-copilot` entry for why that
  * cutover is a deliberately separate, later change (composing core+style reorders the one
  * style-eligible sentence relative to `system.v1`'s original mid-document position, and a live
@@ -40,10 +41,9 @@ internal object RegisteredPromptTemplates {
 
 /**
  * Forces [RegisteredPromptTemplates] to load at boot rather than lazily on first use. Without
- * this, `customerCopilotStyleV1` is only touched from `PublishedStyleProvider`'s failure branch —
- * a `processResources` misconfiguration would leave the service green until communication-service
- * is actually down with a cold cache, which is precisely the moment the fallback is needed and the
- * worst time to discover it's broken. Same shape as `HelpKnowledgeBase`'s `@Startup`, same reason
+ * this, a `processResources` misconfiguration would leave the service green until the first
+ * caller of `customerCopilotStyleV1` — the moment the baseline is needed and the worst time to
+ * discover it's broken. Same shape as `HelpKnowledgeBase`'s `@Startup`, same reason
  * this codebase's own CLAUDE.md documents for `PdfBoxPadesSealAdapter`: an `@ApplicationScoped`
  * bean is lazy by default, and a boot-time guard that only runs on first request is not a guard.
  */

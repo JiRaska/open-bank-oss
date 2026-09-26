@@ -59,6 +59,17 @@ quarkus:
       type: client
     tls:
       verification: none
+    # #10486 batch 7: the booked-entries search (transaction.search) no longer rides the shared
+    # openbank-services principal. TransactionRestClient selects this NAMED client (@OidcClientFilter("m2m")),
+    # so its principal is service-account-openbank-statement (ROLE_API only), granted by identity in
+    # transaction_rest_ext.rego. Every other rest-client stays on the default client.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-statement
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     transaction-api:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
@@ -203,3 +214,23 @@ mp:
         topic: openbank.statement.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+"%prod":
+  quarkus:
+    # DocumentTemplateRestAdapter calls document-service. Production uses a named TLS bucket over
+    # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
+    # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this
+    # stays under %prod: the client certificate only exists in the cluster.
+    tls:
+      document-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/document-tls/tls.crt
+              key: /mnt/document-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/document-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      document-api:
+        tls-configuration-name: document-authority

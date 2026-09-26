@@ -138,3 +138,12 @@ mp:
         # ADR-0244 D7: every case ends in exactly one HITL proposal on this topic.
         topic: ${CASE_OUTBOX_TOPIC:proposal-events}
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      agent-kill-switch-events-in:
+        connector: smallrye-kafka
+        topic: ${AGENT_KILL_SWITCH_TOPIC:agent-kill-switch-events-in}
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.case-coordinator.agent-kill-switch-events-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer

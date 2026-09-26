@@ -31,6 +31,20 @@ class DomesticPaymentTest {
 
         assertThat(settled.submittedAt).isEqualTo(now)
         assertThat(settled.settledAt).isEqualTo(now)
+        assertThat(settled.aggregateRevision).isEqualTo(2)
+    }
+
+    @Test
+    fun `every valid lifecycle transition increments the durable aggregate revision once`() {
+        val clock = Clock.fixed(Instant.parse("2026-01-02T00:00:00Z"), ZoneOffset.UTC)
+        val received = payment()
+
+        val validated = received.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
+        val submitted = validated.transitionTo(DomesticPaymentStatus.SENT_TO_CLEARING, clock = clock)
+
+        assertThat(received.aggregateRevision).isEqualTo(1)
+        assertThat(validated.aggregateRevision).isEqualTo(2)
+        assertThat(submitted.aggregateRevision).isEqualTo(3)
     }
 
     @Test

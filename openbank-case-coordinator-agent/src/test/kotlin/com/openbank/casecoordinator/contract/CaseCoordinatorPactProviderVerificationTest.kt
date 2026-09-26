@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.casecoordinator.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -40,11 +41,22 @@ import javax.sql.DataSource
  * The two `given` states each insert the fixture rows their interaction asserts on, keyed by the
  * same deterministic case UUID the activities use (`UUID.nameUUIDFromBytes` of the workflow id —
  * the V1 PK is that derived UUID). They share one workflow id, so each state deletes first.
+ *
+ * ## Why a second provider verification class is safe
+ *
+ * This class carries class-level `@TestSecurity`, which authenticates every request it makes.
+ * That is correct for the roster/thread/status interactions, but would silently turn the
+ * adversarial 401 interaction green. [CaseCoordinatorUnauthorizedPactVerificationTest] replays
+ * interactions whose provider state is [NEGATIVE_AUTH_STATE] with no `@TestSecurity`, so the
+ * request arrives anonymous and the secured endpoint answers 401 as the consumer encoded.
+ * pact-jvm 4.7.3 matches provider-state filters with `String.matches` (full-match Java regex), so
+ * the negative lookahead below and the literal filter on the sibling class are exact complements.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 @Provider("openbank-case-coordinator-agent")
 @PactFolder("../pacts")
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @TestSecurity(user = "pact-viewer", roles = ["ROLE_VIEWER"])
 class CaseCoordinatorPactProviderVerificationTest {
@@ -151,3 +163,8 @@ class CaseCoordinatorPactProviderVerificationTest {
         val PROPOSAL_UUID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
     }
 }
+
+/**
+ * The unauthenticated half of the coordinator's git-pact verification (ADR-0279 #3).
+ */
+const val NEGATIVE_AUTH_STATE = "no valid identity is presented"

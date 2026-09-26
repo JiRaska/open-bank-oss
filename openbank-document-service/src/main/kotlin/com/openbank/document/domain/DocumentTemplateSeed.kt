@@ -141,6 +141,74 @@ object DocumentTemplateSeed {
             locale = "en",
             bodyHtml = PAYMENT_CONFIRMATION_EN_BODY,
         ),
+        // Business onboarding (legal entity): the framework agreement the company signs and the
+        // three disclosures annexed to it (bodies in BusinessTemplateBodies.kt). New codes at
+        // 1.0.0 — the seeder inserts them into an already-seeded database by fixed id, and there
+        // is no PUBLISHED sibling to retire, so V5's one-published-per-code index is untouched.
+        template(
+            id = "1e575a01-0000-4000-9000-000000000030",
+            code = "RAMCOVA_SMLOUVA_PO_CS",
+            version = "1.0.0",
+            name = "Rámcová smlouva o platebních službách a běžném účtu pro podnikatele",
+            locale = "cs",
+            bodyHtml = BUSINESS_AGREEMENT_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000031",
+            code = "RAMCOVA_SMLOUVA_PO_EN",
+            version = "1.0.0",
+            name = "Framework Agreement for Payment Services and Business Current Account",
+            locale = "en",
+            bodyHtml = BUSINESS_AGREEMENT_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000032",
+            code = "SAZEBNIK_PO_CS",
+            version = "1.0.0",
+            name = "Sazebník poplatků pro podnikatele",
+            locale = "cs",
+            bodyHtml = BUSINESS_FEES_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000033",
+            code = "SAZEBNIK_PO_EN",
+            version = "1.0.0",
+            name = "Business Schedule of Fees",
+            locale = "en",
+            bodyHtml = BUSINESS_FEES_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000034",
+            code = "PREDSMLUVNI_INFORMACE_PO_CS",
+            version = "1.0.0",
+            name = "Předsmluvní informace k platebním službám",
+            locale = "cs",
+            bodyHtml = BUSINESS_PRECONTRACT_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000035",
+            code = "PREDSMLUVNI_INFORMACE_PO_EN",
+            version = "1.0.0",
+            name = "Pre-contractual Information on Payment Services",
+            locale = "en",
+            bodyHtml = BUSINESS_PRECONTRACT_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000036",
+            code = "INFORMACE_POJISTENI_VKLADU_CS",
+            version = "1.0.0",
+            name = "Informace pro vkladatele o pojištění vkladů",
+            locale = "cs",
+            bodyHtml = DEPOSIT_INSURANCE_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000037",
+            code = "INFORMACE_POJISTENI_VKLADU_EN",
+            version = "1.0.0",
+            name = "Depositor Information Sheet",
+            locale = "en",
+            bodyHtml = DEPOSIT_INSURANCE_EN_BODY,
+        ),
     )
 
     private fun template(id: String, code: String, version: String, name: String, locale: String, bodyHtml: String) =
@@ -173,7 +241,7 @@ object DocumentTemplateSeed {
 // browser "open in new window" view, and the actual generated PDF. Two locale variants
 // (only the city name differs) so every document, not just the party-identification
 // clause, opens with a real letterhead rather than a bare heading.
-private const val LETTERHEAD_CS = """
+internal const val LETTERHEAD_CS = """
 <div style="display:flex;align-items:center;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:2px solid #4f46e5;">
 <svg width="42" height="42" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenBank">
 <rect width="42" height="42" rx="10" fill="#4f46e5"/>
@@ -186,7 +254,7 @@ private const val LETTERHEAD_CS = """
 </div>
 """
 
-private const val LETTERHEAD_EN = """
+internal const val LETTERHEAD_EN = """
 <div style="display:flex;align-items:center;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:2px solid #4f46e5;">
 <svg width="42" height="42" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenBank">
 <rect width="42" height="42" rx="10" fill="#4f46e5"/>

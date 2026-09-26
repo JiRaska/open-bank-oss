@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.3...sdd-service-v0.13.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.2...sdd-service-v0.13.3) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.1...sdd-service-v0.13.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sdd:** guard sdd_outbox created_at plausibility at INSERT ([#9297](https://github.com/JiRaska/open-bank-oss/issues/9297)) ([6766f2f](https://github.com/JiRaska/open-bank-oss/commit/6766f2f414c01154edd1c4ed8585418b2f3dace1))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.0...sdd-service-v0.13.1) (2026-09-08)
 
 

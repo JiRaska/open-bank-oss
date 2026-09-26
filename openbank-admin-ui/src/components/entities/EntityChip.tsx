@@ -49,25 +49,43 @@ function shortId(id: string): string {
 export function EntityChip({ type, id, label, sublabel }: Props) {
   const { data: session } = useSession()
   const canOpenParty = type !== 'party' || hasPermission(session?.user?.roles ?? [], 'parties:view')
-  const [resolved, setResolved] = useState<string | undefined>(label)
+  const identity = `${type}:${id}`
+  const [resolution, setResolution] = useState<{ identity: string; label: string } | null>(null)
   const Icon = type === 'party' ? User : CreditCard
 
   useEffect(() => {
-    if (label) { setResolved(label); return }
-    if (!canOpenParty) { setResolved(undefined); return }
+    // Supplied labels are already authoritative and are rendered directly.
+    // Do not mirror props into state: doing so leaves the previous entity's
+    // human name visible for one render after an id change.
+    if (label || !canOpenParty) return
     const ctrl = new AbortController()
+    let active = true
     fetch(RESOLVER[type].url(id), { signal: ctrl.signal, cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (d) setResolved(RESOLVER[type].pick(d) ?? shortId(id)) })
-      .catch(() => setResolved(shortId(id)))
-    return () => ctrl.abort()
-  }, [type, id, label, canOpenParty])
+      .then(d => {
+        if (active && d) setResolution({ identity, label: RESOLVER[type].pick(d) ?? shortId(id) })
+      })
+      .catch(error => {
+        if (!active || (error instanceof DOMException && error.name === 'AbortError')) return
+        setResolution({ identity, label: shortId(id) })
+      })
+    return () => {
+      active = false
+      ctrl.abort()
+    }
+  }, [type, id, identity, label, canOpenParty])
+
+  // A resolver label is party PII fetched under the permission that existed when the request
+  // started. Mask it immediately if that permission is revoked; an explicit snapshot supplied
+  // by the owning workflow follows its separate display policy and remains non-linking.
+  const resolvedLabel = canOpenParty && resolution?.identity === identity ? resolution.label : undefined
+  const visibleLabel = label ?? resolvedLabel ?? shortId(id)
 
   const content = (
     <>
       <Icon size={12} aria-hidden="true" style={{ flexShrink: 0 }} />
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {resolved ?? shortId(id)}
+        {visibleLabel}
       </span>
       {sublabel && <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{sublabel}</span>}
     </>

@@ -17,6 +17,7 @@ import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.LockModeType
 import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
@@ -53,8 +54,11 @@ class ComplaintRepositoryImpl @Inject constructor(
 
     @WithTransaction
     override fun update(complaint: Complaint, outbox: OutboxMessage): Uni<Complaint> = sf.withTransaction { s ->
-        s.find(ComplaintEntity::class.java, complaint.id).flatMap { e ->
+        s.find(ComplaintEntity::class.java, complaint.id, LockModeType.PESSIMISTIC_WRITE).flatMap { e ->
             checkNotNull(e) { "Complaint vanished during update: ${complaint.id}" }
+            check(e.aggregateRevision + 1 == complaint.aggregateRevision) {
+                "stale complaint revision ${complaint.aggregateRevision}; current is ${e.aggregateRevision}"
+            }
             applyUpdate(e, complaint)
             s.persist(e).flatMap { s.persist(outbox.toEntity()) }.map { mapper.toDomain(e) }
         }
@@ -73,6 +77,7 @@ private fun applyUpdate(e: ComplaintEntity, c: Complaint) {
     e.rootCauseCode = c.rootCauseCode
     e.closedAt = c.closedAt
     e.updatedAt = c.updatedAt
+    e.aggregateRevision = c.aggregateRevision
 }
 
 /** Map a transactional-outbox message to its persisted entity (PENDING, shared dispute_outbox table). */

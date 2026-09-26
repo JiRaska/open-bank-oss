@@ -48,6 +48,8 @@ data class Complaint(
     val closedAt: OffsetDateTime? = null,
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
+    /** Database-backed ordering token for replay-safe projections. */
+    val aggregateRevision: Long = 1,
     /** Derived field, populated on read (today > dueDate AND not RESOLVED/CLOSED). */
     val breached: Boolean = false,
 )

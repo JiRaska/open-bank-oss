@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Dispute Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Payment dispute management — open, evidence, escalate, withdraw, resolve, timeline — plus
     regulatory complaints handling with a statutory deadline clock (ADR-0085). Evidence is a
@@ -582,6 +582,12 @@ components:
           type: string
           format: date
           description: Statutory deadline (PSD2 15 business days; 35 after an interim reply).
+        aggregateRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+          description: Monotonic lifecycle revision used for ordered event projection.
         breached:
           type: boolean
           description: Derived — today is past dueDate and the complaint is not RESOLVED/CLOSED.

@@ -4,24 +4,42 @@
 
 package com.openbank.kyb.application.usecase
 
+import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
+import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
+import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
+import com.openbank.kyb.application.port.`in`.PrepareAgreementCommand
+import com.openbank.kyb.application.port.`in`.QuestionnairePrefill
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.out.AgreementEntity
+import com.openbank.kyb.application.port.out.AgreementParty
+import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
+import com.openbank.kyb.application.port.out.BusinessAgreementRequest
+import com.openbank.kyb.application.port.out.BusinessAgreementView
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
+import com.openbank.kyb.application.port.out.BusinessOnboardingSettings
 import com.openbank.kyb.application.port.out.BusinessOnboardingWorkflowPort
+import com.openbank.kyb.application.port.out.CeremonySignerStatus
+import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
+import com.openbank.kyb.domain.model.AcceptedDisclosure
+import com.openbank.kyb.domain.model.AgreementConflictException
+import com.openbank.kyb.domain.model.AgreementRecord
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
+import com.openbank.kyb.domain.model.KnownPerson
 import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
@@ -63,6 +81,12 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     @Inject lateinit var representation: RepresentationAttestationService
 
     @Inject lateinit var clock: Clock
+
+    @Inject lateinit var documents: DocumentGateway
+
+    @Inject lateinit var settings: BusinessOnboardingSettings
+
+    @Inject lateinit var ubo: BeneficialOwnershipPort
 
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
 
@@ -119,7 +143,11 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun matchInitiator(cmd: MatchInitiatorCommand): BusinessOnboardingCase {
         val case = ownedBy(cmd.caseId, cmd.callerPartyId)
         val now = Instant.now(clock)
-        val matched = case.initiatorMatched(cmd.representativeIndex, cmd.claimedName, cmd.dateOfBirth, now)
+        // Who the initiator IS comes from party-service's record, never from the request: `claimedName`
+        // and `dateOfBirth` stay on the command for the API contract and are not used for identity.
+        val identity = parties.initiatorIdentity(case.initiatorPartyId)
+            ?: throw InitiatorIdentityMismatchException("no identity on record for the initiator")
+        val matched = case.initiatorMatched(cmd.representativeIndex, identity, now)
         val event = if (matched.status == CaseStatus.MANUAL_REVIEW) KybEvents.reviewRequired(matched, now) else null
         return cases.update(matched, event).also(::armTimers)
     }
@@ -154,12 +182,111 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         return cases.update(identified, KybEvents.signerIdentified(identified, signer, now)).also(::armTimers)
     }
 
+    override suspend fun answerQuestionnaire(cmd: AnswerQuestionnaireCommand): BusinessOnboardingCase {
+        val case = participantOf(cmd.caseId, cmd.callerPartyId)
+        val now = Instant.now(clock)
+        return cases.update(case.questionnaireAnswered(cmd.questionnaire, cmd.callerPartyId, now), null)
+            .also(::armTimers)
+    }
+
+    override suspend fun makeDeclarations(cmd: MakeDeclarationsCommand): BusinessOnboardingCase {
+        val case = participantOf(cmd.caseId, cmd.callerPartyId)
+        val now = Instant.now(clock)
+        // The people a PEP entry must cover: every natural-person beneficial owner the register
+        // reports (a corporate owner is not a person and has no PEP status of its own), plus every
+        // listed representative, which the aggregate adds from the extract.
+        val uboNames = ubo.lookup(case.identifier).reportableOwners.filter { !it.corporate }.map { it.fullName }
+        val made = case.declarationsMade(cmd.declarations, uboNames, knownPersons(case), cmd.callerPartyId, now)
+        return cases.update(made, null).also(::armTimers)
+    }
+
+    override suspend fun questionnairePrefill(caseId: UUID, callerPartyId: UUID): QuestionnairePrefill {
+        val case = participantOf(caseId, callerPartyId)
+        val previous = cases.findInvolving(callerPartyId)
+            .filter { it.id != caseId }
+            .mapNotNull { it.questionnaire }
+            .filter { it.answeredBy == callerPartyId }
+            .maxByOrNull { it.answeredAt ?: Instant.EPOCH }
+        return QuestionnairePrefill(knownPersons(case), previous)
+    }
+
+    /**
+     * Everyone on the case the bank already knows as a customer, with the PEP fact their profile
+     * carries. A profile lookup that finds nothing leaves the fact unknown — never "not a PEP".
+     */
+    private suspend fun knownPersons(case: BusinessOnboardingCase): List<KnownPerson> =
+        case.signers.filter { it.partyId != null }.map { s ->
+            val profile = parties.pepProfile(s.partyId!!)
+            KnownPerson(s.fullName, s.partyId, profile?.pep, profile?.category)
+        }
+
+    override suspend fun prepareAgreement(cmd: PrepareAgreementCommand): BusinessAgreementView {
+        require(cmd.lang in AGREEMENT_LANGS) { "lang must be one of ${AGREEMENT_LANGS.joinToString(", ")}" }
+        val case = participantOf(cmd.caseId, cmd.callerPartyId)
+        case.requireAgreementPreparable()
+        val view = documents.ensureBusinessAgreement(agreementRequest(case, cmd.lang))
+        requireOwnCeremony(case, view)
+        val now = Instant.now(clock)
+        val prepared = case.agreementPrepared(
+            AgreementRecord(
+                documentId = view.documentId,
+                ceremonyId = view.ceremonyId,
+                templateCode = view.templateCode,
+                templateVersion = view.templateVersion,
+                sha256 = view.sha256,
+                lang = cmd.lang,
+            ),
+            now,
+        )
+        cases.update(prepared, null).also(::armTimers)
+        return view
+    }
+
+    override suspend fun acceptDisclosures(cmd: AcceptDisclosuresCommand): BusinessOnboardingCase {
+        val case = participantOf(cmd.caseId, cmd.callerPartyId)
+        val agreement = case.agreement ?: throw AgreementConflictException(
+            AgreementConflictException.NOT_PREPARED,
+            "the business agreement has not been prepared for this case",
+        )
+        // The set to match is the one document-service holds NOW, never one the client remembers.
+        val view = currentCeremony(case, agreement.lang)
+        if (view.documentId != agreement.documentId || view.ceremonyId != agreement.ceremonyId) {
+            throw AgreementConflictException(
+                AgreementConflictException.DISCLOSURES_STALE,
+                "the agreement was re-rendered — prepare it again before accepting",
+            )
+        }
+        val current = view.disclosures.map { AcceptedDisclosure(it.code, it.version, it.sha256) }
+        val now = Instant.now(clock)
+        return cases.update(case.disclosuresAccepted(cmd.disclosures, current, cmd.callerPartyId, now), null)
+            .also(::armTimers)
+    }
+
     override suspend fun sign(cmd: SignCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
+        // Local preconditions first (acceptance recorded, the case's own ceremony id), then the
+        // authority: document-service must say this caller SIGNED that ceremony, for this case.
+        case.requireSignable(cmd.signerPartyId, cmd.signatureRef)
+        val agreement = requireNotNull(case.agreement)
+        val view = currentCeremony(case, agreement.lang)
+        if (view.ceremonyId != agreement.ceremonyId || view.documentId != agreement.documentId) {
+            throw AgreementConflictException(
+                AgreementConflictException.SIGNATURE_REF_MISMATCH,
+                "the ceremony document-service holds for this case is not the one this case recorded",
+            )
+        }
+        val ceremonySigner = view.signers.firstOrNull { it.partyRef == cmd.signerPartyId }
+        if (ceremonySigner?.status != CeremonySignerStatus.SIGNED) {
+            throw AgreementConflictException(
+                AgreementConflictException.CEREMONY_NOT_SIGNED,
+                "the signature ceremony does not record a completed signature by this party",
+            )
+        }
         val now = Instant.now(clock)
-        val signed = case.signed(cmd.signerPartyId, cmd.signatureRef, now)
+        val signed = case.signed(cmd.signerPartyId, cmd.signatureRef, now, settings.highRiskCountries)
         val event = when (signed.status) {
             CaseStatus.SIGNED, CaseStatus.ACTIVE -> KybEvents.agreementSigned(signed, now, cmd.signerPartyId.toString())
+            CaseStatus.MANUAL_REVIEW -> KybEvents.reviewRequired(signed, now)
             else -> null
         }
         if (signed.status == CaseStatus.SIGNED || signed.status == CaseStatus.ACTIVE) grantMandates(signed)
@@ -249,6 +376,80 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         }
     }
 
+    /** The initiator or an identified signer; anybody else is refused (403). */
+    private suspend fun participantOf(caseId: UUID, callerPartyId: UUID): BusinessOnboardingCase {
+        val case = get(caseId)
+        if (!case.isParticipant(callerPartyId)) {
+            throw CaseCallerMismatchException("only the initiator or a signer of this case may do this")
+        }
+        return case
+    }
+
+    private suspend fun currentCeremony(case: BusinessOnboardingCase, lang: String): BusinessAgreementView {
+        val view = documents.businessAgreement(case.id, lang) ?: throw AgreementConflictException(
+            AgreementConflictException.CEREMONY_NOT_FOUND,
+            "document-service holds no business agreement for this case",
+        )
+        requireOwnCeremony(case, view)
+        return view
+    }
+
+    /** The ceremony's document must belong to THIS case — a ceremony id from another case is never accepted. */
+    private fun requireOwnCeremony(case: BusinessOnboardingCase, view: BusinessAgreementView) {
+        if (view.caseId != case.id) {
+            throw AgreementConflictException(
+                AgreementConflictException.CEREMONY_CASE_MISMATCH,
+                "the agreement document belongs to a different case",
+            )
+        }
+    }
+
+    private fun agreementRequest(case: BusinessOnboardingCase, lang: String): BusinessAgreementRequest {
+        val ex = requireNotNull(case.extract) { "a case ready to sign carries its register extract" }
+        val entityParty = requireNotNull(case.entityPartyId) { "a case ready to sign carries its entity party" }
+        val country = ex.identifier.country ?: ex.registeredAddress?.countryCode
+        val seat = ex.registeredAddress?.let { a ->
+            listOfNotNull(
+                a.line1,
+                listOfNotNull(a.postalCode, a.city).joinToString(" ").takeIf { it.isNotBlank() },
+                a.countryCode,
+            ).joinToString(", ")
+        }.orEmpty()
+        val signerByIndex = case.signers.filter {
+            it.representativeIndex != null
+        }.associateBy { it.representativeIndex }
+        return BusinessAgreementRequest(
+            caseId = case.id,
+            entityPartyId = entityParty,
+            lang = lang,
+            entity = AgreementEntity(
+                name = ex.legalName,
+                ico = ex.identifier.value,
+                seat = seat,
+                legalForm = settings.legalFormLabel(country, ex.legalFormCode, lang)
+                    ?: ex.legalFormCode
+                    ?: ex.legalFormClass.name,
+            ),
+            representatives = ex.representatives.mapIndexed { i, r ->
+                AgreementParty(signerByIndex[i]?.partyId, r.fullName, r.role)
+            },
+            signers = case.signers
+                .filter {
+                    it.partyId != null && it.status != SignerStatus.INVITED && it.status != SignerStatus.DECLINED
+                }
+                .map { s ->
+                    AgreementParty(
+                        s.partyId,
+                        s.fullName,
+                        s.representativeIndex?.let { ex.representatives.getOrNull(it)?.role },
+                    )
+                },
+            signingRule = ex.representationRule.sourceText
+                ?: "${ex.representationRule.mode} (${case.requiredSignatures} signature(s))",
+            product = settings.businessProduct,
+        )
+    }
+
     private suspend fun ownedBy(caseId: UUID, callerPartyId: UUID): BusinessOnboardingCase {
         val case = get(caseId)
         if (case.initiatorPartyId != callerPartyId) throw CaseCallerMismatchException("only the initiator may do this")
@@ -281,6 +482,10 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
                 ),
             )
         }
+    }
+
+    private companion object {
+        val AGREEMENT_LANGS = setOf("cs", "en")
     }
 
     private fun entityPartyRequest(caseId: UUID, extract: RegistryExtract) = EntityPartyRequest(

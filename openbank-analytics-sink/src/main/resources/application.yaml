@@ -44,6 +44,17 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    # #10486 batch 5: the registry sweep's account list (account.list) no longer rides the shared
+    # openbank-services principal. AccountRegistryClient selects this NAMED client (@OidcClientFilter("m2m")),
+    # so its token's principal is service-account-openbank-analytics-sink (ROLE_API only), granted by identity
+    # in account_rest_ext.rego. Every other rest-client stays on the default (shared) client above.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-analytics-sink
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   rest-client:
     account-service:

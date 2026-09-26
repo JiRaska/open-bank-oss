@@ -84,7 +84,11 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     await page.getByRole('button', { name: /Vybrat|Select/ }).first().click()
 
     await expect(page.getByText(/Domains and recency|Domény a aktuálnost/)).toBeVisible()
-    await expect(page.getByRole('status')).toContainText(/Invalid projection records excluded: 2|Vyloučeno neplatných projekčních záznamů: 2/)
+    await expect(
+      page.getByRole('status').filter({
+        hasText: /Invalid projection records excluded: 2|Vyloučeno neplatných projekčních záznamů: 2/,
+      }),
+    ).toBeVisible()
   })
 
   test('authorization loss clears the selected party and every mounted detail panel', async ({ page }) => {

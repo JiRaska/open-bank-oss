@@ -3,7 +3,10 @@ info:
   title: OpenBank KYB Service API
   # 1.2.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 shipped the name
   # search (#9707); this is the next free minor as of live main.
-  version: 1.4.0
+  # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
+  # prefill; `sign` keeps its schema and gains stricter, documented semantics.
+  # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
+  version: 1.7.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -230,6 +233,18 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            Refused. The initiator's verified identity does not match the chosen listed representative,
+            the initiator is not a listed representative, or their identity is not yet verified. An
+            address mismatch alone is NOT this: it moves the case to MANUAL_REVIEW instead.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string, example: INITIATOR_IDENTITY_MISMATCH}
+                  message: {type: string}
   /api/v1/kyb/cases/{id}/cosigners:
     post:
       tags: [KYB]
@@ -288,10 +303,183 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/questionnaire:
+    put:
+      tags: [KYB]
+      summary: Answer the company's AML / FATCA / CRS questionnaire
+      description: >-
+        Company-level questions only (AML Act 253/2008 §9: purpose and intended nature of the
+        relationship, turnover, source of funds, cash, countries; the ENTITY's tax residency and
+        FATCA/CRS class). Nothing about a person is asked here. Caller must be the initiator or an
+        identified signer; open in INITIATOR_MATCHED, AWAITING_COSIGNERS and READY_TO_SIGN, and
+        closed once any signature has been given (409). Re-answering replaces the answers.
+      operationId: answerQuestionnaire
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Questionnaire'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/questionnaire/prefill:
+    get:
+      tags: [KYB]
+      summary: What the app may pre-fill instead of asking again
+      description: >-
+        `knownPersons` are the people on the case the bank already knows as customers (initiator,
+        identified co-signers). `pepOnFile` tells the app not to ask for that person's PEP status;
+        `pep` itself is rendered only for the caller's own entry. `previousQuestionnaire` is the
+        questionnaire the caller last answered on another case, offered as a starting point.
+      operationId: questionnairePrefill
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      responses:
+        '200':
+          description: Prefill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionnairePrefill'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/declarations:
+    put:
+      tags: [KYB]
+      summary: Confirm the beneficial owners, declare PEP status and truthfulness
+      description: >-
+        `truthful` must be true and a UBO discrepancy needs `uboDiscrepancyNote` (400 otherwise).
+        Every reportable natural-person beneficial owner and every listed representative must be
+        covered by a PEP status — taken from the person's customer profile where the bank holds
+        one (such a person may be omitted; a declared value that contradicts the profile is ignored
+        and becomes a review flag), declared in `peps` otherwise (400 when missing).
+      operationId: makeDeclarations
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclarationsRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/agreement:
+    post:
+      tags: [KYB]
+      summary: Render the business framework agreement and its signature ceremony
+      description: >-
+        Idempotent. Requires the questionnaire and the declarations (409
+        AGREEMENT_PREREQUISITES_MISSING) and every required signer identified (status
+        READY_TO_SIGN, else 409 INVALID_TRANSITION). kyb builds the request from the case and asks
+        document-service; the ceremony it returns is recorded on the case. A re-rendered agreement
+        resets acceptance; one already signed is never replaced (409 AGREEMENT_LOCKED).
+      operationId: prepareAgreement
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+        - name: lang
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [cs, en]
+            default: cs
+      responses:
+        '200':
+          description: The agreement as document-service holds it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessAgreement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/AgreementConflict'
+  /api/v1/kyb/cases/{id}/agreement/accept:
+    post:
+      tags: [KYB]
+      summary: Accept the agreement's disclosure documents
+      description: >-
+        The set must equal EXACTLY the disclosures document-service currently lists for the
+        agreement (code, version, sha256) — otherwise 409 DISCLOSURES_STALE. Each signer accepts
+        for themself; signing requires the caller's own acceptance.
+      operationId: acceptAgreement
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptDisclosuresRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/AgreementConflict'
   /api/v1/kyb/cases/{id}/sign:
     post:
       tags: [KYB]
       summary: Record one signer's completed signature ceremony
+      description: >-
+        `signatureRef` MUST be the case's ceremony id (`agreement.ceremonyId`). The caller must have
+        accepted the disclosures, and document-service must record the caller as SIGNED in that
+        ceremony, whose document belongs to this case. Refusals are 409 with a distinct `error`:
+        AGREEMENT_NOT_PREPARED, DISCLOSURES_NOT_ACCEPTED, SIGNATURE_REF_MISMATCH,
+        CEREMONY_NOT_FOUND, CEREMONY_CASE_MISMATCH, CEREMONY_NOT_SIGNED. After the last required
+        signature any AML risk flag (PEP, FATCA status other than ACTIVE_NFFE, a tax residency
+        outside the entity's country, cash-intensive, a high-risk country, a UBO discrepancy, a PEP
+        declaration contradicting the customer profile) moves the case to MANUAL_REVIEW with every
+        flag named in `reviewReason`; activation then waits for the reviewer.
       operationId: signCase
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -314,7 +502,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/AgreementConflict'
   /api/v1/kyb/cases/{id}/abandon:
     post:
       tags: [KYB]
@@ -521,6 +709,16 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    AgreementConflict:
+      description: >-
+        A state conflict. `error` is INVALID_TRANSITION, or one of the agreement codes
+        (AGREEMENT_PREREQUISITES_MISSING, AGREEMENT_NOT_PREPARED, AGREEMENT_LOCKED, DISCLOSURES_STALE,
+        DISCLOSURES_NOT_ACCEPTED, SIGNATURE_REF_MISMATCH, CEREMONY_NOT_FOUND, CEREMONY_CASE_MISMATCH,
+        CEREMONY_NOT_SIGNED).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     RegistryUnavailable:
       description: The public register could not be reached
       content:
@@ -645,6 +843,20 @@ components:
         the register's own vocabulary verbatim.
       properties:
         fullName: { type: string }
+        sourceRecordRef:
+          type: [string, 'null']
+          description: >-
+            Companies House PSC record path scoped to this company. This identifies the source
+            observation, not the natural or legal person across companies. Null when absent or invalid.
+        registrationNumber:
+          type: [string, 'null']
+          description: >-
+            Corporate PSC registration number as filed by Companies House. Together with its
+            jurisdiction this is candidate identity evidence, not an automatic entity match.
+        countryRegistered:
+          type: [string, 'null']
+          description: >-
+            Filed jurisdiction of a corporate PSC. Null when absent, invalid or not corporate.
         dateOfBirth:
           type: string
           format: date
@@ -938,9 +1150,208 @@ components:
             $ref: '#/components/schemas/Signer'
         reviewReason:
           type: [string, 'null']
+        questionnaire:
+          oneOf:
+            - $ref: '#/components/schemas/Questionnaire'
+            - type: 'null'
+        declarations:
+          oneOf:
+            - $ref: '#/components/schemas/Declarations'
+            - type: 'null'
+        agreement:
+          oneOf:
+            - $ref: '#/components/schemas/AgreementSummary'
+            - type: 'null'
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    Questionnaire:
+      type: object
+      required: [purpose, expectedMonthlyTurnover, sourceOfFunds, cashIntensive, countries, taxResidencies, fatcaStatus, crsStatus]
+      properties:
+        purpose:
+          type: string
+          enum: [OPERATING_ACCOUNT, SAVINGS, PAYMENTS_ESHOP, HOLDING, OTHER]
+        purposeNote:
+          type: [string, 'null']
+          maxLength: 500
+          description: Required when purpose is OTHER.
+        expectedMonthlyTurnover:
+          type: string
+          enum: [UP_TO_100K, UP_TO_1M, UP_TO_10M, OVER_10M]
+          description: CZK per month.
+        sourceOfFunds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [BUSINESS_REVENUE, SHARE_CAPITAL, LOANS, INVESTMENTS, OTHER]
+        sourceOfFundsNote:
+          type: [string, 'null']
+          maxLength: 500
+          description: Required when sourceOfFunds includes OTHER.
+        cashIntensive:
+          type: boolean
+        countries:
+          type: array
+          minItems: 1
+          items: { type: string, pattern: '^[A-Z]{2}$' }
+        taxResidencies:
+          type: array
+          minItems: 1
+          description: The ENTITY's tax residencies (ISO-3166 alpha-2).
+          items: { type: string, pattern: '^[A-Z]{2}$' }
+        fatcaStatus:
+          type: string
+          enum: [ACTIVE_NFFE, PASSIVE_NFFE, FINANCIAL_INSTITUTION, US_PERSON]
+        crsStatus:
+          type: string
+          enum: [ACTIVE_NFE, PASSIVE_NFE, FINANCIAL_INSTITUTION]
+        answeredAt:
+          type: [string, 'null']
+          format: date-time
+          readOnly: true
+        answeredBy:
+          type: [string, 'null']
+          format: uuid
+          readOnly: true
+    PepEntryRequest:
+      type: object
+      required: [name, isPep]
+      properties:
+        name: { type: string }
+        isPep: { type: boolean }
+        detail:
+          type: [string, 'null']
+          description: The public function; required when isPep is true.
+    DeclarationsRequest:
+      type: object
+      required: [uboConfirmed, truthful]
+      properties:
+        uboConfirmed:
+          type: boolean
+          description: True when the register's beneficial-owner list is correct.
+        uboDiscrepancyNote:
+          type: [string, 'null']
+          maxLength: 500
+        peps:
+          type: array
+          items:
+            $ref: '#/components/schemas/PepEntryRequest'
+        truthful:
+          type: boolean
+          description: Must be true.
+    Declarations:
+      type: object
+      properties:
+        uboConfirmed: { type: boolean }
+        uboDiscrepancyNote: { type: [string, 'null'] }
+        peps:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              isPep: { type: boolean }
+              detail: { type: [string, 'null'] }
+              fromProfile:
+                type: boolean
+                description: The value came from the person's customer profile, not this declaration.
+        truthful: { type: boolean }
+        profileConflicts:
+          type: array
+          items: { type: string }
+          description: Names whose declared PEP status contradicted their customer profile.
+        declaredAt: { type: [string, 'null'], format: date-time }
+        declaredBy: { type: [string, 'null'], format: uuid }
+    DisclosureRef:
+      type: object
+      required: [code, version, sha256]
+      properties:
+        code: { type: string }
+        version: { type: string }
+        sha256: { type: string }
+    AcceptDisclosuresRequest:
+      type: object
+      required: [disclosures]
+      properties:
+        disclosures:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisclosureRef'
+    AgreementSummary:
+      type: object
+      properties:
+        documentId: { type: string, format: uuid }
+        ceremonyId:
+          type: string
+          format: uuid
+          description: The only value `POST /sign` accepts as signatureRef.
+        templateCode: { type: string }
+        templateVersion: { type: string }
+        sha256: { type: string }
+        lang: { type: string, enum: [cs, en] }
+        acceptedDisclosures:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisclosureRef'
+        acceptedAt: { type: [string, 'null'], format: date-time }
+        acceptedBy: { type: [string, 'null'], format: uuid }
+        acceptedByParties:
+          type: array
+          items: { type: string, format: uuid }
+    BusinessAgreement:
+      type: object
+      description: document-service's BusinessAgreement, passed through.
+      properties:
+        caseId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        templateCode: { type: string }
+        templateVersion: { type: string }
+        sha256: { type: string }
+        sealedSha256: { type: [string, 'null'] }
+        ceremonyId: { type: string, format: uuid }
+        ceremonyStatus:
+          type: string
+          enum: [PENDING, PARTIALLY_SIGNED, COMPLETED, DECLINED, EXPIRED]
+        signers:
+          type: array
+          items:
+            type: object
+            properties:
+              partyRef: { type: string, format: uuid }
+              status: { type: string, enum: [PENDING, SIGNED, DECLINED] }
+              signedAt: { type: [string, 'null'] }
+        disclosures:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              version: { type: string }
+              title: { type: [string, 'null'] }
+              sha256: { type: string }
+              documentId: { type: [string, 'null'], format: uuid }
+    QuestionnairePrefill:
+      type: object
+      properties:
+        knownPersons:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              partyId: { type: string, format: uuid }
+              pep:
+                type: [boolean, 'null']
+                description: Rendered only for the caller's own entry.
+              pepOnFile:
+                type: boolean
+                description: The bank holds this person's PEP status; do not ask for it.
+        previousQuestionnaire:
+          oneOf:
+            - $ref: '#/components/schemas/Questionnaire'
+            - type: 'null'

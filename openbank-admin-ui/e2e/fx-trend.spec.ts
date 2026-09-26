@@ -91,26 +91,32 @@ test('does not mislabel an outage as missing fixings and can retry', async ({ pa
   expect(attempts).toBeGreaterThan(attemptsBeforeRetry)
 })
 
-test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page }) => {
-  await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify([
-      { timestamp: '2026-05-29T00:00:00Z', rate: 25 },
-      { timestamp: '2026-08-29T00:00:00Z', rate: 25.5 },
-    ]),
-  }))
-  await page.goto('/fx')
-  await expect(page.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })
+for (const theme of ['light', 'dark'] as const) {
+  test(`meets WCAG A and AA rules across the loaded FX workspace in ${theme} theme`, async ({ page, context }) => {
+    await context.addInitScript(chosen => localStorage.setItem('ob-admin-theme', chosen), theme)
+    await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        { timestamp: '2026-05-29T00:00:00Z', rate: 25 },
+        { timestamp: '2026-08-29T00:00:00Z', rate: 25.5 },
+      ]),
+    }))
+    await page.goto('/fx', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })
+    if (theme === 'dark') await expect(page.locator('html')).toHaveClass(/dark/)
+    else await expect(page.locator('html')).not.toHaveClass(/dark/)
 
-  const scheduleEditor = page.getByRole('button', { name: /Upravit plán CNB|Edit CNB schedule/ })
-  await expect(scheduleEditor).toBeVisible()
-  await expect(scheduleEditor).toHaveAttribute('aria-expanded', 'false')
+    const scheduleEditor = page.getByRole('button', { name: /Upravit plán CNB|Edit CNB schedule/ })
+    await expect(scheduleEditor).toBeVisible()
+    await expect(scheduleEditor).toHaveAttribute('aria-expanded', 'false')
+    await page.waitForTimeout(400)
 
-  const scan = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-    .analyze()
-  expect(scan.violations, scan.violations.map(violation =>
-    `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
-  ).join('\n')).toEqual([])
-})
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
+  })
+}

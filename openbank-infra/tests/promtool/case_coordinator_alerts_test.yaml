@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for the ADR-0244 P3 case-coordinator guardrail alerts.
+# Every alert has a must-FIRE case and a must-NOT-fire control.
+rule_files:
+  - prometheus-rules-case-coordinator.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "kill-switch active for 15 m fires ShadowPilotKillSwitchActive"
+    input_series:
+      - series: 'openbank_casecoordinator_kill_switch_active{scope="SHADOW"}'
+        values: "1+0x20"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ShadowPilotKillSwitchActive
+        exp_alerts:
+          - exp_labels:
+              scope: SHADOW
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "Case-coordinator kill-switch is active"
+              description: "The SHADOW kill-switch was set and has remained active for more than 15 minutes."
+
+  - interval: 1m
+    name: "kill-switch at 0 does NOT fire ShadowPilotKillSwitchActive"
+    input_series:
+      - series: 'openbank_casecoordinator_kill_switch_active{scope="SHADOW"}'
+        values: "0+0x20"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ShadowPilotKillSwitchActive
+        exp_alerts: []
+
+  - interval: 1m
+    name: "p99 halt latency above 240 s fires ShadowPilotHaltLatencySlo"
+    input_series:
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="60.0"}'
+        values: "0+0x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="120.0"}'
+        values: "0+0x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="180.0"}'
+        values: "0+0x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="240.0"}'
+        values: "0+0x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="300.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="600.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="900.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="+Inf"}'
+        values: "100+100x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ShadowPilotHaltLatencySlo
+        exp_alerts:
+          - exp_labels:
+              caseClass: incident
+              deliveryMode: shadow
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: "Shadow pilot halt latency exceeds the 240 s read-model SLO"
+              description: "p99 halt latency for incident/shadow is 4m 59s."
+              subject_period: continuous
+
+  - interval: 1m
+    name: "p99 halt latency below 240 s does NOT fire ShadowPilotHaltLatencySlo"
+    input_series:
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="60.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="120.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="180.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="240.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="300.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="600.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="900.0"}'
+        values: "100+100x20"
+      - series: 'openbank_casecoordinator_halt_latency_seconds_bucket{caseClass="incident",deliveryMode="shadow",le="+Inf"}'
+        values: "100+100x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ShadowPilotHaltLatencySlo
+        exp_alerts: []
+
+  - interval: 1m
+    name: "open or contested cases for 30 m fire ShadowPilotCasesStuck"
+    input_series:
+      - series: 'openbank_casecoordinator_active_cases{caseClass="incident",deliveryMode="shadow",status="OPEN"}'
+        values: "1+0x45"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ShadowPilotCasesStuck
+        exp_alerts:
+          - exp_labels:
+              caseClass: incident
+              deliveryMode: shadow
+              severity: info
+              team: platform
+            exp_annotations:
+              summary: "Shadow pilot has open or contested cases for more than 30 minutes"
+              description: "There are active cases in incident/shadow for more than 30 minutes; this may be expected during a drill."
+
+  - interval: 1m
+    name: "only closed cases do NOT fire ShadowPilotCasesStuck"
+    input_series:
+      - series: 'openbank_casecoordinator_active_cases{caseClass="incident",deliveryMode="shadow",status="CLOSED"}'
+        values: "1+0x45"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ShadowPilotCasesStuck
+        exp_alerts: []

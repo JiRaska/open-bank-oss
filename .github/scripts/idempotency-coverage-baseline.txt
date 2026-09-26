@@ -83,6 +83,9 @@ openbank-lending-service POST /api/v1/lending/loans/{id}/termination/decide  # a
 openbank-lending-service POST /api/v1/lending/loans/{id}/termination/propose  # aggregate-state guard, verified — ADR-0297, burn-down #8351
 openbank-lending-service POST /api/v1/lending/loans/{id}/withdrawal  # aggregate-state guard, verified — ADR-0297, burn-down #8351
 openbank-lending-service POST /api/v1/lending/loans/{id}/writeoff  # aggregate-state guard, verified — ADR-0297, burn-down #8351
+openbank-lending-service POST /api/v1/lending/ledger-backfill/requests  # natural-key replay: a retry for the same plan hash returns the pending PROPOSED request (#10746)
+openbank-lending-service POST /api/v1/lending/ledger-backfill/requests/{id}/decide  # lifecycle/action endpoint on an addressed resource — conditional PROPOSED->decided update refuses a replay (#10746)
+openbank-lending-service POST /api/v1/lending/ledger-backfill/requests/{id}/execute  # every journal carries the live ledger idempotency reference; an EXECUTED request refuses a replay and a lease blocks concurrent runs (#10746)
 openbank-sanctions-service POST /api/v1/sanctions/lists/refresh-all  # creation POST with no idempotency key today — burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/lists/{listType}/refresh  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/review  # creation POST with no idempotency key today — burn-down #8351
@@ -107,10 +110,19 @@ openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an 
 # card-issuance joined money_path_services in ADR-0283 phase 0 (#8808). Nothing about these seven
 # endpoints changed; the classification widened, which is the gate working — a service that ships
 # an authorisation decision was being scored by the lenient rule. Burn-down: #8845.
+openbank-card-issuance-service POST /api/v1/cards/outbox/requeue  # operator replay of DEAD outbox rows (ROLE_ADMIN) — a second run moves 0 rows because the first left none DEAD; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # decision endpoint that persists nothing — CardAuthorizationPolicy is pure and the handler only reads the card and its rules, so a replay recomputes the same answer; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/block  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-card-issuance-service POST /api/v1/cards/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # decision endpoint that persists nothing — CardAuthorizationPolicy is pure and the handler only reads the card and its rules, so a replay recomputes the same answer; verify in burn-down #8351
-openbank-card-issuance-service POST /api/v1/cards/outbox/requeue  # operator replay of DEAD outbox rows (ROLE_ADMIN) — a second run moves 0 rows because the first left none DEAD; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/entities/{entityId}/signing/evaluate  # read-only evaluation carried in a body; mutates nothing — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/signer-groups  # natural key (entity, group id): a second PENDING change for the same group is 409 SIGNER_GROUP_CHANGE_PENDING — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/trusted-payees  # natural key (entity, IBAN): a second PENDING add for the same IBAN is 409 PAYEE_CHANGE_PENDING — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests  # natural key = the initiator's single-use SCA challenge (uq_approval_signature_challenge): a retry replays the original request — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures  # natural key = the signer's single-use SCA challenge; a replay is 409 ALREADY_SIGNED — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{approvalId}/rejection  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state (NOT_PENDING) — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{approvalId}/release-claim  # single-use by design: the DB compare-and-set IS the idempotency (second claim 409), rail Idempotency-Key = approvalId — ADR-0312
+openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{approvalId}/release-result  # idempotent for the same result, 409 for a different one — ADR-0312
+openbank-sca-service POST /api/v1/sca/challenges/{id}/consume  # lifecycle/action endpoint on an addressed resource — single-use by construction: atomic compare-and-consume (UPDATE ... WHERE consumed_at IS NULL), a replay is 409 already-consumed and never spends twice — ADR-0021 settlement gate; served since ADR-0021, first PUBLISHED in openapi.yaml by #10312

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.dev/schemas/openbank-security-scanner/ict-incident-event.schema.json",
+  "title": "ICT incident event v1",
+  "description": "aggregateRevision is the strict database-backed ordering token; sourceVersion remains for mixed-version readers during migration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sourceVersion", "eventType", "incident", "occurredAt", "sourceService"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sourceVersion": { "type": "integer", "minimum": 1 },
+    "aggregateRevision": { "type": "integer", "minimum": 1 },
+    "eventType": {
+      "enum": ["ICT_INCIDENT_REPORTED", "ICT_INCIDENT_STATUS_CHANGED", "ICT_INCIDENT_REPORTED_TO_REGULATOR"]
+    },
+    "sourceService": { "const": "security-scanner" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "incident": {
+      "type": "object",
+      "required": ["id", "severity", "status", "affectedServices", "detectedAt", "updatedAt"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "severity": { "enum": ["P1_CRITICAL", "P2_HIGH", "P3_MEDIUM", "P4_LOW"] },
+        "status": { "enum": ["OPEN", "INVESTIGATING", "CONTAINED", "RESOLVED", "CLOSED"] },
+        "affectedServices": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "detectedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

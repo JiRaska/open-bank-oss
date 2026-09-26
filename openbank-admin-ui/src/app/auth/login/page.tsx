@@ -63,6 +63,7 @@ function LoginContent() {
   const { language, setLanguage } = useLanguage()
   const [pending, setPending] = useState(false)
   const [scene, setScene] = useState(0)
+  const [alternateReady, setAlternateReady] = useState(false)
   const copy = COPY[language]
   const error = params.get("error")
   const callbackUrl = safeCallbackPath(params.get("callbackUrl"))
@@ -71,8 +72,15 @@ function LoginContent() {
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     if (reducedMotion) return
 
+    // Keep the first paint to one hero asset. The second scene is decorative and
+    // cannot become visible for eight seconds, so loading it after the critical
+    // rendering window removes needless competition with the sign-in controls.
+    const warmup = window.setTimeout(() => setAlternateReady(true), 1_500)
     const timer = window.setInterval(() => setScene(current => (current + 1) % 2), 8000)
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearTimeout(warmup)
+      window.clearInterval(timer)
+    }
   }, [])
 
   const handleSignIn = async () => {
@@ -98,13 +106,13 @@ function LoginContent() {
             sizes="(max-width: 860px) 100vw, 46vw"
             className={`${styles.scene} ${scene === 0 ? styles.sceneActive : ""}`}
           />
-          <Image
+          {alternateReady && <Image
             src="/brand/explorer-prague-lioness.webp"
             alt=""
             fill
             sizes="(max-width: 860px) 100vw, 46vw"
             className={`${styles.scene} ${scene === 1 ? styles.sceneActive : ""}`}
-          />
+          />}
         </div>
         <div className={styles.storyGlow} aria-hidden="true" />
         <div className={styles.brand}>
@@ -122,7 +130,7 @@ function LoginContent() {
         <footer className={styles.storyFooter}>
           <p className={styles.storyFootnote}>Prague · Czech Republic · Built for clarity</p>
           <div className={styles.sceneControls} role="group" aria-label="Explorer scenes">
-            {copy.scenes.map((label, index) => (
+            {copy.scenes.slice(0, alternateReady ? 2 : 1).map((label, index) => (
               <button
                 key={label}
                 type="button"

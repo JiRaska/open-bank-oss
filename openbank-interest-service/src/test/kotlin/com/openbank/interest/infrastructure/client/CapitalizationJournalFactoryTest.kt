@@ -171,11 +171,13 @@ class CapitalizationJournalFactoryTest {
 
     @Test
     fun `the transaction id is derived from the same business identity, so a retry reuses it`() {
-        val one = CapitalizationJournalFactory.buildRequest(postingOf(capitalization()), config)
-        val two = CapitalizationJournalFactory.buildRequest(postingOf(capitalization()), config)
+        val one = CapitalizationJournalFactory.buildRequest(postingOf(capitalization()), config, PERIOD_TO)
+        // A retry on a LATER day books forward — and must still replay onto the same journal.
+        val two = CapitalizationJournalFactory.buildRequest(postingOf(capitalization()), config, PERIOD_TO.plusDays(9))
 
         assertThat(one.transactionId).isEqualTo(two.transactionId)
         assertThat(one.idempotencyKey).isEqualTo(two.idempotencyKey)
+        assertThat(one.entryDate).isNotEqualTo(two.entryDate)
     }
 
     @Test
@@ -232,12 +234,39 @@ class CapitalizationJournalFactoryTest {
         val request = CapitalizationJournalFactory.buildRequest(
             posting(gross = "100.00", tax = "15", net = "85.00"),
             config,
+            PERIOD_TO,
         )
 
         // §38d ties the withholding to the credit date, which is the period end.
         assertThat(request.entryDate).isEqualTo("2026-01-20")
         assertThat(request.valueDate).isEqualTo("2026-01-20")
         assertThat(request.createdBy).isEqualTo(TestLedgerConfig.systemActorId())
+    }
+
+    @Test
+    fun `a late post books forward into the open day and keeps the period end as value date`() {
+        // #10404: a recovery sweep completing a period-end claim weeks later re-sent the period-end
+        // entryDate into a TIED_OUT accounting day, and the ledger's day lock answered 409 forever.
+        val today = LocalDate.of(2026, 9, 21)
+        val request = CapitalizationJournalFactory.buildRequest(
+            posting(gross = "100.00", tax = "15", net = "85.00"),
+            config,
+            today,
+        )
+
+        assertThat(request.entryDate).isEqualTo("2026-09-21")
+        assertThat(request.valueDate).isEqualTo("2026-01-20")
+        assertThat(request.idempotencyKey).endsWith("-2026-01-20")
+    }
+
+    @Test
+    fun `an early post never books before the period end`() {
+        val request = CapitalizationJournalFactory.buildRequest(
+            posting(gross = "100.00", tax = "15", net = "85.00"),
+            config,
+            PERIOD_TO.minusDays(3),
+        )
+        assertThat(request.entryDate).isEqualTo("2026-01-20")
     }
 
     // --- Helpers -------------------------------------------------------------------------------

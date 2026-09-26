@@ -28,7 +28,14 @@ import java.util.UUID
  */
 object LendingGlChart {
 
-    private val LOANS_RECEIVABLE = leafSet(czk = "1200", eur = "1201", usd = "1202", gbp = "1203")
+    /**
+     * Loans Receivable codes per currency. Held as CODES (not only UUIDs) because the risk engine's
+     * loan-book read (ADR-0314 D4) names the GL account each loan ties out against by its code,
+     * the key the ledger's trial balance uses. The UUID set below is derived from it, so the two
+     * cannot drift.
+     */
+    private val LOANS_RECEIVABLE_CODES = mapOf("CZK" to "1200", "EUR" to "1201", "USD" to "1202", "GBP" to "1203")
+    private val LOANS_RECEIVABLE = LOANS_RECEIVABLE_CODES.mapValues { (_, code) -> leaf(code) }
     private val INTEREST_RECEIVABLE = leafSet(czk = "1300", eur = "1301", usd = "1302", gbp = "1303")
     private val LOAN_LOSS_ALLOWANCE = leafSet(czk = "1400", eur = "1401", usd = "1402", gbp = "1403")
     private val INTEREST_INCOME = leafSet(czk = "4100", eur = "4101", usd = "4102", gbp = "4103")
@@ -71,6 +78,18 @@ object LendingGlChart {
             loanLossAllowance = LOAN_LOSS_ALLOWANCE.getValue(currency),
         )
     }
+
+    /** The Loans Receivable GL code a loan in [currency] is carried on, or null for an unseeded currency. */
+    fun loansReceivableCode(currency: String): String? = LOANS_RECEIVABLE_CODES[currency]
+
+    /**
+     * The chart code of a lending GL account id (e.g. `1200`), for human-readable dry-run totals
+     * (#10746). CZK funding clearing is the one pre-convention id (`…-000001`, code 1100).
+     */
+    fun codeOf(id: UUID): String =
+        if (id == FUNDING_CLEARING.getValue("CZK")) "1100" else id.toString().takeLast(UUID_NODE_DIGITS).trimStart('0')
+
+    private const val UUID_NODE_DIGITS = 12
 
     private fun leafSet(czk: String, eur: String, usd: String, gbp: String): Map<String, UUID> =
         mapOf("CZK" to leaf(czk), "EUR" to leaf(eur), "USD" to leaf(usd), "GBP" to leaf(gbp))
