@@ -31,7 +31,8 @@ data class SnapshotOutcome(val run: SnapshotRun, val replayed: Boolean)
 interface SnapshotUseCase {
     suspend fun listRuns(limit: Int): List<SnapshotRunSummary>
 
-    suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome
+    /** [requestedBy] is the caller's principal name; a replay keeps the first run's requester. */
+    suspend fun createSnapshot(asOf: LocalDate, requestedBy: String? = null): SnapshotOutcome
 
     suspend fun getRun(id: UUID): SnapshotRun
 

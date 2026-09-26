@@ -4,6 +4,7 @@
 
 package com.openbank.risk.integration
 
+import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.it.PostgresTestResource
@@ -14,12 +15,14 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -39,6 +42,9 @@ class RiskSnapshotApiIT {
 
     @Inject
     lateinit var ledger: FakeLedgerPort
+
+    @Inject
+    lateinit var snapshots: SnapshotUseCase
 
     private fun create(asOf: String) = given()
         .contentType("application/json")
@@ -65,6 +71,42 @@ class RiskSnapshotApiIT {
             count("SELECT count(*) FROM snapshot_position WHERE run_id = ? AND valid_date = DATE '2026-01-31'", id),
         )
             .isEqualTo(3)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `the caller's principal name is stored as the requester and returned on the manifest`() {
+        ledger.inputs = Fixtures.tiedOut()
+
+        val id = create("2026-04-30").then().statusCode(201)
+            .body("requestedBy", equalTo("ops"))
+            .extract().path<String>("id")
+
+        given().`when`().get("/api/v1/risk/snapshots/$id")
+            .then().statusCode(200)
+            .body("requestedBy", equalTo("ops"))
+        given().`when`().get("/api/v1/risk/snapshots")
+            .then().statusCode(200)
+            .body("runs.find { it.id == '$id' }.requestedBy", equalTo("ops"))
+        assertThat(count("SELECT count(*) FROM snapshot_run WHERE id = ?::uuid AND requested_by = 'ops'", id))
+            .isEqualTo(1)
+    }
+
+    // @TestSecurity is fixed per test method, so switching caller mid-test goes through the use
+    // case directly (same CDI bean the resource calls) rather than two HTTP requests.
+    @Test
+    fun `a replay keeps the original requester, not the replaying caller's`(): Unit = runBlocking {
+        ledger.inputs = Fixtures.tiedOut()
+        val asOf = LocalDate.parse("2026-06-30")
+
+        val first = snapshots.createSnapshot(asOf, requestedBy = "alice")
+        assertThat(first.replayed).isFalse()
+        assertThat(first.run.requestedBy).isEqualTo("alice")
+
+        val second = snapshots.createSnapshot(asOf, requestedBy = "bob")
+        assertThat(second.replayed).isTrue()
+        assertThat(second.run.id).isEqualTo(first.run.id)
+        assertThat(second.run.requestedBy).isEqualTo("alice")
     }
 
     @Test

@@ -11,6 +11,7 @@ import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -60,6 +61,10 @@ class RiskResource {
     @Inject
     lateinit var capital: CapitalUseCase
 
+    // Field-injected (not a constructor parameter) so the request-scoped identity is read per call.
+    @Inject
+    lateinit var identity: SecurityIdentity
+
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
     @Authorize(action = "risk.snapshot.create")
@@ -71,7 +76,7 @@ class RiskResource {
         } catch (e: DateTimeParseException) {
             throw IllegalArgumentException("field 'asOf' must be an ISO date (YYYY-MM-DD)", e)
         }
-        val outcome = snapshots.createSnapshot(asOf)
+        val outcome = snapshots.createSnapshot(asOf, requestedByActor(identity))
         val status = if (outcome.replayed) Response.Status.OK else Response.Status.CREATED
         return Response.status(status).entity(outcome.run.toResponse()).build()
     }

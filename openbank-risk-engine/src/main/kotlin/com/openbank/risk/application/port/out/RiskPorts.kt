@@ -40,6 +40,7 @@ data class SnapshotRunSummary(
     val status: String,
     val positionCount: Int,
     val mismatchCount: Int,
+    val requestedBy: String?,
 )
 
 /** A curve set without its pillars, for the curve-set list. */

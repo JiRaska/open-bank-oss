@@ -44,7 +44,7 @@ class SnapshotService(
     private val lending: LendingPort? = null,
 ) : SnapshotUseCase {
 
-    override suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome {
+    override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome {
         val inputs = ledger.read(asOf)
         val loanBook = lending?.readLoanBook(asOf)
         val inputHash = InputHash.of(inputs, loanBook)
@@ -62,6 +62,7 @@ class SnapshotService(
             status = tieOut.status,
             positionCount = positions.size,
             mismatches = tieOut.mismatches,
+            requestedBy = requestedBy,
         )
         val stored = repository.saveIfAbsent(candidate, positions, instruments.orEmpty())
         return SnapshotOutcome(stored, replayed = stored.id != candidate.id)

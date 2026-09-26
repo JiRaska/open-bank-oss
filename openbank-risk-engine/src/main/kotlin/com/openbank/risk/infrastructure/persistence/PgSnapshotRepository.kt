@@ -58,6 +58,7 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
                 status = TieOutStatus.valueOf(row.getString("status")).name,
                 positionCount = row.getInteger("position_count"),
                 mismatchCount = row.getInteger("mismatch_count"),
+                requestedBy = row.getString("requested_by"),
             )
         }
 
@@ -81,6 +82,7 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
                         run.status.name,
                         run.positionCount,
                         run.mismatches.size,
+                        run.requestedBy,
                     ),
                 ),
             ).flatMap { result ->
@@ -248,19 +250,21 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
             status = TieOutStatus.valueOf(row.getString("status")),
             positionCount = row.getInteger("position_count"),
             mismatches = mismatches,
+            requestedBy = row.getString("requested_by"),
         )
     }
 
     private companion object {
         const val SELECT_RECENT =
-            "SELECT id, as_of, recorded_at, provenance, status, position_count, mismatch_count FROM snapshot_run " +
-                "ORDER BY recorded_at DESC, id LIMIT $1"
+            "SELECT id, as_of, recorded_at, provenance, status, position_count, mismatch_count, requested_by " +
+                "FROM snapshot_run ORDER BY recorded_at DESC, id LIMIT $1"
         const val SELECT_RUN =
-            "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count FROM snapshot_run"
+            "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count, requested_by " +
+                "FROM snapshot_run"
         const val INSERT_RUN =
             "INSERT INTO snapshot_run (id, as_of, recorded_at, input_hash, provenance, status, " +
-                "position_count, mismatch_count) " +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (as_of, input_hash) DO NOTHING"
+                "position_count, mismatch_count, requested_by) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (as_of, input_hash) DO NOTHING"
         const val INSERT_MISMATCH =
             "INSERT INTO snapshot_tie_out_mismatch (run_id, gl_account_code, currency, ledger_net, positions_net) " +
                 "VALUES ($1, $2, $3, $4, $5)"
