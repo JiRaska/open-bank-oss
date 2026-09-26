@@ -14,6 +14,7 @@ import com.openbank.ledger.application.port.`in`.JournalLineRequest
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.ListJournalsQuery
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
+import com.openbank.ledger.application.port.`in`.PostJournalOutcome
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
 import com.openbank.ledger.application.port.out.GlAccountRepository
 import com.openbank.ledger.application.port.out.JournalRepository
@@ -75,14 +76,17 @@ class LedgerService(
      * journal, account, transaction, actor, amount, and idempotency data: it proves execution
      * without becoming a second financial record.
      */
+    override suspend fun postJournal(command: PostJournalCommand): JournalEntry = postJournalWithOutcome(command).entry
+
     @Suppress("TooGenericExceptionCaught") // The span must record every failure before propagation.
-    override suspend fun postJournal(command: PostJournalCommand): JournalEntry {
+    override suspend fun postJournalWithOutcome(command: PostJournalCommand): PostJournalOutcome {
         val span = activeTracer().spanBuilder("ledger.journal.post")
             .setSpanKind(SpanKind.INTERNAL)
             .startSpan()
         return try {
-            postJournalInternal(command).also { entry ->
-                span.setAttribute("openbank.ledger.journal.status", entry.status.name)
+            postJournalInternal(command).also { outcome ->
+                span.setAttribute("openbank.ledger.journal.status", outcome.entry.status.name)
+                span.setAttribute("openbank.ledger.journal.replayed", outcome.replayed)
             }
         } catch (failure: Exception) {
             span.recordException(failure)
@@ -96,11 +100,13 @@ class LedgerService(
     private fun activeTracer(): Tracer =
         if (::tracer.isInitialized) tracer else GlobalOpenTelemetry.getTracer("openbank-ledger-service")
 
-    private suspend fun postJournalInternal(command: PostJournalCommand): JournalEntry {
+    private suspend fun postJournalInternal(command: PostJournalCommand): PostJournalOutcome {
         // Idempotent replay: a repeated key returns the original entry, never double-posts.
         // Checked BEFORE the period lock so replaying an entry that was legitimately booked while
         // the year was still open stays idempotent even after the year is later attested.
-        journalRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+        journalRepository.findByIdempotencyKey(command.idempotencyKey)?.let {
+            return PostJournalOutcome(it, replayed = true)
+        }
 
         // Day lock (ADR-0207 D3) runs BEFORE the year check because the day is the tighter
         // constraint: a day already CUTOFF/TIED_OUT/LOCKED refuses a posting even inside an open
@@ -169,13 +175,13 @@ class LedgerService(
         val saved = try {
             journalRepository.save(entry, command.idempotencyKey, messages)
         } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return PostJournalOutcome(recoverConcurrentReplay(e, command.idempotencyKey), replayed = true)
         } catch (e: PgException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return PostJournalOutcome(recoverConcurrentReplay(e, command.idempotencyKey), replayed = true)
         }
         recordPostings(entry, POSTING, metrics)
         recordPostingAmounts(entry, metrics)
-        return saved
+        return PostJournalOutcome(saved, replayed = false)
     }
 
     /**
