@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { buildCustomerGraph } from '@/lib/context/customerGraph'
+import { buildCustomerGraph, selectGraphFocus, type CustomerGraph } from '@/lib/context/customerGraph'
 import type { Customer360Evidence } from '@/lib/customer360/evidence'
 
 const PARTY = '11111111-1111-4111-8111-111111111111'
@@ -66,6 +66,24 @@ function graph(data = evidence) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Customer context graph', () => {
+  it('shows later exact matches when an earlier source chain exceeds the visible budget', () => {
+    const nodes: CustomerGraph['nodes'] = ['parent', 'child', 'grandchild', 'direct'].map(id => ({
+      id, kind: 'domain', label: id, source: 'test', facts: [],
+    }))
+    const graphData: CustomerGraph = {
+      nodes,
+      edges: [
+        { id: 'root-parent', from: 'customer', to: 'parent', relation: 'REF' },
+        { id: 'parent-child', from: 'parent', to: 'child', relation: 'REF' },
+        { id: 'child-grandchild', from: 'child', to: 'grandchild', relation: 'REF' },
+        { id: 'root-direct', from: 'customer', to: 'direct', relation: 'REF' },
+      ],
+      truncated: false,
+    }
+
+    expect(selectGraphFocus(graphData, [nodes[2], nodes[3]], 2).map(node => node.id)).toEqual(['direct'])
+  })
+
   it('keeps authorised source-backed relationships visible when analytics is unavailable', async () => {
     installSources()
     graph({ ...evidence, available: false, asOf: null, domains: [], accountIds: [], consents: [], error: 'clickhouse unavailable' })

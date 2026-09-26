@@ -77,7 +77,8 @@ export function selectGraphFocus(graph: CustomerGraph, matches: CustomerGraphNod
       current = parentId
     }
     const needed = chain.filter(node => !seen.has(node.id))
-    if (selected.length + needed.length > limit) break
+    // One long evidence chain must not hide later exact matches that still fit the view.
+    if (selected.length + needed.length > limit) continue
     for (const node of needed) {
       selected.push(node)
       seen.add(node.id)
