@@ -13,7 +13,7 @@ import java.util.UUID
  * ADR-0322 phase 1 — **types only**. This package defines the shared envelope every automated
  * decision (authorization, fraud, credit, AI-agent) emits as the `payload` of an
  * [com.openbank.libs.audit.AuditEvent]. It deliberately carries no wiring: no interceptor
- * reference, no outbox/transport dependency (ADR-0323, #10926, still open), no service-level
+ * reference, no outbox/transport dependency (the hash-linked publisher proposed in #10926, still open), no service-level
  * producer. `libs-core-purity` requires this — ADR-0317 forbids a core module (this one) from
  * depending on a bounded-context module such as `openbank-libs-lending`, so the credit
  * [com.openbank.libs.decision.PolicyEvaluation] type maps *onto* [DecisionRecord]; this package
