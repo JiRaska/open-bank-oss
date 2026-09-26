@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PSD2 Open Banking API
-  version: 2.6.0
+  version: 2.7.0
   description: |
     PSD2-compliant open banking — Account Information Service (AIS) and
     Payment Initiation Service (PIS) for Third Party Providers.
@@ -48,6 +48,7 @@ paths:
         '201': { description: Consent created — consentStatus, consentId, _links }
         '400': { description: Missing X-Request-ID / format error }
         '401': { description: Missing or invalid TPP credentials }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
   /v1/consents/{consentId}:
     get:
       tags: [Berlin-XS2A]
@@ -147,6 +148,7 @@ paths:
         '400': { description: Missing X-Request-ID / body does not match the payment product }
         '401': { description: Missing TPP credentials or Consent-ID }
         '404': { description: Unknown payment product }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
   /v1/payments/{paymentProduct}/{paymentId}/status:
     get:
       tags: [Berlin-XS2A]
@@ -269,6 +271,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
 
   /open-banking/v2/payments/instant-sepa-credit-transfers:
     post:
@@ -295,6 +299,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
 
   /open-banking/v2/payments/domestic-cz:
     post:
@@ -321,6 +327,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
 
   /open-banking/v2/payments/sipo:
     post:
@@ -347,6 +355,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
 
   /open-banking/v2/payments/{product}/{paymentId}/status:
     get:
@@ -375,7 +385,34 @@ paths:
           description: Payment status
 
 components:
+  responses:
+    IdempotencyConflict:
+      description: |
+        The request identifier (bespoke surface: `Idempotency-Key`; Berlin Group surface and
+        consents: `X-Request-ID`) is bound to a fingerprint of the request that first used it —
+        method, path, `Consent-ID` and the canonical body (key order, whitespace and amount scale
+        ignored). Same identifier + same request replays the stored response
+        (`X-Idempotency-Replayed: true`). Rendered in the Berlin Group `tppMessages` envelope with
+        one of two service-specific codes (NextGenPSD2 defines none for idempotency):
+        `IDEMPOTENCY_KEY_REUSED` — the identifier was already used for a DIFFERENT request; use a
+        fresh identifier. `IDEMPOTENCY_REQUEST_IN_PROGRESS` — the same request is still executing;
+        retry shortly.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TppMessages'
   schemas:
+    TppMessages:
+      type: object
+      properties:
+        tppMessages:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { type: string, enum: [ERROR, WARNING] }
+              code: { type: string, examples: [IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_REQUEST_IN_PROGRESS] }
+              text: { type: string }
     PisPaymentRequest:
       type: object
       required: [debtorAccount, creditorAccount, creditorName, amount]

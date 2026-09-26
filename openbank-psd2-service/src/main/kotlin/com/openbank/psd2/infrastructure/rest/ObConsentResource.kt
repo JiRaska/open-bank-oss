@@ -7,6 +7,7 @@ package com.openbank.psd2.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
 import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
@@ -49,28 +50,37 @@ class ConsentResource(
         if (xRequestId.isNullOrBlank()) throw Psd2RequestFormatException("X-Request-ID header is required")
 
         val idempotencyKey = consentCreateKey(tppId, xRequestId)
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
-        }
-
-        val consent = consentMgmt.createConsent(
-            CreateConsentCommand(
-                tppId = tppId,
-                tppName = tppName,
-                request = request,
-                redirectUri = redirectUri,
-                tppTransactionId = xRequestId,
-                ipAddress = null,
-            ),
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/open-banking/v2/consents",
+            mapOf("request" to request, "redirectUri" to redirectUri),
         )
-        idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(consent))
-        return Response.status(201)
-            .header("Location", "/open-banking/v2/consents/${consent.consentId}")
-            .entity(consent).build()
+        return Psd2Idempotency.execute(
+            idempotencyStore,
+            idempotencyKey,
+            requestHash,
+            replay = { cached -> Response.status(cached.statusCode) },
+            conflict = Psd2Idempotency::conflictResponse,
+        ) {
+            val consent = consentMgmt.createConsent(
+                CreateConsentCommand(
+                    tppId = tppId,
+                    tppName = tppName,
+                    request = request,
+                    redirectUri = redirectUri,
+                    tppTransactionId = xRequestId,
+                    ipAddress = null,
+                ),
+            )
+            Psd2Idempotency.Completed(
+                Response.status(201)
+                    .header("Location", "/open-banking/v2/consents/${consent.consentId}")
+                    .entity(consent).build(),
+                201,
+                objectMapper.writeValueAsString(consent),
+            )
+        }
     }
 
     @GET

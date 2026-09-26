@@ -8,6 +8,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
@@ -85,7 +86,7 @@ class PisResourceTest {
     fun `initiateSepa replays a cached response on idempotency hit`(): Unit = runBlocking {
         val cacheKey = "psd2:payment:tpp-1:SEPA_CREDIT_TRANSFERS:idem-1"
         val cached = IdempotencyRecord(cacheKey, 201, """{"paymentId":"p-1"}""", OffsetDateTime.now())
-        coEvery { idempotencyStore.get(cacheKey) } returns cached
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Replay(cached)
 
         val response = resource.initiateSepa(samplePayment(), "consent-1", "idem-1", ctxWithTpp("tpp-1"))
 
@@ -97,7 +98,7 @@ class PisResourceTest {
     @Test
     fun `initiateSepa delegates to the use case, caches and returns 201`(): Unit = runBlocking {
         val cacheKey = "psd2:payment:tpp-1:SEPA_CREDIT_TRANSFERS:idem-2"
-        coEvery { idempotencyStore.get(cacheKey) } returns null
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Reserved
         coEvery {
             pis.initiatePayment(
                 InitiatePaymentCommand(
@@ -109,18 +110,18 @@ class PisResourceTest {
                 ),
             )
         } returns sampleResponse("p-1")
-        coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
+        coEvery { idempotencyStore.save(cacheKey, any<String>(), 201, any(), any()) } returns Unit
 
         val response = resource.initiateSepa(samplePayment(), "consent-1", "idem-2", ctxWithTpp("tpp-1"))
 
         assertThat(response.status).isEqualTo(201)
-        coVerify(exactly = 1) { idempotencyStore.save(cacheKey, 201, any()) }
+        coVerify(exactly = 1) { idempotencyStore.save(cacheKey, any<String>(), 201, any(), any()) }
     }
 
     @Test
     fun `initiateInstantSepa uses the INSTANT_SEPA_CREDIT_TRANSFERS product`(): Unit = runBlocking {
         val cacheKey = "psd2:payment:tpp-1:INSTANT_SEPA_CREDIT_TRANSFERS:idem-3"
-        coEvery { idempotencyStore.get(cacheKey) } returns null
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Reserved
         coEvery {
             pis.initiatePayment(
                 InitiatePaymentCommand(
@@ -132,7 +133,7 @@ class PisResourceTest {
                 ),
             )
         } returns sampleResponse("p-2")
-        coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
+        coEvery { idempotencyStore.save(cacheKey, any<String>(), 201, any(), any()) } returns Unit
 
         val response = resource.initiateInstantSepa(samplePayment(), "consent-1", "idem-3", ctxWithTpp("tpp-1"))
 

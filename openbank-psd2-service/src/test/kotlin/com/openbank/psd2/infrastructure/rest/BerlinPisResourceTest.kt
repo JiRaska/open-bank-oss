@@ -8,6 +8,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
 import com.openbank.psd2.domain.model.ObLinks
@@ -126,7 +127,7 @@ class BerlinPisResourceTest {
     fun `initiate replays a cached response on idempotency hit`(): Unit = runBlocking {
         val cacheKey = "psd2:v1:payment:tpp-1:SEPA_CREDIT_TRANSFERS:req-1"
         val cached = IdempotencyRecord(cacheKey, 201, """{"paymentId":"p-1"}""", OffsetDateTime.now())
-        coEvery { idempotencyStore.get(cacheKey) } returns cached
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Replay(cached)
 
         val response = resource.initiate("sepa-credit-transfers", sepaBody(), "consent-1", "req-1", ctxWithTpp("tpp-1"))
 
@@ -139,11 +140,11 @@ class BerlinPisResourceTest {
     fun `initiate deserialises the SEPA body, delegates and returns Berlin created body with Location`(): Unit =
         runBlocking {
             val cacheKey = "psd2:v1:payment:tpp-1:SEPA_CREDIT_TRANSFERS:req-2"
-            coEvery { idempotencyStore.get(cacheKey) } returns null
+            coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Reserved
             coEvery {
                 pis.initiatePayment(match { it.tppId == "tpp-1" && it.product == PaymentProduct.SEPA_CREDIT_TRANSFERS })
             } returns sampleResponse("p-1")
-            coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
+            coEvery { idempotencyStore.save(cacheKey, any<String>(), 201, any(), any()) } returns Unit
 
             val response = resource.initiate(
                 "sepa-credit-transfers",
@@ -161,7 +162,7 @@ class BerlinPisResourceTest {
     @Test
     fun `initiate deserialises the SIPO body into a SipoPayment`(): Unit = runBlocking {
         val cacheKey = "psd2:v1:payment:tpp-1:SIPO:req-3"
-        coEvery { idempotencyStore.get(cacheKey) } returns null
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Reserved
         coEvery {
             pis.initiatePayment(
                 match {
@@ -170,7 +171,7 @@ class BerlinPisResourceTest {
                 },
             )
         } returns sampleResponse("p-2")
-        coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
+        coEvery { idempotencyStore.save(cacheKey, any<String>(), 201, any(), any()) } returns Unit
 
         val response = resource.initiate("sipo", sipoBody(), "consent-1", "req-3", ctxWithTpp("tpp-1"))
 
