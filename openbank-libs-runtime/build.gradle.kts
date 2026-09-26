@@ -44,6 +44,7 @@ dependencies {
     // (issue #5482). Re-check this whole block against the BOM's actual managed versions on
     // every Quarkus platform bump, not just the ones a compile error would catch.
     compileOnly("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
+    compileOnly("io.quarkus.resteasy.reactive:resteasy-reactive:3.38.0")
     compileOnly("jakarta.annotation:jakarta.annotation-api:3.0.0")
     compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
     // @InterceptorBinding / @Nonbinding for the Authorize and FeatureFlag annotations, which
