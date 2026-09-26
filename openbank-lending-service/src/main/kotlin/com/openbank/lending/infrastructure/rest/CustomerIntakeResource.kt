@@ -12,6 +12,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.security.RolesAllowed
@@ -86,34 +87,28 @@ class CustomerIntakeResource(
         // the edge supplies Idempotency-Key / X-Request-ID on retries; a keyed retry replays the
         // cached 201 and never stacks a duplicate application. Scoped per party.
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
-        requestKey?.let { key ->
-            idempotencyStore.get("lending:intake-apply:$partyId:$key")?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
+        // #10916: bound to the fingerprint of what the CUSTOMER sent (not the application built
+        // below, whose firstDueDate comes from the clock and would differ between retries).
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", INTAKE_PATH, request)
+        val storeKey = requestKey?.let { "lending:intake-apply:$partyId:$it" }
+        return idempotencyStore.submitOnce(storeKey, requestHash, INTAKE_KEY_TTL_SECONDS) {
+            val application = LoanApplicationRequest(
+                partyId = partyId,
+                requestedAmount = Money(request.amount, CurrencyCode.of(config.currency)),
+                nominalAnnualRate = config.nominalAnnualRate.get(),
+                termPeriods = request.termMonths,
+                firstDueDate = firstDueDate(),
+                jurisdiction = config.jurisdiction,
+                productType = config.productType,
+            )
+            try {
+                val created = apply.apply(application, "$CUSTOMER_ACTOR_PREFIX$partyId").awaitSuspending()
+                Response.status(HTTP_CREATED).entity(objectMapper.writeValueAsString(created))
+                    .type(MediaType.APPLICATION_JSON).build()
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                error(HTTP_UNPROCESSABLE, e.message ?: "intake refused")
             }
         }
-        val application = LoanApplicationRequest(
-            partyId = partyId,
-            requestedAmount = Money(request.amount, CurrencyCode.of(config.currency)),
-            nominalAnnualRate = config.nominalAnnualRate.get(),
-            termPeriods = request.termMonths,
-            firstDueDate = firstDueDate(),
-            jurisdiction = config.jurisdiction,
-            productType = config.productType,
-        )
-        val created = try {
-            apply.apply(application, "$CUSTOMER_ACTOR_PREFIX$partyId").awaitSuspending()
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            return error(HTTP_UNPROCESSABLE, e.message ?: "intake refused")
-        }
-        val body = objectMapper.writeValueAsString(created)
-        requestKey?.let { key ->
-            idempotencyStore.save("lending:intake-apply:$partyId:$key", HTTP_CREATED, body, INTAKE_KEY_TTL_SECONDS)
-        }
-        return Response.status(HTTP_CREATED).entity(body).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -176,6 +171,7 @@ class CustomerIntakeResource(
         private val ZERO_UUID = UUID(0, 0)
         private const val HTTP_CREATED = 201
         private const val INTAKE_KEY_TTL_SECONDS = 300L
+        private const val INTAKE_PATH = "/api/v1/lending/intake/applications"
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_UNPROCESSABLE = 422
