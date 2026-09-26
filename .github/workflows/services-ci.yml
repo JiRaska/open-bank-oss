@@ -76,6 +76,7 @@ jobs:
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
       verification-modules: ${{ steps.detect.outputs.verification-modules }}
+      admin-ui-pact-changed: ${{ steps.detect.outputs.admin-ui-pact-changed }}
     steps:
       # harden-runner omitted on the self-hosted sandbox runner — egress is enforced
       # at the infra layer (egress-only SG, isolated VPC, ADR-0027), so the eBPF shim
@@ -104,6 +105,9 @@ jobs:
             case "$1" in
               openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
                 return 0 ;;
+              .github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/gates/workflow-write-permissions-baseline.txt)
+                # These feed the separate Pact drift/publication gate, not a service build.
+                return 0 ;;
               .github/workflows/*)
                 # These two files own the service build itself. A change to either must
                 # still select the canary below; all other workflow files are external
@@ -123,28 +127,22 @@ jobs:
             || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
+          # shellcheck source=.github/scripts/service-ci-pact-modules.sh
+          source .github/scripts/service-ci-pact-modules.sh
+          pact_build_modules_self_test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
             CHANGED="$ALL"
           elif [ "${{ github.event_name }}" = "push" ]; then
-            # A push to main normally re-runs the WHOLE fleet so every provider
-            # re-verifies every consumer's current contract (Pact matrix completeness,
-            # ADR-0092) and publishes fresh results the SHA's auto-deploy gates on (#846).
-            # But a push that changed ONLY inert paths — release-please version.txt /
-            # CHANGELOG.md / manifest bumps, admin-ui deploy chores, gitops/infra
-            # (openbank-infra), or docs — cannot alter any service's compile inputs OR
-            # any pact, so a ~40-module rebuild produces zero new pacts and re-runs
-            # identical verifications. That was ~69% of a multi-hundred-job main-push
-            # backlog (2026-07-15). Skip the build entirely in that case: all-green still
-            # goes green on an empty matrix (the "nothing to build" path), exactly like a
-            # PR that touches no service module, so branch protection is unaffected.
-            # Any push touching a build-relevant path still triggers the FULL fleet — the
-            # safe direction is over-build, never under-build (an under-build would leave a
-            # stale/missing Pact verification). fetch-depth:0 above guarantees HEAD~1
-            # exists (main is squash-merged => each push is a single commit).
+            # Scope service and Pact changes; inert release/docs/infra changes build nothing.
+            # Unknown build inputs fall back to the full fleet below. Full history makes
+            # HEAD~1 available on main (squash-merged pushes are single commits).
             FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+            if admin_ui_pact_changed "$FILES"; then
+              echo "admin-ui-pact-changed=true" >> "$GITHUB_OUTPUT"
+            fi
             echo "Push changed files:"; echo "$FILES"
             # Inert = provably cannot change a compile input or a contract. A service's
             # source, any build input, Pact, or unknown automation path remains relevant and
@@ -167,9 +165,9 @@ jobs:
               # the Pact graph.
               #   - code-global input (openbank-libs*, gradle, build-logic) -> full-fleet (any
               #     service's compile/test inputs may change).
-              #   - pacts/<consumer>-<provider>.json changed -> build BOTH: the consumer republishes
-              #     the pact, the provider re-verifies against it (the exact completeness reason
-              #     main-push used to full-fleet for). Delimiter is the single '-openbank-'.
+              #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
+              #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
+              #     publishes it, so only its provider belongs in this matrix.
               #   - <module>/... changed -> that module.
               #   - openbank-libs/governance/ -> data for CI checks/admin-ui, not a compile input.
               #   - the CI recipe itself -> canary below.
@@ -185,14 +183,12 @@ jobs:
                   [ -z "$f" ] && continue
                   case "$f" in
                     pacts/*.json)
-                      base=$(basename "$f" .json)
-                      prov="openbank-${base##*-openbank-}"
-                      cons="${base%-openbank-*}"
-                      for p in "$cons" "$prov"; do
+                      if ! modules=$(pact_build_modules "$f"); then SCOPE_OK=0; continue; fi
+                      while IFS= read -r p; do
                         if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
-                      done ;;
+                      done <<< "$modules" ;;
                     openbank-libs/governance/*) : ;;
-                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) : ;;
+                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
                     openbank-*/*)
                       m="${f%%/*}"
                       if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;
@@ -214,7 +210,7 @@ jobs:
                   fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
-                     && grep -qE '^\.github/workflows/(services-ci|_service-ci)\.yml' <<< "$FILES"; then
+                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
                     CHANGED="openbank-libs"
                   fi
                   echo "Decision: scoped main-push build -> ${CHANGED:-<none>}"
@@ -308,7 +304,7 @@ jobs:
               # with the causing PR long merged (issue #8984).
               # Derivation matches the push path (split on the LAST '-openbank-'). A consumer that
               # is not a Gradle module is skipped rather than failing the scoping: openbank-admin-ui
-              # authors four of the committed pacts and builds in its own workflow. A PROVIDER that
+              # authors five of the committed pacts and builds in its own workflow. A PROVIDER that
               # does not resolve to a module is not skippable — it is the side that verifies — so
               # that falls back to the full fleet, the safe direction this detector always takes.
               while IFS= read -r f; do
@@ -358,7 +354,7 @@ jobs:
               # Skip the canary if a real service is already in the matrix (it validates
               # the recipe too).
               if [ -z "${CHANGED// /}" ] \
-                 && grep -qE '^\.github/workflows/(services-ci|_service-ci)\.yml' <<< "$FILES"; then
+                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
                 echo "Decision: recipe-only change -> build canary openbank-libs."
                 CHANGED="openbank-libs"
               fi
@@ -384,9 +380,31 @@ jobs:
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  publication-ready:
+    name: Await exact-SHA Admin UI Pact publication
+    # Only a hosted runner waits. The broker is private, so the published job's
+    # exact-SHA GitHub result is the cross-workflow handoff before ARC verification.
     needs: changes
-    if: needs.changes.outputs.any == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.admin-ui-pact-changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 37
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require verified publication before provider builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/test-await-admin-ui-pact-publication.py
+          python3 .github/scripts/await-admin-ui-pact-publication.py
+
+  build:
+    needs: [changes, publication-ready]
+    if: always() && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped')
     # The reusable workflow assumes openbank-arc-build-runner via GitHub OIDC for ECR auth
     # (needed on the Hetzner pool, which has no ambient AWS creds). A job that calls a reusable
     # workflow must grant the token here; the callee cannot elevate beyond the caller.
@@ -420,12 +438,13 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: ${{ matrix.service }}
-    # Pass the Pact Broker password (secret) through to the reusable workflow
-    # (ADR-0092); vars.PACT_BROKER_URL/_USERNAME are available to it automatically.
+    # Pass the Pact Broker password only when the callee's contract job can run
+    # (ADR-0092). PRs and schedules must not receive a write-capable broker secret.
+    # vars.PACT_BROKER_URL/_USERNAME are available to the callee automatically.
     # Named explicitly rather than `secrets: inherit` — inherit hands the called
     # workflow EVERY repo secret, and this is the only one it reads.
     secrets:
-      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
   # Single required status check that aggregates the matrix, so branch protection
   # can require "Services CI / all-green" without enumerating every service.
@@ -471,7 +490,7 @@ jobs:
 
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
   #
-  # `needs` is the whole story: `changes`, `build`, `verification-metadata`. It never observes
+  # `needs` is the whole story: `changes`, `publication-ready`, `build`, `verification-metadata`. It never observes
   # ci.yml's `gates (*)` shards, and therefore says nothing about `Validate manifests`, which
   # aggregates them. Both are required contexts in the `main-protection` ruleset, and it is the
   # PAIR that covers builds + gates — neither half alone is merge-readiness.
@@ -488,7 +507,7 @@ jobs:
   # change. #3955 tracks that decision.
   all-green:
     name: all-green
-    needs: [changes, build, verification-metadata]
+    needs: [changes, publication-ready, build, verification-metadata]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -497,6 +516,10 @@ jobs:
         run: |
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "Changed-service detection did not succeed; build scope is unknown."; exit 1
+          fi
+          if [ "${{ needs.changes.outputs.admin-ui-pact-changed }}" = "true" ] \
+             && [ "${{ needs.publication-ready.result }}" != "success" ]; then
+            echo "Exact-SHA Admin UI Pact publication was not proven; refusing a green service gate."; exit 1
           fi
           if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
             echo "One or more service builds failed."; exit 1

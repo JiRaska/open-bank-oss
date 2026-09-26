@@ -10,6 +10,17 @@
 name: Verify one provider
 
 on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+    secrets:
+      PACT_BROKER_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       service:
