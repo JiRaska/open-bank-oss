@@ -748,10 +748,21 @@ def self_test() -> int:
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
     # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
-    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
-    # automated sync while this exact distinction is under rollout review.
+    # that Argo has ever created a pod. Incentive was the real manual-sync instance until #10783
+    # automated its sync, so no committed Application exercises the branch any more. Render
+    # Incentive twice: as committed (automated, so it must NOT be flagged) and with its owning
+    # Application forced to manual sync, so the manual-sync rendering stays falsifiable.
     if "incentive" in deployed:
-        incentive = render("incentive")
+        global application_automated
+        automated = application_automated
+        case("an automated-sync workload is not presented as live-unverified",
+             automated("incentive") is not True
+             or "LIVE STATUS UNVERIFIED" not in render("incentive"))
+        application_automated = lambda s: False if s == "incentive" else automated(s)
+        try:
+            incentive = render("incentive")
+        finally:
+            application_automated = automated
         case("a manual-sync workload is explicitly live-unverified",
              says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
         case("a manual-sync workload does not present declared metrics as a live scrape",
