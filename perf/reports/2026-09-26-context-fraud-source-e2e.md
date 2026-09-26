@@ -19,7 +19,7 @@ The isolated fixture used synthetic accounts and counterparties, separate Postgr
 
 ## Limits and remaining acceptance
 
-This proves one local synthetic source-backed flow and its access/state/outage boundaries. It does not prove deployed Kafka ACLs, actual Audit-service ingestion, browser rendering/BFF behavior, historical role changes, concurrency or race coverage, annual 1x/10x performance, the other banking scenarios, required human review, or sandbox deployment. Runtime and request evidence is machine-local. The portable harness described below covers the API lifecycle; runtime provisioning and the outage/recovery drill remain separate.
+This proves one local synthetic source-backed flow and its access/state/outage boundaries. It does not prove deployed Kafka ACLs, actual Audit-service ingestion, historical role changes, concurrency or race coverage, annual 1x/10x performance, the other banking scenarios, required human review, or sandbox deployment. Runtime and request evidence is machine-local. The portable harness described below covers the API lifecycle; runtime provisioning and the outage/recovery drill remain separate.
 
 Initial fixture errors were corrected without changing production security gates: an undeclared Kafka channel override prevented startup, the source HTTPS port must satisfy the existing 8443 gate, and the isolated consumer needed its own actual group. The first synthetic CA lacked a required key-usage extension; it was corrected instead of disabling verification. Initial assertion assumptions were corrected to use the actual `CLOSED_NO_FINDING` status and allow an empty HTTP 403 body.
 
@@ -38,3 +38,9 @@ python3 perf/scripts/context-fraud-source-e2e.py --synthetic-fixture \
 The probe creates random synthetic accounts/counterparties and owns only its created cases and assignment proposals. It closes owned cases and revokes their assignments through normal APIs, failing if cleanup fails. Immutable source scores and audit evidence remain intentionally. An indeterminate transport failure during creation can leave an unidentified synthetic record and requires fixture-owner reconciliation. No production fixture or real client data should be supplied.
 
 The automated probe does not stop services, provision Kafka ACLs, prove hidden-case projection readiness independently, exercise browser login/BFF/UI, or certify performance. The source outage/recovery result above came from the separate controlled runtime drill.
+
+## Actual browser login and graph rendering
+
+A headless Chromium probe used the actual Admin UI, Keycloak authorization-code login, and synthetic assigned administrator. The authenticated browser called the actual Context BFF, received HTTP 200 with the expected source root, and rendered the starting-case evidence. Visual inspection confirmed the source case, score reference, account, counterparty and shared-account connection to one assigned related case. No injected session cookie, mocked BFF response or bypassed authorization was used.
+
+The probe initially timed out while waiting for complete page loading after authentication; waiting for the document instead of all ancillary requests allowed the real flow to complete. This was a probe correction, not a production authentication change. The separate review-queue panel remained unavailable because its generic local service mapping targets a different port from the isolated Fraud fixture. Therefore this proves graph login/BFF/rendering, not complete acceptance of the entire Fraud page. Browser evidence and synthetic screenshots remain machine-local.
