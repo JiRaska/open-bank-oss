@@ -64,7 +64,7 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 
 **D2 — Declaration.** A profile is a set of Kotlin constants in openbank-libs-runtime
 (`com.openbank.libs.resilience`) used as the annotation arguments, plus a marker annotation
-`@ResilienceProfile("money-sync")` on the adapter method.
+`@ResilienceProfile("money-sync")` on the adapter method (not yet implemented, #10930).
 
 The `money-sync` rule "retry only when the call carries an idempotency key" is a *runtime*
 property of the call, which static annotation constants cannot express. It is implemented with
