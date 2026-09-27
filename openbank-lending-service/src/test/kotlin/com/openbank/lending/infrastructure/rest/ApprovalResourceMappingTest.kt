@@ -10,11 +10,13 @@ import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.approval.web.ApprovalResponse
 import com.openbank.libs.approval.web.DecideApprovalRequest
+import com.openbank.libs.authz.Authorize
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.NotFoundException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -28,7 +30,8 @@ import java.time.OffsetDateTime
  * self-approval propagation, wire DTOs) to `ApprovalEndpointSupport` (libs-runtime, tested by its
  * own `ApprovalEndpointSupportTest` against a real `InMemoryApprovalStore`, #10915). What THIS
  * test covers is the resource's own responsibility: resolving the checker's identity from
- * [SecurityIdentity] rather than the request body, and wiring lending's roles/annotations. This
+ * [SecurityIdentity] rather than the request body, and — via the annotation-equivalence test
+ * below — that the #11062 migration did not silently change `@RolesAllowed`/`@Authorize`. This
  * service previously had no dedicated `ApprovalResource` unit test (issue #11031).
  */
 class ApprovalResourceMappingTest {
@@ -125,5 +128,38 @@ class ApprovalResourceMappingTest {
         assertThatThrownBy {
             runBlocking { resourceWith(guarding, maker).decide("appr-1", DecideApprovalRequest(approve = true)) }
         }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
+    }
+
+    // --- annotation equivalence (review finding) ------------------------------------------------
+    //
+    // The KDoc above claims the migration "did not silently change @RolesAllowed/@Authorize", but
+    // nothing in this file previously checked that by any mechanism -- a plain assertion would
+    // have to be updated by hand alongside the source and could drift silently. Asserting against
+    // the exact pre-migration values (from ApprovalResource.kt as it existed before #11062, commit
+    // 8036ab19c7^) makes a wrong role/action list on either method fail loudly.
+
+    @Test
+    fun `the migrated resource keeps the pre-migration role and action annotations`() {
+        // Both are `suspend fun`s, so javac/kotlinc compile them with a synthetic trailing
+        // kotlin.coroutines.Continuation parameter -- getMethod(name, Int::class.java) etc. throws
+        // NoSuchMethodException. Locate by declared name instead of guessing the erased signature.
+        val declaredMethods = ApprovalResource::class.java.declaredMethods
+        val listPending = declaredMethods.single { it.name == "listPending" }
+        val decide = declaredMethods.single { it.name == "decide" }
+
+        val listRoles = listPending.getAnnotation(RolesAllowed::class.java)?.value?.toSet()
+        val decideRoles = decide.getAnnotation(RolesAllowed::class.java)?.value?.toSet()
+        val listAuthorize = listPending.getAnnotation(Authorize::class.java)
+        val decideAuthorize = decide.getAnnotation(Authorize::class.java)
+
+        assertThat(listRoles).isEqualTo(setOf("ROLE_LENDING_OFFICER", "ROLE_CREDIT_RISK", "ROLE_ADMIN"))
+        assertThat(decideRoles).isEqualTo(setOf("ROLE_LENDING_OFFICER", "ROLE_ADMIN"))
+        // listPending and decide intentionally carry DIFFERENT role sets -- the read additionally
+        // admits ROLE_CREDIT_RISK. A change that accidentally equalised them must fail here too.
+        assertThat(listRoles).isNotEqualTo(decideRoles)
+        assertThat(listAuthorize?.action).isEqualTo("lending.approval.read")
+        assertThat(listAuthorize?.resource).isEqualTo("")
+        assertThat(decideAuthorize?.action).isEqualTo("lending.approval.decide")
+        assertThat(decideAuthorize?.resource).isEqualTo("#id")
     }
 }
