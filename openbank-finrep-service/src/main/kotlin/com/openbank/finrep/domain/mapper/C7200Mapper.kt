@@ -43,11 +43,12 @@ import java.time.LocalDate
  * Data gaps (ADR-0097 — never a real-looking zero): r0040 / r0050 because the engine's single L1
  * class `hqla-l1-cash-or-reserves` does not distinguish coins and banknotes from central-bank
  * reserves; every value row when the read is disabled, no tied snapshot exists, the book is
- * multi-currency, or the engine left balances unclassified (any of which could be a liquid asset);
- * and column c0040 of a level whose applied haircut differs from the Delegated Regulation 2015/61
- * standard haircut, because the engine applies BCBS d238 factors and its scope says EU deviations
- * are not applied. For the classes it models today the BCBS and EU haircuts coincide (L1 0 %, L2A
- * 15 %, L2B 25 % RMBS / 50 % other), which is the only reason c0040 is reported at all.
+ * multi-currency or empty, or the engine left balances unclassified (any of which could be a liquid
+ * asset); every c0040 cell when the run's liquidity parameter set is not the EU 2015/61 set
+ * ([RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET]); and column c0040 of a level whose applied haircut
+ * differs from the Delegated Regulation 2015/61 standard haircut (L1 0 %, L2A 15 %, L2B 25 % RMBS /
+ * 50 % other). The engine rounds lines and totals separately, so the lines must tie to its level
+ * totals only within [RiskEngineFigures.roundingTolerance]; c0040 reports the engine's own total.
  */
 object C7200Mapper {
 
@@ -74,6 +75,7 @@ object C7200Mapper {
         val result = lookup.result
         val gap = lookup.unavailableReason ?: gapReason(checkNotNull(result))
         val levels = if (gap == null) levels(checkNotNull(result)) else emptyMap()
+        val valueGap = valueGap(gap, result)
         val currency = result?.currency ?: "CZK"
 
         fun level(key: String) = levels[key] ?: Level.EMPTY
@@ -98,7 +100,7 @@ object C7200Mapper {
         val cells = buildList {
             rows.forEach { (row, label, l) ->
                 add(cell(row, COL_AMOUNT, label, l.marketValue, gap))
-                add(cell(row, COL_VALUE, label, l.value, gap ?: l.haircutGap))
+                add(cell(row, COL_VALUE, label, l.value, valueGap ?: l.haircutGap))
             }
             listOf("r0040" to "Coins and banknotes", "r0050" to "Withdrawable central bank reserves")
                 .forEach { (row, label) ->
@@ -109,7 +111,12 @@ object C7200Mapper {
         return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })))
     }
 
+    /** The gap for every c0040 (2015/61 value) cell: the whole-template gap, else the parameter-set gap. */
+    private fun valueGap(gap: String?, result: RiskLiquidityResult?): String? =
+        gap ?: result?.let { RiskEngineFigures.parameterSetGap(it.parameterSetId, it.parameterSetVersion, it.runId) }
+
     private fun gapReason(result: RiskLiquidityResult): String? = when {
+        result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
         result.currencyCount > 1 || result.level1 == null || result.level2a == null || result.level2b == null ->
             "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
                 "total can be stated (snapshot ${result.runId})."
@@ -119,7 +126,10 @@ object C7200Mapper {
         else -> null
     }
 
-    /** Per-level sums from the lines, tied to the engine's own level totals (fails the render if not). */
+    /**
+     * Per-level market values from the lines and the engine's own after-haircut level totals; the lines
+     * must tie to those totals within independent rounding (fails the render if not).
+     */
     private fun levels(result: RiskLiquidityResult): Map<String, Level> {
         val byLevel = result.lines.groupBy { line ->
             line.level.also {
@@ -129,26 +139,28 @@ object C7200Mapper {
         val engineTotals = mapOf(L1 to result.level1, L2A to result.level2a, L2B to result.level2b)
         return EU_HAIRCUTS.keys.associateWith { key ->
             val lines = byLevel[key].orEmpty()
-            val level = Level(
-                marketValue = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.marketValue) },
-                value = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.afterHaircut) },
-                haircutGap = haircutGap(key, lines, result.runId),
-            )
             val engine = checkNotNull(engineTotals[key])
-            check(level.value.compareTo(engine) == 0) {
-                "risk-engine $key lines sum to ${level.value}, but its $key total is $engine (snapshot ${result.runId})"
+            val lineSum = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.afterHaircut) }
+            check(RiskEngineFigures.tiesWithinRounding(lineSum, engine, lines.size)) {
+                "risk-engine $key lines sum to $lineSum, but its $key total is $engine, beyond rounding " +
+                    "(snapshot ${result.runId})"
             }
-            level
+            Level(
+                marketValue = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.marketValue) },
+                value = engine,
+                haircutGap = haircutGap(key, lines, result),
+            )
         }
     }
 
-    private fun haircutGap(level: String, lines: List<RiskHqlaLine>, runId: String): String? {
+    private fun haircutGap(level: String, lines: List<RiskHqlaLine>, result: RiskLiquidityResult): String? {
         val allowed = EU_HAIRCUTS.getValue(level)
         val off = lines.map { it.haircut }.filter { h -> allowed.none { it.compareTo(h) == 0 } }.distinct()
         return if (off.isEmpty()) {
             null
         } else {
-            "Risk-engine snapshot $runId applies a $level haircut of ${off.joinToString()} (BCBS d238), which is " +
+            "Risk-engine snapshot ${result.runId} applies a $level haircut of ${off.joinToString()} (parameter set " +
+                "'${result.parameterSetId}'), which is " +
                 "not a Delegated Regulation 2015/61 standard haircut for $level; the value according to Article 9 " +
                 "cannot be stated."
         }

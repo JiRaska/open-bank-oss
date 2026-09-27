@@ -39,8 +39,9 @@ class C7200MapperTest {
         level2b: String? = "105",
         currencies: Int = 1,
         unclassified: Int = 0,
+        parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
     ) = RiskLiquidityResult(
-        "run-7", asOf, "bcbs-d238-d295", "2", "CZK", lines,
+        "run-7", asOf, parameterSet, "2", "CZK", lines,
         level1?.let(::BigDecimal), level2a?.let(::BigDecimal), level2b?.let(::BigDecimal), currencies, unclassified,
     )
 
@@ -125,7 +126,8 @@ class C7200MapperTest {
             asOf,
         )
         assertThat(t.at("r0240", "c0040").isDataGap).isTrue()
-        assertThat(t.at("r0240", "c0040").gapReason).contains("L2A haircut of 0.20")
+        assertThat(t.at("r0240", "c0040").gapReason).contains("L2A haircut of 0.20", "'eu-2015-61-crr2'")
+            .doesNotContain("d238")
         assertThat(t.at("r0010", "c0040").isDataGap).isTrue()
         assertThat(t.at("r0240", "c0010").isDataGap).isFalse()
         assertThat(t.at("r0020", "c0040").isDataGap).isFalse()
@@ -142,9 +144,47 @@ class C7200MapperTest {
     }
 
     @Test
+    fun `an empty book with no currency is an empty-book gap, not a multi-currency one`() {
+        val t = C7200Mapper.map(
+            RiskLiquidityLookup.found(
+                result(lines = emptyList(), level1 = null, level2a = null, level2b = null, currencies = 0),
+            ),
+            asOf,
+        )
+        assertThat(t.cells).allMatch { it.isDataGap }
+        assertThat(t.at("r0010", "c0010").gapReason).contains("empty book", "run-7").doesNotContain("multi-currency")
+    }
+
+    @Test
+    fun `lines rounded separately from the engine's level total still tie, and c0040 is the engine's total`() {
+        // Three L2A lines of 10.03 at 15 %: 8.5255 each, rounded to 8.53 -> 25.59; the engine's total of
+        // 30.09 * 0.85 = 25.5765 is rounded on its own -> 25.58.
+        val l2a = List(3) { RiskHqlaLine("L2A", BigDecimal("10.03"), BigDecimal("0.15"), BigDecimal("8.53")) }
+        val t = C7200Mapper.map(
+            RiskLiquidityLookup.found(result(lines = l2a, level1 = "0", level2a = "25.58", level2b = "0")),
+            asOf,
+        )
+        assertThat(t.at("r0240", "c0040").value).isEqualByComparingTo("25.58")
+        assertThat(t.at("r0240", "c0010").value).isEqualByComparingTo("30.09")
+        assertThat(t.at("r0240", "c0040").isDataGap).isFalse()
+    }
+
+    @Test
+    fun `a run on a non-EU parameter set blanks every 2015-61 value cell and names the set`() {
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(parameterSet = "bcbs-d238-d295")), asOf)
+        val values = listOf("r0010", "r0020", "r0030", "r0230", "r0240", "r0310")
+        values.forEach { row ->
+            val c = t.at(row, "c0040")
+            assertThat(c.isDataGap).isTrue()
+            assertThat(c.gapReason).contains("'bcbs-d238-d295'", "run-7", "eu-2015-61-crr2")
+            assertThat(t.at(row, "c0010").isDataGap).isFalse()
+        }
+    }
+
+    @Test
     fun `lines that disagree with the engine's own level total fail the render`() {
         assertThatThrownBy { C7200Mapper.map(RiskLiquidityLookup.found(result(level1 = "1249")), asOf) }
-            .hasMessageContaining("L1 lines sum to 1250")
+            .hasMessageContaining("L1 lines sum to 1250", "beyond rounding")
     }
 
     @Test
