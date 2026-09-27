@@ -32,7 +32,8 @@ import java.util.UUID
 class RiskSnapshotApiIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "treasury-deal-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

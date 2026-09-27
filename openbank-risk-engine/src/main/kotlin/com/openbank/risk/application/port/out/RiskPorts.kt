@@ -13,6 +13,7 @@ import com.openbank.risk.domain.model.LoanContract
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutMismatch
+import com.openbank.risk.domain.model.TreasuryDeal
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -87,6 +88,31 @@ data class FxFixingRate(
     val validFrom: Instant,
     val validTo: Instant,
     val receivedAt: Instant,
+)
+
+/**
+ * The bank's money-market deals (ADR-0315 D6), maintained from treasury-service's `treasury.deal.*`
+ * events. [apply] is monotonic and idempotent per deal: a state only advances, so a redelivered or
+ * out-of-date event changes nothing.
+ */
+interface TreasuryDealBook {
+    suspend fun dealsOnBook(asOf: LocalDate): List<TreasuryDeal>
+
+    /** Returns true when the event changed the stored deal. */
+    suspend fun apply(event: TreasuryDealEvent): Boolean
+}
+
+/** One `treasury.deal.*` event as the book needs it; [rate] is present only on `booked`. */
+data class TreasuryDealEvent(
+    val state: String,
+    val dealId: UUID,
+    val product: String,
+    val counterpartyId: String,
+    val currency: String,
+    val principal: BigDecimal,
+    val rate: BigDecimal?,
+    val valueDate: LocalDate?,
+    val maturityDate: LocalDate?,
 )
 
 interface FxFixingRepository {
