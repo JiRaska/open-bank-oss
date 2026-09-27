@@ -24,7 +24,7 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.10.0
+  version: 1.11.0
 tags:
   - name: FINREP
   - name: COREP
@@ -151,6 +151,12 @@ paths:
         always `isDataGap: true` (the engine does not split them), every value row is a gap with its
         reason when no tied snapshot exists, the read is not enabled, the book is multi-currency or
         balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
+        `[row code UNVERIFIED]` in their label. `C_73.00` (LCR outflows, Delegated Regulation (EU)
+        2015/61; columns c0010 amount and c0060 outflow) is read from the same LCR result; retail
+        deposits subject to higher outflows (r0060) and non-operational deposits (r0250) are always
+        `isDataGap: true` (the engine models neither), the outflow column of a component whose
+        engine run-off factor is not the 2015/61 rate is a gap, every row is a gap under the same
+        conditions as `C_72.00`, and rows whose code is not yet verified against the EBA DPM carry
         `[row code UNVERIFIED]` in their label. Any other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
@@ -165,7 +171,7 @@ paths:
           in: path
           required: true
           description: EBA COREP template identifier
-          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00] }
+          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00, C_73.00] }
         - name: asOf
           in: query
           required: false

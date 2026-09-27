@@ -21,8 +21,10 @@ import com.openbank.finrep.application.port.out.RiskExposureClass
 import com.openbank.finrep.application.port.out.RiskHqlaLine
 import com.openbank.finrep.application.port.out.RiskLiquidityLookup
 import com.openbank.finrep.application.port.out.RiskLiquidityResult
+import com.openbank.finrep.application.port.out.RiskOutflowLine
 import com.openbank.finrep.domain.mapper.C0200Mapper
 import com.openbank.finrep.domain.mapper.C7200Mapper
+import com.openbank.finrep.domain.mapper.C7300Mapper
 import com.openbank.finrep.infrastructure.client.CapitalResponse
 import com.openbank.finrep.infrastructure.client.LiquidityResponse
 import com.openbank.finrep.infrastructure.client.RiskEngineRestClient
@@ -163,6 +165,15 @@ class RiskEngineCapitalPactConsumerTest {
                 h.decimalType("level2a", 0.00)
                 h.decimalType("level2b", 0.00)
             }
+            // C 73.00 reads the outflow lines and the engine's own total they must tie to. A tied book
+            // may hold no liability with an outflow, so the list may be empty.
+            lcr.minArrayLike("outflows", 0, 1) { o ->
+                o.stringType("factorKey", "lcr-retail-less-stable-runoff")
+                o.decimalType("amount", 2000.00)
+                o.numberType("factor", 0.10)
+                o.decimalType("weighted", 200.00)
+            }
+            lcr.decimalType("totalOutflows", 200.00)
         }
     }
 
@@ -248,6 +259,54 @@ class RiskEngineCapitalPactConsumerTest {
         // The example carries one unclassified balance, so the render must refuse the liquid-asset
         // totals and say why: proves `unclassified` is read, not merely parsed.
         val totalRow = template.cells.single { it.rowRef == "r0010" && it.colRef == "c0040" }
+        assertThat(totalRow.isDataGap).isTrue()
+        assertThat(totalRow.gapReason).contains("unclassified in risk-engine snapshot ${l.runId}")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "liquidityPact")
+    fun `the same liquidity result feeds a C 73_00 render`(mockServer: MockServer) {
+        assertThat(liquidityPath).isEqualTo("$RISK_SNAPSHOTS_PATH/{id}/liquidity")
+        val body = given().baseUri(mockServer.getUrl()).get(liquidityPath.replace("{id}", EXAMPLE_RUN_ID))
+            .then().statusCode(200).extract().asString()
+        val l = json.readValue<LiquidityResponse>(body)
+        val lcr = checkNotNull(l.total).lcr
+        val result = RiskLiquidityResult(
+            runId = l.runId,
+            asOf = LocalDate.parse(l.asOf),
+            parameterSetId = l.parameterSetId,
+            parameterSetVersion = l.parameterSetVersion,
+            currency = checkNotNull(l.total).currency,
+            lines = emptyList(),
+            level1 = lcr.hqla.level1,
+            level2a = lcr.hqla.level2a,
+            level2b = lcr.hqla.level2b,
+            currencyCount = l.currencies.size,
+            unclassifiedBalances = l.unclassified.size,
+            outflows = lcr.outflows.map { RiskOutflowLine(it.factorKey, it.amount, it.factor, it.weighted) },
+            totalOutflows = lcr.totalOutflows,
+        )
+        val outflow = lcr.outflows.single()
+        assertThat(outflow.factorKey).isEqualTo("lcr-retail-less-stable-runoff")
+        assertThat(outflow.amount).isEqualByComparingTo("2000.00")
+        assertThat(outflow.factor).isEqualByComparingTo("0.10")
+        assertThat(outflow.weighted).isEqualByComparingTo("200.00")
+        assertThat(lcr.totalOutflows).isEqualByComparingTo("200.00")
+        // With the unclassified balance cleared the render ties and states the outflow, proving the
+        // four outflow fields and the total are read, not merely parsed ...
+        val tied = C7300Mapper.map(
+            RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0)),
+            LocalDate.parse(REPORTING_DATE),
+        )
+        assertThat(
+            tied.cells.single {
+                it.rowRef == "r0130" && it.colRef == "c0060"
+            }.value,
+        ).isEqualByComparingTo("200.00")
+        assertThat(tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }.isDataGap).isFalse()
+        // ... and the example as served (one unclassified balance) must refuse the totals and say why.
+        val served = C7300Mapper.map(RiskLiquidityLookup.found(result), LocalDate.parse(REPORTING_DATE))
+        val totalRow = served.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }
         assertThat(totalRow.isDataGap).isTrue()
         assertThat(totalRow.gapReason).contains("unclassified in risk-engine snapshot ${l.runId}")
     }

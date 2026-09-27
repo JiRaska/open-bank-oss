@@ -350,7 +350,16 @@
                       "marketValue": 1000.0
                     }
                   ]
-                }
+                },
+                "outflows": [
+                  {
+                    "amount": 2000.0,
+                    "factor": 0.1,
+                    "factorKey": "lcr-retail-less-stable-runoff",
+                    "weighted": 200.0
+                  }
+                ],
+                "totalOutflows": 200.0
               }
             }
           ],
@@ -372,7 +381,16 @@
                     "marketValue": 1000.0
                   }
                 ]
-              }
+              },
+              "outflows": [
+                {
+                  "amount": 2000.0,
+                  "factor": 0.1,
+                  "factorKey": "lcr-retail-less-stable-runoff",
+                  "weighted": 200.0
+                }
+              ],
+              "totalOutflows": 200.0
             }
           },
           "unclassified": [
@@ -460,6 +478,55 @@
               ]
             },
             "$.currencies[*].lcr.hqla.lines[*].marketValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.totalOutflows": {
               "combine": "AND",
               "matchers": [
                 {
@@ -558,6 +625,55 @@
               ]
             },
             "$.total.lcr.hqla.lines[*].marketValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.outflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.totalOutflows": {
               "combine": "AND",
               "matchers": [
                 {

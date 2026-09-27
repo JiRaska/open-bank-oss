@@ -125,6 +125,20 @@ data class RiskLiquidityResult(
     val level2b: BigDecimal?,
     val currencyCount: Int,
     val unclassifiedBalances: Int,
+    val outflows: List<RiskOutflowLine> = emptyList(),
+    val totalOutflows: BigDecimal? = null,
+)
+
+/**
+ * One LCR outflow line of a risk-engine result (COREP C 73.00): the run-off factor key the engine
+ * applied (e.g. `lcr-retail-stable-runoff`), the unweighted [amount], the [factor] and the
+ * [weighted] outflow. [RiskLiquidityResult.totalOutflows] is the engine's own sum of [weighted].
+ */
+data class RiskOutflowLine(
+    val factorKey: String,
+    val amount: BigDecimal,
+    val factor: BigDecimal,
+    val weighted: BigDecimal,
 )
 
 /** What a liquidity lookup found: the [result], or the data-gap reason there is none (never an error). */
@@ -140,7 +154,7 @@ data class RiskLiquidityLookup(val result: RiskLiquidityResult?, val unavailable
 }
 
 /**
- * Read-only view of the risk engine's LCR liquid-asset result (COREP C 72.00). The run is selected
+ * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows). The run is selected
  * exactly as [RiskCapitalPort] selects it, so C 02.00 and C 72.00 of one date read the same snapshot.
  */
 interface RiskLiquidityPort {

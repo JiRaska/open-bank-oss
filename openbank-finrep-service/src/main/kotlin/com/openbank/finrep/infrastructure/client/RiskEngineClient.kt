@@ -12,6 +12,7 @@ import com.openbank.finrep.application.port.out.RiskHqlaLine
 import com.openbank.finrep.application.port.out.RiskLiquidityLookup
 import com.openbank.finrep.application.port.out.RiskLiquidityPort
 import com.openbank.finrep.application.port.out.RiskLiquidityResult
+import com.openbank.finrep.application.port.out.RiskOutflowLine
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
@@ -96,7 +97,19 @@ data class HqlaResponse(
     val level2b: BigDecimal,
 )
 
-data class LcrResponse(val hqla: HqlaResponse)
+/** One LCR outflow line (only the fields C 73.00 reads); `factorKey` names the run-off rate applied. */
+data class OutflowLineResponse(
+    val factorKey: String,
+    val amount: BigDecimal,
+    val factor: BigDecimal,
+    val weighted: BigDecimal,
+)
+
+data class LcrResponse(
+    val hqla: HqlaResponse,
+    val outflows: List<OutflowLineResponse> = emptyList(),
+    val totalOutflows: BigDecimal? = null,
+)
 
 data class CurrencyLiquidityResponse(val currency: String, val lcr: LcrResponse)
 
@@ -148,7 +161,8 @@ class RiskEngineCapitalAdapter(
         if (!enabled) return RiskLiquidityLookup.unavailable(DISABLED_REASON_LIQUIDITY)
         val run = tiedOutRunAt(asOf) ?: return RiskLiquidityLookup.unavailable(NO_SNAPSHOT_REASON_LIQUIDITY)
         val l = client.liquidity(run.id).awaitSuspending()
-        val hqla = l.total?.lcr?.hqla
+        val lcr = l.total?.lcr
+        val hqla = lcr?.hqla
         return RiskLiquidityLookup.found(
             RiskLiquidityResult(
                 runId = l.runId,
@@ -164,6 +178,10 @@ class RiskEngineCapitalAdapter(
                 level2b = hqla?.level2b,
                 currencyCount = l.currencies.size,
                 unclassifiedBalances = l.unclassified.size,
+                outflows = lcr?.outflows.orEmpty().map {
+                    RiskOutflowLine(it.factorKey, it.amount, it.factor, it.weighted)
+                },
+                totalOutflows = lcr?.totalOutflows,
             ),
         )
     }

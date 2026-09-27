@@ -231,6 +231,57 @@ class CorepServiceTest {
         ).isEqualTo(1.0)
     }
 
+    // --- C 73.00 from the same LCR result's outflows ---
+
+    @Test
+    fun `C_73_00 is read from the risk engine's liquidity outflows and never from the ledger`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 9, 30)
+        val found = object : RiskLiquidityPort {
+            override suspend fun liquidityAt(asOf: LocalDate) = RiskLiquidityLookup.found(
+                RiskLiquidityResult(
+                    "run-1", asOf, "bcbs-d238-d295", "2", "CZK", emptyList(),
+                    BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 1, 0,
+                    outflows = listOf(
+                        com.openbank.finrep.application.port.out.RiskOutflowLine(
+                            "lcr-retail-less-stable-runoff",
+                            BigDecimal("1000"),
+                            BigDecimal("0.10"),
+                            BigDecimal("100"),
+                        ),
+                    ),
+                    totalOutflows = BigDecimal("100"),
+                ),
+            )
+        }
+        val template = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital, found)
+            .getTemplate(GetCorepTemplateQuery(templateId = "C_73.00", asOf = asOf))
+        assertThat(template.templateId).isEqualTo("C_73.00")
+        assertThat(template.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }.value)
+            .isEqualByComparingTo("100")
+        assertThat(
+            registry.get("openbank.finrep.templates.rendered").tag("template", "C_73.00").counter().count(),
+        ).isEqualTo(1.0)
+        coVerify(exactly = 0) { ledgerPort.getTrialBalance(any()) }
+        coVerify(exactly = 0) { ledgerPort.getLiveTrialBalance(any()) }
+    }
+
+    @Test
+    fun `an unreachable risk engine fails C_73_00 as a counted failure, not a report of zeros`(): Unit = runBlocking {
+        val down = object : RiskLiquidityPort {
+            override suspend fun liquidityAt(asOf: LocalDate): RiskLiquidityLookup = error("connection refused")
+        }
+        assertThatThrownBy {
+            runBlocking {
+                CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital, down)
+                    .getTemplate(GetCorepTemplateQuery(templateId = "C_73.00", asOf = LocalDate.of(2026, 9, 30)))
+            }
+        }.hasMessageContaining("connection refused")
+        assertThat(
+            registry.find("openbank.finrep.template.failures").tag("framework", "corep")
+                .tag("reason", "risk_engine_unavailable").counter()?.count(),
+        ).isEqualTo(1.0)
+    }
+
     private val noLiquidity = object : RiskLiquidityPort {
         override suspend fun liquidityAt(asOf: LocalDate) = RiskLiquidityLookup.unavailable("not wired in this test")
     }
