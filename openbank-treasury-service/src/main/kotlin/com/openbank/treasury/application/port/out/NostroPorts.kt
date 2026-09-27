@@ -32,6 +32,13 @@ data class StoredStatement(
  */
 class DuplicateStatementException(cause: Throwable) : RuntimeException("nostro statement already stored", cause)
 
+/**
+ * The ledger answered in a way that is not a balance and not its "I do not hold that account" —
+ * e.g. a 404 from a ledger that does not serve the route yet. Mapped to 502: the reconciliation
+ * cannot be computed, and saying "not stated" would be a false reason.
+ */
+class LedgerUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
 interface NostroStatementRepository {
     suspend fun findById(id: UUID): StoredStatement?
 
@@ -56,8 +63,9 @@ interface LedgerReadPort {
      * `amount`, never the CZK `base_amount` — over every real booked journal with entry date
      * <= [asOf] (#11107). One code path for every nostro, CZK included.
      *
-     * NULL only when the ledger does not know [glCode] at all (it answers 404): the one case in
-     * which no balance can be stated. Any other failure propagates — a figure is never guessed.
+     * NULL only when the ledger does not know [glCode] at all (its unknown-account 404): the one
+     * case in which no balance can be stated. Any other 404 (a route the ledger does not serve) is a
+     * [LedgerUnavailableException]; any other failure propagates — a figure is never guessed.
      */
     suspend fun accountBalance(glCode: String, currency: String, asOf: LocalDate): BigDecimal?
 }

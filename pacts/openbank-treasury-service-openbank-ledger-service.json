@@ -4,6 +4,38 @@
   },
   "interactions": [
     {
+      "description": "GET the balance of a GL account the ledger does not hold",
+      "providerStates": [
+        {
+          "name": "ledger does not hold GL account 9999"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/journals/accounts/9999/balance",
+        "query": {
+          "asOf": [
+            "2026-03-15"
+          ],
+          "currency": [
+            "EUR"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "error": "GL account 9999 not found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 404
+      }
+    },
+    {
       "description": "GET the EUR nostro GL balance in EUR as of the statement date",
       "providerStates": [
         {

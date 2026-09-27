@@ -12,6 +12,7 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.openbank.treasury.infrastructure.nostro.LedgerReadAdapter
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -128,6 +129,26 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         .toPact()
 
     /**
+     * The ONE 404 treasury reads as "the ledger does not hold this GL" (#11113 review). The body is
+     * pinned by VALUE: treasury matches `error == "GL account <code> not found"` exactly, and every
+     * other 404 — a ledger that does not serve the route — is an upstream failure there. If the
+     * ledger ever rewords this message, provider replay goes red before treasury blanks balances.
+     */
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun unknownGlAccountBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger does not hold GL account 9999")
+        .uponReceiving("GET the balance of a GL account the ledger does not hold")
+        .path("/api/v1/journals/accounts/9999/balance")
+        .query("asOf=$STATEMENT_DATE&currency=EUR")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(404)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(newJsonBody { o -> o.stringValue("error", "GL account 9999 not found") }.build())
+        .toPact()
+
+    /**
      * ADR-0279: every changed contract test needs a 401 negative interaction. treasury's `m2m`
      * identity can be missing, expired or revoked independently of the request otherwise being
      * identical to [nostroJournalLinesPact] — this pins that ledger still answers 401 (not a
@@ -190,6 +211,23 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         assertThat(body.getString("currency")).isEqualTo("EUR")
         assertThat(body.getString("asOf")).isEqualTo(STATEMENT_DATE)
         assertThat(body.getDouble("net")).isEqualTo(10000.00)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "unknownGlAccountBalancePact")
+    fun `an unknown GL account is ledger's own 404 body, the one treasury reads as not held`(mockServer: MockServer) {
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .queryParam("asOf", STATEMENT_DATE)
+            .queryParam("currency", "EUR")
+            .get(clientDerivedBalancePath("9999"))
+            .then()
+            .statusCode(404)
+            .extract().asString()
+
+        assertThat(LedgerReadAdapter.isUnknownAccount(body, "9999")).isTrue()
+        assertThat(LedgerReadAdapter.isUnknownAccount(body, "1002")).isFalse()
     }
 
     @Test

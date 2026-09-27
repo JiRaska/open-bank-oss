@@ -192,6 +192,14 @@ class LedgerPactProviderVerificationTest {
     @State("ledger has a EUR journal line on 1002 for the statement date")
     fun stateWithEurNostroJournalLine() = NostroPactSeed.seedEurNostroLine(dataSource)
 
+    /**
+     * treasury's unknown-account read (#11113): no setup — 9999 is in no chart migration, so the
+     * ledger's own GlAccountNotFoundExceptionMapper answers, and treasury reads exactly that body as
+     * "not held" (any other 404 is an upstream failure there).
+     */
+    @State("ledger does not hold GL account 9999")
+    fun stateWithUnknownGlAccount() = Unit
+
     private companion object {
         const val PERIOD_ID = "00000000-0000-0000-0000-000000009601"
         const val ASSET_ID = "00000000-0000-0000-0000-000000009602"

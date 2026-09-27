@@ -181,6 +181,18 @@ class NostroReconciliationApiIT {
 
     @Test
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a ledger that cannot answer the balance read is a 502, never balances blanked with a false reason`() {
+        ledger.unavailableAccounts += "1001"
+        val id: String = upload(fixture("SYNTH-IT-502-${UUID.randomUUID()}".take(40)))
+            .then().statusCode(201).extract().path("id")
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(502)
+            .body("error", equalTo("LEDGER_UNAVAILABLE"))
+    }
+
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
     fun `an amount beyond the stored scale is a 400, not a statement that cannot be reloaded`() {
         val fine = String(fixture("SYNTH-IT-SCALE-${UUID.randomUUID()}".take(40)))
         val tooFine = fine.replace(">5000.00<", ">5000.00001<").replace(">1155000.00<", ">1155000.00001<")

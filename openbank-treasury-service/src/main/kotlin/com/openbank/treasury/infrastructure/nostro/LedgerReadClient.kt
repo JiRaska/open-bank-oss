@@ -4,8 +4,10 @@
 
 package com.openbank.treasury.infrastructure.nostro
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.treasury.application.port.out.LedgerReadPort
+import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.domain.model.LedgerNostroLine
 import com.openbank.treasury.domain.model.Side
 import com.openbank.treasury.domain.model.TreasuryChart
@@ -122,16 +124,29 @@ class LedgerReadAdapter(@RestClient private val client: LedgerReadRestClient) : 
 
     /**
      * REAL_ONLY (the ledger default): canary activity never reaches a real correspondent. Native
-     * amounts in [currency] (#11107), so a EUR nostro gets a EUR figure. A 404 (GL unknown to the
-     * ledger) is the one answer mapped to "not stated"; the echo is checked so a balance for some
-     * other account, currency or date can never be compared against the statement.
+     * amounts in [currency] (#11107), so a EUR nostro gets a EUR figure. The echo is checked so a
+     * balance for some other account, currency or date can never be compared against the statement.
+     *
+     * A 404 is TWO different answers and only one of them means "not stated": ledger's own
+     * unknown-account body (`{"error":"GL account <code> not found"}`, GlAccountNotFoundExceptionMapper)
+     * is the ledger saying it does not hold the GL. Any other 404 — above all a ledger that does not
+     * serve this route yet, because treasury deployed first — is an upstream failure, never a NULL
+     * with a false reason: that would blank CZK balances that worked before (#11113 review).
      */
     override suspend fun accountBalance(glCode: String, currency: String, asOf: LocalDate): BigDecimal? {
         val view = try {
             client.accountBalance(glCode, asOf.toString(), currency).awaitSuspending()
         } catch (e: WebApplicationException) {
-            if (e.response?.status == NOT_FOUND) return null
-            throw e
+            val status = e.response?.status
+            if (status == NOT_FOUND) {
+                val body = runCatching { e.response.readEntity(String::class.java) }.getOrNull()
+                if (isUnknownAccount(body, glCode)) return null
+            }
+            throw LedgerUnavailableException(
+                "ledger answered $status for GET /api/v1/journals/accounts/$glCode/balance — " +
+                    "not its unknown-account answer; is the ledger serving the native-balance route?",
+                e,
+            )
         }
         check(view.code == glCode && view.currency == currency && view.asOf == asOf.toString()) {
             "ledger answered a balance for ${view.code}/${view.currency}/${view.asOf}, asked $glCode/$currency/$asOf"
@@ -139,10 +154,18 @@ class LedgerReadAdapter(@RestClient private val client: LedgerReadRestClient) : 
         return view.net
     }
 
-    private companion object {
+    internal companion object {
         const val PAGE_SIZE = 200
         const val MAX_PAGES = 50
         const val NOT_FOUND = 404
         val BOOKED = setOf("POSTED", "REVERSED")
+        private val JSON = ObjectMapper()
+
+        /** true only for ledger's unknown-account body naming exactly [glCode]. */
+        fun isUnknownAccount(body: String?, glCode: String): Boolean {
+            if (body.isNullOrBlank()) return false
+            val error = runCatching { JSON.readTree(body)?.get("error")?.asText() }.getOrNull()
+            return error == "GL account $glCode not found"
+        }
     }
 }

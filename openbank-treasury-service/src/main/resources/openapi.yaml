@@ -401,6 +401,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '502':
+          description: |
+            ledger-service answered the balance read with something that is neither a balance nor
+            its unknown-account 404 (e.g. a ledger that does not serve the route yet) — the
+            reconciliation cannot be computed (`LEDGER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
 components:
   securitySchemes:
