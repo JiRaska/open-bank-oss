@@ -94,14 +94,13 @@ class NostroReconciliationService(
     override suspend fun reconcile(statementId: UUID): NostroReconciliation {
         val stored = statements.findById(statementId) ?: throw StatementNotFoundException(statementId)
         val statement = stored.statement
-        // A statement may span several booking days: read the ledger lines over the whole span.
-        // The span is bounded to NostroStatement.MAX_SPAN_DAYS at construction (upload is a 400).
-        // Balances are read in the STATEMENT currency from the ledger's native amounts (#11107),
-        // the same path for CZK and foreign nostros: opening as at the day BEFORE the earliest
-        // booking date, closing as at the statement date the correspondent's closing balance is for.
-        val from = statement.firstDate
-        val lines = ledger.nostroLines(stored.glCode, from, statement.lastDate)
-        val opening = ledger.accountBalance(stored.glCode, statement.currency, from.minusDays(1))
+        // The balances and the lines describe ONE period: opening as at the OPBD balance's date,
+        // closing as at the CLBD balance's date, lines booked in between — (openingDate,
+        // statementDate]. Reading lines to a later day than the closing balance (or opening a day
+        // before the first entry) would turn a quiet day or a later booking into a false difference.
+        // Balances are read in the STATEMENT currency from native amounts (#11107), every nostro alike.
+        val lines = ledger.nostroLines(stored.glCode, statement.firstDate, statement.lastDate)
+        val opening = ledger.accountBalance(stored.glCode, statement.currency, statement.openingDate)
         val closing = ledger.accountBalance(stored.glCode, statement.currency, statement.statementDate)
         val stated = opening != null && closing != null
         return NostroMatcher.match(

@@ -61,6 +61,7 @@ object Camt053Parser {
         val currency = requireNotNull(child(closing, "Amt")?.getAttribute("Ccy")?.takeIf { it.isNotBlank() }) {
             "CLBD/Amt@Ccy is required"
         }
+        val openingDate = Camt053Values.date(child(opening, "Dt"), "OPBD/Dt")
         val statementDate = Camt053Values.date(child(closing, "Dt"), "CLBD/Dt")
         val entries = children(stmt, "Ntry")
             // camt.053.001.02 has `<Sts>BOOK</Sts>`; .08+ has `<Sts><Cd>BOOK</Cd></Sts>`.
@@ -73,6 +74,7 @@ object Camt053Parser {
             statementId = statementId,
             iban = iban.replace(" ", "").uppercase(),
             currency = currency,
+            openingDate = openingDate,
             statementDate = statementDate,
             openingBalance = signed(opening),
             closingBalance = signed(closing),

@@ -125,26 +125,54 @@ class NostroReconciliationServiceTest {
     }
 
     @Test
-    fun `a multi-day statement reads the ledger over its whole span, opening the day before the first`() =
+    fun `a multi-day statement with quiet first days opens at its OPBD date - no ledger-only item is swallowed`() =
         runBlocking<Unit> {
-            val day1 = LocalDate.parse("2026-09-23")
-            val xml = String(NostroFixtures.xml())
-                .replaceFirst("<BookgDt><Dt>2026-09-25</Dt>", "<BookgDt><Dt>2026-09-23</Dt>")
+            // OPBD dated 2026-09-20, every entry on the 25th: the 21st..24th are quiet days on the
+            // statement. A ledger line booked on the 22nd that the correspondent never saw must be
+            // listed as unmatched — read from the day before the first ENTRY, it would vanish into
+            // the opening balance and the statement would falsely reconcile.
+            val xml = String(
+                NostroFixtures.xml(),
+            ).replace("<Dt><Dt>2026-09-24</Dt></Dt>", "<Dt><Dt>2026-09-20</Dt></Dt>")
                 .toByteArray()
-            ledger.lines += "1001" to NostroFixtures.line(
-                "250000.00",
-                com.openbank.treasury.domain.model.Side.DEBIT,
-                tx = NostroFixtures.INBOUND_TX,
-                date = day1,
+            NostroFixtures.ledgerLines().take(2).forEach { ledger.lines += "1001" to it }
+            val stray = NostroFixtures.line(
+                "777.00",
+                com.openbank.treasury.domain.model.Side.CREDIT,
+                description = "ledger-only on a quiet day",
+                date = LocalDate.parse("2026-09-22"),
             )
+            ledger.lines += "1001" to stray
             val r = service.reconcile(stored(xml).id)
 
             assertThat(ledger.queries).containsExactly(
-                "lines:1001:2026-09-23..2026-09-25",
-                "balance:1001:CZK:2026-09-22",
+                "lines:1001:2026-09-21..2026-09-25",
+                "balance:1001:CZK:2026-09-20",
                 "balance:1001:CZK:2026-09-25",
             )
-            assertThat(r.matches.map { it.entry.bookingDate }).contains(day1)
+            assertThat(r.unmatchedLedgerLines).containsExactly(stray)
+            assertThat(r.reconciled).isFalse()
+        }
+
+    @Test
+    fun `a ledger entry after the closing balance date is in neither the lines nor the closing balance`() =
+        runBlocking<Unit> {
+            NostroFixtures.ledgerLines().take(2).forEach { ledger.lines += "1001" to it }
+            ledger.lines +=
+                "1001" to
+                NostroFixtures.line(
+                    "5000.00",
+                    com.openbank.treasury.domain.model.Side.DEBIT,
+                    date = NostroFixtures.DATE.plusDays(1),
+                )
+            val r = service.reconcile(stored(NostroFixtures.xml()).id)
+
+            assertThat(ledger.queries).containsExactly(
+                "lines:1001:2026-09-25..2026-09-25",
+                "balance:1001:CZK:2026-09-24",
+                "balance:1001:CZK:2026-09-25",
+            )
+            assertThat(r.unmatchedLedgerLines).isEmpty()
         }
 
     @Test

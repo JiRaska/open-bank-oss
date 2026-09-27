@@ -30,11 +30,18 @@ data class StatementEntry(
 /**
  * A correspondent's end-of-day statement for one nostro account (camt.053 `Stmt`). Balances are
  * signed from OUR side: positive means the correspondent holds money for us (CRDT balance).
+ *
+ * [openingDate] is the OPBD balance's `Dt` and [statementDate] the CLBD balance's `Dt`: the opening
+ * balance is as at the END of [openingDate], the closing as at the end of [statementDate], so the
+ * movements between them are exactly the entries booked in ([openingDate], [statementDate]] — the
+ * window the ledger is read over. An entry outside it would make the balances and the lines
+ * describe different periods, so the statement is refused (400).
  */
 data class NostroStatement(
     val statementId: String,
     val iban: String,
     val currency: String,
+    val openingDate: LocalDate,
     val statementDate: LocalDate,
     val openingBalance: BigDecimal,
     val closingBalance: BigDecimal,
@@ -46,16 +53,25 @@ data class NostroStatement(
         require(openingBalance.add(movement).compareTo(closingBalance) == 0) {
             "statement $statementId does not foot: opening $openingBalance + entries $movement != closing $closingBalance"
         }
-        require(ChronoUnit.DAYS.between(firstDate, lastDate) < MAX_SPAN_DAYS) {
-            "statement $statementId spans $firstDate..$lastDate, more than $MAX_SPAN_DAYS days"
+        require(!openingDate.isAfter(statementDate)) {
+            "statement $statementId opens on $openingDate, after it closes on $statementDate"
+        }
+        require(ChronoUnit.DAYS.between(openingDate, statementDate) <= MAX_SPAN_DAYS) {
+            "statement $statementId spans $openingDate..$statementDate, more than $MAX_SPAN_DAYS days"
+        }
+        entries.firstOrNull { it.bookingDate !in firstDate..statementDate }?.let {
+            throw IllegalArgumentException(
+                "statement $statementId entry ${it.sequence} is booked on ${it.bookingDate}, outside the " +
+                    "period its balances describe (after $openingDate, up to $statementDate)",
+            )
         }
     }
 
-    /** Earliest of the entry booking dates and the statement (closing balance) date. */
-    val firstDate: LocalDate get() = (entries.map { it.bookingDate } + statementDate).min()
+    /** First booking day the statement's movements can fall on: the day after the opening balance. */
+    val firstDate: LocalDate get() = openingDate.plusDays(1)
 
-    /** Latest of the entry booking dates and the statement (closing balance) date. */
-    val lastDate: LocalDate get() = (entries.map { it.bookingDate } + statementDate).max()
+    /** Last booking day: the closing balance's date. */
+    val lastDate: LocalDate get() = statementDate
 
     companion object {
         /** A multi-day statement is read from the ledger over its whole span; bounded so that read is too. */
