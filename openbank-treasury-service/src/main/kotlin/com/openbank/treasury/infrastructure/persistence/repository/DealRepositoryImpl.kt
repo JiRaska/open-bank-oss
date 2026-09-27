@@ -213,7 +213,7 @@ class DealRepositoryImpl(
                 "counterpartyId = ?1 and product = ?2 and state in ?3",
                 counterpartyId,
                 ProductType.FX_SPOT.name,
-                listOf(DealState.PENDING_APPROVAL.name, DealState.BOOKED.name),
+                Deal.FX_LIMIT_CONSUMING_STATES.map { it.name },
             ).list()
         }.awaitSuspending()
         return placed + fx.filter { it.dealId != excludeDealId }.sumOf { it.fxCounterAmount ?: BigDecimal.ZERO }

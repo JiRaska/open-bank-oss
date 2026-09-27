@@ -371,8 +371,8 @@ data class Deal(
 
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
-        get() = when {
-            product == ProductType.FX_SPOT -> state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED)
+        get() = when (product) {
+            ProductType.FX_SPOT -> state in FX_LIMIT_CONSUMING_STATES
             else -> product.isAsset && state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
         }
 
@@ -430,6 +430,13 @@ data class Deal(
         private val FX_RATE_LIMIT = BigDecimal("1000")
         private const val DEVIATION_SCALE = 4
         private const val MONEY_SCALE = 2
+
+        /**
+         * An FX spot consumes its counterparty's CZK limit (settlement risk on its CZK leg) only
+         * while PENDING_APPROVAL or BOOKED: once both legs are exchanged nothing is left at risk.
+         * The repository's `exposure` query reads the same set, never a second literal list.
+         */
+        val FX_LIMIT_CONSUMING_STATES: Set<DealState> = setOf(DealState.PENDING_APPROVAL, DealState.BOOKED)
 
         /** The CZK leg of an FX spot: foreign amount x deal rate, half-up to 2 dp. */
         fun counterAmountOf(principal: BigDecimal, rate: BigDecimal): BigDecimal =
