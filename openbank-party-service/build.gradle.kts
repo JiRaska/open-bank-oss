@@ -51,13 +51,12 @@ dependencies {
     // CI infra pilot (P2): @QuarkusTest ITs get an isolated, per-JVM PostgreSQL +
     // Redpanda (Kafka API) via Testcontainers, instead of the shared compose stack
     // that flakes under full-fleet load. testcontainers core/junit come from the
-    // version catalog; the postgresql + redpanda modules are pinned literally to the
-    // SAME catalog version so this pilot stays scoped to one service (editing
-    // openbank-libs/gradle/libs.versions.toml is a code-global change -> full-fleet).
+    // version catalog, like the postgresql + redpanda modules (their 2.x artifacts are
+    // `testcontainers-`prefixed; a literal 1.x pin here would leave a mixed classpath).
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
-    testImplementation("org.testcontainers:postgresql:1.20.4")
-    testImplementation("org.testcontainers:redpanda:1.20.4")
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
 }
 
 // Coverage ratchet (prod-readiness C2). Measured LINE coverage is ~65% (433/661);

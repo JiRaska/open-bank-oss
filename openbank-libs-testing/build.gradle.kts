@@ -95,7 +95,7 @@ dependencies {
     api(libs.testcontainers.postgresql)
     api(libs.testcontainers.redpanda)
 
-    // testcontainers:1.20.4 transitively pulls docker-java-*:3.4.0, whose default API-version
+    // testcontainers 1.x transitively pulled docker-java-*:3.4.0, whose default API-version
     // negotiation is rejected by newer Docker daemons requiring a minimum API >= 1.40
     // ("client version 1.32 is too old") — the exact failure this constraint fixes, confirmed
     // by diffing resolved versions against a real Quarkus service (BOM-aligned to 3.7.1, works

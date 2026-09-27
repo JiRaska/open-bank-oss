@@ -26,7 +26,12 @@ kover = "0.9.9"
 wiremock = "3.9.2"
 avro = "1.11.3"
 apicurio-registry = "2.6.2.Final"
-testcontainers = "1.20.4"
+# 2.0.5 = the line enforcedPlatform(libs.quarkus.bom) already resolves for org.testcontainers:testcontainers
+# in every Quarkus service. 1.20.4 negotiated Docker API 1.32, which Docker Engine 29 rejects
+# ("client version 1.32 is too old"), and the 2.x module artifacts are prefixed `testcontainers-`
+# (the old `postgresql`/`redpanda`/`junit-jupiter` names froze at 1.x, so services ran a mixed
+# 2.0.5-core / 1.20.4-module classpath).
+testcontainers = "2.0.5"
 # 4.7.3 (issue #461 follow-up): the only route org.apache.tika:tika-core enters the
 # project dependency graph as a real classpath dependency (pact-consumer/pact-provider
 # pull it transitively for content-type matching) — 4.6.17 resolves tika-core 2.9.1,
@@ -130,11 +135,11 @@ rest-assured-kotlin = { module = "io.rest-assured:kotlin-extensions" }
 # leg so the test asserts exactly what was produced (key/headers) without a live broker.
 smallrye-reactive-messaging-inmemory = { module = "io.smallrye.reactive:smallrye-reactive-messaging-in-memory" }
 testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
-testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
 # Per-job isolated test infra (fleet sweep, issue #578): @QuarkusTest ITs spin their
 # own PostgreSQL + Redpanda (Kafka API) per JVM instead of sharing one compose stack.
-testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
-testcontainers-redpanda = { module = "org.testcontainers:redpanda", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
+testcontainers-redpanda = { module = "org.testcontainers:testcontainers-redpanda", version.ref = "testcontainers" }
 
 # Consumer-driven contract testing — Pact JVM (ADR-0063)
 pact-consumer = { module = "au.com.dius.pact.consumer:junit5", version.ref = "pact" }

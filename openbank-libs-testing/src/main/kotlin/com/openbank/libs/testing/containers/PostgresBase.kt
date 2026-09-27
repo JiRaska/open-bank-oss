@@ -6,8 +6,6 @@ package com.openbank.libs.testing.containers
 
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
-import org.opentest4j.TestAbortedException
-import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 
@@ -37,9 +35,7 @@ abstract class PostgresBase(
     }
 
     protected fun startPostgres(): PostgreSQLContainer<*> {
-        if (!DockerClientFactory.instance().isDockerAvailable) {
-            throw TestAbortedException("Docker not available — skipping Testcontainers IT")
-        }
+        DockerRequirement.require()
         val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
             .withUsername("openbank")
             .withPassword("openbank_secret")
