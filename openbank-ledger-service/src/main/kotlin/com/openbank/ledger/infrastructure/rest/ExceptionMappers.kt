@@ -10,6 +10,7 @@ import com.openbank.ledger.application.usecase.ClosedFiscalPeriodException
 import com.openbank.ledger.application.usecase.ClosedPeriodConflictException
 import com.openbank.ledger.application.usecase.ClosedPeriodNotFoundException
 import com.openbank.ledger.application.usecase.FrozenPeriodException
+import com.openbank.ledger.application.usecase.GlAccountNotFoundException
 import com.openbank.ledger.application.usecase.GlAccountValidationException
 import com.openbank.ledger.application.usecase.JournalNotFoundException
 import com.openbank.ledger.application.usecase.JournalReversalConflictException
@@ -34,6 +35,15 @@ class JournalNotFoundExceptionMapper : ExceptionMapper<JournalNotFoundException>
         .entity(mapOf("error" to (exception.message ?: "Not found")))
         .type(MediaType.APPLICATION_JSON)
         .build()
+}
+
+@Provider
+class GlAccountNotFoundExceptionMapper : ExceptionMapper<GlAccountNotFoundException> {
+    override fun toResponse(exception: GlAccountNotFoundException): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(mapOf("error" to (exception.message ?: "Not found")))
+            .type(MediaType.APPLICATION_JSON)
+            .build()
 }
 
 @Provider

@@ -120,9 +120,9 @@ class CreditRiskCapitalTest {
 
     @Test
     fun `a central-bank claim outside the domestic currency takes the unrated d424 7 weight`() {
-        val r = run(listOf(gl("1510", "ASSET", "100", "EUR")))
-        assertThat(r.total!!.totalRwa).isEqualByComparingTo("100")
-        assertThat(r.total!!.lines.single().factorKey).isEqualTo("rw-sovereign-unrated")
+        val eur = run(listOf(gl("1510", "ASSET", "100", "EUR"))).currencies.single()
+        assertThat(eur.totalRwa).isEqualByComparingTo("100")
+        assertThat(eur.lines.single().factorKey).isEqualTo("rw-sovereign-unrated")
     }
 
     @Test
@@ -169,10 +169,12 @@ class CreditRiskCapitalTest {
     }
 
     @Test
-    fun `a two-currency book has per-currency results, no total and no ratios`() {
+    fun `a two-currency book with no fixing has per-currency results, no total and no ratios`() {
         val r = run(book + gl("1002", "ASSET", "100", "EUR"), bookInstruments)
         assertThat(r.currencies.map { it.currency }).containsExactly("CZK", "EUR")
         assertThat(r.total).isNull()
+        assertThat(r.totalNotStated).contains("EUR")
+        assertThat(r.fxRates).isEmpty()
         assertThat(r.ownFundsRequirement).isNull()
         assertThat(r.ratios).isNull()
         assertThat(r.ratiosNotComputable).contains("multi-currency")

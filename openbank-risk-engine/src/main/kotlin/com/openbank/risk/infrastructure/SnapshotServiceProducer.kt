@@ -11,6 +11,7 @@ import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
+import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotRepository
@@ -143,8 +144,11 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun capitalUseCase(snapshots: SnapshotUseCase, config: CapitalConfig): CapitalUseCase =
-        CapitalService(snapshots, config.toParameters())
+    fun capitalUseCase(
+        snapshots: SnapshotUseCase,
+        config: CapitalConfig,
+        fixings: FxFixingRepository,
+    ): CapitalUseCase = CapitalService(snapshots, config.toParameters(), fixings)
 
     /** Same reason as [validateLiquidityParameters]: a bad risk weight must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call

@@ -174,6 +174,13 @@ DECLARED: dict[str, tuple[str, str]] = {
         "riding the same weekly schedule and cache posture as the matrix job above — a "
         "pure consumer with no reason to store a per-run entry.",
     ),
+    "pitest.yml::pitest-libs": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Advisory mutation lane over the shared "
+        "openbank-libs-domain/-runtime modules (ADR-0063 gap), same weekly schedule and "
+        "cache posture as the matrix job and pitest-authz above — a pure consumer with no "
+        "reason to store a per-run entry.",
+    ),
     "pact-drift-check.yml::drift-check": (
         "read-only",
         "Demoted from setup-java. Consumer; regenerates consumer pacts and diffs them, and "
