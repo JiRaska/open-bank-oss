@@ -201,19 +201,17 @@ class DealRepositoryImpl(
     }
 
     /**
-     * Count of deals currently PENDING_APPROVAL, for this counterparty/currency, that carry a
-     * senior limit override still in force (ADR-0315 D4, #10896). Booking clears nothing about the
-     * override; only a re-submission (which clears `limitOverrideBy` via [Deal.reject]) or moving
-     * off PENDING_APPROVAL retires it from this count.
+     * Deals currently PENDING_APPROVAL that carry a senior limit override (ADR-0315 D4, #10896).
+     * NOT filtered by counterparty or currency in SQL: the limit line an override counts against is
+     * [Deal.limitCurrency], which is not the `currency` column for every product, so the grouping
+     * happens in the domain ([Deal.holdsActiveLimitOverride]). A re-submission (which clears
+     * `limitOverrideBy` via [Deal.reject]) or moving off PENDING_APPROVAL retires the override.
      */
-    override suspend fun activeLimitOverrideCount(counterpartyId: String, currency: String): Int = Panache.withSession {
-        count(
-            "counterpartyId = ?1 and currency = ?2 and state = ?3 and limitOverrideBy is not null",
-            counterpartyId,
-            currency,
-            DealState.PENDING_APPROVAL.name,
-        )
-    }.awaitSuspending().toInt()
+    override suspend fun pendingLimitOverrides(): List<Deal> = withHistories(
+        Panache.withSession {
+            find("state = ?1 and limitOverrideBy is not null", DealState.PENDING_APPROVAL.name).list()
+        }.awaitSuspending(),
+    )
 
     /**
      * Idempotent on the key: an accrual pass and a maturity can record the same day concurrently.

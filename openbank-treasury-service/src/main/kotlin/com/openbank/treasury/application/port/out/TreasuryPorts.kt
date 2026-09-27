@@ -68,8 +68,12 @@ interface DealRepository {
     /** Outstanding placed principal with [counterpartyId] in [currency], excluding [excludeDealId]. */
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
 
-    /** Count of PENDING_APPROVAL deals for [counterpartyId]/[currency] with a senior override still in force. */
-    suspend fun activeLimitOverrideCount(counterpartyId: String, currency: String): Int
+    /**
+     * Every PENDING_APPROVAL deal carrying a senior limit override, across all counterparties and
+     * currencies. Deliberately NOT grouped by currency here: which limit line an override sits on
+     * is [Deal.limitCurrency], a domain rule the caller applies via [Deal.holdsActiveLimitOverride].
+     */
+    suspend fun pendingLimitOverrides(): List<Deal>
 
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
 

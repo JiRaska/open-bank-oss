@@ -228,6 +228,16 @@ class TreasuryDealApiIT {
                 "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.activeOverrides",
                 equalTo(1),
             )
+            // Keyed per (counterparty, LIMIT currency): the override sits on SIMBK-C's CZK line only —
+            // not on its EUR line, and not on another counterparty's CZK line (#10896).
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'EUR' }.activeOverrides",
+                equalTo(0),
+            )
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-A' && it.currency == 'CZK' }.activeOverrides",
+                equalTo(0),
+            )
     }
 
     @Test

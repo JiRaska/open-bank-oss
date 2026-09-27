@@ -229,6 +229,23 @@ class DealTest {
         }
 
         @Test
+        fun `an active override counts on its counterparty's limit-currency line only, until booked`() {
+            val (pending, breach) = breachedPending()
+            val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
+            val cp = overridden.counterpartyId
+            assertThat(pending.holdsActiveLimitOverride(cp, pending.limitCurrency)).isFalse()
+            assertThat(overridden.holdsActiveLimitOverride(cp, overridden.limitCurrency)).isTrue()
+            assertThat(overridden.holdsActiveLimitOverride("SIMBK-OTHER", overridden.limitCurrency)).isFalse()
+            val other = com.openbank.treasury.domain.model.Deal.SUPPORTED_CURRENCIES.first {
+                it !=
+                    overridden.limitCurrency
+            }
+            assertThat(overridden.holdsActiveLimitOverride(cp, other)).isFalse()
+            val booked = overridden.approve(approver, breach, NOW)
+            assertThat(booked.holdsActiveLimitOverride(cp, booked.limitCurrency)).isFalse()
+        }
+
+        @Test
         fun `the senior who overrode cannot also book the deal`() {
             val (pending, breach) = breachedPending()
             val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
