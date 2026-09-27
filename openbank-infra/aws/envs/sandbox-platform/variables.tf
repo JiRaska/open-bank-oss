@@ -133,7 +133,9 @@ variable "karpenter_version" {
 variable "argocd_version" {
   description = "argo-cd Helm chart version."
   type        = string
-  default     = "9.5.21"
+  # 10.9.2 = Argo CD v3.5.3 (tested on K8s 1.33-1.36). Chart 10.x defaults
+  # global.networkPolicy.create=true; main.tf pins it false (see there).
+  default = "10.9.2"
 }
 
 variable "cnpg_version" {
