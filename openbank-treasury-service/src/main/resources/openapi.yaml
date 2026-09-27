@@ -6,6 +6,8 @@ info:
   #        per-currency daily positions.
   # 1.1.0: additive — POST /deals/{id}/override-limit (ROLE_TREASURY_SENIOR_APPROVER) and
   #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
+  # 1.2.0: additive — GET /limits/utilisation (#10896): per-counterparty limit, utilised,
+  #        available, utilisation %, breached flag and active senior-override count.
   version: 1.2.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
