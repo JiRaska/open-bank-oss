@@ -24,6 +24,8 @@ data class DraftDealCommand(
     val valueDate: LocalDate,
     val maturityDate: LocalDate?,
     val rationale: String?,
+    /** ADR-0315 D10: the JSON object of data an agent's draft was built from. */
+    val inputs: String? = null,
 )
 
 data class DealView(val deal: Deal, val journals: List<LedgerJournalRef>)

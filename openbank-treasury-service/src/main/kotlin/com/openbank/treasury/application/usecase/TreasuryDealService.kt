@@ -73,6 +73,7 @@ class TreasuryDealService(
             actor = actor,
             at = now,
             rationale = command.rationale,
+            inputs = command.inputs,
         )
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }

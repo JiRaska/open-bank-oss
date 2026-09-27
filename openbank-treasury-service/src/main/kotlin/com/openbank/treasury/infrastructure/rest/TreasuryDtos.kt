@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
 import com.openbank.treasury.application.port.out.LedgerJournalRef
@@ -32,6 +33,11 @@ data class DraftDealRequest(
     /** Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY, always overnight. */
     val maturityDate: LocalDate? = null,
     val rationale: String? = null,
+    /**
+     * ADR-0315 D10: the data an AI agent built this draft from, as a JSON object. Required (with
+     * `rationale`) when the caller is an agent; optional for a human dealer.
+     */
+    val inputs: JsonNode? = null,
 )
 
 data class ReasonRequest(val reason: String? = null)
@@ -94,6 +100,8 @@ data class DealResponse(
     val submittedBy: String?,
     val approvedBy: String?,
     val rationale: String?,
+    /** The JSON object an agent's draft was built from (ADR-0315 D10), verbatim; null for a human draft. */
+    val inputs: String?,
     val limitCheck: LimitCheckResponse?,
     /** A senior approver's recorded override of a limit breach (ADR-0315 D4); null when none. */
     val limitOverride: LimitOverrideResponse?,
@@ -122,6 +130,7 @@ data class DealResponse(
             submittedBy = d.submittedBy?.id,
             approvedBy = d.approvedBy?.id,
             rationale = d.rationale,
+            inputs = d.inputs,
             limitCheck = d.limitCheck?.let(LimitCheckResponse::from),
             limitOverride = d.limitOverride?.let {
                 LimitOverrideResponse(it.by.id, it.reason, it.at, it.coversExposureUpTo, it.limitAtOverride)

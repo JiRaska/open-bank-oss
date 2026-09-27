@@ -105,6 +105,10 @@ class DealEntity : PanacheEntity() {
     @Column(name = "rationale", columnDefinition = "TEXT")
     var rationale: String? = null
 
+    /** ADR-0315 D10: the JSON object an agent's draft was built from (V9). */
+    @Column(name = "draft_inputs", columnDefinition = "TEXT")
+    var draftInputs: String? = null
+
     @Column(name = "limit_override_by")
     var limitOverrideBy: String? = null
 

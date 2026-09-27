@@ -57,6 +57,7 @@ object DealFixtures {
         actor = by,
         at = NOW,
         rationale = if (by.type == ActorType.AI_AGENT) "test rationale" else null,
+        inputs = if (by.type == ActorType.AI_AGENT) """{"quote":"4.10"}""" else null,
     )
 
     fun withinLimit(deal: Deal) = LimitCheck.of(bankA, deal, BigDecimal.ZERO)

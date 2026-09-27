@@ -6,7 +6,10 @@ info:
   #        per-currency daily positions.
   # 1.1.0: additive — POST /deals/{id}/override-limit (ROLE_TREASURY_SENIOR_APPROVER) and
   #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
-  version: 1.1.0
+  # 1.7.0: additive — DraftDealRequest.inputs / Deal.inputs: the JSON object an AI agent's draft was
+  #        built from, required with `rationale` when an agent drafts (ADR-0315 D10). 1.2-1.6 are
+  #        taken by the open treasury PRs; this merges after them.
+  version: 1.7.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -17,7 +20,8 @@ info:
     its submitter (422 `FOUR_EYES_VIOLATION`), and only a human may submit, approve, reject,
     cancel, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
     refused with 403 `ACTOR_NOT_PERMITTED`. An AI agent may draft, and must then supply a
-    `rationale`.
+    `rationale` and the `inputs` it used (ADR-0315 D10); its draft consumes no limit, and only a
+    human dealer can submit it.
 
     **Counterparty limits** cap outstanding PLACED principal per counterparty and currency
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
@@ -369,6 +373,13 @@ components:
         rationale:
           type: string
           description: Required when an AI agent drafts (ADR-0315 D10).
+        inputs:
+          type: object
+          additionalProperties: true
+          description: >
+            The data an AI agent built the draft from (quote, curve point, headroom, position), as a
+            JSON object. Required with `rationale` when an AI agent drafts (ADR-0315 D10); optional
+            for a human dealer. Stored and returned verbatim.
     ReasonRequest:
       type: object
       required: [reason]
@@ -429,6 +440,9 @@ components:
         submittedBy: { type: [string, 'null'] }
         approvedBy: { type: [string, 'null'] }
         rationale: { type: [string, 'null'] }
+        inputs:
+          type: [string, 'null']
+          description: The JSON object an AI agent's draft was built from, serialised verbatim (ADR-0315 D10).
         limitCheck:
           oneOf:
             - $ref: '#/components/schemas/LimitCheck'

@@ -72,7 +72,10 @@ class TreasuryResource {
     @POST
     @Path("/deals")
     @RolesAllowed(DEALER)
-    @Operation(summary = "Draft a deal (DRAFT); nothing posts")
+    @Operation(
+        summary = "Draft a deal (DRAFT); nothing posts and no limit is consumed. An AI agent " +
+            "(ADR-0315 D10) must send rationale and inputs; only a human dealer can submit it.",
+    )
     @Authorize(action = "treasury.deal.draft")
     suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
         val deal = deals.draft(
@@ -86,6 +89,10 @@ class TreasuryResource {
                 valueDate = requireNotNull(request.valueDate) { "valueDate is required" },
                 maturityDate = request.maturityDate,
                 rationale = request.rationale,
+                inputs = request.inputs?.let { node ->
+                    require(node.isObject) { "inputs must be a JSON object" }
+                    node.toString()
+                },
             ),
             actor(),
             requireKey(key),

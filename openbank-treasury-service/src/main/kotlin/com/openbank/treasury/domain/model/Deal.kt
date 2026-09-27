@@ -108,6 +108,12 @@ data class Deal(
     val limitCheck: LimitCheck? = null,
     /** An AI agent's inputs and rationale for a draft it proposed (ADR-0315 D10); null for humans. */
     val rationale: String? = null,
+    /**
+     * The data an AI agent's draft was built from, as a JSON object (ADR-0315 D10) — the quote,
+     * curve point, headroom or position it read — so the human who submits and the approver who
+     * books can check the proposal against what the agent actually saw. Null for a human draft.
+     */
+    val inputs: String? = null,
     /** A senior approver's recorded override of a counterparty-limit breach (ADR-0315 D4). */
     val limitOverride: LimitOverride? = null,
     val history: List<DealTransition> = emptyList(),
@@ -300,7 +306,8 @@ data class Deal(
 
         /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or
-         * the system may not. An agent's draft must carry its rationale (ADR-0315 D10).
+         * the system may not. An agent's draft must carry its rationale and the inputs it used
+         * (ADR-0315 D10); a draft never consumes a limit and only a human can submit it.
          */
         @Suppress("LongParameterList")
         fun draft(
@@ -316,12 +323,16 @@ data class Deal(
             actor: Actor,
             at: Instant,
             rationale: String? = null,
+            inputs: String? = null,
         ): Deal {
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not draft a treasury deal")
             }
             if (actor.type == ActorType.AI_AGENT) {
                 require(!rationale.isNullOrBlank()) { "an agent-drafted deal must carry its rationale (ADR-0315 D10)" }
+                require(!inputs.isNullOrBlank()) {
+                    "an agent-drafted deal must carry the inputs it used (ADR-0315 D10)"
+                }
             }
             val maturity = when {
                 product == ProductType.CNB_DEPOSIT_FACILITY -> DayCount.nextBusinessDay(valueDate)
@@ -343,6 +354,7 @@ data class Deal(
                 createdAt = at,
                 updatedAt = at,
                 rationale = rationale,
+                inputs = inputs,
                 history = listOf(DealTransition(from = null, to = DealState.DRAFT, actor = actor, at = at)),
             )
         }
