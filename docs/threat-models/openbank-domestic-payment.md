@@ -526,7 +526,7 @@ not change any existing request's outcome until explicitly flipped.
 
 - **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
   change.** `DomesticPaymentNotFoundMapper`/`InvalidDomesticPaymentStateTransitionMapper` are
-  deleted; `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
+  deleted and present in no tracked backend source; `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
   extend `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`,
   handled by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper`
   (added, unused, by #10923). Both already used the base's default codes

@@ -806,7 +806,8 @@ decision use first; the additive projection table may remain until its consumer 
   QuarkusUnauthorizedExceptionMapper class; no data or config migration involved.
 
 - **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
-  change.** `AccountNotFoundExceptionMapper`/`AccountUpdateConflictExceptionMapper` are deleted;
+  change.** `AccountNotFoundExceptionMapper`/`AccountUpdateConflictExceptionMapper` are deleted and
+  present in no tracked backend source;
   `AccountNotFoundException`/`AccountUpdateConflictException` now extend
   `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
   by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,
