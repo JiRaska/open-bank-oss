@@ -26,7 +26,7 @@ data class TreasuryDeal(
     val maturityDate: LocalDate,
     val state: String,
 ) {
-    val isAsset: Boolean get() = product != MM_BORROWING
+    val isAsset: Boolean get() = product != MM_BORROWING && product != CNB_LOMBARD
 
     /**
      * On the balance sheet at [asOf]: settled on or before it, and not yet matured at it. A deal
@@ -45,6 +45,9 @@ data class TreasuryDeal(
         const val MM_PLACEMENT = "MM_PLACEMENT"
         const val MM_BORROWING = "MM_BORROWING"
         const val CNB_DEPOSIT_FACILITY = "CNB_DEPOSIT_FACILITY"
+
+        /** Overnight borrowing from the ČNB lombard facility (#10896): a liability on 2320. */
+        const val CNB_LOMBARD = "CNB_LOMBARD"
         const val BOOKED = "BOOKED"
         const val SETTLED = "SETTLED"
         const val MATURED = "MATURED"
@@ -55,13 +58,14 @@ data class TreasuryDeal(
 /**
  * Maps a treasury deal to a contract-level [InstrumentKind.MONEY_MARKET_DEAL] instrument on the
  * principal GL account treasury posts it to (ledger V29, treasury `TreasuryChart`), in the
- * trial-balance convention: a placement or a ČNB deposit is +principal, a borrowing −principal.
+ * trial-balance convention: a placement or a ČNB deposit is +principal, a borrowing (interbank or
+ * ČNB lombard, ledger V30 account 2320) −principal.
  * Accrued interest (1520/1521, 2310/2311) stays GL-level, as a loan's interest receivable does.
  */
 object TreasuryInstrumentMapper {
 
     /** Every principal account a money-market deal lives on; carried at contract level when read. */
-    val PRINCIPAL_CODES: Set<String> = setOf("1500", "1501", "1510", "2300", "2301")
+    val PRINCIPAL_CODES: Set<String> = setOf("1500", "1501", "1510", "2300", "2301", "2320")
 
     /**
      * Products this mapper can turn into a contract-level instrument. Anything else — e.g.
@@ -70,7 +74,12 @@ object TreasuryInstrumentMapper {
      * for this engine and must never reach [glAccountCode] or [toInstrument].
      */
     val SUPPORTED_PRODUCTS: Set<String> =
-        setOf(TreasuryDeal.MM_PLACEMENT, TreasuryDeal.MM_BORROWING, TreasuryDeal.CNB_DEPOSIT_FACILITY)
+        setOf(
+            TreasuryDeal.MM_PLACEMENT,
+            TreasuryDeal.MM_BORROWING,
+            TreasuryDeal.CNB_DEPOSIT_FACILITY,
+            TreasuryDeal.CNB_LOMBARD,
+        )
 
     fun glAccountCode(product: String, currency: String): String = when (product to currency) {
         TreasuryDeal.MM_PLACEMENT to "CZK" -> "1500"
@@ -78,6 +87,7 @@ object TreasuryInstrumentMapper {
         TreasuryDeal.CNB_DEPOSIT_FACILITY to "CZK" -> "1510"
         TreasuryDeal.MM_BORROWING to "CZK" -> "2300"
         TreasuryDeal.MM_BORROWING to "EUR" -> "2301"
+        TreasuryDeal.CNB_LOMBARD to "CZK" -> "2320"
         else -> error("no treasury principal account for $product in $currency")
     }
 

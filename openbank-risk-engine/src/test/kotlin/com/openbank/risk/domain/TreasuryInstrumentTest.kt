@@ -18,6 +18,7 @@ import com.openbank.risk.domain.model.TieOutStatus
 import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
@@ -139,12 +140,25 @@ class TreasuryInstrumentTest {
     }
 
     @Test
-    fun `SUPPORTED_PRODUCTS is exactly the three money-market products the mapper can build`() {
+    fun `SUPPORTED_PRODUCTS is exactly the four money-market products the mapper can build`() {
         assertThat(TreasuryInstrumentMapper.SUPPORTED_PRODUCTS).containsExactlyInAnyOrder(
             TreasuryDeal.MM_PLACEMENT,
             TreasuryDeal.MM_BORROWING,
             TreasuryDeal.CNB_DEPOSIT_FACILITY,
+            TreasuryDeal.CNB_LOMBARD,
         )
+    }
+
+    @Test
+    fun `a ČNB lombard borrowing is a negative principal on 2320, carried at contract level`() {
+        val lombard = TreasuryInstrumentMapper.toInstrument(
+            deal(product = TreasuryDeal.CNB_LOMBARD, principal = "2500000.00"),
+        )
+        assertThat(lombard.glAccountCode).isEqualTo("2320")
+        assertThat(lombard.outstanding).isEqualByComparingTo("-2500000.00")
+        assertThat(TreasuryInstrumentMapper.PRINCIPAL_CODES).contains("2320")
+        assertThatThrownBy { TreasuryInstrumentMapper.glAccountCode(TreasuryDeal.CNB_LOMBARD, "EUR") }
+            .isInstanceOf(IllegalStateException::class.java)
     }
 
     @Test
