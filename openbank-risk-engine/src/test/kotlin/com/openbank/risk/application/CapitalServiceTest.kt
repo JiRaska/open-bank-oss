@@ -17,6 +17,7 @@ import com.openbank.risk.domain.model.PositionKind
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutStatus
+import com.openbank.risk.application.port.`in`.CapitalAnalysis
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -67,7 +68,7 @@ class CapitalServiceTest {
         Position(PositionKind.GL_ACCOUNT, "1002", "ASSET", "EUR", null, BigDecimal("100")),
     )
 
-    private fun analyse(asOf: String, repo: WindowRepo) = runBlocking {
+    private fun analyse(asOf: String, repo: WindowRepo): CapitalAnalysis = runBlocking {
         CapitalService(Snapshots(LocalDate.parse(asOf), book), CapitalTestParameters.shipped(), repo).analyse(runId)
     }
 
