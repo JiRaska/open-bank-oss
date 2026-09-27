@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.11.0...finrep-service-v0.12.0) (2026-09-27)
+
+
+### Features
+
+* **finrep:** COREP C 73.00 LCR outflows from the risk engine ([#11098](https://github.com/JiRaska/open-bank-oss/issues/11098)) ([5b05987](https://github.com/JiRaska/open-bank-oss/commit/5b059872ab495619f5f124554519c14b69bf77bb))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.2...finrep-service-v0.11.0) (2026-09-27)
 
 

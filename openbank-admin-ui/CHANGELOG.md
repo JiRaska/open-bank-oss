@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.260.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.259.0...admin-ui-v0.260.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** render COREP C 02.00 with its data gaps ([#11106](https://github.com/JiRaska/open-bank-oss/issues/11106)) ([42c7f37](https://github.com/JiRaska/open-bank-oss/commit/42c7f3702d57c1427ae8e881a527d10ad31d0fe3)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
 ## [0.259.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.258.0...admin-ui-v0.259.0) (2026-09-27)
 
 
