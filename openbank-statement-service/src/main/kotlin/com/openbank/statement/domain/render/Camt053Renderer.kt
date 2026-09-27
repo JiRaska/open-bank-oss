@@ -7,7 +7,6 @@ import com.openbank.statement.domain.model.StatementModel
 import java.math.BigDecimal
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import java.util.Currency
 
 /**
  * Renders a [StatementModel] to ISO 20022 **camt.053.001.08** (bank-to-customer statement) XML.
@@ -16,7 +15,14 @@ import java.util.Currency
  * re-queried. **Deterministic** (ADR-0035 §F): all timestamps derive from [StatementModel.closedAt],
  * never the wall clock, so re-rendering a closed period is byte-identical. Amounts are serialised at
  * the currency's own ISO 4217 minor-unit scale (e.g. 0 for JPY, 2 for EUR/CZK, 3 for KWD/BHD) with a
- * dot decimal separator per ISO 20022.
+ * dot decimal separator per ISO 20022; an unknown code, or one ISO defines without a minor unit
+ * (XAU, XDR), falls back to scale 2 ([CurrencyScale]).
+ *
+ * Determinism caveat: "byte-identical" holds for a fixed renderer version. The switch from a fixed
+ * scale 2 to currency scale changes the re-render of an already-closed period in any currency whose
+ * minor unit is not 2 (JPY `1500.00` becomes `1500`, KWD `1.500` gains its third digit). Nothing
+ * stores or hashes rendered bytes (ADR-0035 stores the record, not the file), so no stored digest is
+ * invalidated; 2-decimal currencies (EUR, CZK, USD) render exactly as before.
  */
 object Camt053Renderer {
 
@@ -94,7 +100,7 @@ object Camt053Renderer {
      * never a fixed scale 2, which silently mis-renders every non-2-decimal currency.
      */
     private fun money(v: BigDecimal, currency: String): String =
-        v.setScale(Currency.getInstance(currency).defaultFractionDigits, java.math.RoundingMode.HALF_UP)
+        v.setScale(CurrencyScale.of(currency), java.math.RoundingMode.HALF_UP)
             .toPlainString()
 
     private fun esc(s: String): String = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

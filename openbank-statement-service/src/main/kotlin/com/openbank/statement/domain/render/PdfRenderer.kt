@@ -8,7 +8,6 @@ import com.openbank.statement.domain.model.StatementModel
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.format.DateTimeFormatter
-import java.util.Currency
 
 /**
  * Renders a [StatementModel] (or a consolidated envelope of several pockets) to a deterministic,
@@ -94,5 +93,5 @@ object PdfRenderer {
      * never a fixed scale 2, which silently mis-renders every non-2-decimal currency.
      */
     private fun money(v: BigDecimal, currency: String): String =
-        v.setScale(Currency.getInstance(currency).defaultFractionDigits, RoundingMode.HALF_UP).toPlainString()
+        v.setScale(CurrencyScale.of(currency), RoundingMode.HALF_UP).toPlainString()
 }

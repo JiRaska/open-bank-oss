@@ -9,7 +9,6 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.Currency
 
 /**
  * Renders a [StatementModel] to a **SWIFT MT940** customer statement message.
@@ -60,11 +59,13 @@ object Mt940Renderer {
     /**
      * Non-negative amount, comma decimal separator, at the CURRENCY'S OWN ISO 4217 minor-unit scale
      * (JPY 0, EUR/USD/CZK 2, KWD/BHD 3) — never a fixed scale 2, which silently mis-renders every
-     * non-2-decimal currency.
+     * non-2-decimal currency. SWIFT's `15d` amount format always carries the decimal comma, even with
+     * no fraction digits, so a zero-scale amount renders as `500,` and never as a bare `500`.
      */
-    private fun amount(v: BigDecimal, currency: String): String =
-        v.setScale(Currency.getInstance(currency).defaultFractionDigits, RoundingMode.HALF_UP)
-            .toPlainString().replace('.', ',')
+    private fun amount(v: BigDecimal, currency: String): String {
+        val s = v.setScale(CurrencyScale.of(currency), RoundingMode.HALF_UP).toPlainString().replace('.', ',')
+        return if (s.contains(',')) s else "$s,"
+    }
 
     private fun truncate(s: String, max: Int): String = if (s.length <= max) s else s.substring(0, max)
 }

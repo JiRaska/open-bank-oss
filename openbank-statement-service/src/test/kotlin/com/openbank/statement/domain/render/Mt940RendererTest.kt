@@ -69,9 +69,12 @@ class Mt940RendererTest {
 
         val mt = Mt940Renderer.render(model)
 
-        assertThat(mt).contains(":60F:C260101JPY1000")
-        assertThat(mt).contains(":62F:C260131JPY1500")
-        assertThat(mt).contains(":61:2601160115C500NTRFTX-1")
+        // SWIFT 15d: the decimal comma is mandatory even at zero fraction digits.
+        assertThat(mt.lines()).contains(
+            ":60F:C260101JPY1000,",
+            ":62F:C260131JPY1500,",
+            ":61:2601160115C500,NTRFTX-1",
+        )
         assertThat(mt).doesNotContain("1000,00")
         assertThat(mt).doesNotContain("500,00")
     }
@@ -90,5 +93,41 @@ class Mt940RendererTest {
         assertThat(mt).contains(":60F:C260101KWD1000,500")
         assertThat(mt).contains(":62F:C260131KWD1250,750")
         assertThat(mt).contains(":61:2601160115C250,250NTRFTX-1")
+    }
+
+    @Test
+    fun `an unknown or lower-case currency code falls back to scale 2 instead of failing the render`() {
+        val unknown = Mt940Renderer.render(
+            Fixtures.model(
+                currency = "ZZZ",
+                opening = "1000",
+                closing = "1500",
+                entries = listOf(Fixtures.entry(ref = "TX-1", amount = "500", currency = "ZZZ")),
+            ),
+        )
+        assertThat(unknown.lines()).contains(":60F:C260101ZZZ1000,00", ":61:2601160115C500,00NTRFTX-1")
+
+        val lower = Mt940Renderer.render(
+            Fixtures.model(
+                currency = "jpy",
+                opening = "1000",
+                closing = "1500",
+                entries = listOf(Fixtures.entry(ref = "TX-1", amount = "500", currency = "jpy")),
+            ),
+        )
+        assertThat(lower.lines()).contains(":60F:C260101jpy1000,")
+    }
+
+    @Test
+    fun `a currency ISO defines without a minor unit (XAU) falls back to scale 2`() {
+        val mt = Mt940Renderer.render(
+            Fixtures.model(
+                currency = "XAU",
+                opening = "1.5",
+                closing = "2",
+                entries = listOf(Fixtures.entry(ref = "TX-1", amount = "0.5", currency = "XAU")),
+            ),
+        )
+        assertThat(mt.lines()).contains(":60F:C260101XAU1,50", ":61:2601160115C0,50NTRFTX-1")
     }
 }
