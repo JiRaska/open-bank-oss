@@ -141,15 +141,20 @@ against a running service, and complements ADR-0151, which injects at the infras
 - One more annotation per adapter.
 
 **Neutral**
-- Enforcement: a new checker `check-resilience-profile.py` (gate `resilience-profile`, advisory
-  first, then enforced with a baseline ratchet) requires every `@Timeout`/`@Retry`/`@CircuitBreaker`
-  method in `src/main` to carry `@ResilienceProfile`, and rejects `retryOn = [Exception::class]`
-  under `money-sync`. Until the annotation exists the gate cannot run (#10930).
+- Enforcement: `check-resilience-profile.py` (gate `resilience-profile`, **advisory**, per-file
+  baseline ratchet — landed with 146 of 147 measured sites baselined, one adopted) requires every
+  `@Timeout`/`@Retry`/`@CircuitBreaker`/`@Bulkhead` declaration in service `src/main` to carry
+  `@ResilienceProfile`, or `CUSTOM` with a non-blank `reason`. It does **not yet** reject
+  `retryOn = [Exception::class]` under `money-sync` — that check, and flipping the gate to
+  `enforced`, are follow-up work tracked by the fleet sweep.
 
 ### Delivery check
 
-- `git grep -l '@Timeout(' -- '*/src/main/*.kt' | xargs grep -L '@ResilienceProfile'` prints nothing.
-- `.github/gates/gates.yaml` has id `resilience-profile` with `mode: enforced`.
+- `git grep -l '@Timeout(' -- '*/src/main/*.kt' | xargs grep -L '@ResilienceProfile'` still prints
+  most of the fleet — expected until the sweep; the gate's own baseline is the source of truth for
+  what remains undeclared.
+- `.github/gates/gates.yaml` has id `resilience-profile` (today: `mode: advisory`; `enforced` is
+  the fleet-sweep exit criterion).
 - `git grep -l 'ResilientCallMetrics' -- '*/src/main/*.kt' | cut -d/ -f1 | sort -u | wc -l` is at
   least 40 (today: one service outside the libs).
 

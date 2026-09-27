@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.261.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.260.0...admin-ui-v0.261.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** list the COREP LCR templates ([#11114](https://github.com/JiRaska/open-bank-oss/issues/11114)) ([30448ec](https://github.com/JiRaska/open-bank-oss/commit/30448ec3ae61f3161b27848688497711919189df)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
 ## [0.260.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.259.0...admin-ui-v0.260.0) (2026-09-27)
 
 
