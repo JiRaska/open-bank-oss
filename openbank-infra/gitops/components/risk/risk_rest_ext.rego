@@ -48,3 +48,12 @@ allowed_reasons contains "operator-risk-curve-set-create" if {
 	role in input.principal.roles
 	input.action == "risk.curve-set.create"
 }
+
+# finrep-service reads the Pillar 1 capital result for COREP C 02.00 (ADR-0313 D6) as its OWN
+# Keycloak client, openbank-finrep (ROLE_API only). Keyed by principal id, never by role, so the
+# grant reaches this one machine and nothing that happens to share a role; reads only.
+allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-finrep"
+	input.action == "risk.snapshot.read"
+}
