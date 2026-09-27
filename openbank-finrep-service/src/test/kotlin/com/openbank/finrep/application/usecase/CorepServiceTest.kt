@@ -196,7 +196,7 @@ class CorepServiceTest {
         val found = object : RiskLiquidityPort {
             override suspend fun liquidityAt(asOf: LocalDate) = RiskLiquidityLookup.found(
                 RiskLiquidityResult(
-                    "run-1", asOf, "bcbs-d238-d295", "2", "CZK",
+                    "run-1", asOf, "eu-2015-61-crr2", "2", "CZK",
                     listOf(RiskHqlaLine("L1", BigDecimal("1000"), BigDecimal.ZERO, BigDecimal("1000"))),
                     BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO, 1, 0,
                 ),

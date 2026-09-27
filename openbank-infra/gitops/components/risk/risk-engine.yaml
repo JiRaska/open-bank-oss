@@ -49,7 +49,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-risk-engine to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-8b93bf77
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-580b26e0
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8159 and management 8085 — both read off the service's own application.yaml
@@ -128,6 +128,12 @@ spec:
             # ledger edge (risk-internal-tls), %prod TLS bucket lending-authority. Set explicitly so
             # the environment states the decision rather than inheriting the code default.
             - name: OPENBANK_RISK_LENDING_ENABLED
+              value: "true"
+            # ADR-0314: once per business day, drive the same SnapshotUseCase.createSnapshot the
+            # POST /api/v1/risk/snapshots endpoint calls, replay-idempotent on (asOf, inputHash).
+            # Off by code default (openbank.risk.eod-snapshot.enabled); stated explicitly so the
+            # environment states the decision rather than inheriting the default.
+            - name: OPENBANK_RISK_EOD_SNAPSHOT_ENABLED
               value: "true"
             - name: LENDING_SERVICE_URL
               value: https://lending-service.lending.svc:8443

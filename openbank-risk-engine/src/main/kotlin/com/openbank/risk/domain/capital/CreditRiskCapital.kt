@@ -119,7 +119,10 @@ object CreditRiskCapital {
                 when (p.kind) {
                     PositionKind.SUB_LEDGER -> acc.customerAccount(p)
                     PositionKind.LOAN -> acc.loan(p, p.instrumentId?.let(byId::get)?.ifrs9Stage)
-                    PositionKind.GL_ACCOUNT -> acc.glAccount(p)
+                    // A money-market deal is classified by the principal account it sits on (1510
+                    // central bank, 1500/1501 bank, 2300/2301 a liability), exactly as its GL-level
+                    // balance was before deals were modelled (ADR-0315 D6).
+                    PositionKind.GL_ACCOUNT, PositionKind.TREASURY_DEAL -> acc.glAccount(p)
                 }
             }
             CurrencyCapital(ccy, acc.lines, acc.ownFunds.takeIf { it.isNotEmpty() }?.let(::OwnFunds))

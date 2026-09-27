@@ -4,7 +4,9 @@ info:
   # 1.0.0: first contract (ADR-0315 MVP, issue #10618) — money-market deals (MM_PLACEMENT,
   #        MM_BORROWING, CNB_DEPOSIT_FACILITY) with four-eyes booking, counterparty limits and
   #        per-currency daily positions.
-  version: 1.0.0
+  # 1.1.0: additive — POST /deals/{id}/override-limit (ROLE_TREASURY_SENIOR_APPROVER) and
+  #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
+  version: 1.1.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -144,6 +146,31 @@ paths:
       tags: [Treasury]
       operationId: rejectDeal
       summary: Reject a PENDING_APPROVAL deal back to DRAFT (ROLE_TREASURY_APPROVER)
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '400': { description: Missing reason }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /api/v1/treasury/deals/{id}/override-limit:
+    post:
+      tags: [Treasury]
+      operationId: overrideDealLimit
+      summary: Senior override of a counterparty-limit breach, with a reason (ROLE_TREASURY_SENIOR_APPROVER)
+      description: >
+        ADR-0315 D4. The deal must be PENDING_APPROVAL and its limit check breached. The overrider is
+        never the deal's creator or submitter, and booking still needs a different approver. The
+        override covers the exposure measured now; if exposure grows before booking, approval refuses
+        again.
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -372,6 +399,15 @@ components:
         idempotencyKey: { type: string, examples: ['treasury:0191c0de-0000-7000-8000-000000000001:settled'] }
         journalId: { type: string, format: uuid }
         postedAt: { type: string, format: date-time }
+    LimitOverride:
+      type: object
+      description: A senior approver's override of a counterparty-limit breach (ADR-0315 D4).
+      properties:
+        by: { type: string }
+        reason: { type: string }
+        at: { type: string, format: date-time }
+        coversExposureUpTo: { type: number }
+        limitAtOverride: { type: number }
     Deal:
       type: object
       properties:
@@ -396,6 +432,10 @@ components:
         limitCheck:
           oneOf:
             - $ref: '#/components/schemas/LimitCheck'
+            - type: 'null'
+        limitOverride:
+          oneOf:
+            - $ref: '#/components/schemas/LimitOverride'
             - type: 'null'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

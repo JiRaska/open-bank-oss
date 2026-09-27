@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.config.yaml)
