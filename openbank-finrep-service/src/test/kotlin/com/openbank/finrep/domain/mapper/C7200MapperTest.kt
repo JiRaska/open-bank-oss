@@ -198,7 +198,8 @@ class C7200MapperTest {
 
     @Test
     fun `the engine's pledged-collateral note makes every liquid-asset cell a gap naming the note`() {
-        val note = "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for " +
+        val note = "PLEDGED_COLLATERAL_NOT_MODELLED: A secured central-bank borrowing (ČNB lombard) is " +
+            "outstanding, but the collateral pledged for " +
             "it is not modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock " +
             "and the LCR may be overstated, and the RSF of the pledged assets understated."
         val t = C7200Mapper.map(RiskLiquidityLookup.found(result(notes = listOf(note))), asOf)
@@ -210,6 +211,21 @@ class C7200MapperTest {
                     .contains(note).contains("run-7")
             }
         }
+    }
+
+    @Test
+    fun `the code prefix alone gaps the liquid assets, with no 'pledged' or 'HQLA' wording`() {
+        val note = "PLEDGED_COLLATERAL_NOT_MODELLED: some future rewording of this sentence."
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(notes = listOf(note))), asOf)
+        assertThat(t.at("r0010", "c0010").isDataGap).isTrue()
+    }
+
+    @Test
+    fun `a legacy un-prefixed note is still caught by the loose fallback match`() {
+        val note = "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for " +
+            "it is not modelled: pledged assets are encumbered and would not count as HQLA."
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(notes = listOf(note))), asOf)
+        assertThat(t.at("r0010", "c0010").isDataGap).isTrue()
     }
 
     @Test

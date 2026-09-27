@@ -42,15 +42,20 @@ object RiskEngineFigures {
                 "'$EU_LIQUIDITY_PARAMETER_SET', so this 2015/61 value cannot be stated."
         }
 
+    /** The stable machine code the risk engine prefixes the pledged-collateral note with (#11096). */
+    private const val PLEDGED_COLLATERAL_NOTE_CODE = "PLEDGED_COLLATERAL_NOT_MODELLED"
+
     /**
      * The gap reason for every HQLA / liquidity-buffer cell when the engine says the collateral pledged
      * for a secured central-bank borrowing (the ČNB lombard) is not modelled, else null. Pledged assets
      * are encumbered and not HQLA, so the engine's stock may include them: stating it would overstate
      * the buffer.
      *
-     * The engine carries this only as free text in `notes` (risk-engine `Liquidity.PLEDGED_COLLATERAL_NOTE`,
-     * no stable key), so the match is deliberately loose — any note mentioning both "pledged" and
-     * "HQLA", case-insensitive — so a rewording of that sentence still gaps rather than silently stating.
+     * The engine now prefixes the note with the stable [PLEDGED_COLLATERAL_NOTE_CODE] code
+     * (risk-engine `Liquidity.PLEDGED_COLLATERAL_NOTE_CODE`, #11096), matched first. The loose
+     * substring match on "pledged" + "HQLA" (case-insensitive) is kept only as a fallback for a
+     * risk-engine snapshot produced before #11096 landed, and can be removed once #11096 is on
+     * `main` (tracked as debt in #11107).
      */
     fun pledgedCollateralGap(notes: List<String>, runId: String): String? =
         notes.firstOrNull(::isPledgedCollateralNote)?.let { note ->
@@ -58,8 +63,10 @@ object RiskEngineFigures {
                 "\"$note\" Encumbered assets are not HQLA, so this liquid-asset figure cannot be stated."
         }
 
-    private fun isPledgedCollateralNote(note: String): Boolean =
-        note.contains("pledged", ignoreCase = true) && note.contains("HQLA", ignoreCase = true)
+    private fun isPledgedCollateralNote(note: String): Boolean {
+        if (note.startsWith(PLEDGED_COLLATERAL_NOTE_CODE)) return true
+        return note.contains("pledged", ignoreCase = true) && note.contains("HQLA", ignoreCase = true)
+    }
 
     /** The gap reason when the engine's book holds no currency at all (not a multi-currency book). */
     fun emptyBookReason(runId: String): String =
