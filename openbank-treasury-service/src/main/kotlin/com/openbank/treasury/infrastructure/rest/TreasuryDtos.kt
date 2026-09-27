@@ -29,7 +29,7 @@ data class DraftDealRequest(
     val rate: BigDecimal? = null,
     val tradeDate: LocalDate? = null,
     val valueDate: LocalDate? = null,
-    /** Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY, always overnight. */
+    /** Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY and CNB_LOMBARD, always overnight. */
     val maturityDate: LocalDate? = null,
     val rationale: String? = null,
 )
