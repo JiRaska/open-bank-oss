@@ -46,7 +46,62 @@ variable "cert_manager_version" {
   # which set the field directly. No CRD field removals/renames, no Helm
   # values shape change for our `helm_release.cert_manager` block, no new
   # required flags.
-  default = "v1.20.4"
+  #
+  # v1.21 (#10893 step 5/5): v1.21.2 is the latest 1.21.x patch (checked
+  # GitHub releases 2026-09-27: v1.21.0-alpha.0/.1, v1.21.0-beta.0, v1.21.0,
+  # v1.21.1, v1.21.2, no later tag). Supported Kubernetes range is 1.33-1.36
+  # (cert-manager.io/docs/releases) — the first line covering BOTH our
+  # current sandbox control plane (1.35) and the #10893 target (1.36), so no
+  # further minor bump is required once the cluster moves.
+  #
+  # Reviewed the v1.21.0 release notes, the v1.21.1/v1.21.2 patch notes and
+  # the upgrade guide against this tree:
+  # - Helm chart drops the default tokenrequest Role/RoleBinding
+  #   ("serviceaccounts/token: create") — n/a, no `serviceAccountRef` in this
+  #   tree points at the cert-manager controller ServiceAccount; every
+  #   Issuer/ClusterIssuer here authenticates via CA secret, ACME account
+  #   secret, or EKS Pod Identity (Route53), never a projected token bound to
+  #   this SA.
+  # - `cert-manager-edit` ClusterRole Challenge/Order restriction — same
+  #   change already reviewed for v1.19.6/v1.20.4; still n/a (no binding
+  #   references it, nothing here creates ACME challenges/orders directly).
+  # - Helm values removed: `prometheus.servicemonitor.targetPort`,
+  #   `prometheus.servicemonitor.path`, `prometheus.podmonitor.path`; metrics
+  #   Service port renamed `tcp-prometheus-servicemonitor` -> `http-metrics`
+  #   — n/a, `helm_release.cert_manager`'s `set` block here only configures
+  #   `crds.enabled` and the three DNS-01 `extraArgs`; no `prometheus.*` key
+  #   set, and no ServiceMonitor/PodMonitor manifest in `gitops/` selects the
+  #   old port name (grepped fleet-wide).
+  # - `enableGatewayAPI`/`enableGatewayAPIListenerSet` deprecated in favor of
+  #   `gatewayAPI.enabled`/`gatewayAPI.enableListenerSet` (backward
+  #   compatible) — n/a, no Gateway API resources in this tree (all 4
+  #   ClusterIssuers are DNS-01/CA only) and neither old nor new key is set.
+  # - `ServerSideApply` feature gate deprecated for cainjector (now
+  #   unconditional) and `CAInjectorMerging` promoted GA — n/a, neither
+  #   feature gate is referenced in `extraArgs` here.
+  # - v1.21.2 (security patch): Go 1.26.8 + crypto/TLS/XML dependency bumps,
+  #   ACME response bodies capped at 16 MiB and no longer reflected into
+  #   Issuer status/Events, restricted ambient AWS credentials for
+  #   *namespaced* Vault Issuers — n/a to the last one, this tree has no
+  #   Vault issuer; the response-body and DoS fixes are strict hardening, no
+  #   manifest change needed. Also fixes a DNS-name de-dup bug for Gateway
+  #   listeners sharing a Secret (n/a, no Gateway API here) and an HTTP-01
+  #   cleanup failure when the solver pod is already gone (n/a, DNS-01 only).
+  # - Known v1.21.0 issues (controller crash-loop with
+  #   `renewal.policy: Disabled`, stuck Issuer/ClusterIssuer reconciliation,
+  #   ACME event log spam) are all fixed by v1.21.2, which is why this pins
+  #   .2 rather than .0/.1 — checked no Certificate in this tree sets
+  #   `renewal.policy: Disabled` (grepped fleet-wide; none do).
+  # - No Certificate/ClusterIssuer/CertificateRequest CRD field
+  #   removals/renames that this tree uses; the three SPKI-pinned mobile
+  #   hosts (customer.open-bank.tech/customer-edge,
+  #   kc.open-bank.tech/keycloak, rum.open-bank.tech/rum-gateway) keep their
+  #   explicit `cert-manager.io/private-key-rotation-policy: "Never"`
+  #   annotation, which no default-flip in any version can override (verified
+  #   still present on `origin/main`). No Helm values shape change for our
+  #   `helm_release.cert_manager` block beyond the removed `prometheus.*`
+  #   keys (unused here), no new required flags.
+  default = "v1.21.2"
 }
 
 variable "karpenter_version" {
