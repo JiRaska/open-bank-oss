@@ -65,8 +65,8 @@ class MoneyRoundingPolicyCallSiteTest {
             // openbank-sdd-service SddCollectionDebitConsumer.kt:127; domestic SettlementAdapter.kt:84
             check(RoundingPolicy.LEDGER_POSTING, c, ins) { it.setScale(c.defaultFractionDigits, RoundingMode.HALF_UP) }
         }
-        // openbank-ledger-service FxRevaluationPosting.kt:119-120 — CZK, literal scale 2
-        check(RoundingPolicy.LEDGER_POSTING, czk, tiesAt(2)) { it.setScale(2, RoundingMode.HALF_UP) }
+        // NOT pinned here: openbank-ledger-service FxRevaluationPosting.kt:119-120 is a literal
+        // setScale(2, HALF_UP) — equal to LEDGER_POSTING for CZK only, so it stays out of the registry.
     }
 
     @Test
@@ -127,10 +127,14 @@ class MoneyRoundingPolicyCallSiteTest {
     }
 
     @Test
-    fun `DISPLAY is the statement renderers' fixed scale 2`() {
-        for (c in listOf(eur, jpy, kwd)) {
-            // openbank-statement-service PdfRenderer.kt:82, Camt053Renderer.kt:90, Mt940Renderer.kt:60
-            check(RoundingPolicy.DISPLAY, c, tiesAt(2)) { it.setScale(2, RoundingMode.HALF_UP) }
+    fun `DISPLAY is the statement renderers' currency minor-unit scale`() {
+        for (c in listOf(eur, czk, jpy, kwd)) {
+            // openbank-statement-service Pdf/Camt053/Mt940Renderer money()/amount() after #11081:
+            // v.setScale(CurrencyScale.of(currency), HALF_UP). Written as a literal, not read from the
+            // renderer, so this holds whichever of #11011 / #11081 merges first.
+            check(RoundingPolicy.DISPLAY, c, tiesAt(c.defaultFractionDigits)) {
+                it.setScale(c.defaultFractionDigits, RoundingMode.HALF_UP)
+            }
         }
     }
 

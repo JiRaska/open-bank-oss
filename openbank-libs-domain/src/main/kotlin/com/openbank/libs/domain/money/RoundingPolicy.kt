@@ -19,9 +19,6 @@ private const val FX_RATE_SCALE = 8
 /** interest-service WithholdingTaxPolicy.TAX_SCALE: whole currency units. */
 private const val TAX_SCALE = 0
 
-/** statement-service renderers format with a literal 2 decimals, whatever the currency. */
-private const val STATEMENT_DISPLAY_SCALE = 2
-
 /**
  * The closed, named set of rounding rules the fleet uses (ADR-0318). Each policy is a
  * (scale, mode) pair: [fixedScale] when the rule has its own scale, otherwise the currency's
@@ -50,13 +47,17 @@ enum class RoundingPolicy(val fixedScale: Int?, val mode: RoundingMode, val rati
     /**
      * Normalising an amount to the currency minor unit before it is booked: transaction
      * TransactionService (ingest, sell-side and derived FX settlement leg), interest
-     * InterestService (gross and net capitalisation), sdd SddCollectionDebitConsumer, domestic
-     * SettlementAdapter, and ledger FxRevaluationPosting (CZK, literal scale 2).
+     * InterestService.kt:394 (gross) and :406 (net capitalisation), sdd SddCollectionDebitConsumer,
+     * domestic SettlementAdapter.
+     *
+     * NOT ledger FxRevaluationPosting.kt:119-120: that site is a literal `setScale(2, HALF_UP)`,
+     * equivalent to this policy only because it posts CZK (2 minor digits). Like treasury's fixed
+     * scale-2 sites it stays outside the registry until it migrates with its own decision.
      */
     LEDGER_POSTING(
         null,
         RoundingMode.HALF_UP,
-        "Currency scale, HALF_UP — amounts normalised for booking (transaction, interest, sdd, domestic, ledger).",
+        "Currency scale, HALF_UP — amounts normalised for booking (transaction, interest, sdd, domestic).",
     ),
 
     /** Daily rate = annualRate / dayCount divisor, before it is applied to a balance. */
@@ -97,14 +98,15 @@ enum class RoundingPolicy(val fixedScale: Int?, val mode: RoundingMode, val rati
     ),
 
     /**
-     * Statement output (PDF, camt.053, MT940). Today these format at a literal scale 2 for every
-     * currency, so a JPY or KWD statement is rendered at the wrong scale; recorded as-is rather
-     * than silently corrected here.
+     * Statement output (PDF, camt.053, MT940): the currency's minor units (ISO 4217 default fraction
+     * digits; a code with none, e.g. XAU, falls back to 2 in the renderers), HALF_UP. The renderers
+     * move from a literal scale 2 to this in #11081; the policy records the intended rule so the
+     * registry does not codify the JPY/KWD mis-rendering that PR fixes.
      */
     DISPLAY(
-        STATEMENT_DISPLAY_SCALE,
+        null,
         RoundingMode.HALF_UP,
-        "Statement rendering at a fixed scale 2, HALF_UP — statement Pdf/Camt053/Mt940 renderers.",
+        "Statement rendering at the currency's minor units, HALF_UP — statement Pdf/Camt053/Mt940 renderers.",
     ),
     ;
 
