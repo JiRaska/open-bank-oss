@@ -133,7 +133,9 @@ variable "karpenter_version" {
 variable "argocd_version" {
   description = "argo-cd Helm chart version."
   type        = string
-  default     = "9.5.21"
+  # 10.9.2 = Argo CD v3.5.3 (tested on K8s 1.33-1.36). Chart 10.x defaults
+  # global.networkPolicy.create=true; main.tf pins it false (see there).
+  default = "10.9.2"
 }
 
 variable "cnpg_version" {
@@ -167,9 +169,10 @@ variable "keda_version" {
   # Scale-to-zero controller for the FinOps workload tiers (ADR-0057). Unlike
   # Karpenter, KEDA does NOT panic on a K8s version skew: it drives the stable
   # autoscaling/v2 HPA API and its own CRDs, so it tolerates a control plane
-  # ahead of its tested matrix. 2.19 is the latest stable and runs cleanly on
-  # the cluster's K8s 1.34. Still worth tracking the EKS version on upgrades.
-  default = "2.19.0"
+  # ahead of its tested matrix. Still track the EKS version on upgrades:
+  # support matrix 2.19 = K8s 1.32-1.34, 2.20 = 1.33-1.35, 2.21 = 1.34-1.36.
+  # 2.21 is the only release covering both the current 1.35 and the 1.36 target.
+  default = "2.21.0"
 }
 
 # ---------------------------------------------------------------------------

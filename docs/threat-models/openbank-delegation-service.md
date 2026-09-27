@@ -176,6 +176,14 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-27** — **Party-eligibility client resilience values now sourced from the shared
+  `READ` profile** (ADR-0321, PR #11072). `ResilientPartyEligibilityClient.eligibilityOf` is
+  annotated `@ResilienceProfile(READ)` and its `@Timeout`/`@Retry`/`@CircuitBreaker` arguments
+  are the named constants in `ResilienceProfiles.Read`; the effective values on the wire are
+  unchanged (2000 ms timeout, 2 retries, same breaker thresholds). No new caller, endpoint,
+  credential or network path — the delegation → party-service boundary (trust boundary 7) and
+  its fail-closed eligibility gate (T3) are as before. Rollback: revert.
+
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.18.0...delegation-service-v0.19.0) (2026-09-27)
+
+
+### Features
+
+* **libs,delegation:** ADR-0321 resilience-profile gate + first adoption ([#11072](https://github.com/JiRaska/open-bank-oss/issues/11072)) ([3f8b9b4](https://github.com/JiRaska/open-bank-oss/commit/3f8b9b488862bf088717dabaa19208958285f968))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.17.1...delegation-service-v0.18.0) (2026-09-26)
 
 

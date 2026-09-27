@@ -3,7 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.interest.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -78,7 +80,10 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @TestProfile(InterestOutboxAtomicityIT.NoDispatchProfile::class)
-@QuarkusTestResource(com.openbank.interest.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_interest_it")],
+)
 class InterestOutboxAtomicityIT {
 
     class NoDispatchProfile : QuarkusTestProfile {
