@@ -141,18 +141,64 @@ data class DecisionCorrelation(
     }
 }
 
-/** The GDPR Art. 22 oversight state of an automated decision (ADR-0322 D1). */
+/**
+ * The GDPR Art. 22 oversight state of an automated decision (ADR-0322 D1).
+ *
+ * [type] is an explicit, framework-free discriminator (never `this::class.simpleName`, which
+ * is not stable across obfuscation/renaming and is not itself serialisable metadata). This
+ * envelope is emitted as [AuditEvent][com.openbank.libs.audit.AuditEvent] `payload`, a plain
+ * `Map<String, Any?>` with no Jackson annotation permitted in this module
+ * (`libs-core-purity`/ADR-0317) — `data object None` and `data object Pending` carry no
+ * properties of their own, so without [type] a codec reading the map back has nothing to
+ * distinguish them (or `Completed`) by, and a naive `mapOf("by" to ..., "at" to ...)` shape is
+ * ambiguous with an absent-review map. [toMap]/[fromMap] use [type] as the sole discriminator.
+ */
 sealed interface HumanReview {
+    val type: String
+
     /** No human review applies to this decision. */
-    data object None : HumanReview
+    data object None : HumanReview {
+        override val type: String = "NONE"
+    }
 
     /** A human review has been requested but has not concluded. */
-    data object Pending : HumanReview
+    data object Pending : HumanReview {
+        override val type: String = "PENDING"
+    }
 
     /** A human reviewed the decision. [by] is an actor id, never a display name. */
     data class Completed(val by: String, val at: Instant) : HumanReview {
+        override val type: String = "COMPLETED"
+
         init {
             require(by.isNotBlank()) { "HumanReview.Completed.by must not be blank" }
+        }
+    }
+
+    companion object {
+        /** Pure-Kotlin, framework-free encoding for the [AuditEvent][com.openbank.libs.audit.AuditEvent] payload map. */
+        fun HumanReview.toMap(): Map<String, Any?> = when (this) {
+            None -> mapOf("type" to type)
+            Pending -> mapOf("type" to type)
+            is Completed -> mapOf("type" to type, "by" to by, "at" to at.toString())
+        }
+
+        /** Inverse of [toMap]. Throws [IllegalArgumentException] on an unknown or missing `type`/field. */
+        fun fromMap(map: Map<String, Any?>): HumanReview {
+            val type = map["type"] as? String
+            return when (type) {
+                "NONE" -> None
+                "PENDING" -> Pending
+                "COMPLETED" -> Completed(
+                    by = requireNotNull(map["by"] as? String) { "HumanReview.Completed map missing 'by'" },
+                    at = Instant.parse(
+                        requireNotNull(map["at"] as? String) {
+                            "HumanReview.Completed map missing 'at'"
+                        },
+                    ),
+                )
+                else -> throw IllegalArgumentException("Unknown HumanReview type discriminator: '$type'")
+            }
         }
     }
 }
@@ -172,12 +218,70 @@ enum class DecisionRetentionClass { AUDIT_LOG_5Y, CREDIT_EVIDENCE }
  * A closed, per-[DecisionClass] outcome. Kept as one sealed hierarchy — rather than a bare
  * `String` — so a decision can never carry an outcome value that does not belong to its own
  * class; [DecisionRecord]'s constructor enforces the pairing.
+ *
+ * Each subtype's own enum `.name` (`ALLOW`, `PASS`, `APPROVE`, `PROPOSED`, …) is NOT a
+ * sufficient discriminator on the wire — `DecisionOutcome.Authz.DENY` and a hypothetical future
+ * value sharing the literal string "DENY" in another subtype are otherwise indistinguishable
+ * once flattened into the [AuditEvent][com.openbank.libs.audit.AuditEvent] payload map, and
+ * [DecisionRecord]'s pairing invariant only holds if the reader can recover which subtype a
+ * decoded value belongs to. [kind] carries the subtype name explicitly.
  */
 sealed interface DecisionOutcome {
-    enum class Authz : DecisionOutcome { ALLOW, DENY }
-    enum class Fraud : DecisionOutcome { PASS, REVIEW, BLOCK }
-    enum class Credit : DecisionOutcome { APPROVE, REFER, DECLINE }
-    enum class Agent : DecisionOutcome { PROPOSED, EXECUTED, REFUSED }
+    /** The [DecisionOutcome] subtype this value belongs to — the wire discriminator. */
+    val kind: String
+
+    enum class Authz : DecisionOutcome {
+        ALLOW,
+        DENY,
+        ;
+
+        override val kind: String = "AUTHZ"
+    }
+
+    enum class Fraud : DecisionOutcome {
+        PASS,
+        REVIEW,
+        BLOCK,
+        ;
+
+        override val kind: String = "FRAUD"
+    }
+
+    enum class Credit : DecisionOutcome {
+        APPROVE,
+        REFER,
+        DECLINE,
+        ;
+
+        override val kind: String = "CREDIT"
+    }
+
+    enum class Agent : DecisionOutcome {
+        PROPOSED,
+        EXECUTED,
+        REFUSED,
+        ;
+
+        override val kind: String = "AGENT"
+    }
+
+    companion object {
+        /** Pure-Kotlin, framework-free encoding: `kind` (subtype) + `name` (enum constant). */
+        fun DecisionOutcome.toMap(): Map<String, Any?> = mapOf("kind" to kind, "name" to (this as Enum<*>).name)
+
+        /** Inverse of [toMap]. Throws [IllegalArgumentException] on an unknown or missing `kind`/`name`. */
+        fun fromMap(map: Map<String, Any?>): DecisionOutcome {
+            val kind = requireNotNull(map["kind"] as? String) { "DecisionOutcome map missing 'kind'" }
+            val name = requireNotNull(map["name"] as? String) { "DecisionOutcome map missing 'name'" }
+            return when (kind) {
+                "AUTHZ" -> Authz.valueOf(name)
+                "FRAUD" -> Fraud.valueOf(name)
+                "CREDIT" -> Credit.valueOf(name)
+                "AGENT" -> Agent.valueOf(name)
+                else -> throw IllegalArgumentException("Unknown DecisionOutcome kind discriminator: '$kind'")
+            }
+        }
+    }
 }
 
 /**
@@ -219,6 +323,98 @@ data class DecisionRecord(
         require(expectedOutcomeType.isInstance(outcome)) {
             "DecisionRecord.outcome must be a ${expectedOutcomeType.simpleName} for decisionClass=$decisionClass, " +
                 "was ${outcome::class.simpleName}"
+        }
+
+        // Retention pairing documented on DecisionRetentionClass: CREDIT decisions follow the
+        // stricter ADR-0214 D4 evidence retention (CREDIT_EVIDENCE); every other decisionClass
+        // follows the ADR-0118 default audit-log retention (AUDIT_LOG_5Y). Enforced here rather
+        // than left to producers to remember, since a wrong pairing on a CREDIT record would
+        // under-retain lending evidence and a wrong pairing on any other class would over-retain
+        // beyond the ADR-0118 default with no CREDIT_EVIDENCE basis for it.
+        val expectedRetentionClass = when (decisionClass) {
+            DecisionClass.CREDIT -> DecisionRetentionClass.CREDIT_EVIDENCE
+            DecisionClass.AUTHZ, DecisionClass.FRAUD, DecisionClass.AGENT -> DecisionRetentionClass.AUDIT_LOG_5Y
+        }
+        require(retentionClass == expectedRetentionClass) {
+            "DecisionRecord.retentionClass must be $expectedRetentionClass for decisionClass=$decisionClass, " +
+                "was $retentionClass"
+        }
+    }
+
+    companion object {
+        private const val KEY_DECISION_ID = "decisionId"
+        private const val KEY_DECISION_CLASS = "decisionClass"
+        private const val KEY_DECIDED_AT = "decidedAt"
+        private const val KEY_INPUT_DIGEST = "inputDigest"
+        private const val KEY_ENGINE_KIND = "engineKind"
+        private const val KEY_ENGINE_ID = "engineId"
+        private const val KEY_ENGINE_VERSION = "engineVersion"
+        private const val KEY_OUTCOME = "outcome"
+        private const val KEY_REASONS = "reasons"
+        private const val KEY_SUBJECT_REF = "subjectRef"
+        private const val KEY_TRACE_ID = "traceId"
+        private const val KEY_CORRELATION_ID = "correlationId"
+        private const val KEY_CHANNEL = "channel"
+        private const val KEY_ACT_CHAIN = "actChain"
+        private const val KEY_HUMAN_REVIEW = "humanReview"
+        private const val KEY_ATOMIC = "atomic"
+        private const val KEY_RETENTION_CLASS = "retentionClass"
+
+        /**
+         * Pure-Kotlin, framework-free encoding of the whole envelope for the
+         * [AuditEvent][com.openbank.libs.audit.AuditEvent] `payload` map (`libs-core-purity`
+         * forbids a Jackson annotation in this module). [DecisionReason] and the nested
+         * [HumanReview]/[DecisionOutcome] discriminators round-trip through [fromMap].
+         */
+        fun DecisionRecord.toMap(): Map<String, Any?> = mapOf(
+            KEY_DECISION_ID to decisionId.toString(),
+            KEY_DECISION_CLASS to decisionClass.name,
+            KEY_DECIDED_AT to decidedAt.toString(),
+            KEY_INPUT_DIGEST to inputDigest.hex,
+            KEY_ENGINE_KIND to engine.kind.name,
+            KEY_ENGINE_ID to engine.id,
+            KEY_ENGINE_VERSION to engine.version,
+            KEY_OUTCOME to with(DecisionOutcome) { outcome.toMap() },
+            KEY_REASONS to reasons.map { mapOf("code" to it.code, "ruleId" to it.ruleId) },
+            KEY_SUBJECT_REF to subjectRef.value,
+            KEY_TRACE_ID to correlation.traceId,
+            KEY_CORRELATION_ID to correlation.correlationId,
+            KEY_CHANNEL to correlation.channel,
+            KEY_ACT_CHAIN to correlation.actChain,
+            KEY_HUMAN_REVIEW to with(HumanReview) { humanReview.toMap() },
+            KEY_ATOMIC to atomic,
+            KEY_RETENTION_CLASS to retentionClass.name,
+        )
+
+        /** Inverse of [toMap]. Throws [IllegalArgumentException]/[NullPointerException] on a malformed map. */
+        @Suppress("UNCHECKED_CAST")
+        fun fromMap(map: Map<String, Any?>): DecisionRecord {
+            val reasons = (map[KEY_REASONS] as List<Map<String, Any?>>).map {
+                DecisionReason(code = it["code"] as String, ruleId = it["ruleId"] as? String)
+            }
+            return DecisionRecord(
+                decisionId = UUID.fromString(map[KEY_DECISION_ID] as String),
+                decisionClass = DecisionClass.valueOf(map[KEY_DECISION_CLASS] as String),
+                decidedAt = Instant.parse(map[KEY_DECIDED_AT] as String),
+                inputDigest = InputDigest(map[KEY_INPUT_DIGEST] as String),
+                engine = DecisionEngine(
+                    kind = DecisionEngineKind.valueOf(map[KEY_ENGINE_KIND] as String),
+                    id = map[KEY_ENGINE_ID] as String,
+                    version = map[KEY_ENGINE_VERSION] as String,
+                ),
+                outcome = DecisionOutcome.fromMap(map[KEY_OUTCOME] as Map<String, Any?>),
+                reasons = reasons,
+                subjectRef = SubjectRef(map[KEY_SUBJECT_REF] as String),
+                correlation = DecisionCorrelation(
+                    traceId = map[KEY_TRACE_ID] as? String,
+                    correlationId = map[KEY_CORRELATION_ID] as? String,
+                    channel = map[KEY_CHANNEL] as? String,
+                    actChain = map[KEY_ACT_CHAIN] as List<String>,
+                ),
+                humanReview = HumanReview.fromMap(map[KEY_HUMAN_REVIEW] as Map<String, Any?>),
+                atomic = map[KEY_ATOMIC] as Boolean,
+                retentionClass = DecisionRetentionClass.valueOf(map[KEY_RETENTION_CLASS] as String),
+            )
         }
     }
 }

@@ -18,9 +18,15 @@ class DecisionRecordTest {
 
     private fun digest() = InputDigest.sha256(mapOf("principal" to "party-1", "action" to "account.freeze"))
 
+    private fun retentionFor(decisionClass: DecisionClass) = when (decisionClass) {
+        DecisionClass.CREDIT -> DecisionRetentionClass.CREDIT_EVIDENCE
+        else -> DecisionRetentionClass.AUDIT_LOG_5Y
+    }
+
     private fun authzRecord(
         outcome: DecisionOutcome = DecisionOutcome.Authz.ALLOW,
         decisionClass: DecisionClass = DecisionClass.AUTHZ,
+        retentionClass: DecisionRetentionClass = retentionFor(decisionClass),
     ) = DecisionRecord(
         decisionClass = decisionClass,
         decidedAt = decidedAt,
@@ -29,7 +35,7 @@ class DecisionRecordTest {
         outcome = outcome,
         subjectRef = SubjectRef("account-1"),
         atomic = false,
-        retentionClass = DecisionRetentionClass.AUDIT_LOG_5Y,
+        retentionClass = retentionClass,
     )
 
     // --- construction / defaults --------------------------------------------------------------
@@ -239,5 +245,168 @@ class DecisionRecordTest {
         val b = authzRecord()
 
         assertThat(a).isNotEqualTo(b)
+    }
+
+    // --- retention-class pairing (review finding) -----------------------------------------------
+    //
+    // DecisionRetentionClass documents CREDIT -> CREDIT_EVIDENCE, every other class -> AUDIT_LOG_5Y
+    // (ADR-0214 D4 / ADR-0118). Prose alone does not stop a producer pairing them wrong, so the
+    // constructor enforces it.
+
+    @Test
+    fun `accepts CREDIT paired with CREDIT_EVIDENCE`() {
+        val record = authzRecord(
+            decisionClass = DecisionClass.CREDIT,
+            outcome = DecisionOutcome.Credit.APPROVE,
+            retentionClass = DecisionRetentionClass.CREDIT_EVIDENCE,
+        )
+        assertThat(record.retentionClass).isEqualTo(DecisionRetentionClass.CREDIT_EVIDENCE)
+    }
+
+    @Test
+    fun `rejects CREDIT paired with AUDIT_LOG_5Y`() {
+        assertThatThrownBy {
+            authzRecord(
+                decisionClass = DecisionClass.CREDIT,
+                outcome = DecisionOutcome.Credit.APPROVE,
+                retentionClass = DecisionRetentionClass.AUDIT_LOG_5Y,
+            )
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("retentionClass")
+    }
+
+    @Test
+    fun `rejects a non-CREDIT class paired with CREDIT_EVIDENCE`() {
+        assertThatThrownBy {
+            authzRecord(
+                decisionClass = DecisionClass.AUTHZ,
+                outcome = DecisionOutcome.Authz.ALLOW,
+                retentionClass = DecisionRetentionClass.CREDIT_EVIDENCE,
+            )
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("retentionClass")
+    }
+
+    @Test
+    fun `every class accepts only its documented retention pairing`() {
+        DecisionClass.entries.forEach { decisionClass ->
+            val correct = retentionFor(decisionClass)
+            val wrong = DecisionRetentionClass.entries.first { it != correct }
+            val outcome = when (decisionClass) {
+                DecisionClass.AUTHZ -> DecisionOutcome.Authz.ALLOW
+                DecisionClass.FRAUD -> DecisionOutcome.Fraud.PASS
+                DecisionClass.CREDIT -> DecisionOutcome.Credit.APPROVE
+                DecisionClass.AGENT -> DecisionOutcome.Agent.PROPOSED
+            }
+            authzRecord(decisionClass = decisionClass, outcome = outcome, retentionClass = correct)
+            assertThatThrownBy {
+                authzRecord(decisionClass = decisionClass, outcome = outcome, retentionClass = wrong)
+            }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    // --- codec round-trips (review finding: framework-free discriminators) ---------------------
+    //
+    // DecisionRecord is emitted as an AuditEvent payload (Map<String, Any?>), and libs-domain may
+    // carry no Jackson import (`libs-core-purity`). HumanReview.None/Pending are property-less
+    // objects and DecisionOutcome's sealed subtypes share `.name` values across each other
+    // (ALLOW/DENY vs PASS/REVIEW/BLOCK never collide today, but nothing prevented it) -- both are
+    // ambiguous on a bare map without an explicit `type`/`kind` discriminator. toMap()/fromMap()
+    // are the framework-free codec; these tests are the negative proof for the discriminator: they
+    // fail if `type`/`kind` is removed, because fromMap would then have nothing to switch on.
+
+    @Test
+    fun `HumanReview None round-trips through toMap fromMap`() {
+        val decoded = HumanReview.fromMap(with(HumanReview) { HumanReview.None.toMap() })
+        assertThat(decoded).isSameAs(HumanReview.None)
+    }
+
+    @Test
+    fun `HumanReview Pending round-trips through toMap fromMap`() {
+        val decoded = HumanReview.fromMap(with(HumanReview) { HumanReview.Pending.toMap() })
+        assertThat(decoded).isSameAs(HumanReview.Pending)
+    }
+
+    @Test
+    fun `HumanReview Completed round-trips through toMap fromMap`() {
+        val completed = HumanReview.Completed(by = "operator-1", at = decidedAt)
+        val decoded = HumanReview.fromMap(with(HumanReview) { completed.toMap() })
+        assertThat(decoded).isEqualTo(completed)
+    }
+
+    @Test
+    fun `HumanReview variants encode to distinct discriminated maps`() {
+        val maps = listOf(
+            with(HumanReview) { HumanReview.None.toMap() },
+            with(HumanReview) { HumanReview.Pending.toMap() },
+            with(HumanReview) { HumanReview.Completed(by = "operator-1", at = decidedAt).toMap() },
+        )
+        assertThat(maps.map { it["type"] }.toSet()).hasSize(3)
+    }
+
+    @Test
+    fun `HumanReview fromMap rejects an unknown type discriminator`() {
+        assertThatThrownBy { HumanReview.fromMap(mapOf("type" to "SOMETHING_ELSE")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `DecisionOutcome every variant round-trips through toMap fromMap`() {
+        val allOutcomes: List<DecisionOutcome> =
+            DecisionOutcome.Authz.entries + DecisionOutcome.Fraud.entries +
+                DecisionOutcome.Credit.entries + DecisionOutcome.Agent.entries
+
+        allOutcomes.forEach { outcome ->
+            val decoded = DecisionOutcome.fromMap(with(DecisionOutcome) { outcome.toMap() })
+            assertThat(decoded).isEqualTo(outcome)
+        }
+    }
+
+    @Test
+    fun `DecisionOutcome fromMap rejects an unknown kind discriminator`() {
+        assertThatThrownBy { DecisionOutcome.fromMap(mapOf("kind" to "SOMETHING_ELSE", "name" to "ALLOW")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `DecisionRecord round-trips every decisionClass through toMap fromMap`() {
+        DecisionClass.entries.forEach { decisionClass ->
+            val outcome = when (decisionClass) {
+                DecisionClass.AUTHZ -> DecisionOutcome.Authz.DENY
+                DecisionClass.FRAUD -> DecisionOutcome.Fraud.REVIEW
+                DecisionClass.CREDIT -> DecisionOutcome.Credit.REFER
+                DecisionClass.AGENT -> DecisionOutcome.Agent.EXECUTED
+            }
+            val record = authzRecord(decisionClass = decisionClass, outcome = outcome).copy(
+                reasons = listOf(
+                    DecisionReason(code = "POLICY_DENY", ruleId = "rule-1"),
+                    DecisionReason(code = "OTHER"),
+                ),
+                correlation = DecisionCorrelation(
+                    traceId = "trace-1",
+                    correlationId = "corr-1",
+                    channel = "api",
+                    actChain = listOf("agent-1"),
+                ),
+                humanReview = HumanReview.Completed(by = "operator-1", at = decidedAt),
+            )
+
+            val decoded = DecisionRecord.fromMap(with(DecisionRecord) { record.toMap() })
+
+            assertThat(decoded).isEqualTo(record)
+        }
+    }
+
+    @Test
+    fun `DecisionRecord toMap payload has no ambiguous None-vs-Pending shape`() {
+        // Negative proof for the discriminator: without `type`, None and Pending both encode to
+        // an effectively empty map and are indistinguishable on decode.
+        val record = authzRecord().copy(humanReview = HumanReview.Pending)
+        val encoded = with(HumanReview) { record.humanReview.toMap() }
+        assertThat(encoded["type"]).isEqualTo("PENDING")
+        assertThat(HumanReview.fromMap(encoded)).isSameAs(HumanReview.Pending)
+        assertThat(HumanReview.fromMap(encoded)).isNotSameAs(HumanReview.None)
     }
 }
