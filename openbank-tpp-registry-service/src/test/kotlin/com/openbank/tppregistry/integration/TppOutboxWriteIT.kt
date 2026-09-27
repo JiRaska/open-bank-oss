@@ -3,9 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.tppregistry.integration
 
-import com.openbank.tppregistry.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -40,7 +41,10 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(TppOutboxWriteIT.DispatcherOffResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
+)
 class TppOutboxWriteIT {
 
     class DispatcherOffResource : QuarkusTestResourceLifecycleManager {

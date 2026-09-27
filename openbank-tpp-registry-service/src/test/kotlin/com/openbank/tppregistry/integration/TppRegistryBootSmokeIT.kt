@@ -4,8 +4,10 @@
 
 package com.openbank.tppregistry.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -30,7 +32,10 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @QuarkusTestResource(TppRegistryBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.tppregistry.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
+)
 class TppRegistryBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

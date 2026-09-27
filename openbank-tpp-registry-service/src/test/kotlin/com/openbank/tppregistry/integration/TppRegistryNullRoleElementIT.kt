@@ -4,8 +4,10 @@
 
 package com.openbank.tppregistry.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -25,7 +27,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(TppRegistryNullRoleElementIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.tppregistry.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
+)
 @TestSecurity(user = "operator@openbank.test", roles = ["ROLE_OPERATOR"])
 class TppRegistryNullRoleElementIT {
 
