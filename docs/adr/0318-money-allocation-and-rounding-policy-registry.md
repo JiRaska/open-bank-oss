@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [libs, interest, fx, fees-billing]
-summary: "libs Money gains a largest-remainder allocate/split and a named rounding-policy registry (interest accrual, FX, fees, tax, display); services stop choosing RoundingMode and scale inline, enforced by a ratchet gate."
+summary: "libs Money gains a largest-remainder allocate/split and a named rounding-policy registry (MONEY_SCALE, LEDGER_POSTING HALF_UP, interest, FX, fees, tax, DISPLAY); services stop choosing RoundingMode/scale inline, ratchet-gated."
 ---
 
 # ADR-0318 — Money allocation and rounding policy registry
@@ -45,6 +45,48 @@ Two concrete consequences of that spread:
   independently can lose or create a minor unit; the ledger's per-currency balancing (ADR-0025)
   then rejects or, worse, absorbs it into a suspense line.
 
+## Amendment (2026-09-27, per #11011)
+
+Phase-1 implementation (`openbank-libs-domain`, PR #11011) measured the real call sites
+fleet-wide and found decision item 2 below wrong on two points, corrected in place here rather
+than superseding the ADR (still `proposed`/`planned`, so amending is allowed per
+`docs/adr/SCHEMA.md`):
+
+- **`LEDGER_POSTING` does not round HALF_EVEN.** No posting site on `origin/main` does; every
+  booking-normalisation call site (`TransactionService.kt:127/344/353`,
+  `SddCollectionDebitConsumer.kt:127`, `SettlementAdapter.kt:84`,
+  `FxRevaluationPosting.kt:119-120`) rounds HALF_UP. The HALF_EVEN behaviour the original text
+  attributed to `LEDGER_POSTING` is `Money.scale()`'s own normalisation and the entity rehydration
+  mappers (`PanacheJournalRepository.kt:377/379`, `PanacheTransactionRepository.kt:211/214`,
+  `DelegationGrantEntity.kt:191`, `SpendReservationEntity.kt:87`) — a different call-site class,
+  now its own policy, `MONEY_SCALE`.
+- **`INTEREST_ACCRUAL` is not a single (scale, mode) pair.** `InterestService.kt` rounds twice —
+  a scale-10 HALF_UP daily rate (`:137`), then a scale-6 HALF_UP accrued amount (`:138`) — so the
+  registry needs two policies applied in order: `INTEREST_DAILY_RATE` then `INTEREST_ACCRUAL`.
+
+`DISPLAY` is also corrected: the statement renderers (`PdfRenderer.kt:82`, `Camt053Renderer.kt:90`,
+`Mt940Renderer.kt:60`) round every currency to a **fixed scale 2** with HALF_UP, not to the
+currency's own scale with HALF_EVEN as originally written. The registry records this as it is —
+it means JPY (0 decimals) and KWD/BHD (3 decimals) statement amounts render at the wrong scale
+today; that defect is tracked separately, not fixed by this ADR.
+
+The `PdfRenderer.kt`/`Camt053Renderer.kt`/`Mt940Renderer.kt`/`TransactionService.kt`/etc. line
+numbers above and the full ~30-row measured call-site table are in PR #11011's description
+(section "Rounding sites in money-path services + statement renderers", `origin/main` @
+2026-09-26T22:59Z); this ADR does not duplicate the whole table.
+
+Two sites remain **out of the registry**, treasury's ACT/360 work, discovered by the same probe
+and deliberately not folded into an existing policy:
+- `Deal.kt:374` — scale-12 HALF_UP ACT/360 intermediate.
+- `Deal.kt:375` and `Postings.kt:147` — fixed scale 2, HALF_UP (same mode as `LEDGER_POSTING`, but
+  a fixed scale rather than the currency's own — the same shape as the `DISPLAY` scale-2 issue
+  above). These should get their own policy when treasury migrates onto the registry, not be
+  merged into `LEDGER_POSTING` or `DISPLAY`.
+
+Item 2 and item 3 below are amended to reflect the policy set as corrected; items 1 and 4 are
+unaffected. This amendment changes only what the ADR says the registry contains — it changes no
+posted amount and no code (phase 1 is libs-only per PR #11011).
+
 ## Decision
 
 We will:
@@ -55,15 +97,19 @@ We will:
    position, deterministically). Invariant, property-tested: the parts always sum exactly to the
    input and no part differs from its exact share by one minor unit or more.
 2. Add a **`RoundingPolicy` registry**: a closed, named set of policies, each a (scale, mode)
-   pair plus a short rationale — initially `LEDGER_POSTING` (currency scale, HALF_EVEN, the
-   current `Money` behaviour), `INTEREST_ACCRUAL` (intermediate scale, mode fixed per product
-   terms), `FX_RATE` and `FX_AMOUNT`, `FEE`, `TAX_WITHHOLDING` (DOWN to the authority's unit, as
-   `WithholdingTaxPolicy` does today) and `DISPLAY`. Services call `money.round(RoundingPolicy.X)`
-   instead of spelling `setScale(n, RoundingMode.Y)`.
+   pair plus a short rationale — `MONEY_SCALE` (currency scale, HALF_EVEN, `Money.scale()` and the
+   entity-to-`Money` rehydration mappers), `LEDGER_POSTING` (currency scale, **HALF_UP**, every
+   site that normalises an amount for booking), `INTEREST_DAILY_RATE` (scale 10, HALF_UP) followed
+   by `INTEREST_ACCRUAL` (scale 6, HALF_UP — accrual rounds twice, so it is two policies applied in
+   order), `FX_RATE` and `FX_AMOUNT`, `FEE`, `TAX_WITHHOLDING` (DOWN to the authority's unit, as
+   `WithholdingTaxPolicy` does today) and `DISPLAY` (**fixed scale 2**, HALF_UP — what the statement
+   renderers do for every currency today, which means JPY and KWD statements render at the wrong
+   scale; the registry records this as it is and does not fix it). Services call
+   `money.round(RoundingPolicy.X)` instead of spelling `setScale(n, RoundingMode.Y)`.
 3. The initial values of each policy are set to **what the code does today**, measured per call
-   site — this ADR changes where the rule lives, not any posted amount. Any later change of a
-   policy's mode is a customer-visible change and goes through its own PR with a money-path
-   review.
+   site (corrected against the measurement in PR #11011 — see Amendment above) — this ADR changes
+   where the rule lives, not any posted amount. Any later change of a policy's mode is a
+   customer-visible change and goes through its own PR with a money-path review.
 4. Enforce with a **ratchet gate** (`money-rounding-inline-ratchet`, advisory first): new
    `RoundingMode.`/`setScale(` in a money-path service's `src/main` outside the registry fails;
    today's 55 sites are baselined and the baseline may only shrink.
@@ -116,3 +162,4 @@ We will:
 - ADR-0025 per-currency ledger balancing; ADR-0046 FX revaluation; ADR-0143 fee posting.
 - ADR-0305, ADR-0308 — bitemporal effective-dating (referenced, not redone).
 - `openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/Money.kt`
+- PR #11011 — phase-1 implementation and the measured call-site table this amendment is based on.
