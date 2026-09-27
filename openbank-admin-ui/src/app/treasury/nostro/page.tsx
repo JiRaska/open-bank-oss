@@ -142,30 +142,41 @@ function ReconciliationResult({
   const closingDiffText = formatDifference(result.closingDifference, money)
   const openingNonZero = isNonZeroDifference(result.openingDifference)
   const closingNonZero = isNonZeroDifference(result.closingDifference)
+  const ledgerBalanceText = (v: number | null) =>
+    v === null ? t('neuvedeno', 'not stated') : `${money(v)} ${result.currency}`
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-        <StatusBadge
-          status={result.reconciled ? 'RECONCILED' : 'UNRECONCILED'}
-          tone={result.reconciled ? 'success' : 'warning'}
-          label={result.reconciled ? t('Sesouhlaseno', 'Reconciled') : t('Nesouhlasí', 'Not reconciled')}
-        />
+        {result.reconciled === null ? (
+          <StatusBadge status="UNDETERMINED" tone="neutral" label={t('Zůstatky nelze porovnat', 'Balances not comparable')} />
+        ) : (
+          <StatusBadge
+            status={result.reconciled ? 'RECONCILED' : 'UNRECONCILED'}
+            tone={result.reconciled ? 'success' : 'warning'}
+            label={result.reconciled ? t('Sesouhlaseno', 'Reconciled') : t('Nesouhlasí', 'Not reconciled')}
+          />
+        )}
         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
           {t(`Výpis ${result.statementId} · IBAN ${result.iban} · GL ${result.glCode} · ${result.statementDate}`, `Statement ${result.statementId} · IBAN ${result.iban} · GL ${result.glCode} · ${result.statementDate}`)}
         </span>
       </div>
 
+      {result.balanceNotStated ? (
+        <p role="note" style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+          {t('Zůstatky hlavní knihy nejsou uvedeny: ', 'Ledger balances not stated: ')}{result.balanceNotStated}
+        </p>
+      ) : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
         <StatCard label={t('Počáteční zůstatek (výpis)', 'Opening balance (statement)')} value={`${money(result.statementOpeningBalance)} ${result.currency}`} />
-        <StatCard label={t('Počáteční zůstatek (hl. kniha)', 'Opening balance (ledger)')} value={`${money(result.ledgerOpeningBalance)} ${result.currency}`} />
+        <StatCard label={t('Počáteční zůstatek (hl. kniha)', 'Opening balance (ledger)')} value={ledgerBalanceText(result.ledgerOpeningBalance)} />
         <StatCard
           label={t('Rozdíl (počáteční)', 'Opening difference')}
           value={openingDiffText === null ? t('nevypočteno', 'not computed') : `${openingDiffText} ${result.currency}`}
           tone={openingNonZero ? 'danger' : undefined}
         />
         <StatCard label={t('Konečný zůstatek (výpis)', 'Closing balance (statement)')} value={`${money(result.statementClosingBalance)} ${result.currency}`} />
-        <StatCard label={t('Konečný zůstatek (hl. kniha)', 'Closing balance (ledger)')} value={`${money(result.ledgerClosingBalance)} ${result.currency}`} />
+        <StatCard label={t('Konečný zůstatek (hl. kniha)', 'Closing balance (ledger)')} value={ledgerBalanceText(result.ledgerClosingBalance)} />
         <StatCard
           label={t('Rozdíl (konečný)', 'Closing difference')}
           value={closingDiffText === null ? t('nevypočteno', 'not computed') : `${closingDiffText} ${result.currency}`}

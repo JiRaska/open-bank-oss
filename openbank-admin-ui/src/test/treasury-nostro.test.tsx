@@ -167,6 +167,28 @@ describe('reconciliation result rendering', () => {
     expect(screen.getByText(/Reconciled|Sesouhlaseno/)).toBeInTheDocument()
   })
 
+  it('a EUR nostro with no ledger balance renders "not stated" and an undetermined badge, never 0 or Reconciled', async () => {
+    router = url => (url.includes('/reconciliation')
+      ? json(reconciliation({
+        currency: 'EUR',
+        ledgerOpeningBalance: null, openingDifference: null, ledgerClosingBalance: null, closingDifference: null,
+        balanceNotStated: 'ledger exposes only base-currency (CZK) balances for this account',
+        unmatchedStatementEntries: [], unmatchedLedgerLines: [], reconciled: null,
+      }))
+      : json({}, 404))
+    await renderPage(<NostroReconciliationPage />)
+    fireEvent.change(screen.getByLabelText(/Statement ID|ID výpisu/), { target: { value: STATEMENT.id } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^(Load|Načíst)$/ })) })
+    await screen.findByText(/SYNTH-STMT-1/)
+
+    expect(screen.getAllByText(/^(not stated|neuvedeno)$/).length).toBe(2)
+    expect(screen.getAllByText(/not computed|nevypočteno/).length).toBe(2)
+    expect(screen.getByText(/base-currency \(CZK\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Balances not comparable|Zůstatky nelze porovnat/)).toBeInTheDocument()
+    expect(screen.queryByText(/^(Reconciled|Sesouhlaseno)$/)).toBeNull()
+    expect(screen.queryByText(/^0[.,]00 EUR$/)).toBeNull()
+  })
+
   it('shows a 404 for an unknown statement id readably', async () => {
     router = () => json({}, 404)
     await renderPage(<NostroReconciliationPage />)

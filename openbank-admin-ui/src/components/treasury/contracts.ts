@@ -99,9 +99,9 @@ export type Positions = z.infer<typeof positionsSchema>
 export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
 
 // Nostro reconciliation (ADR-0315 D7, #10896): NostroResource + the NostroStatement* /
-// NostroReconciliation schemas in openapi.yaml. Differences are `number` in the OpenAPI document,
-// but nothing in the service guarantees they are always computed — a `null` is not the same claim
-// as a `0`, so this stays nullable and the page must never render one as the other.
+// NostroReconciliation schemas in openapi.yaml (1.4.0). The ledger balances, the differences and
+// `reconciled` are nullable there: a null is not the same claim as a 0 (or a false), and the page
+// must never render one as the other.
 export const nostroStatementSchema = z.object({
   id: z.string(),
   statementId: z.string(),
@@ -155,12 +155,16 @@ export const nostroReconciliationSchema = z.object({
   currency: z.string(),
   statementDate: z.iso.date(),
   statementOpeningBalance: decimal,
-  ledgerOpeningBalance: decimal,
+  // NULL when the ledger cannot state the balance in the statement currency — it exposes only
+  // base-currency (CZK) balances, so a EUR nostro has none; balanceNotStated carries the reason.
+  ledgerOpeningBalance: decimal.nullable(),
   openingDifference: decimal.nullable(),
   statementClosingBalance: decimal,
-  ledgerClosingBalance: decimal,
+  ledgerClosingBalance: decimal.nullable(),
   closingDifference: decimal.nullable(),
-  reconciled: z.boolean(),
+  balanceNotStated: z.string().nullish(),
+  // NULL = every item matched but the balances could not be compared: undetermined, not a pass.
+  reconciled: z.boolean().nullable(),
   matches: z.array(nostroMatchSchema),
   unmatchedStatementEntries: z.array(nostroStatementEntrySchema),
   unmatchedLedgerLines: z.array(nostroLedgerLineSchema),
