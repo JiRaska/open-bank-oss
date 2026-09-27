@@ -363,6 +363,9 @@
               }
             }
           ],
+          "notes": [
+            "A secured central-bank borrowing (\u010CNB lombard) is outstanding, but the collateral pledged for it is not modelled: pledged assets are encumbered and would not count as HQLA."
+          ],
           "parameterSetId": "eu-2015-61-crr2",
           "parameterSetVersion": "2",
           "runId": "0190a4c0-0000-7000-8000-00000000c020",
@@ -531,6 +534,23 @@
               "matchers": [
                 {
                   "match": "decimal"
+                }
+              ]
+            },
+            "$.notes": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.notes[*]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
                 }
               ]
             },

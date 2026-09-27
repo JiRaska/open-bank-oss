@@ -112,6 +112,8 @@ data class RiskHqlaLine(
  * The liquid-asset side of ONE tied-out risk-engine snapshot's LCR at the report date. [lines] and
  * the level sums (after haircut, before the Level 2 caps) are present only for a single-currency book;
  * [unclassifiedBalances] counts balances the engine could not classify, any of which could be HQLA.
+ * [notes] are the engine's free-text caveats on the result (e.g. that pledged collateral is not
+ * modelled); the mappers read them through [com.openbank.finrep.domain.mapper.RiskEngineFigures].
  */
 data class RiskLiquidityResult(
     val runId: String,
@@ -127,6 +129,7 @@ data class RiskLiquidityResult(
     val unclassifiedBalances: Int,
     val outflows: List<RiskOutflowLine> = emptyList(),
     val totalOutflows: BigDecimal? = null,
+    val notes: List<String> = emptyList(),
 )
 
 /**

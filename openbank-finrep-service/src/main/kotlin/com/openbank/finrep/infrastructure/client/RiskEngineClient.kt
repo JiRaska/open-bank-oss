@@ -121,6 +121,7 @@ data class LiquidityResponse(
     val currencies: List<CurrencyLiquidityResponse>,
     val total: CurrencyLiquidityResponse?,
     val unclassified: List<UnclassifiedBalanceResponse>,
+    val notes: List<String> = emptyList(),
 )
 
 /**
@@ -182,6 +183,7 @@ class RiskEngineCapitalAdapter(
                     RiskOutflowLine(it.factorKey, it.amount, it.factor, it.weighted)
                 },
                 totalOutflows = lcr?.totalOutflows,
+                notes = l.notes,
             ),
         )
     }
