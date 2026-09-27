@@ -47,9 +47,17 @@ object PositionBuilder {
         inputs: LedgerInputs,
         loans: List<Instrument>? = null,
         controlCodes: Set<String> = DEPOSIT_CONTROL_CODES,
+        /**
+         * The bank's money-market deals (ADR-0315 D6), or null when the treasury read is disabled.
+         * Same rule as loans: once read, the treasury principal accounts are NEVER also carried at
+         * GL level, so a missing deal cannot tie out by the GL figure standing in for it.
+         */
+        treasuryDeals: List<Instrument>? = null,
     ): List<Position> {
         val typeByCode = inputs.trialBalance.associate { it.glAccountCode to it.glAccountType }
-        val contractCodes = if (loans == null) controlCodes else controlCodes + LOANS_RECEIVABLE_CODES
+        val contractCodes = controlCodes +
+            (if (loans == null) emptySet() else LOANS_RECEIVABLE_CODES) +
+            (if (treasuryDeals == null) emptySet() else TreasuryInstrumentMapper.PRINCIPAL_CODES)
         val controlByCurrency = inputs.trialBalance
             .filter { it.glAccountCode in controlCodes }
             .groupBy { it.currency }
@@ -81,6 +89,19 @@ object PositionBuilder {
                 instrumentId = loan.id,
             )
         }
+        val treasuryPositions = treasuryDeals.orEmpty().map { deal ->
+            Position(
+                kind = PositionKind.TREASURY_DEAL,
+                glAccountCode = deal.glAccountCode,
+                glAccountType = deal.glAccountCode?.let {
+                    typeByCode[it] ?: if (deal.outstanding.signum() >= 0) "ASSET" else "LIABILITY"
+                },
+                currency = deal.currency,
+                subAccountId = null,
+                amount = deal.outstanding,
+                instrumentId = deal.id,
+            )
+        }
         val glPositions = inputs.trialBalance
             .filter { it.glAccountCode !in contractCodes }
             .map { line ->
@@ -93,6 +114,6 @@ object PositionBuilder {
                     amount = line.net,
                 )
             }
-        return subLedgerPositions + loanPositions + glPositions
+        return subLedgerPositions + loanPositions + treasuryPositions + glPositions
     }
 }

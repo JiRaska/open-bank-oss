@@ -10,19 +10,22 @@ import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
+import com.openbank.finrep.application.port.out.RiskCapitalPort
 import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.C0100Mapper
+import com.openbank.finrep.domain.mapper.C0200Mapper
 import com.openbank.finrep.domain.model.CorepTemplate
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
 import java.time.LocalDate
 
 /**
- * COREP report generation (ADR-0097 Phase 2, first increment). Only C 01.00 (Own Funds) is
- * implemented; every other COREP template (C 02.00 own funds requirements, C 05.01 transitional
- * provisions, etc.) is out of scope for this increment.
+ * COREP report generation (ADR-0097 Phase 2). C 01.00 (Own Funds) is mapped from the ledger's
+ * trial balance; C 02.00 (Own Funds Requirements) from the risk engine's Pillar 1 result for a
+ * TIED_OUT snapshot at the report date (ADR-0313 D6). Every other COREP template (C 05.01
+ * transitional provisions, etc.) is out of scope.
  *
  * The rendered return deliberately carries **flagged data gaps** rather than silent omissions
  * (ADR-0097): a render with no recognised 6000-6060 capital source is reported as explicit zeros
@@ -30,13 +33,21 @@ import java.time.LocalDate
  * subtotals and `data_gap_cells` proves that the source gap cleared.
  */
 @ApplicationScoped
-class CorepService(private val ledgerPort: LedgerPort, private val metrics: FinrepMetricsPort) : CorepUseCase {
+class CorepService(
+    private val ledgerPort: LedgerPort,
+    private val metrics: FinrepMetricsPort,
+    private val riskCapital: RiskCapitalPort,
+) : CorepUseCase {
 
     override suspend fun getTemplate(query: GetCorepTemplateQuery): CorepTemplate {
         val startedAt = System.nanoTime()
-        val snapshot = trialBalance(query.asOf, query.evidence)
+        var trialBalanceLines = 0
         val template = when (query.templateId) {
-            "C_01.00" -> C0100Mapper.map(snapshot.lines, query.asOf)
+            "C_01.00" -> trialBalance(query.asOf, query.evidence).let {
+                trialBalanceLines = it.lines.size
+                C0100Mapper.map(it.lines, query.asOf)
+            }
+            C0200Mapper.TEMPLATE_ID -> C0200Mapper.map(capital(query.asOf), query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
                 throw IllegalArgumentException("Unknown or unimplemented COREP template: ${query.templateId}")
@@ -46,7 +57,7 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
             TemplateRender(
                 framework = RegulatoryFramework.COREP,
                 templateId = template.templateId,
-                trialBalanceLines = snapshot.lines.size,
+                trialBalanceLines = trialBalanceLines,
                 cells = template.cells.size,
                 dataGapCells = template.cells.count { it.isDataGap },
                 // COREP defines no balance-sheet identity, so "balanced" is neither true nor false.
@@ -57,6 +68,15 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
             ),
         )
         return template
+    }
+
+    /** Count-and-rethrow, as for the ledger below: no Pillar 1 report can be produced without it. */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun capital(asOf: LocalDate) = try {
+        riskCapital.capitalAt(asOf)
+    } catch (e: Exception) {
+        metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.RISK_ENGINE_UNAVAILABLE)
+        throw e
     }
 
     /**

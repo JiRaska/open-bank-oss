@@ -141,16 +141,54 @@ mp:
           topic: openbank.dlq.risk-engine.fx-fixing-in
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # treasury-service's `treasury.deal.*` events (ADR-0315 D6): the bank's own money-market deals,
+      # kept in treasury_deal and carried into every snapshot as instruments. Same rules as above:
+      # nested keys only, an explicit per-service DLQ (KafkaTopic CR + Write ACL in openbank-infra).
+      # earliest: a new group reads the retained deal events once, so deals settled before this
+      # consumer existed still reach the book; the book is monotonic, so a replay changes nothing.
+      treasury-deal-in:
+        connector: smallrye-kafka
+        topic: openbank.treasury.deal.events
+        client:
+          id: risk-engine-treasury-deal-${quarkus.uuid}
+        group:
+          id: risk-engine-treasury-deal
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.risk-engine.treasury-deal-in
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 openbank:
   risk:
     # ADR-0313 D13: a run says which world it describes. Defaults to synthetic, so a run is
     # labelled production only where an environment explicitly says so.
     provenance: ${OPENBANK_RISK_PROVENANCE:synthetic}
+    treasury:
+      # ADR-0315 D6: carry the bank's money-market deals (from treasury's events) into every
+      # snapshot as MONEY_MARKET_DEAL instruments on 1500/1501/1510/2300/2301. Off keeps those
+      # accounts GL-level, as before deals were modelled.
+      enabled: ${OPENBANK_RISK_TREASURY_ENABLED:true}
     lending:
       # ADR-0314 D4: read lending's loan book into every snapshot (loans become contract-level
       # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
       enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
+    eod-snapshot:
+      # ADR-0314: once per business day, drive the SAME SnapshotUseCase.createSnapshot the
+      # POST /api/v1/risk/snapshots endpoint calls, for today's as-of date — replay-idempotent on
+      # (asOf, inputHash), so a re-run or a restart mid-day is a no-op, not a duplicate. Off by
+      # default: ADR-0314 shipped operator-driven, and this scheduler is opt-in per environment,
+      # same shape as openbank.risk.lending.enabled above.
+      enabled: ${OPENBANK_RISK_EOD_SNAPSHOT_ENABLED:false}
+      # `openbank.risk.eod-snapshot.cron` defaults to "0 30 22 * * ?" in the @Scheduled annotation
+      # itself (EodSnapshotScheduler) — same property-naming and Europe/Prague zone convention as
+      # ledger-service's openbank.ledger.accounting-day.cron (AccountingDayScheduler). No key here
+      # unless an environment needs to override it, same as that scheduler's own application.yaml.
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
     # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
     # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),
@@ -412,6 +450,15 @@ authz:
 
 "%prod":
   quarkus:
+    http:
+      # East-west mTLS listener (8443): the listener must VALIDATE the caller's certificate.
+      # `quarkus.http.ssl.client-auth` is BUILD TIME, so it has to live in this file (#10441);
+      # under %prod because with no certificate configured dev/@QuarkusTest would refuse to start.
+      ssl:
+        client-auth: required
+      # Keep plain HTTP/8159: with client-auth REQUIRED Quarkus otherwise drops the HTTP listener
+      # and every existing caller and probe gets connection refused (#10505).
+      insecure-requests: enabled
     # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
     # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
     # this stays under %prod: the client certificate only exists in the cluster.

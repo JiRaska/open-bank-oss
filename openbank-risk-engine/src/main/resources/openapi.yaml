@@ -15,11 +15,12 @@ info:
   #        standard factors from a versioned parameter set. Additive.
   # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
-  # 1.6.1 (#11005, EU LCR/NSFR parameter sets — merged to main), 1.7.0 (#10998) and 1.8.0 (#11015)
-  #        are claimed by other risk-engine PRs at the time this bump was written; requestedBy on
-  #        SnapshotRun/SnapshotRunSummary is additive too, so this takes the next free number after
-  #        all three. Whoever lands after this must re-check info.version against live origin/main
-  #        and re-bump if needed.
+  # 1.6.0 -> 1.7.0: additive — position kind TREASURY_DEAL: the bank's money-market deals from
+  # treasury's events as contract-level MONEY_MARKET_DEAL instruments (ADR-0315 D6).
+  # 1.7.0 -> 1.9.0: 1.7.0 (#10998) and 1.8.0 (#11015) are claimed by other risk-engine PRs at the
+  #        time this bump was written; requestedBy on SnapshotRun/SnapshotRunSummary is additive
+  #        too, so this takes the next free number after both. Whoever lands after this must
+  #        re-check info.version against live origin/main and re-bump if needed.
   version: 1.9.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
@@ -508,7 +509,12 @@ components:
             $ref: '#/components/schemas/Mismatch'
         requestedBy:
           type: [string, 'null']
-          description: The caller's principal name; null for a run recorded before this field existed.
+          description: |
+            The caller's principal name. Null means the run was recorded before this field
+            existed. A value of the form `system:<job>` means a scheduled job requested the
+            run (e.g. `system:risk-engine-eod-snapshot` for the nightly EOD snapshot). A POST
+            that replays an existing run (idempotent replay) returns the ORIGINAL requester,
+            not the caller of the replaying request.
 
     SnapshotRunSummary:
       type: object
@@ -535,7 +541,12 @@ components:
           type: integer
         requestedBy:
           type: [string, 'null']
-          description: The caller's principal name; null for a run recorded before this field existed.
+          description: |
+            The caller's principal name. Null means the run was recorded before this field
+            existed. A value of the form `system:<job>` means a scheduled job requested the
+            run (e.g. `system:risk-engine-eod-snapshot` for the nightly EOD snapshot). A POST
+            that replays an existing run (idempotent replay) returns the ORIGINAL requester,
+            not the caller of the replaying request.
 
     SnapshotRunList:
       type: object
@@ -555,7 +566,7 @@ components:
           # x-extensible-enum, not enum: the position kinds GROW as ADR-0314 D4 brings contract
           # sources in (LOAN now, treasury kinds with ADR-0315). A client must tolerate an unknown
           # kind; declaring the set closed would make every new source a URL-major break.
-          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN]
+          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN, TREASURY_DEAL]
           description: >-
             SUB_LEDGER (a customer balance on deposit control), GL_ACCOUNT (a GL account with no finer
             breakdown) or LOAN (a loan from lending's loan book, ADR-0314 D4). The set grows.
