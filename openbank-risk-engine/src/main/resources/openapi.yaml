@@ -20,7 +20,10 @@ info:
   # 1.7.0 -> 1.11.0: additive — the capital total is stated in CZK at the ČNB fixing in effect on
   #        asOf (Capital.fxRates lists every rate used; Capital.totalNotStated says why a total is
   #        absent). 1.8.0-1.10.0 are claimed by open PRs #11015, #11016, #11040.
-  version: 1.11.0
+  # 1.11.0 -> 1.11.1: correction — LiquiditySnapshot.notes documents the stable machine-readable
+  #        code prefix (e.g. "PLEDGED_COLLATERAL_NOT_MODELLED: ...") a note may carry; no shape
+  #        change, description only.
+  version: 1.11.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -1185,6 +1188,11 @@ components:
         notes:
           type: array
           items: {type: string}
+          description: >-
+            Free-text caveats about this run. A note may start with a stable machine-readable code
+            followed by ": " (e.g. "PLEDGED_COLLATERAL_NOT_MODELLED: ...") so a downstream consumer
+            can detect it by code instead of matching free text; the remainder is human-readable and
+            may change wording between releases.
         assumptions: {$ref: '#/components/schemas/LiquidityAssumptions'}
 
     ExposureLine:
