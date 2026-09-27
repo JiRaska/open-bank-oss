@@ -319,7 +319,8 @@ class RiskEngineCapitalPactConsumerTest {
 
     private companion object {
         const val PLEDGED_NOTE_EXAMPLE =
-            "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it " +
+            "PLEDGED_COLLATERAL_NOT_MODELLED: A secured central-bank borrowing (ČNB lombard) is outstanding, " +
+                "but the collateral pledged for it " +
                 "is not modelled: pledged assets are encumbered and would not count as HQLA."
         const val LIQUIDITY_STATE = "a TIED_OUT risk snapshot with an LCR result exists at the report date"
         const val STATE = "a TIED_OUT risk snapshot exists at the report date"
