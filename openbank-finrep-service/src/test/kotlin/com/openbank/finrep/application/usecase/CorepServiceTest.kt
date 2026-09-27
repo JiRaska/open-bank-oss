@@ -239,7 +239,7 @@ class CorepServiceTest {
         val found = object : RiskLiquidityPort {
             override suspend fun liquidityAt(asOf: LocalDate) = RiskLiquidityLookup.found(
                 RiskLiquidityResult(
-                    "run-1", asOf, "bcbs-d238-d295", "2", "CZK", emptyList(),
+                    "run-1", asOf, "eu-2015-61-crr2", "2", "CZK", emptyList(),
                     BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 1, 0,
                     outflows = listOf(
                         com.openbank.finrep.application.port.out.RiskOutflowLine(

@@ -37,8 +37,9 @@ class C7300MapperTest {
         total: String? = "550",
         currencies: Int = 1,
         unclassified: Int = 0,
+        parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
     ) = RiskLiquidityResult(
-        "run-7", asOf, "bcbs-d238-d295", "2", "CZK", emptyList(),
+        "run-7", asOf, parameterSet, "2", "CZK", emptyList(),
         BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, currencies, unclassified,
         outflows = lines, totalOutflows = total?.let(::BigDecimal),
     )
@@ -109,7 +110,7 @@ class C7300MapperTest {
         val derogated = listOf(line(C7300Mapper.STABLE, "2000", "0.03")) + lines.drop(1)
         val t = C7300Mapper.map(RiskLiquidityLookup.found(result(lines = derogated, total = "510")), asOf)
         assertThat(t.at("r0110", "c0060").isDataGap).isTrue()
-        assertThat(t.at("r0110", "c0060").gapReason).contains("0.03")
+        assertThat(t.at("r0110", "c0060").gapReason).contains("0.03", "'eu-2015-61-crr2'").doesNotContain("d238")
         assertThat(t.at("r0110", "c0010").isDataGap).isFalse()
         assertThat(t.at("r0030", "c0060").isDataGap).isTrue()
         assertThat(t.at("r0010", "c0060").isDataGap).isTrue()
@@ -122,6 +123,7 @@ class C7300MapperTest {
             RiskLiquidityLookup.unavailable("read disabled") to "read disabled",
             RiskLiquidityLookup.found(result(currencies = 2, total = null)) to "multi-currency",
             RiskLiquidityLookup.found(result(unclassified = 3)) to "3 balance(s) are unclassified",
+            RiskLiquidityLookup.found(result(lines = emptyList(), currencies = 0, total = null)) to "empty book",
         )
         cases.forEach { (lookup, reason) ->
             val t = C7300Mapper.map(lookup, asOf)
@@ -130,6 +132,25 @@ class C7300MapperTest {
                 assertThat(c.gapReason).contains(reason)
             }
         }
+    }
+
+    @Test
+    fun `a run on a non-EU parameter set blanks every 2015-61 outflow cell and names the set`() {
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result(parameterSet = "bcbs-d238-d295")), asOf)
+        listOf("r0010", "r0030", "r0110", "r0130", "r0170", "r0885").forEach { row ->
+            assertThat(t.at(row, "c0060").isDataGap).isTrue()
+            assertThat(t.at(row, "c0060").gapReason).contains("'bcbs-d238-d295'", "run-7", "eu-2015-61-crr2")
+            assertThat(t.at(row, "c0010").isDataGap).isFalse()
+        }
+    }
+
+    @Test
+    fun `an empty book is not reported as multi-currency`() {
+        val t = C7300Mapper.map(
+            RiskLiquidityLookup.found(result(lines = emptyList(), currencies = 0, total = null)),
+            asOf,
+        )
+        assertThat(t.at("r0010", "c0010").gapReason).contains("empty book").doesNotContain("multi-currency")
     }
 
     @Test
