@@ -23,6 +23,7 @@ data class ForecastRowDto(
     val outflows: BigDecimal,
     val net: BigDecimal,
     val cumulative: BigDecimal,
+    val minCumulative: BigDecimal,
 )
 
 data class CurrencyForecastDto(
@@ -66,6 +67,7 @@ fun ForecastRow.toDto() = ForecastRowDto(
     outflows = outflows,
     net = net,
     cumulative = cumulative,
+    minCumulative = minCumulative,
 )
 
 fun CurrencyForecast.toDto() = CurrencyForecastDto(

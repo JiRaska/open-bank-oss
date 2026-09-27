@@ -182,6 +182,18 @@ object Liquidity {
         )
     }
 
+    /**
+     * Ids of the contract-level instruments whose position [compute] counts in the HQLA stock — a
+     * money-market deal on an account the parameter set classifies as HQLA (1510 ČNB deposit
+     * facility, Level 1). Read off the same [LiquidityClassification.classOf] call [compute] makes,
+     * so there is one classification, not a second list of "HQLA accounts" to drift from it.
+     */
+    fun hqlaInstrumentIds(positions: List<Position>, params: LiquidityParameters): Set<String> = positions.asSequence()
+        .filter { it.kind == PositionKind.TREASURY_DEAL && it.instrumentId != null }
+        .filter { params.classification.classOf(it.glAccountCode, it.glAccountType)?.isHqla == true }
+        .mapNotNull { it.instrumentId }
+        .toSet()
+
     /** d238 Annex 1 ¶5, with the 2/3, 15/85 and 15/60 ratios derived from the two configured caps. */
     fun hqlaStock(lines: List<HqlaLine>, level2Cap: BigDecimal, level2bCap: BigDecimal): HqlaStock {
         fun sum(level: HqlaLevel) = lines.filter { it.level == level }.sumOf { it.afterHaircut }

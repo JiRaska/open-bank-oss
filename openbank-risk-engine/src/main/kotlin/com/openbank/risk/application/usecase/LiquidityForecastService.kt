@@ -9,8 +9,6 @@ import com.openbank.risk.application.port.`in`.LiquidityForecastAnalysis
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.domain.cashflow.BehaviouralModel
-import com.openbank.risk.domain.cashflow.SnapshotCashFlowProjection
-import com.openbank.risk.domain.liquidity.Liquidity
 import com.openbank.risk.domain.liquidity.LiquidityForecast
 import com.openbank.risk.domain.liquidity.LiquidityParameters
 import java.util.UUID
@@ -39,16 +37,12 @@ class LiquidityForecastService(
         require(curveSet.asOf == run.asOf) {
             "curve set ${curveSet.id} is as of ${curveSet.asOf} but run ${run.id} is as of ${run.asOf}"
         }
-        val flows = SnapshotCashFlowProjection.flows(positions, run.asOf, curveSet, model, instruments)
-        val hqla = Liquidity.compute(positions, instruments, run.asOf, parameters).currencies
-            .filter { it.lcr.hqla.lines.isNotEmpty() }
-            .associate { it.currency to it.lcr.hqla }
         return LiquidityForecastAnalysis(
             run,
             curveSet,
             model,
             parameters,
-            LiquidityForecast.forecast(flows, hqla, run.asOf, horizonDays),
+            LiquidityForecast.ofSnapshot(positions, instruments, run.asOf, curveSet, model, parameters, horizonDays),
         )
     }
 }

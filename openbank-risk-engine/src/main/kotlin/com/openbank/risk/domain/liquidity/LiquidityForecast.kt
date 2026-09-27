@@ -4,8 +4,13 @@
 
 package com.openbank.risk.domain.liquidity
 
+import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.cashflow.CashFlow
+import com.openbank.risk.domain.cashflow.SnapshotCashFlowProjection
 import com.openbank.risk.domain.cashflow.SourcedFlows
+import com.openbank.risk.domain.curve.CurveSet
+import com.openbank.risk.domain.model.Instrument
+import com.openbank.risk.domain.model.Position
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -13,7 +18,9 @@ import java.time.temporal.ChronoUnit
 /**
  * One row of the ladder: calendar days [fromDay]..[toDay] after as-of (inclusive), with inflows
  * (positive) and outflows (negative) split by source, and the cumulative position at the END of
- * the row — opening liquidity plus every net flow up to and including [toDay].
+ * the row — opening liquidity plus every net flow up to and including [toDay]. [minCumulative] is
+ * the lowest end-of-day cumulative within the row: equal to [cumulative] for a daily row, and on a
+ * weekly row it shows a mid-week dip that the end-of-week figure would hide.
  */
 data class ForecastRow(
     val fromDay: Int,
@@ -25,6 +32,7 @@ data class ForecastRow(
     val behaviouralInflows: BigDecimal,
     val behaviouralOutflows: BigDecimal,
     val cumulative: BigDecimal,
+    val minCumulative: BigDecimal,
 ) {
     val inflows: BigDecimal get() = contractualInflows.add(behaviouralInflows)
     val outflows: BigDecimal get() = contractualOutflows.add(behaviouralOutflows)
@@ -95,8 +103,16 @@ object LiquidityForecast {
         ),
         ForecastAssumption(
             "gl-positions-not-modelled",
-            "GL-level positions other than HQLA (nostro, money-market placements, borrowings, capital) carry " +
-                "no contract terms in the snapshot and project no flows: not modelled.",
+            "GL-level positions other than HQLA (nostro, accrued interest, capital, and money-market principal " +
+                "accounts while the treasury read is off) carry no contract terms in the snapshot and project no " +
+                "flows: not modelled. Money-market placements and borrowings read from treasury are contract-level " +
+                "and project their maturity flows.",
+        ),
+        ForecastAssumption(
+            "hqla-instruments-in-opening-stock",
+            "Instruments whose account the liquidity parameter set classifies as HQLA (e.g. the ČNB deposit " +
+                "facility, Level 1) are already counted in the opening HQLA stock, so their maturity flows are " +
+                "excluded from the ladder rather than counted twice. They still appear in the cash-flow read.",
         ),
         ForecastAssumption(
             "new-business-not-modelled",
@@ -116,6 +132,36 @@ object LiquidityForecast {
             "Computed per currency; no FX conversion, so a surplus in one currency never covers a gap in another.",
         ),
     )
+
+    /**
+     * The forecast of a snapshot: the shared cash-flow projection, less the flows of instruments
+     * [Liquidity.compute] already counts in the HQLA stock ([Liquidity.hqlaInstrumentIds]), laddered
+     * from that stock. Without the exclusion a ČNB deposit would count once as opening liquidity and
+     * again as a maturity inflow.
+     */
+    @Suppress("LongParameterList")
+    fun ofSnapshot(
+        positions: List<Position>,
+        instruments: List<Instrument>,
+        asOf: LocalDate,
+        curves: CurveSet,
+        model: BehaviouralModel,
+        params: LiquidityParameters,
+        horizonDays: Int,
+    ): LiquidityForecastResult {
+        val inStock = Liquidity.hqlaInstrumentIds(positions, params)
+        val flows = SnapshotCashFlowProjection.flows(
+            positions,
+            asOf,
+            curves,
+            model,
+            instruments.filterNot { it.id in inStock },
+        )
+        val hqla = Liquidity.compute(positions, instruments, asOf, params).currencies
+            .filter { it.lcr.hqla.lines.isNotEmpty() }
+            .associate { it.currency to it.lcr.hqla }
+        return forecast(flows, hqla, asOf, horizonDays)
+    }
 
     fun forecast(
         flows: Map<String, SourcedFlows>,
@@ -185,6 +231,7 @@ object LiquidityForecast {
                 behaviouralInflows = span.sumOf { it.behaviouralIn },
                 behaviouralOutflows = span.sumOf { it.behaviouralOut },
                 cumulative = cumulative[to],
+                minCumulative = (from..to).minOf { cumulative[it] },
             )
         }
         return CurrencyForecast(

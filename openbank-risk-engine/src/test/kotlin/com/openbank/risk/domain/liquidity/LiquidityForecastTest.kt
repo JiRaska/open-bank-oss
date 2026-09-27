@@ -4,6 +4,7 @@
 
 package com.openbank.risk.domain.liquidity
 
+import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.cashflow.CashFlow
 import com.openbank.risk.domain.cashflow.CashFlowKind
@@ -14,8 +15,11 @@ import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurvePillar
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.model.Position
+import com.openbank.risk.domain.model.PositionBuilder
 import com.openbank.risk.domain.model.PositionKind
 import com.openbank.risk.domain.model.Provenance
+import com.openbank.risk.domain.model.TreasuryDeal
+import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -178,5 +182,93 @@ class LiquidityForecastTest {
         assertThat(c.rows.first().behaviouralOutflows).isEqualByComparingTo("-450.00")
         assertThat(laddered).isEqualByComparingTo(BigDecimal("-450.00").add(BigDecimal("-210.00")))
         assertThat(c.survivalDay).isEqualTo(1)
+    }
+
+    // ---- money-market deals (ADR-0315) and the HQLA double count ----
+
+    private val czkCurves = Curve(CurveIndex.CZEONIA, asOf, listOf(CurvePillar(asOf.plusYears(1), BigDecimal("0.04"))))
+        .let { CurveSet(UUID.randomUUID(), asOf, Provenance.SYNTHETIC, "test", Instant.EPOCH, mapOf(it.index to it)) }
+
+    private fun deal(product: String, principal: String) = TreasuryInstrumentMapper.toInstrument(
+        TreasuryDeal(
+            dealId = UUID.nameUUIDFromBytes(product.toByteArray()),
+            product = product,
+            counterpartyId = if (product == TreasuryDeal.CNB_DEPOSIT_FACILITY) "CNB" else "SIMBK-A",
+            currency = "CZK",
+            principal = BigDecimal(principal),
+            rate = BigDecimal("4.25"),
+            valueDate = asOf,
+            maturityDate = asOf.plusDays(30),
+            state = TreasuryDeal.SETTLED,
+        ),
+    )
+
+    private fun tb(code: String, debit: String, credit: String) = Fixtures.tb(code, "ASSET", "CZK", debit, credit)
+
+    /** A CNB deposit on 1510 and a placement on 1500, each funded from 1001, as PositionBuilder builds them. */
+    private fun dealBook(): Pair<List<Position>, List<com.openbank.risk.domain.model.Instrument>> {
+        val cnb = deal(TreasuryDeal.CNB_DEPOSIT_FACILITY, "1000000.00")
+        val placement = deal(TreasuryDeal.MM_PLACEMENT, "100000.00")
+        val ledger = com.openbank.risk.domain.model.LedgerInputs(
+            asOf,
+            listOf(tb("1510", "1000000.00", "0"), tb("1500", "100000.00", "0"), tb("1001", "0", "1100000.00")),
+            emptyList(),
+        )
+        return PositionBuilder.build(ledger, treasuryDeals = listOf(cnb, placement)) to listOf(cnb, placement)
+    }
+
+    @Test
+    fun `the cash-flow read projects every money-market deal, HQLA or not, exactly as main does`() {
+        val (positions, instruments) = dealBook()
+        val cf = SnapshotCashFlowProjection.project(
+            positions,
+            asOf,
+            czkCurves,
+            BehaviouralModel.NMD_PHASE0,
+            instruments,
+        )
+        val czk = cf.currencies.single()
+        // Pinned against main's own deal expectation (100000 @ 4.25% for 30 days = 354.17 interest):
+        // principal + ACT/360 interest of both deals, nothing else on the book projects.
+        assertThat(czk.total).isEqualByComparingTo("1103895.84")
+        assertThat(czk.total).isEqualByComparingTo(
+            instruments.flatMap { SnapshotCashFlowProjection.moneyMarketFlows(it) }.sumOf { it.amount },
+        )
+        assertThat(cf.expanded).isEqualTo(2)
+    }
+
+    @Test
+    fun `a CNB deposit on 1510 is opening HQLA and not a forecast inflow, a 1500 placement is an inflow`() {
+        val (positions, instruments) = dealBook()
+        val params = LiquidityTestParameters.shipped()
+        val c = LiquidityForecast.ofSnapshot(
+            positions,
+            instruments,
+            asOf,
+            czkCurves,
+            BehaviouralModel.NMD_PHASE0,
+            params,
+            90,
+        ).currencies.single()
+
+        assertThat(c.opening).isEqualByComparingTo("1000000.00")
+        val inflows = c.rows.fold(BigDecimal.ZERO) { a, r -> a.add(r.inflows) }
+        // Only the placement: 100000 principal + 354.17 interest on day 30. The CNB deposit's
+        // 1003541.67 maturity is NOT laddered — it is the opening stock already.
+        assertThat(inflows).isEqualByComparingTo("100354.17")
+        assertThat(c.rows.single { it.toDay == 30 }.contractualInflows).isEqualByComparingTo("100354.17")
+        assertThat(c.rows.last().cumulative).isEqualByComparingTo("1100354.17")
+        assertThat(LiquidityForecast.ASSUMPTIONS.map { it.key }).contains("hqla-instruments-in-opening-stock")
+        assertThat(LiquidityForecast.ASSUMPTIONS.single { it.key == "gl-positions-not-modelled" }.statement)
+            .contains("project their maturity flows")
+    }
+
+    @Test
+    fun `a weekly row carries the lowest mid-week cumulative its end-of-week figure hides`() {
+        val c = forecast(emptyList(), listOf(flow(33, "-10.00"), flow(34, "20.00")), opening = "5.00")
+        val week = c.rows.single { it.toDay == 37 }
+        assertThat(week.cumulative).isEqualByComparingTo("15.00")
+        assertThat(week.minCumulative).isEqualByComparingTo("-5.00")
+        assertThat(c.rows.filter { it.fromDay == it.toDay }).allMatch { it.minCumulative.compareTo(it.cumulative) == 0 }
     }
 }

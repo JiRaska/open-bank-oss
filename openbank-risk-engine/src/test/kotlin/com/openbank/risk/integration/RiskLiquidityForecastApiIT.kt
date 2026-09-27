@@ -7,6 +7,8 @@ package com.openbank.risk.integration
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.risk.application.port.out.TreasuryDealBook
+import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.domain.Fixtures.tb
@@ -16,11 +18,13 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -37,9 +41,36 @@ class RiskLiquidityForecastApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @Inject
+    lateinit var treasury: TreasuryDealBook
+
+    /** The CNB deposit behind the 1000 on 1510: with the treasury read on, 1510 is contract-level. */
+    private val cnbDeal = UUID.randomUUID()
+
     @AfterEach
     fun reset() {
         ledger.inputs = Fixtures.tiedOut()
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$cnbDeal'")
+    }
+
+    /**
+     * Matures on day 15 of the 2028-01-31 run, inside the horizon: its 1000 + interest must NOT be
+     * laddered, because the same 1000 is already the opening HQLA stock.
+     */
+    private fun seedCnbDeposit() = runBlocking {
+        treasury.apply(
+            TreasuryDealEvent(
+                state = "SETTLED",
+                dealId = cnbDeal,
+                product = "CNB_DEPOSIT_FACILITY",
+                counterpartyId = "CNB",
+                currency = "CZK",
+                principal = BigDecimal("1000.00"),
+                rate = BigDecimal("2.50"),
+                valueDate = LocalDate.parse("2028-01-30"),
+                maturityDate = LocalDate.parse("2028-02-15"),
+            ),
+        )
     }
 
     /** Fixtures.tiedOut() (1500 CZK of customer deposits) plus 1000 CZK at the CNB deposit facility (HQLA L1). */
@@ -68,6 +99,7 @@ class RiskLiquidityForecastApiIT {
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
     fun `a funded book survives the horizon, opening from the same HQLA stock the LCR reports`() {
         ledger.inputs = withReserves()
+        seedCnbDeposit()
         val runId = snapshot("2028-01-31")
         val setId = curveSet("2028-01-31")
 
@@ -97,7 +129,13 @@ class RiskLiquidityForecastApiIT {
             assertThat(row["cumulative"].decimalValue()).isEqualByComparingTo(running)
         }
         // Three monthly core run-off slices of 17.50 by day 90 (2028-02-29, 03-31 and 04-30 = day 90).
+        // The CNB deposit maturing on day 15 adds nothing: it is the opening stock already.
         assertThat(ladder.last()["cumulative"].decimalValue()).isEqualByComparingTo("497.50")
+        assertThat(ladder[14]["contractualInflows"].decimalValue()).isEqualByComparingTo("0")
+        ladder.forEach {
+            assertThat(it["minCumulative"].decimalValue()).isLessThanOrEqualTo(it["cumulative"].decimalValue())
+        }
+        assertThat(body["assumptions"].map { it["key"].asText() }).contains("hqla-instruments-in-opening-stock")
         assertThat(czk["survivalHorizonDays"].isNull).isTrue()
         assertThat(czk["survivalDate"].isNull).isTrue()
     }
