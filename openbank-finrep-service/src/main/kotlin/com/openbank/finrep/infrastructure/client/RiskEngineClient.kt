@@ -9,6 +9,7 @@ import com.openbank.finrep.application.port.out.RiskCapitalPort
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
 import com.openbank.finrep.application.port.out.RiskHqlaLine
+import com.openbank.finrep.application.port.out.RiskInflowLine
 import com.openbank.finrep.application.port.out.RiskLiquidityLookup
 import com.openbank.finrep.application.port.out.RiskLiquidityPort
 import com.openbank.finrep.application.port.out.RiskLiquidityResult
@@ -109,6 +110,11 @@ data class LcrResponse(
     val hqla: HqlaResponse,
     val outflows: List<OutflowLineResponse> = emptyList(),
     val totalOutflows: BigDecimal? = null,
+    val inflows: List<OutflowLineResponse> = emptyList(),
+    val totalInflows: BigDecimal? = null,
+    val inflowCap: BigDecimal? = null,
+    val cappedInflows: BigDecimal? = null,
+    val inflowCapBinding: Boolean? = null,
 )
 
 data class CurrencyLiquidityResponse(val currency: String, val lcr: LcrResponse)
@@ -182,6 +188,13 @@ class RiskEngineCapitalAdapter(
                     RiskOutflowLine(it.factorKey, it.amount, it.factor, it.weighted)
                 },
                 totalOutflows = lcr?.totalOutflows,
+                inflows = lcr?.inflows.orEmpty().map {
+                    RiskInflowLine(it.factorKey, it.amount, it.factor, it.weighted)
+                },
+                totalInflows = lcr?.totalInflows,
+                inflowCap = lcr?.inflowCap,
+                cappedInflows = lcr?.cappedInflows,
+                inflowCapBinding = lcr?.inflowCapBinding,
             ),
         )
     }

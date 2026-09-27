@@ -19,12 +19,14 @@ import com.openbank.finrep.application.port.out.RiskCapitalLookup
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
 import com.openbank.finrep.application.port.out.RiskHqlaLine
+import com.openbank.finrep.application.port.out.RiskInflowLine
 import com.openbank.finrep.application.port.out.RiskLiquidityLookup
 import com.openbank.finrep.application.port.out.RiskLiquidityResult
 import com.openbank.finrep.application.port.out.RiskOutflowLine
 import com.openbank.finrep.domain.mapper.C0200Mapper
 import com.openbank.finrep.domain.mapper.C7200Mapper
 import com.openbank.finrep.domain.mapper.C7300Mapper
+import com.openbank.finrep.domain.mapper.C7400Mapper
 import com.openbank.finrep.infrastructure.client.CapitalResponse
 import com.openbank.finrep.infrastructure.client.LiquidityResponse
 import com.openbank.finrep.infrastructure.client.RiskEngineRestClient
@@ -174,6 +176,19 @@ class RiskEngineCapitalPactConsumerTest {
                 o.decimalType("weighted", 200.00)
             }
             lcr.decimalType("totalOutflows", 200.00)
+            // C 74.00 reads the inflow lines, the engine's uncapped total they must tie to, and the
+            // 75 % cap as the engine applied it (cap amount, capped total, binding). A tied book may
+            // hold no asset with an inflow, so the list may be empty.
+            lcr.minArrayLike("inflows", 0, 1) { i ->
+                i.stringType("factorKey", "lcr-retail-loan-inflow")
+                i.decimalType("amount", 100.00)
+                i.numberType("factor", 0.50)
+                i.decimalType("weighted", 50.00)
+            }
+            lcr.decimalType("totalInflows", 50.00)
+            lcr.decimalType("inflowCap", 150.00)
+            lcr.decimalType("cappedInflows", 50.00)
+            lcr.booleanType("inflowCapBinding", false)
         }
     }
 
@@ -307,6 +322,62 @@ class RiskEngineCapitalPactConsumerTest {
         // ... and the example as served (one unclassified balance) must refuse the totals and say why.
         val served = C7300Mapper.map(RiskLiquidityLookup.found(result), LocalDate.parse(REPORTING_DATE))
         val totalRow = served.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }
+        assertThat(totalRow.isDataGap).isTrue()
+        assertThat(totalRow.gapReason).contains("unclassified in risk-engine snapshot ${l.runId}")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "liquidityPact")
+    fun `the same liquidity result feeds a C 74_00 render`(mockServer: MockServer) {
+        assertThat(liquidityPath).isEqualTo("$RISK_SNAPSHOTS_PATH/{id}/liquidity")
+        val body = given().baseUri(mockServer.getUrl()).get(liquidityPath.replace("{id}", EXAMPLE_RUN_ID))
+            .then().statusCode(200).extract().asString()
+        val l = json.readValue<LiquidityResponse>(body)
+        val lcr = checkNotNull(l.total).lcr
+        val result = RiskLiquidityResult(
+            runId = l.runId,
+            asOf = LocalDate.parse(l.asOf),
+            parameterSetId = l.parameterSetId,
+            parameterSetVersion = l.parameterSetVersion,
+            currency = checkNotNull(l.total).currency,
+            lines = emptyList(),
+            level1 = lcr.hqla.level1,
+            level2a = lcr.hqla.level2a,
+            level2b = lcr.hqla.level2b,
+            currencyCount = l.currencies.size,
+            unclassifiedBalances = l.unclassified.size,
+            outflows = lcr.outflows.map { RiskOutflowLine(it.factorKey, it.amount, it.factor, it.weighted) },
+            totalOutflows = lcr.totalOutflows,
+            inflows = lcr.inflows.map { RiskInflowLine(it.factorKey, it.amount, it.factor, it.weighted) },
+            totalInflows = lcr.totalInflows,
+            inflowCap = lcr.inflowCap,
+            cappedInflows = lcr.cappedInflows,
+            inflowCapBinding = lcr.inflowCapBinding,
+        )
+        val inflow = lcr.inflows.single()
+        assertThat(inflow.factorKey).isEqualTo("lcr-retail-loan-inflow")
+        assertThat(inflow.amount).isEqualByComparingTo("100.00")
+        assertThat(inflow.factor).isEqualByComparingTo("0.50")
+        assertThat(inflow.weighted).isEqualByComparingTo("50.00")
+        assertThat(lcr.totalInflows).isEqualByComparingTo("50.00")
+        assertThat(lcr.inflowCap).isEqualByComparingTo("150.00")
+        assertThat(lcr.cappedInflows).isEqualByComparingTo("50.00")
+        assertThat(lcr.inflowCapBinding).isFalse()
+        // With the unclassified balance cleared the render ties, states the inflow and the capped
+        // figure, proving every inflow field is read, not merely parsed ...
+        val tied = C7400Mapper.map(
+            RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0)),
+            LocalDate.parse(REPORTING_DATE),
+        )
+        assertThat(tied.cells.single { it.rowRef == "r0030" && it.colRef == "c0140" }.value)
+            .isEqualByComparingTo("50.00")
+        assertThat(tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }.isDataGap).isFalse()
+        val capped = tied.cells.single { it.rowRef == "m0010" && it.colRef == "c0140" }
+        assertThat(capped.isDataGap).isFalse()
+        assertThat(capped.value).isEqualByComparingTo("50.00")
+        // ... and the example as served (one unclassified balance) must refuse the totals and say why.
+        val served = C7400Mapper.map(RiskLiquidityLookup.found(result), LocalDate.parse(REPORTING_DATE))
+        val totalRow = served.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }
         assertThat(totalRow.isDataGap).isTrue()
         assertThat(totalRow.gapReason).contains("unclassified in risk-engine snapshot ${l.runId}")
     }

@@ -127,6 +127,25 @@ data class RiskLiquidityResult(
     val unclassifiedBalances: Int,
     val outflows: List<RiskOutflowLine> = emptyList(),
     val totalOutflows: BigDecimal? = null,
+    val inflows: List<RiskInflowLine> = emptyList(),
+    /** The engine's Σ weighted inflows, BEFORE the 75 % cap (C 74.00). */
+    val totalInflows: BigDecimal? = null,
+    /** The engine's cap amount: its cap factor × [totalOutflows]. */
+    val inflowCap: BigDecimal? = null,
+    /** The engine's inflows AFTER the cap: min([totalInflows], [inflowCap]). */
+    val cappedInflows: BigDecimal? = null,
+    val inflowCapBinding: Boolean? = null,
+)
+
+/**
+ * One LCR inflow line of a risk-engine result (COREP C 74.00): the inflow factor key the engine applied
+ * (e.g. `lcr-retail-loan-inflow`), the unweighted [amount], the [factor] and the [weighted] inflow.
+ */
+data class RiskInflowLine(
+    val factorKey: String,
+    val amount: BigDecimal,
+    val factor: BigDecimal,
+    val weighted: BigDecimal,
 )
 
 /**
@@ -154,7 +173,8 @@ data class RiskLiquidityLookup(val result: RiskLiquidityResult?, val unavailable
 }
 
 /**
- * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows). The run is selected
+ * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows, C 74.00
+ * inflows). The run is selected
  * exactly as [RiskCapitalPort] selects it, so C 02.00 and C 72.00 of one date read the same snapshot.
  */
 interface RiskLiquidityPort {
