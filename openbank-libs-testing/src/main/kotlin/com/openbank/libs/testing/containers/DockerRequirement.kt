@@ -25,9 +25,18 @@ object DockerRequirement {
         ci: String? = System.getenv("CI"),
     ) {
         if (available) return
-        if (ci.equals("true", ignoreCase = true)) {
+        if (isCi(ci)) {
             throw AssertionFailedError("Docker is required for Testcontainers ITs when CI=true, but is not available")
         }
         throw TestAbortedException("Docker not available — skipping Testcontainers IT")
     }
+
+    /**
+     * GitHub Actions always sets `CI=true` (lowercase, per its own docs), but this is a public
+     * env var any runner or local shell can set, and other CI systems (e.g. Jenkins, some
+     * self-hosted setups) commonly use `CI=1`. Match both, case-insensitively, rather than the
+     * single literal `"true"` — a differently-cased or `1`-valued CI flag must still fail loudly
+     * instead of silently skipping.
+     */
+    private fun isCi(ci: String?): Boolean = ci.equals("true", ignoreCase = true) || ci.equals("1", ignoreCase = true)
 }

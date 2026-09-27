@@ -19,10 +19,28 @@ class DockerRequirementTest {
     }
 
     @Test
+    fun `no Docker under a differently-cased CI value still fails`() {
+        assertThatThrownBy { DockerRequirement.require(available = false, ci = "True") }
+            .isInstanceOf(AssertionFailedError::class.java)
+        assertThatThrownBy { DockerRequirement.require(available = false, ci = "TRUE") }
+            .isInstanceOf(AssertionFailedError::class.java)
+    }
+
+    @Test
+    fun `no Docker under CI=1 still fails`() {
+        assertThatThrownBy { DockerRequirement.require(available = false, ci = "1") }
+            .isInstanceOf(AssertionFailedError::class.java)
+    }
+
+    @Test
     fun `no Docker outside CI skips`() {
         assertThatThrownBy { DockerRequirement.require(available = false, ci = null) }
             .isInstanceOf(TestAbortedException::class.java)
         assertThatThrownBy { DockerRequirement.require(available = false, ci = "false") }
+            .isInstanceOf(TestAbortedException::class.java)
+        assertThatThrownBy { DockerRequirement.require(available = false, ci = "0") }
+            .isInstanceOf(TestAbortedException::class.java)
+        assertThatThrownBy { DockerRequirement.require(available = false, ci = "") }
             .isInstanceOf(TestAbortedException::class.java)
     }
 
