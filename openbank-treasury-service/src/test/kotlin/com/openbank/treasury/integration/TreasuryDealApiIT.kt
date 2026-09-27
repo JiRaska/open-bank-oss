@@ -231,6 +231,50 @@ class TreasuryDealApiIT {
             .body("limitOverride.by", equalTo("sara.senior"))
     }
 
+    // --- #10896: ČNB lombard (marginal lending) facility ---
+
+    private fun lombardBody(currency: String = "CZK", counterparty: String = "CNB", rate: String = "5.75") = """
+        {"product":"CNB_LOMBARD","counterpartyId":"$counterparty","currency":"$currency",
+         "principal":2500000.00,"rate":$rate,"valueDate":"$today","maturityDate":"${today.plusDays(30)}"}
+    """.trimIndent()
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `13 - a dealer drafts an overnight ČNB lombard borrowing, off-product terms are 400`() {
+        for (bad in listOf(
+            lombardBody(currency = "EUR"),
+            lombardBody(counterparty = "SIMBK-A"),
+            lombardBody(rate = "0"),
+        )) {
+            given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+                .body(bad).`when`().post("/api/v1/treasury/deals").then().statusCode(400)
+        }
+        lombardId = draft(lombardBody())
+        given().`when`().get("/api/v1/treasury/deals/$lombardId").then().statusCode(200)
+            .body("product", equalTo("CNB_LOMBARD"))
+            .body(
+                "maturityDate",
+                equalTo(com.openbank.treasury.domain.model.DayCount.nextBusinessDay(today).toString()),
+            )
+        action(lombardId, "submit").then().statusCode(200)
+            .body("state", equalTo("PENDING_APPROVAL"))
+            .body("limitCheck.breached", equalTo(false))
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `14 - four-eyes books the lombard, settlement credits Borrowings from CNB 2320`() {
+        action(lombardId, "approve").then().statusCode(200).body("state", equalTo("BOOKED"))
+        action(lombardId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        val settled = ledger.journals.getValue("treasury:$lombardId:settled").second
+        assertThat(settled.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+            .containsExactly("DEBIT 1001 2500000.00 CZK", "CREDIT 2320 2500000.00 CZK")
+        assertThat(outboxTypes(UUID.fromString(lombardId)))
+            .containsExactly("treasury.deal.booked.v1", "treasury.deal.settled.v1")
+    }
+
     private fun state(id: String): String = jdbc { c ->
         c.prepareStatement("select state from deals where deal_id = ?").use { ps ->
             ps.setObject(1, UUID.fromString(id))
@@ -270,5 +314,6 @@ class TreasuryDealApiIT {
         lateinit var dealId: String
         lateinit var breachId: String
         lateinit var selfId: String
+        lateinit var lombardId: String
     }
 }

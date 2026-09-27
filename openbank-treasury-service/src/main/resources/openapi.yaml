@@ -6,7 +6,10 @@ info:
   #        per-currency daily positions.
   # 1.1.0: additive — POST /deals/{id}/override-limit (ROLE_TREASURY_SENIOR_APPROVER) and
   #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
-  version: 1.1.0
+  # 1.5.0: additive — product CNB_LOMBARD (#10896): overnight borrowing from the ČNB marginal
+  #        lending (lombard) facility. The RESPONSE ProductType is now x-extensible-enum (the
+  #        product set grows); the request keeps a closed enum (DraftProductType), one value wider (ADR-0315 D2). Queue: #11036 1.2.0, #11041 1.3.0, #11052 1.4.0.
+  version: 1.5.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -28,6 +31,13 @@ info:
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
     Monday-Friday — there is no holiday calendar yet. The ČNB deposit facility is always
     overnight and CZK only.
+
+    **ČNB lombard** (`CNB_LOMBARD`): overnight borrowing from the ČNB marginal lending facility.
+    CZK only, counterparty `CNB`, maturity always the next business day (`maturityDate` ignored),
+    `rate` is the ČNB lombard rate entered by the dealer and must be > 0. Same four-eyes lifecycle
+    and ACT/360 interest as a money-market borrowing; like any borrowing it consumes no limit.
+    Settlement credits the ledger's "Borrowings from CNB" liability (2320). The collateral pledge
+    that backs a lombard loan is NOT modelled.
 
     **Ledger postings** go through ledger-service's journal API only, keyed
     `treasury:<dealId>:<event>` and balanced per currency: settlement, maturity (principal plus
@@ -338,7 +348,15 @@ components:
   schemas:
     ProductType:
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY]
+      # x-extensible-enum, not enum (1.5.0, #10896): products GROW as ADR-0315 D2 lands them
+      # (CNB_LOMBARD now). A client must tolerate an unknown product; a closed set would make every
+      # new product a URL-major break. The same idiom as risk-engine's Position.kind.
+      x-extensible-enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
+    DraftProductType:
+      # What a client may SEND: closed, so the server's validation is what the document says. A new
+      # product widens it (additive for a request). Responses use the open ProductType above.
+      type: string
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
     DealState:
       type: string
       enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
@@ -355,17 +373,17 @@ components:
       type: object
       required: [product, counterpartyId, currency, principal, rate, valueDate]
       properties:
-        product: { $ref: '#/components/schemas/ProductType' }
+        product: { $ref: '#/components/schemas/DraftProductType' }
         counterpartyId: { type: string, examples: [SIMBK-A] }
         currency: { type: string, enum: [CZK, EUR] }
         principal: { type: number, exclusiveMinimum: 0 }
-        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360' }
+        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360. Must be > 0 for CNB_LOMBARD.' }
         tradeDate: { type: string, format: date, description: Defaults to today }
         valueDate: { type: string, format: date }
         maturityDate:
           type: string
           format: date
-          description: Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY.
+          description: Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY and CNB_LOMBARD (always overnight).
         rationale:
           type: string
           description: Required when an AI agent drafts (ADR-0315 D10).

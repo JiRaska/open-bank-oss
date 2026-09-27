@@ -115,6 +115,37 @@ class TreasuryAccountsPostingIT {
         )
     }
 
+    /** #10896: V30 seeds 2320 "Borrowings from CNB (lombard)" — CZK only, by its fixed id. */
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `the ČNB lombard borrowing account posts in CZK and refuses EUR`() {
+        post(
+            journal(
+                "treasury:it-lombard:settled",
+                line("1001", "DEBIT", "70.00", "CZK"),
+                line("2320", "CREDIT", "70.00", "CZK"),
+            ),
+            201,
+        )
+        post(
+            journal(
+                "treasury:it-lombard:matured",
+                line("2320", "DEBIT", "70.00", "CZK"),
+                line("5200", "DEBIT", "0.01", "CZK"),
+                line("1001", "CREDIT", "70.01", "CZK"),
+            ),
+            201,
+        )
+        post(
+            journal(
+                "treasury:it-lombard-eur:settled",
+                line("1002", "DEBIT", "5.00", "EUR"),
+                line("2320", "CREDIT", "5.00", "EUR"),
+            ),
+            422,
+        )
+    }
+
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `the ČNB facility account is CZK only`() {
