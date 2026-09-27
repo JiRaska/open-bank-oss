@@ -96,3 +96,71 @@ interface RiskCapitalPort {
     /** The most recent TIED_OUT snapshot's capital at exactly [asOf], or why there is none. */
     suspend fun capitalAt(asOf: LocalDate): RiskCapitalLookup
 }
+
+/**
+ * One HQLA line of a risk-engine LCR result (ADR-0313 phase 1): its level as the engine reports it
+ * (`L1`, `L2A`, `L2B`), unweighted market value, the haircut the engine applied and the value after it.
+ */
+data class RiskHqlaLine(
+    val level: String,
+    val marketValue: BigDecimal,
+    val haircut: BigDecimal,
+    val afterHaircut: BigDecimal,
+)
+
+/**
+ * The liquid-asset side of ONE tied-out risk-engine snapshot's LCR at the report date. [lines] and
+ * the level sums (after haircut, before the Level 2 caps) are present only for a single-currency book;
+ * [unclassifiedBalances] counts balances the engine could not classify, any of which could be HQLA.
+ * [notes] are the engine's free-text caveats on the result (e.g. that pledged collateral is not
+ * modelled); the mappers read them through [com.openbank.finrep.domain.mapper.RiskEngineFigures].
+ */
+data class RiskLiquidityResult(
+    val runId: String,
+    val asOf: LocalDate,
+    val parameterSetId: String,
+    val parameterSetVersion: String,
+    val currency: String?,
+    val lines: List<RiskHqlaLine>,
+    val level1: BigDecimal?,
+    val level2a: BigDecimal?,
+    val level2b: BigDecimal?,
+    val currencyCount: Int,
+    val unclassifiedBalances: Int,
+    val outflows: List<RiskOutflowLine> = emptyList(),
+    val totalOutflows: BigDecimal? = null,
+    val notes: List<String> = emptyList(),
+)
+
+/**
+ * One LCR outflow line of a risk-engine result (COREP C 73.00): the run-off factor key the engine
+ * applied (e.g. `lcr-retail-stable-runoff`), the unweighted [amount], the [factor] and the
+ * [weighted] outflow. [RiskLiquidityResult.totalOutflows] is the engine's own sum of [weighted].
+ */
+data class RiskOutflowLine(
+    val factorKey: String,
+    val amount: BigDecimal,
+    val factor: BigDecimal,
+    val weighted: BigDecimal,
+)
+
+/** What a liquidity lookup found: the [result], or the data-gap reason there is none (never an error). */
+data class RiskLiquidityLookup(val result: RiskLiquidityResult?, val unavailableReason: String?) {
+    init {
+        require((result == null) != (unavailableReason == null)) { "exactly one of result or reason" }
+    }
+
+    companion object {
+        fun found(result: RiskLiquidityResult) = RiskLiquidityLookup(result, null)
+        fun unavailable(reason: String) = RiskLiquidityLookup(null, reason)
+    }
+}
+
+/**
+ * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows). The run is selected
+ * exactly as [RiskCapitalPort] selects it, so C 02.00 and C 72.00 of one date read the same snapshot.
+ */
+interface RiskLiquidityPort {
+    /** The most recent TIED_OUT snapshot's liquid assets at exactly [asOf], or why there are none. */
+    suspend fun liquidityAt(asOf: LocalDate): RiskLiquidityLookup
+}
