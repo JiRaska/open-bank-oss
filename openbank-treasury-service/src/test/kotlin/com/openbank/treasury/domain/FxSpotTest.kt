@@ -118,6 +118,12 @@ class FxSpotTest {
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("business day")
         assertThatThrownBy { fxSpot(rate = "0") }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { fxSpot(rate = "25.1234567") }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { fxSpot(rate = "25000") } // NUMERIC(9,6) can't hold >= 1000
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("NUMERIC(9,6)")
+        assertThatThrownBy { fxSpot(rate = "1000") } // the boundary itself is also too large
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("NUMERIC(9,6)")
+        assertThatThrownBy { fxSpot(eur = "0.01", rate = "0.100000") } // rounds to 0.00 CZK
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("fx_counter_amount")
         assertThatThrownBy {
             com.openbank.treasury.domain.model.Deal.draft(
                 id = java.util.UUID.randomUUID(),

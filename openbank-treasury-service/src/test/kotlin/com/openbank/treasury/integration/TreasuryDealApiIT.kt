@@ -348,6 +348,16 @@ class TreasuryDealApiIT {
         bad(fxBody(extra = ",\"tradeDate\":\"$businessDay\",\"valueDate\":\"${businessDay.plusDays(7)}\""))
         bad(draftBody("10.00").replace("}", ",\"buyCurrency\":\"EUR\"}"))
         bad("""{"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK","principal":1,"rate":1}""")
+        // #11041 review fix: a rate the store's NUMERIC(9,6) column can't hold 500s at flush without this.
+        bad(
+            """{"product":"FX_SPOT","counterpartyId":"SIMBK-A","buyCurrency":"EUR","sellCurrency":"CZK",
+               "principal":1000.00,"rate":25000,"tradeDate":"$businessDay"}""",
+        )
+        // #11041 review fix: principal x rate rounding to 0.00 CZK violates fx_counter_amount > 0 at flush.
+        bad(
+            """{"product":"FX_SPOT","counterpartyId":"SIMBK-A","buyCurrency":"EUR","sellCurrency":"CZK",
+               "principal":0.01,"rate":0.1,"tradeDate":"$businessDay"}""",
+        )
     }
 
     @Test

@@ -14,6 +14,7 @@ info:
   # 1.7.0: additive — nostro reconciliation (#10896): POST /nostro/statements (camt.053 upload,
   #        ROLE_TREASURY_APPROVER) and GET /nostro/statements/{id}/reconciliation.
   # 1.8.0: additive — FX_SPOT deal terms, settlement and response fields (#10896).
+  #        Invalid rates and rounded-to-zero counter amounts return 400.
   version: 1.8.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves

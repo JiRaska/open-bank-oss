@@ -191,6 +191,9 @@ data class Deal(
         require(currency != CZK) { "an FX spot deal's currency is the foreign one, bought or sold against CZK" }
         require(rate.signum() > 0) { "an FX deal rate must be positive" }
         require(rate.scale() <= FX_RATE_SCALE) { "an FX deal rate has at most $FX_RATE_SCALE decimal places" }
+        require(rate < FX_RATE_LIMIT) {
+            "an FX deal rate must be less than $FX_RATE_LIMIT (deals.rate is NUMERIC(9,6): at most 3 integer digits)"
+        }
         require(maturityDate == valueDate) { "an FX spot deal has no maturity: maturityDate equals valueDate" }
         require(!DayCount.isWeekend(valueDate)) { "an FX spot value date must be a business day" }
         require(!valueDate.isAfter(DayCount.spotDate(tradeDate))) {
@@ -198,6 +201,10 @@ data class Deal(
         }
         require(terms.counterAmount.compareTo(counterAmountOf(principal, rate)) == 0) {
             "the CZK counter amount must be principal x rate, half-up to 2 dp"
+        }
+        require(terms.counterAmount.signum() > 0) {
+            "the CZK counter amount must be positive (principal $principal x rate $rate rounds to " +
+                "${terms.counterAmount}, which the store's fx_counter_amount > 0 constraint rejects)"
         }
     }
 
@@ -420,6 +427,7 @@ data class Deal(
         private val MAX_RATE = BigDecimal("100")
         private val HUNDRED = BigDecimal("100")
         private const val FX_RATE_SCALE = 6
+        private val FX_RATE_LIMIT = BigDecimal("1000")
         private const val DEVIATION_SCALE = 4
         private const val MONEY_SCALE = 2
 
