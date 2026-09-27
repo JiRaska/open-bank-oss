@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.2...finrep-service-v0.11.0) (2026-09-27)
+
+
+### Features
+
+* **finrep:** COREP C 02.00 own funds requirements from the risk engine ([#11001](https://github.com/JiRaska/open-bank-oss/issues/11001)) ([1bd04df](https://github.com/JiRaska/open-bank-oss/commit/1bd04df13614c8d145dfb116f398d8340bbde461))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.1...finrep-service-v0.10.2) (2026-08-27)
 
 

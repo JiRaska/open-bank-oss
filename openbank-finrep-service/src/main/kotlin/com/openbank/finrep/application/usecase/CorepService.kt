@@ -18,6 +18,7 @@ import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.C0100Mapper
 import com.openbank.finrep.domain.mapper.C0200Mapper
 import com.openbank.finrep.domain.mapper.C7200Mapper
+import com.openbank.finrep.domain.mapper.C7300Mapper
 import com.openbank.finrep.domain.model.CorepTemplate
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
@@ -27,7 +28,7 @@ import java.time.LocalDate
  * COREP report generation (ADR-0097 Phase 2). C 01.00 (Own Funds) is mapped from the ledger's
  * trial balance; C 02.00 (Own Funds Requirements) from the risk engine's Pillar 1 result for a
  * TIED_OUT snapshot at the report date (ADR-0313 D6); C 72.00 (LCR liquid assets) from the same
- * snapshot's LCR liquid-asset result. Every other COREP template (C 05.01
+ * snapshot's LCR liquid-asset result; C 73.00 (LCR outflows) from that same LCR result. Every other COREP template (C 05.01
  * transitional provisions, etc.) is out of scope.
  *
  * The rendered return deliberately carries **flagged data gaps** rather than silent omissions
@@ -53,6 +54,7 @@ class CorepService(
             }
             C0200Mapper.TEMPLATE_ID -> C0200Mapper.map(capital(query.asOf), query.asOf)
             C7200Mapper.TEMPLATE_ID -> C7200Mapper.map(liquidity(query.asOf), query.asOf)
+            C7300Mapper.TEMPLATE_ID -> C7300Mapper.map(liquidity(query.asOf), query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
                 throw IllegalArgumentException("Unknown or unimplemented COREP template: ${query.templateId}")

@@ -44,7 +44,7 @@ class C7200MapperTest {
     ) = RiskLiquidityResult(
         "run-7", asOf, parameterSet, "2", "CZK", lines,
         level1?.let(::BigDecimal), level2a?.let(::BigDecimal), level2b?.let(::BigDecimal), currencies, unclassified,
-        notes,
+        notes = notes,
     )
 
     private fun CorepTemplate.at(row: String, col: String) = cells.single { it.rowRef == row && it.colRef == col }
