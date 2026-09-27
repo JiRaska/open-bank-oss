@@ -54,8 +54,8 @@ than superseding the ADR (still `proposed`/`planned`, so amending is allowed per
 
 - **`LEDGER_POSTING` does not round HALF_EVEN.** No posting site on `origin/main` does; every
   booking-normalisation call site (`TransactionService.kt:127/344/353`,
-  `SddCollectionDebitConsumer.kt:127`, `SettlementAdapter.kt:84`,
-  `FxRevaluationPosting.kt:119-120`) rounds HALF_UP. The HALF_EVEN behaviour the original text
+  `InterestService.kt:394` gross and `:406` net capitalisation, `SddCollectionDebitConsumer.kt:127`,
+  `SettlementAdapter.kt:84`) rounds HALF_UP to the currency scale. The HALF_EVEN behaviour the original text
   attributed to `LEDGER_POSTING` is `Money.scale()`'s own normalisation and the entity rehydration
   mappers (`PanacheJournalRepository.kt:377/379`, `PanacheTransactionRepository.kt:211/214`,
   `DelegationGrantEntity.kt:191`, `SpendReservationEntity.kt:87`) — a different call-site class,
@@ -64,11 +64,13 @@ than superseding the ADR (still `proposed`/`planned`, so amending is allowed per
   a scale-10 HALF_UP daily rate (`:137`), then a scale-6 HALF_UP accrued amount (`:138`) — so the
   registry needs two policies applied in order: `INTEREST_DAILY_RATE` then `INTEREST_ACCRUAL`.
 
-`DISPLAY` is also corrected: the statement renderers (`PdfRenderer.kt:82`, `Camt053Renderer.kt:90`,
-`Mt940Renderer.kt:60`) round every currency to a **fixed scale 2** with HALF_UP, not to the
-currency's own scale with HALF_EVEN as originally written. The registry records this as it is —
-it means JPY (0 decimals) and KWD/BHD (3 decimals) statement amounts render at the wrong scale
-today; that defect is tracked separately, not fixed by this ADR.
+`DISPLAY` is also corrected: it is **the currency's minor units** (ISO 4217 default fraction
+digits, falling back to 2 for a code ISO gives none, e.g. XAU), **HALF_UP** — not HALF_EVEN as
+originally written. On `origin/main` 2026-09-26 the statement renderers (`PdfRenderer.kt:82`,
+`Camt053Renderer.kt:90`, `Mt940Renderer.kt:60`) still used a fixed scale 2 for every currency, so
+JPY (0 decimals) and KWD/BHD (3 decimals) rendered at the wrong scale; PR #11081 moves them to
+currency scale. The registry records the corrected rule rather than codifying the defect, so the
+policy and the renderers agree once #11081 lands, whichever merges first.
 
 The `PdfRenderer.kt`/`Camt053Renderer.kt`/`Mt940Renderer.kt`/`TransactionService.kt`/etc. line
 numbers above and the full ~30-row measured call-site table are in PR #11011's description
@@ -79,9 +81,12 @@ Two sites remain **out of the registry**, treasury's ACT/360 work, discovered by
 and deliberately not folded into an existing policy:
 - `Deal.kt:374` — scale-12 HALF_UP ACT/360 intermediate.
 - `Deal.kt:375` and `Postings.kt:147` — fixed scale 2, HALF_UP (same mode as `LEDGER_POSTING`, but
-  a fixed scale rather than the currency's own — the same shape as the `DISPLAY` scale-2 issue
-  above). These should get their own policy when treasury migrates onto the registry, not be
+  a fixed scale rather than the currency's own). These should get their own policy when treasury migrates onto the registry, not be
   merged into `LEDGER_POSTING` or `DISPLAY`.
+- `FxRevaluationPosting.kt:119-120` (ledger) — literal `setScale(2, HALF_UP)`. It equals
+  `LEDGER_POSTING` only because the revaluation leg posts CZK (2 minor digits); for any other
+  currency the two would diverge, so it is treated like treasury's fixed-scale sites and left out
+  of the registry until it migrates with its own decision.
 
 Item 2 and item 3 below are amended to reflect the policy set as corrected; items 1 and 4 are
 unaffected. This amendment changes only what the ADR says the registry contains — it changes no
@@ -102,13 +107,13 @@ We will:
    site that normalises an amount for booking), `INTEREST_DAILY_RATE` (scale 10, HALF_UP) followed
    by `INTEREST_ACCRUAL` (scale 6, HALF_UP — accrual rounds twice, so it is two policies applied in
    order), `FX_RATE` and `FX_AMOUNT`, `FEE`, `TAX_WITHHOLDING` (DOWN to the authority's unit, as
-   `WithholdingTaxPolicy` does today) and `DISPLAY` (**fixed scale 2**, HALF_UP — what the statement
-   renderers do for every currency today, which means JPY and KWD statements render at the wrong
-   scale; the registry records this as it is and does not fix it). Services call
+   `WithholdingTaxPolicy` does today) and `DISPLAY` (the currency's minor units — ISO 4217 default
+   fraction digits, fallback 2 — HALF_UP; the statement renderers adopt it in PR #11081). Services call
    `money.round(RoundingPolicy.X)` instead of spelling `setScale(n, RoundingMode.Y)`.
 3. The initial values of each policy are set to **what the code does today**, measured per call
    site (corrected against the measurement in PR #11011 — see Amendment above) — this ADR changes
-   where the rule lives, not any posted amount. Any later change of a policy's mode is a
+   where the rule lives, not any posted amount (`DISPLAY` is the one policy set to the corrected
+   rule rather than today's renderers; it formats output and posts nothing). Any later change of a policy's mode is a
    customer-visible change and goes through its own PR with a money-path review.
 4. Enforce with a **ratchet gate** (`money-rounding-inline-ratchet`, advisory first): new
    `RoundingMode.`/`setScale(` in a money-path service's `src/main` outside the registry fails;
