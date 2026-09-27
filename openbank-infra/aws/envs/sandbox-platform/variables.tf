@@ -5,7 +5,17 @@ variable "cert_manager_version" {
   # v1.16.2 -> v1.17.4 -> v1.18.6 -> v1.19.6 -> v1.20.4 -> v1.21.2, each step
   # merged AND applied (Platform OpenTofu workflow_dispatch) before the next.
   # crds.enabled=true, so the chart upgrades the CRDs with each step.
-  default = "v1.17.4"
+  #
+  # v1.18: default privateKey.rotationPolicy flips Never -> Always. Reviewed
+  # every Certificate/ClusterIssuer in this tree (#11146): the root CA
+  # (openbank-sandbox-ca, gitops/components/platform/clusterissuer.yaml) is
+  # already pinned rotationPolicy: Never explicitly (#11124); the two
+  # ingress-shim Certificates with mobile SPKI pinning (customer-edge,
+  # keycloak) already carry the cert-manager.io/private-key-rotation-policy:
+  # "Never" annotation. The other 34 Certificates are internal mTLS leaves
+  # trusted via the openbank-ca chain, not pinned to a leaf public key, so
+  # picking up the new Always default on renewal is harmless for them.
+  default = "v1.18.6"
 }
 
 variable "karpenter_version" {
