@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.13.0...risk-engine-v0.14.0) (2026-09-27)
+
+
+### Features
+
+* **risk-engine:** state the capital total in CZK at the ČNB fixing ([#11167](https://github.com/JiRaska/open-bank-oss/issues/11167)) ([9442f1d](https://github.com/JiRaska/open-bank-oss/commit/9442f1d8531787d1bb276ee446cf412a56dd8f28))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.12.0...risk-engine-v0.13.0) (2026-09-27)
 
 
