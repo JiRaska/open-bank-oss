@@ -104,9 +104,19 @@ data class UnclassifiedReserveBalance(
     val reason: String,
 )
 
-data class CurrencyReserveBase(val currency: String, val lines: List<ReserveLine>, val rate: BigDecimal) {
-    val base: BigDecimal get() = lines.sumOf { it.amount }
-    val requirement: BigDecimal get() = base.multiply(rate, BigMath.MC)
+/**
+ * The reserve base of one currency. [base] and [requirement] are null, with [requirementNotStated]
+ * saying why, while any LIABILITY balance in that currency is unclassified: the base would then be
+ * a partial sum, and a partial sum reported as the base is a number nobody can stand behind (ADR-0097).
+ */
+data class CurrencyReserveBase(
+    val currency: String,
+    val lines: List<ReserveLine>,
+    val rate: BigDecimal,
+    val requirementNotStated: String? = null,
+) {
+    val base: BigDecimal? get() = if (requirementNotStated == null) lines.sumOf { it.amount } else null
+    val requirement: BigDecimal? get() = base?.multiply(rate, BigMath.MC)
 }
 
 data class MinReserveResult(
@@ -125,12 +135,21 @@ data class MinReserveResult(
 ) {
     val totalHoldings: BigDecimal? get() = holdings?.sumOf { it.amount }
 
-    /** Requirement in the holding currency; null when the book has any other currency (no FX conversion). */
-    val requirement: BigDecimal? get() =
-        totalCurrency?.takeIf { it == holdingCurrency }?.let { c -> currencies.single { it.currency == c }.requirement }
+    /**
+     * Requirement on the holding-currency book; null when that currency's book has an unclassified
+     * liability (see [CurrencyReserveBase.requirementNotStated]) or the book has no such currency.
+     * Other currencies do not null it: each currency's base stands on its own classification.
+     */
+    val requirement: BigDecimal? get() = currencies.singleOrNull { it.currency == holdingCurrency }?.requirement
 
-    /** Holdings − requirement: positive is a surplus, negative a shortfall; null when either side is. */
-    val surplus: BigDecimal? get() = requirement?.let { r -> totalHoldings?.subtract(r) }
+    /**
+     * Holdings − requirement: positive is a surplus, negative a shortfall. Only for a book entirely in
+     * the holding currency — with another currency in the book the requirement on it is not converted
+     * (no FX yet), so comparing holdings with the holding-currency requirement alone would overstate
+     * the surplus. Null when either side is.
+     */
+    val surplus: BigDecimal? get() =
+        requirement?.takeIf { totalCurrency == holdingCurrency }?.let { r -> totalHoldings?.subtract(r) }
 
     val remuneration: BigDecimal get() = (requirement ?: BigDecimal.ZERO).multiply(remunerationRate, BigMath.MC)
 }
@@ -161,11 +180,18 @@ object MinimumReserves {
 
     const val CURRENCY_NOTE =
         "The base is reported per currency. Comparing it with holdings needs one currency; the engine has no " +
-            "conversion to CZK yet, so requirement vs holdings is reported only for a CZK-only book."
+            "conversion to CZK yet, so each currency's requirement is stated on its own and requirement vs holdings " +
+            "(surplus / shortfall) is reported only for a CZK-only book."
+
+    const val UNCLASSIFIED_LIABILITY =
+        "A LIABILITY balance in this currency is not classified (see unclassified), so the base would be a partial " +
+            "sum; base and requirement are not stated rather than understated."
 
     const val MATURITY_NOTE =
         "The ledger carries no agreed maturity for customer balances; every customer deposit is treated as maturing " +
             "within 2 years and so in the base (the conservative reading)."
+
+    private const val LIABILITY = "LIABILITY"
 
     fun compute(positions: List<Position>, params: MinReserveParameters): MinReserveResult {
         val acc = Accumulator(params)
@@ -173,7 +199,10 @@ object MinimumReserves {
             when (p.kind) {
                 PositionKind.SUB_LEDGER -> acc.customer(p)
                 PositionKind.LOAN -> Unit // an asset: never in the base, never a holding
-                PositionKind.GL_ACCOUNT -> acc.glAccount(p)
+                // A money-market deal is classified by its principal account (2300/2301 borrowing,
+                // 1510 facility), exactly as its GL-level balance was before deals were modelled
+                // (ADR-0315 D6) — the same routing Liquidity and CreditRiskCapital use.
+                PositionKind.GL_ACCOUNT, PositionKind.TREASURY_DEAL -> acc.glAccount(p)
             }
         }
         // A zero is only stated when an account exists that could hold a non-zero balance (ADR-0097).
@@ -181,7 +210,13 @@ object MinimumReserves {
         val bookCurrencies = positions.map { it.currency }.distinct().sorted()
         val single = bookCurrencies.singleOrNull()
         return MinReserveResult(
-            currencies = bookCurrencies.map { CurrencyReserveBase(it, acc.baseLines(it), params.rate) },
+            currencies = bookCurrencies.map { c ->
+                val gap = acc.unclassified.any {
+                    it.currency == c &&
+                        it.glAccountType.equals(LIABILITY, ignoreCase = true)
+                }
+                CurrencyReserveBase(c, acc.baseLines(c), params.rate, UNCLASSIFIED_LIABILITY.takeIf { gap })
+            },
             totalCurrency = single,
             holdings = acc.holdings.takeIf { holdingsStated },
             holdingsNotStated = HOLDINGS_NOT_STATED.takeUnless { holdingsStated },

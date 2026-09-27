@@ -31,9 +31,9 @@ class MinimumReservesTest {
         Position(PositionKind.SUB_LEDGER, "2100", "LIABILITY", ccy, UUID.randomUUID(), BigDecimal(amount))
 
     @Test
-    fun `shipped set cnb-pmr v1 - rate 2 percent (Opatreni CNB o PMR), 0 remuneration since 2023-10-05, CZK`() {
+    fun `shipped set cnb-pmr v2 - rate 2 percent (Opatreni CNB o PMR), 0 remuneration since 2023-10-05, CZK`() {
         assertThat(params.id).isEqualTo("cnb-pmr")
-        assertThat(params.version).isEqualTo("1")
+        assertThat(params.version).isEqualTo("2")
         assertThat(params.rate).isEqualByComparingTo("0.02")
         assertThat(params.remunerationRate).isEqualByComparingTo("0")
         assertThat(params.holdingCurrency).isEqualTo("CZK")
@@ -93,10 +93,51 @@ class MinimumReservesTest {
     }
 
     @Test
-    fun `an unmapped liability is listed as unclassified and counted nowhere`() {
+    fun `an unmapped liability is listed as unclassified and leaves base and requirement not stated`() {
         val r = MinimumReserves.compute(listOf(customer("-100.00"), gl("2200", "LIABILITY", "-70.00")), params)
-        assertThat(r.currencies.single().base).isEqualByComparingTo("100.00")
+        val czk = r.currencies.single()
+        // 100.00 would be a partial sum: the 70.00 may belong in the base, so no base is stated at all
+        assertThat(czk.base).isNull()
+        assertThat(czk.requirement).isNull()
+        assertThat(czk.requirementNotStated).isEqualTo(MinimumReserves.UNCLASSIFIED_LIABILITY)
+        assertThat(r.requirement).isNull()
+        assertThat(r.surplus).isNull()
         assertThat(r.unclassified.map { it.glAccountCode }).containsExactly("2200")
+    }
+
+    @Test
+    fun `an unclassified liability in one currency does not unstate another currency's requirement`() {
+        val r = MinimumReserves.compute(
+            listOf(customer("-1000.00"), customer("-10.00", "EUR"), gl("2200", "LIABILITY", "-7.00", "EUR")),
+            params,
+        )
+        assertThat(r.currencies.single { it.currency == "EUR" }.requirement).isNull()
+        assertThat(r.currencies.single { it.currency == "CZK" }.requirement).isEqualByComparingTo("20.00")
+        assertThat(r.requirement).isEqualByComparingTo("20.00")
+    }
+
+    @Test
+    fun `an unclassified ASSET does not unstate the requirement`() {
+        val noAssetType = params.copy(glAccountTypes = params.glAccountTypes - "ASSET")
+        val r = MinimumReserves.compute(listOf(customer("-1000.00"), gl("1999", "ASSET", "5.00")), noAssetType)
+        assertThat(r.unclassified.map { it.glAccountCode }).containsExactly("1999")
+        assertThat(r.requirement).isEqualByComparingTo("20.00")
+    }
+
+    @Test
+    fun `a treasury deal on 2301 (EUR borrowing from a bank) is excluded like its GL account, not dropped`() {
+        val deal = Position(PositionKind.TREASURY_DEAL, "2301", "LIABILITY", "EUR", null, BigDecimal("-800.00"))
+        val r = MinimumReserves.compute(listOf(customer("-1000.00"), deal), params)
+        assertThat(r.excluded.map { Triple(it.glAccountCode, it.amount.toPlainString(), it.reserveClass) })
+            .containsExactly(Triple("2301", "-800.00", ReserveClass.EXCLUDED_BANK_OR_CNB))
+        assertThat(r.unclassified).isEmpty()
+        assertThat(r.currencies.single { it.currency == "EUR" }.base).isEqualByComparingTo("0")
+        assertThat(r.currencies.single { it.currency == "CZK" }.base).isEqualByComparingTo("1000.00")
+    }
+
+    @Test
+    fun `CNB lombard borrowing 2320 is a liability to the CNB and excluded from the base`() {
+        assertThat(params.classOf("2320", "LIABILITY")).isEqualTo(ReserveClass.EXCLUDED_BANK_OR_CNB)
     }
 
     @Test
@@ -111,13 +152,27 @@ class MinimumReservesTest {
     }
 
     @Test
-    fun `a multi-currency book reports the base per currency and no requirement vs holdings`() {
+    fun `a multi-currency book reports the base per currency, the CZK requirement, and no requirement vs holdings`() {
         val r = MinimumReserves.compute(listOf(customer("-1000.00"), customer("-10.00", "EUR")), params)
-        assertThat(r.currencies.map { it.currency to it.base.toPlainString() })
+        assertThat(r.currencies.map { it.currency to it.base?.toPlainString() })
             .containsExactly("CZK" to "1000.00", "EUR" to "10.00")
-        assertThat(r.requirement).isNull()
+        // the CZK book is fully classified, so its requirement stands; an EUR asset or liability
+        // does not unstate it — only the comparison with holdings needs a single-currency book
+        assertThat(r.requirement).isEqualByComparingTo("20.00")
         assertThat(r.surplus).isNull()
         assertThat(r.notes).contains(MinimumReserves.CURRENCY_NOTE)
+    }
+
+    @Test
+    fun `with holdings stated, a multi-currency book still gets no surplus (no FX conversion)`() {
+        val withAccount = params.copy(glAccounts = params.glAccounts + ("1599" to ReserveClass.RESERVE_HOLDING))
+        val r = MinimumReserves.compute(
+            listOf(customer("-1000.00"), customer("-10.00", "EUR"), gl("1599", "ASSET", "50.00")),
+            withAccount,
+        )
+        assertThat(r.requirement).isEqualByComparingTo("20.00")
+        assertThat(r.totalHoldings).isEqualByComparingTo("50.00")
+        assertThat(r.surplus).isNull()
     }
 
     @Test

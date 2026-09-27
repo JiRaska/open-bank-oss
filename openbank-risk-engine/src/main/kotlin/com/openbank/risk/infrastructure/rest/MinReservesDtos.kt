@@ -25,9 +25,11 @@ data class ReserveLineDto(
 data class ReserveBaseDto(
     val currency: String,
     val lines: List<ReserveLineDto>,
-    val base: BigDecimal,
+    /** Null (with [requirementNotStated]) while a LIABILITY in this currency is unclassified. */
+    val base: BigDecimal?,
     val rate: BigDecimal,
-    val requirement: BigDecimal,
+    val requirement: BigDecimal?,
+    val requirementNotStated: String?,
 )
 
 data class ExcludedReserveBalanceDto(val glAccountCode: String?, val amount: BigDecimal, val reserveClass: String)
@@ -57,7 +59,7 @@ data class MinReservesResponse(
     val holdings: List<ReserveLineDto>?,
     val totalHoldings: BigDecimal?,
     val holdingsNotStated: String?,
-    /** Present only for a book entirely in the holding currency. */
+    /** Requirement on the holding-currency book; null when that book has an unclassified liability. */
     val requirement: BigDecimal?,
     /** Holdings − requirement; negative is a shortfall. Null when [requirement] is. */
     val surplus: BigDecimal?,
@@ -85,9 +87,10 @@ fun MinReservesAnalysis.toResponse(): MinReservesResponse = MinReservesResponse(
             it.lines.map { l ->
                 l.toDto()
             },
-            it.base.reserveMoney(),
+            it.base?.reserveMoney(),
             it.rate,
-            it.requirement.reserveMoney(),
+            it.requirement?.reserveMoney(),
+            it.requirementNotStated,
         )
     },
     holdingCurrency = result.holdingCurrency,

@@ -427,7 +427,7 @@ openbank:
     # rounding of the requirement, and whether foreign-currency liabilities enter the base.
     min-reserves:
       parameter-set-id: cnb-pmr
-      parameter-set-version: "1"
+      parameter-set-version: "2"     # 2: GL 2320 (ČNB lombard borrowing) excluded-bank-or-cnb
       source: "Opatření ČNB o povinných minimálních rezervách: 2 % of liabilities up to 2 years excl. banks subject to PMR and the ČNB; unremunerated since 2023-10-05"
       rate: 0.02                     # the PMR ratio, 2 % of the reserve base
       remuneration-rate: 0           # ČNB has not remunerated minimum reserves since 2023-10-05
@@ -452,6 +452,10 @@ openbank:
           "2301": excluded-bank-or-cnb
           "2310": excluded-bank-or-cnb
           "2311": excluded-bank-or-cnb
+          # ČNB lombard borrowing (arriving with the ledger chart change in #11087): a liability to the
+          # ČNB itself, which the provision excludes from the base. Mapped ahead of the account so a
+          # lombard balance is excluded from the first snapshot that carries it, not unclassified.
+          "2320": excluded-bank-or-cnb
         # Any LIABILITY not named above (e.g. 2200 Withholding Tax Payable) is deliberately NOT
         # mapped by type: whether it is in the base is a reading of the provision, so it is listed
         # as unclassified instead of guessed.

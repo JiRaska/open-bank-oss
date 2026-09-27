@@ -1413,15 +1413,22 @@ components:
           type: array
           items:
             type: object
-            required: [currency, lines, base, rate, requirement]
+            required: [currency, lines, rate]
             properties:
               currency: {type: string}
               lines:
                 type: array
                 items: {$ref: '#/components/schemas/ReserveLine'}
-              base: {type: number}
+              base:
+                type: [number, 'null']
+                description: Null (see requirementNotStated) while a LIABILITY in this currency is unclassified
               rate: {type: number}
-              requirement: {type: number}
+              requirement:
+                type: [number, 'null']
+                description: Base x rate; null when base is
+              requirementNotStated:
+                type: [string, 'null']
+                description: Why base and requirement are not stated; null when they are
         holdingCurrency: {type: string}
         holdings:
           type: [array, 'null']
@@ -1435,10 +1442,14 @@ components:
           description: Why holdings, surplus and shortfall are not stated; null when they are
         requirement:
           type: [number, 'null']
-          description: Present only for a book entirely in the holding currency (no FX conversion yet)
+          description: >-
+            Requirement on the holding-currency book; null when that book has an unclassified LIABILITY
+            (other currencies do not null it)
         surplus:
           type: [number, 'null']
-          description: Holdings minus requirement; negative is a shortfall. Null when requirement or holdings is.
+          description: >-
+            Holdings minus requirement; negative is a shortfall. Only for a book entirely in the holding
+            currency (no FX conversion yet); null when requirement or holdings is.
         remunerationRate: {type: number}
         remuneration: {type: number}
         excluded:
