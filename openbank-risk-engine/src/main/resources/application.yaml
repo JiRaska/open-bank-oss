@@ -141,12 +141,39 @@ mp:
           topic: openbank.dlq.risk-engine.fx-fixing-in
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # treasury-service's `treasury.deal.*` events (ADR-0315 D6): the bank's own money-market deals,
+      # kept in treasury_deal and carried into every snapshot as instruments. Same rules as above:
+      # nested keys only, an explicit per-service DLQ (KafkaTopic CR + Write ACL in openbank-infra).
+      # earliest: a new group reads the retained deal events once, so deals settled before this
+      # consumer existed still reach the book; the book is monotonic, so a replay changes nothing.
+      treasury-deal-in:
+        connector: smallrye-kafka
+        topic: openbank.treasury.deal.events
+        client:
+          id: risk-engine-treasury-deal-${quarkus.uuid}
+        group:
+          id: risk-engine-treasury-deal
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.risk-engine.treasury-deal-in
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 openbank:
   risk:
     # ADR-0313 D13: a run says which world it describes. Defaults to synthetic, so a run is
     # labelled production only where an environment explicitly says so.
     provenance: ${OPENBANK_RISK_PROVENANCE:synthetic}
+    treasury:
+      # ADR-0315 D6: carry the bank's money-market deals (from treasury's events) into every
+      # snapshot as MONEY_MARKET_DEAL instruments on 1500/1501/1510/2300/2301. Off keeps those
+      # accounts GL-level, as before deals were modelled.
+      enabled: ${OPENBANK_RISK_TREASURY_ENABLED:true}
     lending:
       # ADR-0314 D4: read lending's loan book into every snapshot (loans become contract-level
       # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.

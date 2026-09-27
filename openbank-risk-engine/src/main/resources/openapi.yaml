@@ -15,7 +15,9 @@ info:
   #        standard factors from a versioned parameter set. Additive.
   # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
-  version: 1.6.1
+  # 1.6.0 -> 1.7.0: additive — position kind TREASURY_DEAL: the bank's money-market deals from
+  # treasury's events as contract-level MONEY_MARKET_DEAL instruments (ADR-0315 D6).
+  version: 1.7.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -544,7 +546,7 @@ components:
           # x-extensible-enum, not enum: the position kinds GROW as ADR-0314 D4 brings contract
           # sources in (LOAN now, treasury kinds with ADR-0315). A client must tolerate an unknown
           # kind; declaring the set closed would make every new source a URL-major break.
-          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN]
+          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN, TREASURY_DEAL]
           description: >-
             SUB_LEDGER (a customer balance on deposit control), GL_ACCOUNT (a GL account with no finer
             breakdown) or LOAN (a loan from lending's loan book, ADR-0314 D4). The set grows.
