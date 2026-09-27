@@ -407,8 +407,9 @@ simply stops existing).
 - **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `SepaPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only) instead of the shared client. sepa-payment deliberately grants it nothing and its RBAC is unchanged: the MCP tool behind it (`get_payment_confirmation`, `query.payment_confirmation.readonly`) is held by no charter, so the call was already refused at the MCP gate. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. sepa-payment's own Rollout, identity and OPA grants are unchanged. Nothing to roll back here.
 
 - **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
-  change.** `SepaPaymentNotFoundMapper`/`InvalidSepaPaymentStateTransitionMapper` are deleted and
-  present in no tracked backend source;
+  change.** SepaPaymentNotFoundMapper/InvalidSepaPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `SepaPaymentService.kt`, which document the deletion rather than contradict it).
   `SepaPaymentNotFoundException`/`InvalidSepaPaymentStateTransitionException` now extend
   `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
   by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,

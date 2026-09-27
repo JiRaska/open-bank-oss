@@ -525,8 +525,10 @@ not change any existing request's outcome until explicitly flipped.
 - **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `DomesticPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only). domestic-payment grants it nothing and its RBAC is unchanged, for the same reason as sepa-payment: no charter holds `query.payment_confirmation.readonly`. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. Nothing to roll back here.
 
 - **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
-  change.** `DomesticPaymentNotFoundMapper`/`InvalidDomesticPaymentStateTransitionMapper` are
-  deleted and present in no tracked backend source; `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
+  change.** DomesticPaymentNotFoundMapper/InvalidDomesticPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `ExceptionMappers.kt`'s detekt baseline entry, which document the deletion rather than contradict
+  it). `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
   extend `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`,
   handled by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper`
   (added, unused, by #10923). Both already used the base's default codes
