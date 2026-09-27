@@ -466,6 +466,18 @@ jobs:
             if base="$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null)"; then break; fi
             git fetch -q --deepen=400 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           done
+          # Deepening origin/main alone cannot reach a merge-base: at fetch-depth 1 HEAD (the
+          # PR merge ref) is itself a shallow boundary with its parents cut, so no common
+          # ancestor is visible however deep main gets. Unshallow and retry BEFORE falling back.
+          # The fallback base.sha is stale for any PR opened before main moved, and HEAD is the
+          # merge ref, so `base.sha...HEAD` counts main's own later commits as this PR's diff —
+          # #11030 (touching only .github/) failed openapi-version-not-taken on risk-engine
+          # because #11005 had bumped it on main after the PR was opened (#11085).
+          if [ -z "${base}" ]; then
+            git fetch -q --unshallow origin 2>/dev/null || git fetch -q --deepen=2000 origin 2>/dev/null || true
+            git fetch -q origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}" || true
+            base="$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null)" || base=""
+          fi
           if [ -z "${base}" ]; then
             echo "::warning::merge-base against origin/${BASE_REF} did not resolve after deepening; falling back to the event base.sha, which is stale for a PR that has absorbed main since opening"
             base="${EVENT_BASE_SHA}"
