@@ -6,6 +6,7 @@ package com.openbank.finrep.contract
 
 import au.com.dius.pact.consumer.MockServer
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
+import au.com.dius.pact.consumer.dsl.PactDslJsonRootValue
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
 import au.com.dius.pact.consumer.junit5.PactTestFor
@@ -119,6 +120,9 @@ class RiskEngineCapitalPactConsumerTest {
                 o.eachLike("currencies") { c -> currencyLiquidity(c) }
                 o.`object`("total") { t -> currencyLiquidity(t) }
                 o.minArrayLike("unclassified", 0, 1) { u -> u.stringType("glAccountCode", "9999") }
+                // Free-text caveats; may be empty. C 72.00 / C 76.00 gap the HQLA cells on the
+                // pledged-collateral note, so the field is read, not merely tolerated.
+                o.minArrayLike("notes", 0, PactDslJsonRootValue.stringType(PLEDGED_NOTE_EXAMPLE), 1)
             }.build(),
         )
         .toPact()
@@ -239,10 +243,12 @@ class RiskEngineCapitalPactConsumerTest {
                     level2b = hqla.level2b,
                     currencyCount = l.currencies.size,
                     unclassifiedBalances = l.unclassified.size,
+                    notes = l.notes,
                 ),
             ),
             LocalDate.parse(REPORTING_DATE),
         )
+        assertThat(l.notes).containsExactly(PLEDGED_NOTE_EXAMPLE)
         assertThat(hqla.lines.single().level).isEqualTo("L1")
         assertThat(hqla.level1).isEqualByComparingTo("1000.00")
         // The example carries one unclassified balance, so the render must refuse the liquid-asset
@@ -253,6 +259,9 @@ class RiskEngineCapitalPactConsumerTest {
     }
 
     private companion object {
+        const val PLEDGED_NOTE_EXAMPLE =
+            "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it " +
+                "is not modelled: pledged assets are encumbered and would not count as HQLA."
         const val LIQUIDITY_STATE = "a TIED_OUT risk snapshot with an LCR result exists at the report date"
         const val STATE = "a TIED_OUT risk snapshot exists at the report date"
         const val NO_IDENTITY = "no valid identity is presented"

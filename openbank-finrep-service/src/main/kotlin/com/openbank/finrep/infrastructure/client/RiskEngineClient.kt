@@ -108,6 +108,7 @@ data class LiquidityResponse(
     val currencies: List<CurrencyLiquidityResponse>,
     val total: CurrencyLiquidityResponse?,
     val unclassified: List<UnclassifiedBalanceResponse>,
+    val notes: List<String> = emptyList(),
 )
 
 /**
@@ -164,6 +165,7 @@ class RiskEngineCapitalAdapter(
                 level2b = hqla?.level2b,
                 currencyCount = l.currencies.size,
                 unclassifiedBalances = l.unclassified.size,
+                notes = l.notes,
             ),
         )
     }
