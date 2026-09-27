@@ -10,7 +10,7 @@ import { z } from 'zod'
 const decimal = z.union([z.number(), z.string()]).transform(Number).pipe(z.number().finite())
 const timestamp = z.string().min(1)
 
-export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY'] as const
+export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD'] as const
 export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
 export const CURRENCIES = ['CZK', 'EUR'] as const
 /** The central bank's counterparty id (Deal.CNB_COUNTERPARTY_ID). */
