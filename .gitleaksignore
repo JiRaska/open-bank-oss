@@ -1,0 +1,8 @@
+# gitleaks fingerprint ignores (commit:path:rule:line). Each entry needs a justification.
+# Keep this list minimal; prefer fixing the content. Scoped to ONE finding in ONE commit.
+#
+# FALSE POSITIVE (#11021): the rod-cislo heuristic matched the dotless-decimal IPv4 form of
+# 127.0.0.1 in an EgressPolicy KDoc (an SSRF-bypass example, not a birth number). The literal was
+# already removed from the file by 62616af1ef; this entry only clears the historical commit that
+# the per-PR BASE..HEAD scan still walks. It disappears from main on squash-merge.
+ecae95d1bbbc0ec02206c8450f0e4e86b48ed541:openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/EgressPolicy.kt:rod-cislo:162
