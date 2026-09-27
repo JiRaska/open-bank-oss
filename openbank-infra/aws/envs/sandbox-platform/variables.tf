@@ -15,7 +15,20 @@ variable "cert_manager_version" {
   # "Never" annotation. The other 34 Certificates are internal mTLS leaves
   # trusted via the openbank-ca chain, not pinned to a leaf public key, so
   # picking up the new Always default on renewal is harmless for them.
-  default = "v1.18.6"
+  #
+  # v1.19 (#11157): install v1.19.1+ only (v1.19.0 has a known unexpected-
+  # renewal bug, github.com/cert-manager/cert-manager/issues/8158, fixed in
+  # 1.19.1) — v1.19.6 is the latest 1.19.x patch. ACME client metrics dropped
+  # the high-cardinality `path` label for a bounded `action` label (n/a: this
+  # tree has no dashboard/alert referencing `acme_client_request_*{path=...}`,
+  # grepped fleet-wide). The `cert-manager-edit` ClusterRole loses create on
+  # challenges.acme.cert-manager.io and create/patch/update on
+  # orders.acme.cert-manager.io as of 1.19.6 (security hardening) — n/a: no
+  # RBAC binding in this tree references cert-manager-edit or creates those
+  # resources directly; only the controller itself does, via its own
+  # ClusterRole. No Certificate/ClusterIssuer API field removals/renames, no
+  # Helm values shape change for our `helm_release.cert_manager` block.
+  default = "v1.19.6"
 }
 
 variable "karpenter_version" {
