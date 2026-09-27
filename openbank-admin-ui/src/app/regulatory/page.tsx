@@ -61,7 +61,11 @@ const TEMPLATE_PATHS: Record<string, string[]> = {
     '/api/v1/finrep/templates/F01.03',
     '/api/v1/finrep/templates/F02.00',
   ],
-  'cnb-capital': ['/api/v1/corep/templates/C_01.00'],
+  // C_02.00 (Own Funds Requirements) shares the C_01.00 render/export path — same CorepCell shape
+  // (rowRef/colRef/label/value/isDataGap/gapReason). C_72.00/C_73.00/C_74.00 (#11053/#11098/#11100)
+  // are on their way through the same shape and need only a catalogue entry here once merged to
+  // main; nothing else in this file is template-id-specific.
+  'cnb-capital': ['/api/v1/corep/templates/C_01.00', '/api/v1/corep/templates/C_02.00'],
 }
 
 // This is the canonical environment tag already embedded in the browser bundle. Unknown
@@ -107,7 +111,23 @@ const CELL_LABELS: Record<string, string> = {
 }
 
 function cellLabel(template: RegulatoryTemplate, cell: RegulatoryCell): string {
+  // A backend-supplied label (every COREP cell carries one; FINREP falls back to CELL_LABELS
+  // above) is rendered VERBATIM — including a bracketed marker such as "[row code UNVERIFIED]".
+  // Stripping or reformatting it here would hide a caveat the backend deliberately attached to
+  // this specific row/column, which is exactly the kind of thing an operator reading a
+  // regulatory preview must see, not have filtered out.
   return cell.label ?? CELL_LABELS[`${template.templateId}:${cell.rowRef}:${cell.colRef}`] ?? `${cell.rowRef} / ${cell.colRef}`
+}
+
+// A gap cell's `value` is a flagged, non-attested zero (openapi.yaml: "MUST NOT be read as an
+// attested zero balance") — never render it as if it were a real monetary figure. Show the gap
+// badge plus its reason instead of the underlying number; `money(cell.value, ...)` is used ONLY
+// for a cell that is not a data gap.
+function cellValueText(cell: RegulatoryCell): string {
+  if (cell.isDataGap) {
+    return cell.gapReason ? `DATOVÁ MEZERA — ${cell.gapReason}` : 'DATOVÁ MEZERA'
+  }
+  return money(cell.value, cell.currency)
 }
 
 function money(value: number, currency: string): string {
@@ -145,7 +165,7 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
       { field: `Šablona ${template.templateId}`, value: `Období ${template.period}${template.isBalanced === false ? ' · nevyvážená' : ''}${template.hasDataGaps ? ' · obsahuje datové mezery' : ''}` },
       ...template.cells.map((cell) => ({
         field: `${template.templateId} · ${cellLabel(template, cell)}`,
-        value: `${money(cell.value, cell.currency)}${cell.isDataGap ? ' · DATOVÁ MEZERA' : ''}`,
+        value: cellValueText(cell),
       })),
     ])
     const source = data.evidence === 'FROZEN'
@@ -685,7 +705,26 @@ export default function RegulatoryPage() {
             {/* Visual control table */}
             <div style={{ overflowY: 'auto', padding: '0' }}>
               {previewData.status === 'unavailable' ? (
-                <DataUnavailable kind={previewData.kind} service="FINREP / COREP service" feature={t('regulatorní šablony', 'regulatory templates')} lang="cs" dense />
+                <DataUnavailable
+                  kind={previewData.kind}
+                  service="FINREP / COREP service"
+                  feature={t('regulatorní šablony', 'regulatory templates')}
+                  lang="cs"
+                  dense
+                  // C_02.00 has a dependency the other templates do not: finrep-service's read from
+                  // openbank-risk-engine's Pillar 1 snapshot (RISK_ENGINE_UNAVAILABLE — a real
+                  // failure of that read, distinct from the risk-engine read being disabled or
+                  // having no tied snapshot, both of which render as an ordinary isDataGap cell,
+                  // never as this unavailable state). A generic "service did not answer" message
+                  // would leave an operator debugging finrep-service itself; name the actual
+                  // dependency so they know to check the risk engine instead.
+                  detail={preview.id === 'cnb-capital' && previewData.kind === 'error'
+                    ? t(
+                        'finrep-service odpověděla chybou při načítání C 02.00 (Kapitálové požadavky) — pravděpodobně selhalo čtení z risk-engine (Pillar 1 kapitálový výpočet). Hodnoty se nezobrazí, dokud se čtení z risk-engine neobnoví; zkuste náhled načíst znovu.',
+                        'finrep-service returned an error rendering C 02.00 (Own Funds Requirements) — most likely its read from the risk engine failed (the Pillar 1 capital calculation). Values will not display until the risk-engine read recovers; try loading the preview again.',
+                      )
+                    : undefined}
+                />
               ) : (
                 <>
                 {previewData.status === 'ready' && previewData.evidence === 'LIVE_PREVIEW' && (
