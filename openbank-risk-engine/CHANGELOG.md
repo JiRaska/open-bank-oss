@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.14.0...risk-engine-v0.15.0) (2026-09-27)
+
+
+### Features
+
+* **risk-engine:** classify ČNB lombard borrowing for LCR and NSFR ([#11096](https://github.com/JiRaska/open-bank-oss/issues/11096)) ([febc810](https://github.com/JiRaska/open-bank-oss/commit/febc81016dabd0400cae220d7806e38c5bf25367))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.13.0...risk-engine-v0.14.0) (2026-09-27)
 
 
