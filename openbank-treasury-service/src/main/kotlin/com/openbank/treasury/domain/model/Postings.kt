@@ -58,6 +58,7 @@ data class JournalSpec(
  * | Deposit facility at ČNB          | 1510 | —    | ASSET     |
  * | Accrued interest receivable (MM) | 1520 | 1521 | ASSET     |
  * | MM borrowings from banks         | 2300 | 2301 | LIABILITY |
+ * | Borrowings from ČNB (lombard)    | 2320 | —    | LIABILITY |  (ledger V30)
  * | Accrued interest payable (MM)    | 2310 | 2311 | LIABILITY |
  * | MM interest income               | 4200 | 4201 | INCOME    |
  * | MM interest expense              | 5200 | 5201 | EXPENSE   |
@@ -72,6 +73,7 @@ object TreasuryChart {
             "placement" to "1500",
             "cnb" to "1510",
             "borrowing" to "2300",
+            "cnb-borrowing" to "2320",
             "income" to "4200",
             "expense" to "5200",
             "accrued-receivable" to "1520",
@@ -107,6 +109,7 @@ object TreasuryChart {
  * | MM_PLACEMENT         | Dr placement / Cr nostro (P)  | Dr accrued receivable / Cr income   | Dr nostro (P+I) / Cr placement (P) / Cr accrued (A) / Cr income (I−A) |
  * | CNB_DEPOSIT_FACILITY | Dr ČNB 1510 / Cr nostro (P)   | Dr accrued receivable / Cr income   | Dr nostro (P+I) / Cr 1510 (P) / Cr accrued (A) / Cr income (I−A)      |
  * | MM_BORROWING         | Dr nostro / Cr borrowing (P)  | Dr expense / Cr accrued payable     | Dr borrowing (P) / Dr accrued (A) / Dr expense (I−A) / Cr nostro (P+I) |
+ * | CNB_LOMBARD          | Dr nostro / Cr ČNB 2320 (P)   | Dr expense / Cr accrued payable     | Dr 2320 (P) / Dr accrued (A) / Dr expense (I−A) / Cr nostro (P+I)      |
  *
  * The daily amount is `cumulative(d) − cumulative(d−1)` with `cumulative(n) = I · n / days`, rounded
  * as I itself is, so the dailies sum to exactly I over the life of the deal and a maturity after a
@@ -130,9 +133,9 @@ object PostingRules {
                 PostingLine(TreasuryChart.code(ccy, "cnb"), Side.DEBIT, p, ccy),
                 PostingLine(nostro, Side.CREDIT, p, ccy),
             )
-            ProductType.MM_BORROWING -> listOf(
+            ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOf(
                 PostingLine(nostro, Side.DEBIT, p, ccy),
-                PostingLine(TreasuryChart.code(ccy, "borrowing"), Side.CREDIT, p, ccy),
+                PostingLine(liabilityCode(deal), Side.CREDIT, p, ccy),
             )
         }
         return JournalSpec(deal.id, PostingEvent.SETTLED, lines)
@@ -192,8 +195,8 @@ object PostingRules {
                     line(TreasuryChart.code(ccy, "income"), Side.CREDIT, rest, ccy),
                 )
             }
-            ProductType.MM_BORROWING -> listOfNotNull(
-                PostingLine(TreasuryChart.code(ccy, "borrowing"), Side.DEBIT, p, ccy),
+            ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOfNotNull(
+                PostingLine(liabilityCode(deal), Side.DEBIT, p, ccy),
                 line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
                 line(TreasuryChart.code(ccy, "expense"), Side.DEBIT, rest, ccy),
                 PostingLine(nostro, Side.CREDIT, p + i, ccy),
@@ -222,6 +225,10 @@ object PostingRules {
         }
         return JournalSpec(deal.id, PostingEvent.REVERSED, flipped + unwind)
     }
+
+    /** The principal's liability account: interbank borrowings, or the ČNB lombard account. */
+    private fun liabilityCode(deal: Deal): String =
+        TreasuryChart.code(deal.currency, if (deal.product == ProductType.CNB_LOMBARD) "cnb-borrowing" else "borrowing")
 
     private fun line(code: String, side: Side, amount: BigDecimal, ccy: String): PostingLine? =
         if (amount.signum() > 0) PostingLine(code, side, amount, ccy) else null
