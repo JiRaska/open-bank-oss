@@ -133,6 +133,9 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     'openbank-clearing-service|6. Change log|ClearingResourceSecurityTest':
         'the change-log entry records the correction itself — it names the wrong old class in '
         'order to say it was wrong. §3 no longer cites it (#8409)',
+    'openbank-consent-service|6. Change log|ConsentAlreadyActiveMapper':
+        'deleted by #11051 (exception-mapper consolidation phase 2); the entry names it to say it '
+        'was removed, same shape as the account-service ClearingResourceSecurityTest entry above',
     'openbank-consent-service|6. Change log|ConsentEventPublisher':
         'named in ADR-0126 and the ktlint baseline only; no such class in Kotlin',
     'openbank-consent-service|6. Change log|KafkaConsentEventPublisher':
