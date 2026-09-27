@@ -10,7 +10,7 @@
 #              api_url_file: /etc/alertmanager/secrets/alertmanager-slack/SLACK_WEBHOOK
 #      route the severity=critical match to slack-critical instead of 'null'.
 # Kept decoupled so Alertmanager never CrashLoops on a missing secret mount.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: alertmanager-slack

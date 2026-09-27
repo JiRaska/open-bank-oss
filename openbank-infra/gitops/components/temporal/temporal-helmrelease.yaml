@@ -212,7 +212,7 @@ spec:
 # ExternalSecret pulls DB credentials from OpenBao KV.
 # Path: secret/data/temporal/db
 # Keys expected: DB_HOST, DB_USER, DB_PASSWORD
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: temporal-db-credentials
