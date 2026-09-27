@@ -156,9 +156,13 @@ class Harness:
             return False
         require(booking.get('sourceRef') == self.args.transaction_id
                 and booking.get('type') == 'TRANSACTION_BOOKING', 'authoritative-booking-identity')
+        booking_revision = booking.get('sourceVersion')
+        if type(booking_revision) is not int or booking_revision <= 0:
+            return False
         if not any(e.get('from') == payment_key and e.get('to') == target
                    and e.get('relation') == 'BOOKING_REQUESTED'
-                   and e.get('evidenceRef', '').startswith('transaction:' + self.args.transaction_id + ':')
+                   and e.get('sourceVersion') == booking_revision
+                   and e.get('evidenceRef') == f'transaction:{self.args.transaction_id}:{booking_revision}'
                    for e in edges):
             return False
         payment = nodes.get(payment_key)
@@ -166,12 +170,25 @@ class Harness:
             return False  # A complaint's Transaction reference node is never payment proof.
         require(payment.get('sourceRef') == self.args.payment_id and payment.get('type') == 'PAYMENT',
                 'independent-payment-identity')
-        stages = [e for e in edges if e.get('from') == payment_key
-                  and e.get('evidenceRef', '').startswith('domestic-payment:' + self.args.payment_id + ':')]
-        return any(nodes.get(e.get('to'), {}).get('sourceSystem') == 'domestic-payment'
-                   and nodes[e['to']].get('label') == 'Domestic payment · ' + self.payment_status
-                   and nodes[e['to']].get('sourceVersion') == e.get('sourceVersion')
-                   and e.get('sourceVersion', 0) > 0 for e in stages)
+        revision = self.payment_revision
+        label = 'Domestic payment · ' + self.payment_status
+        if payment.get('sourceVersion') != revision or payment.get('label') != label:
+            return False
+        stage_key = f'payment-stage:domestic:{self.args.payment_id}:{revision}'
+        stage = nodes.get(stage_key)
+        stage_type = ('RAIL_EVIDENCE' if self.payment_status in ('SENT_TO_CLEARING', 'SETTLED', 'RETURNED')
+                      else 'PAYMENT_STAGE')
+        relation = {'RECEIVED': 'CREATED', 'SENT_TO_CLEARING': 'SUBMITTED_TO',
+                    'RETURNED': 'RETURNED_BY'}.get(self.payment_status, self.payment_status)
+        if not stage or stage.get('sourceSystem') != 'domestic-payment':
+            return False
+        if (stage.get('type') != stage_type or stage.get('sourceRef') != f'{self.args.payment_id}:{revision}'
+                or stage.get('label') != label or stage.get('sourceVersion') != revision):
+            return False
+        return any(e.get('from') == payment_key and e.get('to') == stage_key
+                   and e.get('relation') == relation and e.get('sourceVersion') == revision
+                   and e.get('evidenceRef') == f'domestic-payment:{self.args.payment_id}:{revision}'
+                   for e in edges)
 
     def poll(self, condition, label):
         deadline = time.monotonic() + 30
@@ -200,7 +217,10 @@ class Harness:
                 and payment.get('status') in ('RECEIVED', 'VALIDATED', 'SENT_TO_CLEARING',
                                               'SETTLED', 'RETURNED', 'REJECTED', 'CANCELLED'),
                 'authoritative-payment-source')
+        require(type(payment.get('aggregateRevision')) is int and payment['aggregateRevision'] > 0,
+                'authoritative-payment-revision')
         self.payment_status = payment['status']
+        self.payment_revision = payment['aggregateRevision']
         self.checks.append('authoritative-payment-source:PASS')
         source = self.request('dispute', 'maker', 'POST', '/api/v1/complaints', {
             'category': 'PAYMENT_SERVICE', 'channel': 'APP',
