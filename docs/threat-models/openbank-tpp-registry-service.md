@@ -64,9 +64,9 @@ PSD2 service returns 503 rather than fail-open.
 
 ## 6. Change log
 
-- **2026-09-27** — Doc correction, no behavior change (#11088): §5 cited `TppRegistryClient` as the
-  "plain REST client" backing the no-cache claim. That exact symbol has never existed as a Kotlin
-  class/interface in this repository's tracked history of the file — `git grep -n '\bTppRegistryClient\b'`
+- **2026-09-27** — Doc correction, no behavior change (#11088): §5 cited `TppRegistryClient`, a
+  name that exists in no tracked Kotlin source, as the "plain REST client" backing the no-cache
+  claim. `git grep -n '\bTppRegistryClient\b'`
   outside this document matches only the *filename* `TppRegistryClient.kt` (in
   `openbank-psd2-service/detekt-baseline.xml`, `ktlint-baseline.xml`, and the architecture doc's
   package-tree listing), never a declared symbol. The file has, for its whole recorded history,

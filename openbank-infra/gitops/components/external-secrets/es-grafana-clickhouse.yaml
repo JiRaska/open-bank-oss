@@ -6,7 +6,7 @@
 #
 # Grafana lives in `observability`, so this ExternalSecret targets that namespace — mirroring
 # es-admin-ui-clickhouse.yaml, which does the same for `admin-ui`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: grafana-clickhouse
