@@ -28,22 +28,27 @@ import java.time.LocalDate
  *   r0130 Other retail deposits        [row code UNVERIFIED]    — [lcr-retail-less-stable-runoff]
  *   r0170 Operational deposits         [row code UNVERIFIED]    — [lcr-operational-deposit-runoff]
  *   r0885 Other liabilities            [row code UNVERIFIED]    — [lcr-other-contractual-outflow]
+ *   r0950 Secured funding, central bank counterparty [row code UNVERIFIED] — [lcr-central-bank-secured-outflow]
  *   r0060 Retail deposits subject to higher outflows [row code UNVERIFIED] — DATA GAP (not modelled)
  *   r0250 Non-operational deposits     [row code UNVERIFIED]    — DATA GAP (not modelled)
  *
  * UNVERIFIED: every code except r0010 and r0030 is from memory of the Annex XXIV layout and was not
  * checked against the EBA DPM; their labels say so on the wire ([UNVERIFIED_ROWS]). The breakdown
  * rows below them (deposits exempted from the calculation, payout within 30 days, the higher-outflow
- * categories 1 and 2, the operational-deposit sub-types, secured funding, additional outflows and
- * committed facilities) are NOT emitted: their codes are unverified and the engine models none of
- * them — its snapshot carries no committed facilities, term deposits, issued debt, derivatives or
- * securities financing, so those categories are absent, never zero.
+ * categories 1 and 2, the operational-deposit sub-types, secured funding other than with a central
+ * bank, additional outflows and committed facilities) are NOT emitted: their codes are unverified and
+ * the engine models none of them — its snapshot carries no committed facilities, term deposits,
+ * issued debt, derivatives or securities financing, so those categories are absent, never zero. The
+ * one secured funding line it does model is the ČNB lombard (GL 2320, r0950).
  *
- * Ties (the render fails if they do not hold): Σ weighted of the outflow lines must equal the
- * engine's `totalOutflows` within [RiskEngineFigures.roundingTolerance] (the engine rounds every line
- * and the total to cents independently), so a component finrep did not read cannot silently
- * fall out of r0010; and an outflow `factorKey` this mapper does not know fails the render instead
- * of disappearing.
+ * Ties (the render fails if they do not hold): Σ weighted of ALL the outflow lines, known or not,
+ * must equal the engine's `totalOutflows` within [RiskEngineFigures.roundingTolerance] (the engine
+ * rounds every line and the total to cents independently), so a line finrep did not read cannot
+ * silently fall out.
+ *
+ * Unknown components: an outflow `factorKey` this mapper does not map yet does NOT fail the render
+ * and does NOT disappear — r0010 (both columns), which would have to include it, becomes a data gap
+ * naming the key ([unknownComponentReason]); the rows of known components are still stated.
  *
  * Data gaps (ADR-0097 — never a real-looking zero): every row when the read is disabled, no tied
  * snapshot exists, the book is multi-currency or empty, or balances are unclassified (any of which
@@ -52,7 +57,8 @@ import java.time.LocalDate
  * snapshot carries no party type) and applies no higher-outflow category or wholesale run-off; and
  * column c0060 of a component whose applied factor is not the Delegated Regulation 2015/61 rate for
  * that row (stable 5 % Art. 24, other retail 10 % Art. 25, operational 25 % Art. 27, other
- * liabilities 100 % Art. 28) — r0010 / r0030 inherit it.
+ * liabilities 100 % Art. 28, secured funding with a central bank 0 % Art. 28(3)(a)) — r0010 / r0030
+ * inherit it.
  */
 object C7300Mapper {
 
@@ -65,6 +71,7 @@ object C7300Mapper {
     const val LESS_STABLE = "lcr-retail-less-stable-runoff"
     const val OPERATIONAL = "lcr-operational-deposit-runoff"
     const val OTHER = "lcr-other-contractual-outflow"
+    const val CB_SECURED = "lcr-central-bank-secured-outflow"
 
     /** Delegated Regulation (EU) 2015/61 outflow rates for the components as the engine models them. */
     private val EU_RATES: Map<String, BigDecimal> = mapOf(
@@ -72,10 +79,11 @@ object C7300Mapper {
         LESS_STABLE to BigDecimal("0.10"),
         OPERATIONAL to BigDecimal("0.25"),
         OTHER to BigDecimal.ONE,
+        CB_SECURED to BigDecimal.ZERO,
     )
 
     /** Rows this mapper emits whose code has not been checked against the EBA DPM. */
-    val UNVERIFIED_ROWS: Set<String> = setOf("r0060", "r0110", "r0130", "r0170", "r0250", "r0885")
+    val UNVERIFIED_ROWS: Set<String> = setOf("r0060", "r0110", "r0130", "r0170", "r0250", "r0885", "r0950")
 
     const val HIGHER_OUTFLOW_REASON =
         "The risk engine applies no higher-outflow category to retail deposits (the snapshot carries no " +
@@ -84,10 +92,16 @@ object C7300Mapper {
         "The risk engine treats every customer deposit as retail (the snapshot carries no party type) and " +
             "applies no wholesale run-off, so non-operational deposits cannot be stated."
 
+    /** The gap reason for a total that would have to include outflow components this template does not map. */
+    fun unknownComponentReason(keys: Collection<String>, runId: String): String =
+        keys.sorted().joinToString("; ") { "engine reports component '$it' this template does not map yet" } +
+            " (risk-engine snapshot $runId), so a total that would include it cannot be stated."
+
     fun map(lookup: RiskLiquidityLookup, asOf: LocalDate): CorepTemplate {
         val result = lookup.result
         val gap = lookup.unavailableReason ?: gapReason(checkNotNull(result))
         val parts = if (gap == null) components(checkNotNull(result)) else emptyMap()
+        val totalGap = unknownGap(gap, result)
         val valueGap = valueGap(gap, result)
         val currency = result?.currency ?: "CZK"
 
@@ -95,12 +109,17 @@ object C7300Mapper {
         fun sum(vararg keys: String) = keys.map(::part).reduce(Component::plus)
 
         val rows: List<Triple<String, String, Component>> = listOf(
-            Triple("r0010", "OUTFLOWS", sum(STABLE, LESS_STABLE, OPERATIONAL, OTHER)),
+            Triple("r0010", "OUTFLOWS", sum(STABLE, LESS_STABLE, OPERATIONAL, OTHER, CB_SECURED).withGap(totalGap)),
             Triple("r0030", "Retail deposits", sum(STABLE, LESS_STABLE)),
             Triple("r0110", "Stable deposits$UNVERIFIED", part(STABLE)),
             Triple("r0130", "Other retail deposits$UNVERIFIED", part(LESS_STABLE)),
             Triple("r0170", "Operational deposits$UNVERIFIED", part(OPERATIONAL)),
             Triple("r0885", "Other liabilities$UNVERIFIED", part(OTHER)),
+            Triple(
+                "r0950",
+                "Secured funding transactions with a central bank counterparty$UNVERIFIED",
+                part(CB_SECURED),
+            ),
         )
 
         fun cell(row: String, col: String, label: String, value: BigDecimal?, reason: String?) =
@@ -108,8 +127,8 @@ object C7300Mapper {
 
         val cells = buildList {
             rows.forEach { (row, label, c) ->
-                add(cell(row, COL_AMOUNT, label, c.amount, gap))
-                add(cell(row, COL_OUTFLOW, label, c.outflow, valueGap ?: c.rateGap))
+                add(cell(row, COL_AMOUNT, label, c.amount, c.amountGap(gap)))
+                add(cell(row, COL_OUTFLOW, label, c.outflow, c.outflowGap(valueGap)))
             }
             listOf(
                 Triple("r0060", "Retail deposits subject to higher outflows$UNVERIFIED", HIGHER_OUTFLOW_REASON),
@@ -126,6 +145,13 @@ object C7300Mapper {
     private fun valueGap(gap: String?, result: RiskLiquidityResult?): String? =
         gap ?: result?.let { RiskEngineFigures.parameterSetGap(it.parameterSetId, it.parameterSetVersion, it.runId) }
 
+    /** The gap for totals when the engine reports outflow components this mapper does not map, else null. */
+    private fun unknownGap(gap: String?, result: RiskLiquidityResult?): String? {
+        if (gap != null || result == null) return null
+        val unknown = result.outflows.map { it.factorKey }.filterNot { it in EU_RATES }.distinct()
+        return if (unknown.isEmpty()) null else unknownComponentReason(unknown, result.runId)
+    }
+
     private fun gapReason(result: RiskLiquidityResult): String? = when {
         result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
         result.currencyCount > 1 || result.totalOutflows == null ->
@@ -137,13 +163,13 @@ object C7300Mapper {
         else -> null
     }
 
-    /** Per-component sums from the lines, tied to the engine's own total outflows (fails the render if not). */
+    /**
+     * Per-component sums from the lines of the components this mapper knows. Every line — known or
+     * not — must tie to the engine's own total outflows (fails the render if not); an unknown one is
+     * a gap on the totals ([unknownGap]), never an exception and never a silent omission.
+     */
     private fun components(result: RiskLiquidityResult): Map<String, Component> {
-        val byKey = result.outflows.groupBy { line ->
-            line.factorKey.also {
-                check(it in EU_RATES) { "risk-engine outflow '$it' has no C 73.00 row; add it to C7300Mapper" }
-            }
-        }
+        val byKey = result.outflows.groupBy { it.factorKey }
         val parts = EU_RATES.keys.associateWith { key ->
             val lines = byKey[key].orEmpty()
             Component(
@@ -152,7 +178,7 @@ object C7300Mapper {
                 rateGap = rateGap(key, lines, result),
             )
         }
-        val sum = parts.values.fold(BigDecimal.ZERO) { acc, c -> acc.add(c.outflow) }
+        val sum = result.outflows.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.weighted) }
         val engine = checkNotNull(result.totalOutflows)
         check(RiskEngineFigures.tiesWithinRounding(sum, engine, result.outflows.size)) {
             "risk-engine outflow components sum to $sum, but its total outflows are $engine " +
@@ -173,8 +199,24 @@ object C7300Mapper {
         }
     }
 
-    private data class Component(val amount: BigDecimal, val outflow: BigDecimal, val rateGap: String?) {
-        operator fun plus(o: Component) = Component(amount.add(o.amount), outflow.add(o.outflow), rateGap ?: o.rateGap)
+    private data class Component(
+        val amount: BigDecimal,
+        val outflow: BigDecimal,
+        val rateGap: String?,
+        val totalGap: String? = null,
+    ) {
+        operator fun plus(o: Component) = Component(
+            amount.add(o.amount),
+            outflow.add(o.outflow),
+            rateGap ?: o.rateGap,
+            totalGap ?: o.totalGap,
+        )
+
+        fun withGap(reason: String?) = if (reason == null) this else copy(totalGap = reason)
+
+        fun amountGap(templateGap: String?): String? = templateGap ?: totalGap
+
+        fun outflowGap(columnGap: String?): String? = columnGap ?: totalGap ?: rateGap
 
         companion object {
             val EMPTY = Component(BigDecimal.ZERO, BigDecimal.ZERO, null)

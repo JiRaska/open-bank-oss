@@ -47,7 +47,10 @@ import java.time.LocalDate
  * asset); every c0040 cell when the run's liquidity parameter set is not the EU 2015/61 set
  * ([RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET]); and column c0040 of a level whose applied haircut
  * differs from the Delegated Regulation 2015/61 standard haircut (L1 0 %, L2A 15 %, L2B 25 % RMBS /
- * 50 % other). The engine rounds lines and totals separately, so the lines must tie to its level
+ * 50 % other); and every value cell (c0010 and c0040, every row) when the engine's notes say the
+ * collateral pledged for a secured central-bank borrowing is not modelled
+ * ([RiskEngineFigures.pledgedCollateralGap]) — pledged assets are encumbered, so the stock may be
+ * overstated. The engine rounds lines and totals separately, so the lines must tie to its level
  * totals only within [RiskEngineFigures.roundingTolerance]; c0040 reports the engine's own total.
  */
 object C7200Mapper {
@@ -75,6 +78,7 @@ object C7200Mapper {
         val result = lookup.result
         val gap = lookup.unavailableReason ?: gapReason(checkNotNull(result))
         val levels = if (gap == null) levels(checkNotNull(result)) else emptyMap()
+        val amountGap = amountGap(gap, result)
         val valueGap = valueGap(gap, result)
         val currency = result?.currency ?: "CZK"
 
@@ -99,7 +103,7 @@ object C7200Mapper {
 
         val cells = buildList {
             rows.forEach { (row, label, l) ->
-                add(cell(row, COL_AMOUNT, label, l.marketValue, gap))
+                add(cell(row, COL_AMOUNT, label, l.marketValue, amountGap))
                 add(cell(row, COL_VALUE, label, l.value, valueGap ?: l.haircutGap))
             }
             listOf("r0040" to "Coins and banknotes", "r0050" to "Withdrawable central bank reserves")
@@ -111,9 +115,19 @@ object C7200Mapper {
         return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })))
     }
 
-    /** The gap for every c0040 (2015/61 value) cell: the whole-template gap, else the parameter-set gap. */
-    private fun valueGap(gap: String?, result: RiskLiquidityResult?): String? =
-        gap ?: result?.let { RiskEngineFigures.parameterSetGap(it.parameterSetId, it.parameterSetVersion, it.runId) }
+    /**
+     * The gap for every c0040 (2015/61 value) cell: the whole-template gap, else the parameter-set gap,
+     * else the pledged-collateral gap.
+     */
+    private fun valueGap(gap: String?, result: RiskLiquidityResult?): String? = gap
+        ?: result?.let { RiskEngineFigures.parameterSetGap(it.parameterSetId, it.parameterSetVersion, it.runId) }
+        ?: pledgedGap(result)
+
+    /** The gap for every c0010 (market value) cell: the whole-template gap, else the pledged-collateral gap. */
+    private fun amountGap(gap: String?, result: RiskLiquidityResult?): String? = gap ?: pledgedGap(result)
+
+    private fun pledgedGap(result: RiskLiquidityResult?): String? =
+        result?.let { RiskEngineFigures.pledgedCollateralGap(it.notes, it.runId) }
 
     private fun gapReason(result: RiskLiquidityResult): String? = when {
         result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)

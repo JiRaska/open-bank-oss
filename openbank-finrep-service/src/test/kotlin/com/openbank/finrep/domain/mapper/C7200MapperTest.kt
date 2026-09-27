@@ -40,9 +40,11 @@ class C7200MapperTest {
         currencies: Int = 1,
         unclassified: Int = 0,
         parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
+        notes: List<String> = emptyList(),
     ) = RiskLiquidityResult(
         "run-7", asOf, parameterSet, "2", "CZK", lines,
         level1?.let(::BigDecimal), level2a?.let(::BigDecimal), level2b?.let(::BigDecimal), currencies, unclassified,
+        notes = notes,
     )
 
     private fun CorepTemplate.at(row: String, col: String) = cells.single { it.rowRef == row && it.colRef == col }
@@ -192,5 +194,28 @@ class C7200MapperTest {
         assertThatThrownBy {
             C7200Mapper.map(RiskLiquidityLookup.found(result(lines = lines + line("L3", "1", "0"))), asOf)
         }.hasMessageContaining("'L3'")
+    }
+
+    @Test
+    fun `the engine's pledged-collateral note makes every liquid-asset cell a gap naming the note`() {
+        val note = "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for " +
+            "it is not modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock " +
+            "and the LCR may be overstated, and the RSF of the pledged assets understated."
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(notes = listOf(note))), asOf)
+        listOf("r0010", "r0020", "r0030", "r0230", "r0240", "r0310").forEach { row ->
+            listOf("c0010", "c0040").forEach { col ->
+                val c = t.at(row, col)
+                assertThat(c.isDataGap).describedAs("$row/$col").isTrue()
+                assertThat(c.gapReason).contains("Pledged collateral not modelled; HQLA may be overstated")
+                    .contains(note).contains("run-7")
+            }
+        }
+    }
+
+    @Test
+    fun `an unrelated engine note does not gap the liquid assets`() {
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(notes = listOf("Currencies are summed."))), asOf)
+        assertThat(t.at("r0010", "c0040").isDataGap).isFalse()
+        assertThat(t.at("r0010", "c0010").isDataGap).isFalse()
     }
 }

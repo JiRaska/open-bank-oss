@@ -42,6 +42,25 @@ object RiskEngineFigures {
                 "'$EU_LIQUIDITY_PARAMETER_SET', so this 2015/61 value cannot be stated."
         }
 
+    /**
+     * The gap reason for every HQLA / liquidity-buffer cell when the engine says the collateral pledged
+     * for a secured central-bank borrowing (the ČNB lombard) is not modelled, else null. Pledged assets
+     * are encumbered and not HQLA, so the engine's stock may include them: stating it would overstate
+     * the buffer.
+     *
+     * The engine carries this only as free text in `notes` (risk-engine `Liquidity.PLEDGED_COLLATERAL_NOTE`,
+     * no stable key), so the match is deliberately loose — any note mentioning both "pledged" and
+     * "HQLA", case-insensitive — so a rewording of that sentence still gaps rather than silently stating.
+     */
+    fun pledgedCollateralGap(notes: List<String>, runId: String): String? =
+        notes.firstOrNull(::isPledgedCollateralNote)?.let { note ->
+            "Pledged collateral not modelled; HQLA may be overstated. Risk-engine snapshot $runId reports: " +
+                "\"$note\" Encumbered assets are not HQLA, so this liquid-asset figure cannot be stated."
+        }
+
+    private fun isPledgedCollateralNote(note: String): Boolean =
+        note.contains("pledged", ignoreCase = true) && note.contains("HQLA", ignoreCase = true)
+
     /** The gap reason when the engine's book holds no currency at all (not a multi-currency book). */
     fun emptyBookReason(runId: String): String =
         "Risk-engine snapshot $runId holds no balances in any currency (an empty book), so no liquidity " +
