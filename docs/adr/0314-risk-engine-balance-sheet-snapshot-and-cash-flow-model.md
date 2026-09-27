@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [architecture, analytics, database, regulatory-reporting]
 summary: "The risk engine builds an as-of balance-sheet snapshot from events plus pulled reference data, expands each position into cash flows in one canonical model, and fills three source gaps: rate configs, FX fixings and loan rate terms."
-followup: "#10708, #10716, #10729, #10741, #10970, #10998, #11005, #11010 merged (snapshot bootstrap, cash-flow engine, loan/treasury instruments, IRRBB shocks, EU LCR/NSFR parameters, EOD scheduler); #11015 (ČNB minimum reserves) and #11040 (liquidity survival forecast) still open, tracked on #10896"
+followup: "#10708, #10716, #10729, #10741, #10970, #10998, #11005, #11010, #11015, #11040 — the first eight merged (snapshot bootstrap, cash-flow engine, loan/treasury instruments, IRRBB shocks, EU LCR/NSFR parameters, EOD scheduler); #11015 (ČNB minimum reserves) and #11040 (liquidity survival forecast) are still open, tracked on #10896"
 ---
 
 # ADR-0314 — Risk engine: balance-sheet snapshot and cash-flow data model
