@@ -68,6 +68,15 @@ spec:
               value: "false"
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
+            # ADR-0313 D6: COREP C 02.00 reads the risk engine's Pillar 1 result over the engine's
+            # private-CA mTLS listener (8443, client auth REQUIRED; ASVS V9.1 forbids a new plaintext
+            # edge). finrep authenticates with finrep-internal-tls, mounted at /mnt/internal-tls and
+            # named by the %prod `risk-authority` TLS bucket in application.yaml. Declared here so the
+            # NetworkPolicy generator admits finrep -> risk-engine:8443; the read itself stays OFF
+            # (OPENBANK_FINREP_RISK_ENGINE_ENABLED unset = false) until finrep's own identity and its
+            # risk-engine read grant are deployed.
+            - name: RISK_ENGINE_URL
+              value: https://risk-engine.risk.svc:8443
             # NOT optional (#2929). LedgerClient carries OidcClientRequestReactiveFilter, so
             # without this value the oidc-client never initializes and the ledger call goes out
             # with no Authorization header. The ref was absent entirely until now.
@@ -96,6 +105,16 @@ spec:
               port: management
             initialDelaySeconds: 20
             periodSeconds: 30
+          volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
+      volumes:
+        # Client certificate for the risk-engine 8443 mTLS edge (finrep-internal-tls).
+        - name: internal-tls
+          secret:
+            secretName: finrep-internal-tls
+            optional: false
 ---
 apiVersion: v1
 kind: Service
