@@ -58,28 +58,70 @@ class NostroReconciliationServiceTest {
         runBlocking { service.upload(Camt053Parser.parse(xml), sha, key, actor) }
 
     @Test
-    fun `a EUR nostro never asks the ledger for a balance and says why none is shown`() = runBlocking<Unit> {
+    fun `a EUR nostro is compared on native EUR ledger balances, never the CZK base figure`() = runBlocking<Unit> {
         NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-23"))] = BigDecimal("50000.00")
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal("57500.00")
+        // The same GL's CZK base-currency figures: what the trial balance would have answered.
+        // Reading these for a EUR statement is the defect this test exists to catch.
+        ledger.balances[Triple("1002", "CZK", LocalDate.parse("2026-09-23"))] = BigDecimal("1257500.00")
+        ledger.balances[Triple("1002", "CZK", LocalDate.parse("2026-09-25"))] = BigDecimal("1445937.50")
         val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
 
-        assertThat(ledger.queries).containsExactly("lines:1002:2026-09-24..2026-09-25")
+        assertThat(ledger.queries).containsExactly(
+            "lines:1002:2026-09-24..2026-09-25",
+            "balance:1002:EUR:2026-09-23",
+            "balance:1002:EUR:2026-09-25",
+        )
         assertThat(r.matches).hasSize(2)
-        assertThat(r.ledgerOpeningBalance).isNull()
-        assertThat(r.ledgerClosingBalance).isNull()
-        assertThat(r.balanceNotStated).isEqualTo(NostroReconciliationService.BALANCE_NOT_STATED)
-        assertThat(r.reconciled).isNull()
+        assertThat(r.ledgerOpeningBalance).isEqualByComparingTo("50000.00")
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.openingDifference).isEqualByComparingTo("0")
+        assertThat(r.closingDifference).isEqualByComparingTo("0")
+        assertThat(r.balanceNotStated).isNull()
+        assertThat(r.reconciled).isTrue()
     }
 
     @Test
-    fun `a CZK nostro is still compared - both balances read`() = runBlocking<Unit> {
+    fun `a EUR balance difference is a break in EUR`() = runBlocking<Unit> {
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-23"))] = BigDecimal("50000.00")
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal("57400.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.closingDifference).isEqualByComparingTo("100.00")
+        assertThat(r.reconciled).isFalse()
+    }
+
+    @Test
+    fun `a CZK nostro reads its balances through the same native path`() = runBlocking<Unit> {
         NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
-        ledger.balances["1001" to NostroFixtures.DATE.minusDays(1)] = BigDecimal("1000000.00")
-        ledger.balances["1001" to NostroFixtures.DATE] = BigDecimal("1149958.00")
+        ledger.balances[Triple("1001", "CZK", NostroFixtures.DATE.minusDays(1))] = BigDecimal("1000000.00")
+        ledger.balances[Triple("1001", "CZK", NostroFixtures.DATE)] = BigDecimal("1149958.00")
         val r = service.reconcile(stored(NostroFixtures.xml()).id)
 
+        assertThat(ledger.queries).containsExactly(
+            "lines:1001:2026-09-25..2026-09-25",
+            "balance:1001:CZK:2026-09-24",
+            "balance:1001:CZK:2026-09-25",
+        )
         assertThat(r.balanceNotStated).isNull()
+        assertThat(r.ledgerOpeningBalance).isEqualByComparingTo("1000000.00")
         assertThat(r.closingDifference).isEqualByComparingTo("5042.00")
         assertThat(r.reconciled).isFalse()
+    }
+
+    @Test
+    fun `balances are not stated only when the ledger does not hold the GL - and it says so`() = runBlocking<Unit> {
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.unknownAccounts += "1002"
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.matches).hasSize(2)
+        assertThat(r.ledgerOpeningBalance).isNull()
+        assertThat(r.ledgerClosingBalance).isNull()
+        assertThat(r.balanceNotStated).isEqualTo("ledger does not hold GL account 1002")
+        assertThat(r.reconciled).isNull()
     }
 
     @Test
@@ -99,8 +141,8 @@ class NostroReconciliationServiceTest {
 
             assertThat(ledger.queries).containsExactly(
                 "lines:1001:2026-09-23..2026-09-25",
-                "balance:1001:2026-09-22",
-                "balance:1001:2026-09-25",
+                "balance:1001:CZK:2026-09-22",
+                "balance:1001:CZK:2026-09-25",
             )
             assertThat(r.matches.map { it.entry.bookingDate }).contains(day1)
         }

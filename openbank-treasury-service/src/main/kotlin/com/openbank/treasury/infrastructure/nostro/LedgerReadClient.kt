@@ -15,8 +15,10 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -45,8 +47,12 @@ interface LedgerReadRestClient {
     ): Uni<JournalPage>
 
     @GET
-    @Path("/trial-balance")
-    fun trialBalance(@QueryParam("asOf") asOf: String): Uni<TrialBalanceView>
+    @Path("/accounts/{code}/balance")
+    fun accountBalance(
+        @PathParam("code") code: String,
+        @QueryParam("asOf") asOf: String,
+        @QueryParam("currency") currency: String,
+    ): Uni<AccountBalanceView>
 }
 
 data class JournalPage(val data: List<JournalView> = emptyList(), val pagination: PageView? = null)
@@ -71,9 +77,16 @@ data class JournalLineView(
     val currencyCode: String,
 )
 
-data class TrialBalanceView(val lines: List<TrialBalanceLineView> = emptyList())
-
-data class TrialBalanceLineView(val glAccountId: UUID, val net: BigDecimal)
+/** ledger's AccountCurrencyBalanceResponse: native amounts in [currency], `net` = debit − credit. */
+data class AccountBalanceView(
+    val code: String,
+    val currency: String,
+    val asOf: String,
+    val scope: String? = null,
+    val debit: BigDecimal,
+    val credit: BigDecimal,
+    val net: BigDecimal,
+)
 
 @ApplicationScoped
 class LedgerReadAdapter(@RestClient private val client: LedgerReadRestClient) : LedgerReadPort {
@@ -108,20 +121,28 @@ class LedgerReadAdapter(@RestClient private val client: LedgerReadRestClient) : 
     }
 
     /**
-     * REAL_ONLY (the ledger default): canary activity never reaches a real correspondent. The
-     * trial balance sums `base_amount`, so this is a CZK figure whatever the GL's currency; the
-     * reconciliation service asks only for a base-currency nostro.
+     * REAL_ONLY (the ledger default): canary activity never reaches a real correspondent. Native
+     * amounts in [currency] (#11107), so a EUR nostro gets a EUR figure. A 404 (GL unknown to the
+     * ledger) is the one answer mapped to "not stated"; the echo is checked so a balance for some
+     * other account, currency or date can never be compared against the statement.
      */
-    override suspend fun glBalance(glCode: String, asOf: LocalDate): BigDecimal {
-        val glId = TreasuryChart.glAccountId(glCode)
-        return client.trialBalance(asOf.toString()).awaitSuspending().lines
-            .filter { it.glAccountId == glId }
-            .fold(BigDecimal.ZERO) { acc, l -> acc.add(l.net) }
+    override suspend fun accountBalance(glCode: String, currency: String, asOf: LocalDate): BigDecimal? {
+        val view = try {
+            client.accountBalance(glCode, asOf.toString(), currency).awaitSuspending()
+        } catch (e: WebApplicationException) {
+            if (e.response?.status == NOT_FOUND) return null
+            throw e
+        }
+        check(view.code == glCode && view.currency == currency && view.asOf == asOf.toString()) {
+            "ledger answered a balance for ${view.code}/${view.currency}/${view.asOf}, asked $glCode/$currency/$asOf"
+        }
+        return view.net
     }
 
     private companion object {
         const val PAGE_SIZE = 200
         const val MAX_PAGES = 50
+        const val NOT_FOUND = 404
         val BOOKED = setOf("POSTED", "REVERSED")
     }
 }

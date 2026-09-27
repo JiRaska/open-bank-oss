@@ -20,7 +20,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ApplicationScoped
 class FakeLedgerRead : LedgerReadPort {
     val lines = CopyOnWriteArrayList<Pair<String, LedgerNostroLine>>()
-    val balances = ConcurrentHashMap<Pair<String, LocalDate>, BigDecimal>()
+
+    /** Native-currency balances keyed by (glCode, currency, asOf); absent = zero. */
+    val balances = ConcurrentHashMap<Triple<String, String, LocalDate>, BigDecimal>()
+
+    /** GL codes the fake ledger answers 404 for (the one "not stated" case). */
+    val unknownAccounts = java.util.concurrent.CopyOnWriteArraySet<String>()
     val queries = CopyOnWriteArrayList<String>()
 
     override suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
@@ -28,14 +33,16 @@ class FakeLedgerRead : LedgerReadPort {
         return lines.filter { it.first == glCode && it.second.entryDate in from..to }.map { it.second }
     }
 
-    override suspend fun glBalance(glCode: String, asOf: LocalDate): BigDecimal {
-        queries += "balance:$glCode:$asOf"
-        return balances[glCode to asOf] ?: BigDecimal.ZERO
+    override suspend fun accountBalance(glCode: String, currency: String, asOf: LocalDate): BigDecimal? {
+        queries += "balance:$glCode:$currency:$asOf"
+        if (glCode in unknownAccounts) return null
+        return balances[Triple(glCode, currency, asOf)] ?: BigDecimal.ZERO
     }
 
     fun reset() {
         lines.clear()
         balances.clear()
+        unknownAccounts.clear()
         queries.clear()
     }
 }

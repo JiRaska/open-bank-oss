@@ -15,7 +15,9 @@ info:
   #        ROLE_TREASURY_APPROVER) and GET /nostro/statements/{id}/reconciliation.
   # 1.8.0: additive — FX_SPOT deal terms, settlement and response fields (#10896).
   #        Invalid rates and rounded-to-zero counter amounts return 400.
-  version: 1.8.0
+  # 1.9.0: native-currency nostro balance reconciliation; unknown GL remains explicitly
+  #        unstated, and an unavailable ledger balance is a 502.
+  version: 1.9.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -697,20 +699,22 @@ components:
         ledgerOpeningBalance:
           type: [number, 'null']
           description: >
-            Ledger GL net as of the day before the statement's earliest date. NULL when the ledger
-            cannot state it in the statement currency (see balanceNotStated).
+            Ledger GL net (debit − credit of native amounts in the statement currency) as of the
+            day before the statement's earliest date. NULL only when the ledger does not hold the
+            GL account (see balanceNotStated).
         openingDifference: {type: [number, 'null'], description: NULL whenever ledgerOpeningBalance is}
         statementClosingBalance: {type: number}
         ledgerClosingBalance:
           type: [number, 'null']
-          description: Ledger GL net as of the statement's latest date. NULL as ledgerOpeningBalance.
+          description: Ledger GL net in the statement currency as of the statement date. NULL as ledgerOpeningBalance.
         closingDifference: {type: [number, 'null'], description: NULL whenever ledgerClosingBalance is}
         balanceNotStated:
           type: [string, 'null']
           description: >
-            Why the ledger balances are NULL — the ledger exposes only base-currency (CZK)
-            balances, so a nostro in any other currency has no comparable figure. NULL when the
-            balances are stated.
+            Why the ledger balances are NULL. Balances are read in the statement currency for every
+            nostro (CZK and foreign alike), so this is set only when the ledger answers that it
+            does not hold the GL account (404) — a chart not yet migrated in that environment. NULL
+            whenever the balances are stated.
         reconciled:
           type: [boolean, 'null']
           description: >

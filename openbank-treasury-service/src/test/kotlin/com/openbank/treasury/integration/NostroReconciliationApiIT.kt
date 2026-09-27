@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.DriverManager
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -44,8 +45,8 @@ class NostroReconciliationApiIT {
         ledger.reset()
         statements.reset()
         NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
-        ledger.balances["1001" to NostroFixtures.DATE.minusDays(1)] = BigDecimal("1000000.00")
-        ledger.balances["1001" to NostroFixtures.DATE] = BigDecimal("1149958.00")
+        ledger.balances[Triple("1001", "CZK", NostroFixtures.DATE.minusDays(1))] = BigDecimal("1000000.00")
+        ledger.balances[Triple("1001", "CZK", NostroFixtures.DATE)] = BigDecimal("1149958.00")
     }
 
     private fun upload(xml: ByteArray, key: String? = UUID.randomUUID().toString()) = given()
@@ -81,7 +82,7 @@ class NostroReconciliationApiIT {
 
         assertThat(
             ledger.queries,
-        ).contains("lines:1001:2026-09-25..2026-09-25", "balance:1001:2026-09-24", "balance:1001:2026-09-25")
+        ).contains("lines:1001:2026-09-25..2026-09-25", "balance:1001:CZK:2026-09-24", "balance:1001:CZK:2026-09-25")
         assertThat(entryRows(id)).isEqualTo(3)
     }
 
@@ -137,22 +138,45 @@ class NostroReconciliationApiIT {
 
     @Test
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `a EUR statement is matched but its balances are not stated - reconciled is null`() {
+    fun `a EUR statement is reconciled on native EUR ledger balances`() {
         ledger.lines.clear()
         NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-23"))] = BigDecimal("50000.00")
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal("57500.00")
         val id: String = upload(NostroFixtures.eurXml("SYNTH-IT-EUR-${UUID.randomUUID()}".take(40)))
             .then().statusCode(201).body("glCode", equalTo("1002")).extract().path("id")
 
         given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
             .then().statusCode(200)
             .body("matches", hasSize<Any>(2))
+            .body("ledgerOpeningBalance", equalTo(50000.00f))
+            .body("ledgerClosingBalance", equalTo(57500.00f))
+            .body("openingDifference", equalTo(0.00f))
+            .body("closingDifference", equalTo(0.00f))
+            .body("balanceNotStated", nullValue())
+            .body("reconciled", equalTo(true))
+        assertThat(ledger.queries).containsExactly(
+            "lines:1002:2026-09-24..2026-09-25",
+            "balance:1002:EUR:2026-09-23",
+            "balance:1002:EUR:2026-09-25",
+        )
+    }
+
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a GL the ledger does not hold leaves balances unstated with the reason - reconciled is null`() {
+        ledger.lines.clear()
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.unknownAccounts += "1002"
+        val id: String = upload(NostroFixtures.eurXml("SYNTH-IT-EUR-${UUID.randomUUID()}".take(40)))
+            .then().statusCode(201).extract().path("id")
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(200)
             .body("ledgerOpeningBalance", nullValue())
-            .body("ledgerClosingBalance", nullValue())
-            .body("openingDifference", nullValue())
             .body("closingDifference", nullValue())
-            .body("balanceNotStated", containsString("base-currency (CZK)"))
+            .body("balanceNotStated", containsString("does not hold GL account 1002"))
             .body("reconciled", nullValue())
-        assertThat(ledger.queries).containsExactly("lines:1002:2026-09-24..2026-09-25")
     }
 
     @Test

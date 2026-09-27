@@ -24,7 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * calls to a real `RestClient` and ran them only against a fake ledger — nothing on the wire had
  * ever been checked against the real provider. This pins the two reads
  * [com.openbank.treasury.infrastructure.nostro.LedgerReadAdapter.nostroLines] and
- * [com.openbank.treasury.infrastructure.nostro.LedgerReadAdapter.glBalance] actually issue, plus
+ * [com.openbank.treasury.infrastructure.nostro.LedgerReadAdapter.accountBalance] actually issue, plus
  * the negative-auth case ADR-0279 requires on every changed contract test.
  *
  * The generated pact file is committed to `pacts/` (git-pact, ADR-0063) and replayed by
@@ -39,11 +39,11 @@ import org.junit.jupiter.api.extension.ExtendWith
  * `pact-drift-check.yml` fails otherwise.
  *
  * Paths are LITERAL on the interaction side (`.path("/api/v1/journals")`,
- * `.path("/api/v1/journals/trial-balance")`) per `CLAUDE.md`'s Pact section: deriving the
+ * `.path("/api/v1/journals/accounts/1002/balance")`) per `CLAUDE.md`'s Pact section: deriving the
  * expected path from the client's own `@Path` would make the test vacuous against a client
  * pointed at a route that does not exist (finrep-service's `/api/v1/ledger/trial-balance`, #2269).
  * The REQUEST that is actually sent is reflected off the client instead
- * ([clientDerivedJournalsPath], [clientDerivedTrialBalancePath]).
+ * ([clientDerivedJournalsPath], [clientDerivedBalancePath]).
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
@@ -96,12 +96,19 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The native-currency balance read (#11107): treasury asks for a nostro's balance in the
+     * STATEMENT currency, so a EUR nostro is compared on EUR, never on the CZK `base_amount` the
+     * trial balance aggregates. Path is the LITERAL `/api/v1/journals/accounts/1002/balance`; the
+     * echoed code/currency/asOf are pinned by value because the adapter refuses a balance whose
+     * echo differs from what it asked for.
+     */
     @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
-    fun nostroTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has a nostro journal line on 1001 for the statement date")
-        .uponReceiving("GET trial-balance as-of the statement date for reconciliation")
-        .path("/api/v1/journals/trial-balance")
-        .query("asOf=$STATEMENT_DATE")
+    fun nostroNativeBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has a EUR journal line on 1002 for the statement date")
+        .uponReceiving("GET the EUR nostro GL balance in EUR as of the statement date")
+        .path("/api/v1/journals/accounts/1002/balance")
+        .query("asOf=$STATEMENT_DATE&currency=EUR")
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -109,13 +116,13 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                // stringValue, NOT stringType (issue #2425, restated in LedgerTrialBalancePactConsumerTest):
-                // `asOf` is echoed from the query parameter this interaction pins by literal.
+                o.stringValue("code", "1002")
+                o.stringValue("currency", "EUR")
                 o.stringValue("asOf", STATEMENT_DATE)
-                o.minArrayLike("lines", 1) { line ->
-                    line.stringValue("glAccountId", NOSTRO_CZK_GL_ID)
-                    line.decimalType("net", 250000.00)
-                }
+                o.stringType("scope", "REAL_ONLY")
+                o.decimalType("debit", 10000.00)
+                o.decimalType("credit", 0.00)
+                o.decimalType("net", 10000.00)
             }.build(),
         )
         .toPact()
@@ -165,21 +172,24 @@ class TreasuryNostroLedgerReadPactConsumerTest {
     }
 
     @Test
-    @PactTestFor(pactMethod = "nostroTrialBalancePact")
-    fun `trial balance carries the nostro GL net for the statement date`(mockServer: MockServer) {
-        assertThat(clientDerivedTrialBalancePath()).isEqualTo("/api/v1/journals/trial-balance")
+    @PactTestFor(pactMethod = "nostroNativeBalancePact")
+    fun `native balance of the EUR nostro is stated in EUR for the statement date`(mockServer: MockServer) {
+        assertThat(clientDerivedBalancePath("1002")).isEqualTo("/api/v1/journals/accounts/1002/balance")
 
         val body = given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
             .queryParam("asOf", STATEMENT_DATE)
-            .get(clientDerivedTrialBalancePath())
+            .queryParam("currency", "EUR")
+            .get(clientDerivedBalancePath("1002"))
             .then()
             .statusCode(200)
             .extract().jsonPath()
 
+        assertThat(body.getString("code")).isEqualTo("1002")
+        assertThat(body.getString("currency")).isEqualTo("EUR")
         assertThat(body.getString("asOf")).isEqualTo(STATEMENT_DATE)
-        assertThat(body.getString("lines[0].glAccountId")).isEqualTo(NOSTRO_CZK_GL_ID)
+        assertThat(body.getDouble("net")).isEqualTo(10000.00)
     }
 
     @Test
@@ -201,12 +211,13 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         com.openbank.treasury.infrastructure.nostro.LedgerReadRestClient::class.java
             .getAnnotation(jakarta.ws.rs.Path::class.java).value
 
-    private fun clientDerivedTrialBalancePath(): String {
+    /** `LedgerReadRestClient.accountBalance`'s `@Path`, reflected and filled with [code]. */
+    private fun clientDerivedBalancePath(code: String): String {
         val base = clientDerivedJournalsPath()
         val sub = com.openbank.treasury.infrastructure.nostro.LedgerReadRestClient::class.java
-            .getMethod("trialBalance", String::class.java)
+            .getMethod("accountBalance", String::class.java, String::class.java, String::class.java)
             .getAnnotation(jakarta.ws.rs.Path::class.java).value
-        return "$base$sub"
+        return "$base$sub".replace("{code}", code)
     }
 
     private companion object {

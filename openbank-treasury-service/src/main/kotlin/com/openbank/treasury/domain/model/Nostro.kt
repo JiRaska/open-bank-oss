@@ -86,10 +86,10 @@ enum class MatchType {
 data class NostroMatch(val entry: StatementEntry, val line: LedgerNostroLine, val type: MatchType)
 
 /**
- * The ledger balances are NULL when the ledger cannot state them in the statement currency — its
- * balance reads aggregate `base_amount` (CZK) only, so a EUR nostro has no comparable figure, and
- * [balanceNotStated] says why. A CZK figure against a EUR statement would be a difference nobody
- * could stand behind (ADR-0097), so none is shown.
+ * Ledger balances are read in the statement currency from native line amounts (#11107), so they
+ * are stated for every nostro, CZK or foreign. They are NULL — with [balanceNotStated] saying why —
+ * only when the ledger cannot state them at all (it does not hold the GL account); a figure in any
+ * other currency would be a difference nobody could stand behind (ADR-0097), so none is shown.
  */
 data class NostroReconciliation(
     val statement: NostroStatement,

@@ -44,17 +44,20 @@ interface NostroStatementRepository {
 }
 
 /**
- * ledger-service's READ surface (GET /api/v1/journals, GET /api/v1/journals/trial-balance), on
- * treasury's own identity. Never writes: reconciliation lists differences, it does not post them.
+ * ledger-service's READ surface (GET /api/v1/journals, GET /api/v1/journals/accounts/{code}/balance),
+ * on treasury's own identity. Never writes: reconciliation lists differences, it does not post them.
  */
 interface LedgerReadPort {
     /** Booked (POSTED or REVERSED) real journal lines on [glCode] with entry date in [from]..[to]. */
     suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine>
 
     /**
-     * Net (debit − credit) of [glCode] over every real booked journal with entry date <= [asOf],
-     * in the ledger's BASE currency (CZK) — the trial balance aggregates `base_amount` only, so this
-     * is meaningless for a nostro held in any other currency and must not be asked for one.
+     * Net (debit − credit) of [glCode] in its NATIVE [currency] — the sum of the lines' own
+     * `amount`, never the CZK `base_amount` — over every real booked journal with entry date
+     * <= [asOf] (#11107). One code path for every nostro, CZK included.
+     *
+     * NULL only when the ledger does not know [glCode] at all (it answers 404): the one case in
+     * which no balance can be stated. Any other failure propagates — a figure is never guessed.
      */
-    suspend fun glBalance(glCode: String, asOf: LocalDate): BigDecimal
+    suspend fun accountBalance(glCode: String, currency: String, asOf: LocalDate): BigDecimal?
 }
