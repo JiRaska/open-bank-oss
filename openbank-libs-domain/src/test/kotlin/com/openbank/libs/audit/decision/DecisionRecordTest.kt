@@ -409,4 +409,290 @@ class DecisionRecordTest {
         assertThat(HumanReview.fromMap(encoded)).isSameAs(HumanReview.Pending)
         assertThat(HumanReview.fromMap(encoded)).isNotSameAs(HumanReview.None)
     }
+
+    // --- fromMap: named field, never a bare NPE/CCE (review finding: req/opt helpers) -----------
+    //
+    // DecisionRecord.fromMap used to cast every field with a bare `as`, so a missing or
+    // mistyped key threw a NullPointerException or ClassCastException with no indication which
+    // key was wrong. req()/opt() are the only places allowed to cast a decoded payload value, and
+    // every failure here must be an IllegalArgumentException naming the key.
+
+    private fun validRecordMap(): MutableMap<String, Any?> {
+        val record = authzRecord().copy(
+            reasons = listOf(DecisionReason(code = "POLICY_DENY", ruleId = "rule-1")),
+            correlation = DecisionCorrelation(traceId = "trace-1", correlationId = "corr-1", channel = "api"),
+            humanReview = HumanReview.Completed(by = "operator-1", at = decidedAt),
+        )
+        return with(DecisionRecord) { record.toMap() }.toMutableMap()
+    }
+
+    private fun requiredKeys() = listOf(
+        "decisionId", "decisionClass", "decidedAt", "inputDigest", "engineKind", "engineId",
+        "engineVersion", "outcome", "reasons", "subjectRef", "actChain", "humanReview", "atomic",
+        "retentionClass",
+    )
+
+    @Test
+    fun `fromMap rejects a missing required key naming that key`() {
+        requiredKeys().forEach { key ->
+            val map = validRecordMap()
+            map.remove(key)
+            assertThatThrownBy { DecisionRecord.fromMap(map) }
+                .describedAs("dropping '%s' must fail naming it", key)
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining(key)
+        }
+    }
+
+    @Test
+    fun `fromMap rejects an explicit-null required key naming that key`() {
+        requiredKeys().forEach { key ->
+            val map = validRecordMap()
+            map[key] = null
+            assertThatThrownBy { DecisionRecord.fromMap(map) }
+                .describedAs("nulling '%s' must fail naming it", key)
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining(key)
+        }
+    }
+
+    @Test
+    fun `fromMap rejects a wrongly typed required key naming that key`() {
+        requiredKeys().forEach { key ->
+            val map = validRecordMap()
+            // 42 (an Int) is not a valid value for any required key here (String, List or Boolean).
+            map[key] = 42
+            assertThatThrownBy { DecisionRecord.fromMap(map) }
+                .describedAs("mistyping '%s' must fail naming it", key)
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining(key)
+        }
+    }
+
+    @Test
+    fun `fromMap rejects an unknown decisionClass constant`() {
+        val map = validRecordMap()
+        map["decisionClass"] = "NOT_A_CLASS"
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("decisionClass")
+            .hasMessageContaining("NOT_A_CLASS")
+    }
+
+    @Test
+    fun `fromMap rejects an unknown engineKind constant`() {
+        val map = validRecordMap()
+        map["engineKind"] = "NOT_AN_ENGINE"
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("engineKind")
+            .hasMessageContaining("NOT_AN_ENGINE")
+    }
+
+    @Test
+    fun `fromMap rejects an unknown retentionClass constant`() {
+        val map = validRecordMap()
+        map["retentionClass"] = "NOT_A_RETENTION"
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("retentionClass")
+            .hasMessageContaining("NOT_A_RETENTION")
+    }
+
+    @Test
+    fun `fromMap rejects a malformed decisionId UUID`() {
+        val map = validRecordMap()
+        map["decisionId"] = "not-a-uuid"
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("decisionId")
+    }
+
+    @Test
+    fun `fromMap rejects a malformed decidedAt instant`() {
+        val map = validRecordMap()
+        map["decidedAt"] = "not-an-instant"
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("decidedAt")
+    }
+
+    @Test
+    fun `fromMap rejects a reasons entry missing code naming the reasons index`() {
+        val map = validRecordMap()
+        @Suppress("UNCHECKED_CAST")
+        map["reasons"] = listOf(mapOf("ruleId" to "rule-1"))
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("reasons[0].code")
+    }
+
+    @Test
+    fun `fromMap rejects a reasons entry that is not a map`() {
+        val map = validRecordMap()
+        map["reasons"] = listOf("not-a-map")
+        assertThatThrownBy { DecisionRecord.fromMap(map) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("reasons[0]")
+    }
+
+    @Test
+    fun `fromMap accepts a legacy reasons entry with explicit null ruleId`() {
+        val map = validRecordMap()
+        map["reasons"] = listOf(mapOf("code" to "POLICY_DENY", "ruleId" to null))
+        val decoded = DecisionRecord.fromMap(map)
+        assertThat(decoded.reasons.single()).isEqualTo(DecisionReason(code = "POLICY_DENY", ruleId = null))
+    }
+
+    @Test
+    fun `fromMap accepts legacy explicit-null correlation fields`() {
+        val map = validRecordMap()
+        map["traceId"] = null
+        map["correlationId"] = null
+        map["channel"] = null
+        val decoded = DecisionRecord.fromMap(map)
+        assertThat(decoded.correlation.traceId).isNull()
+        assertThat(decoded.correlation.correlationId).isNull()
+        assertThat(decoded.correlation.channel).isNull()
+    }
+
+    @Test
+    fun `fromMap accepts absent correlation keys the same as explicit null`() {
+        val map = validRecordMap()
+        map.remove("traceId")
+        map.remove("correlationId")
+        map.remove("channel")
+        val decoded = DecisionRecord.fromMap(map)
+        assertThat(decoded.correlation.traceId).isNull()
+        assertThat(decoded.correlation.correlationId).isNull()
+        assertThat(decoded.correlation.channel).isNull()
+    }
+
+    @Test
+    fun `toMap omits null-valued optional correlation and ruleId keys rather than writing an explicit null`() {
+        val record = authzRecord().copy(
+            reasons = listOf(DecisionReason(code = "POLICY_DENY", ruleId = null)),
+            correlation = DecisionCorrelation(),
+        )
+        val map = with(DecisionRecord) { record.toMap() }
+
+        assertThat(map).doesNotContainKeys("traceId", "correlationId", "channel")
+        @Suppress("UNCHECKED_CAST")
+        val reasonMap = (map["reasons"] as List<Map<String, Any?>>).single()
+        assertThat(reasonMap).doesNotContainKey("ruleId")
+    }
+
+    // --- HumanReview.fromMap negatives ---------------------------------------------------------
+
+    @Test
+    fun `HumanReview fromMap rejects a missing type`() {
+        assertThatThrownBy { HumanReview.fromMap(emptyMap()) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("type")
+    }
+
+    @Test
+    fun `HumanReview fromMap rejects Completed missing by`() {
+        assertThatThrownBy { HumanReview.fromMap(mapOf("type" to "COMPLETED", "at" to decidedAt.toString())) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("by")
+    }
+
+    @Test
+    fun `HumanReview fromMap rejects Completed missing at`() {
+        assertThatThrownBy { HumanReview.fromMap(mapOf("type" to "COMPLETED", "by" to "operator-1")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("at")
+    }
+
+    @Test
+    fun `HumanReview fromMap rejects a malformed Completed at`() {
+        assertThatThrownBy {
+            HumanReview.fromMap(mapOf("type" to "COMPLETED", "by" to "operator-1", "at" to "not-an-instant"))
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("at")
+    }
+
+    // --- DecisionOutcome.fromMap negatives ------------------------------------------------------
+
+    @Test
+    fun `DecisionOutcome fromMap rejects a missing kind`() {
+        assertThatThrownBy { DecisionOutcome.fromMap(mapOf("name" to "ALLOW")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("kind")
+    }
+
+    @Test
+    fun `DecisionOutcome fromMap rejects a missing name`() {
+        assertThatThrownBy { DecisionOutcome.fromMap(mapOf("kind" to "AUTHZ")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("name")
+    }
+
+    @Test
+    fun `DecisionOutcome fromMap rejects a name that does not belong to the kind's subtype`() {
+        assertThatThrownBy { DecisionOutcome.fromMap(mapOf("kind" to "AUTHZ", "name" to "PASS")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("name")
+            .hasMessageContaining("PASS")
+    }
+
+    // --- round-trip variants (review finding: exercise the shapes fromMap must tolerate) --------
+
+    @Test
+    fun `round-trips a record with HumanReview None`() {
+        val record = authzRecord().copy(humanReview = HumanReview.None)
+        val decoded = DecisionRecord.fromMap(with(DecisionRecord) { record.toMap() })
+        assertThat(decoded).isEqualTo(record)
+    }
+
+    @Test
+    fun `round-trips a record with HumanReview Pending`() {
+        val record = authzRecord().copy(humanReview = HumanReview.Pending)
+        val decoded = DecisionRecord.fromMap(with(DecisionRecord) { record.toMap() })
+        assertThat(decoded).isEqualTo(record)
+    }
+
+    @Test
+    fun `round-trips a record with empty reasons and empty actChain`() {
+        val record = authzRecord().copy(
+            reasons = emptyList(),
+            correlation = DecisionCorrelation(actChain = emptyList()),
+        )
+        val decoded = DecisionRecord.fromMap(with(DecisionRecord) { record.toMap() })
+        assertThat(decoded).isEqualTo(record)
+        assertThat(decoded.reasons).isEmpty()
+        assertThat(decoded.correlation.actChain).isEmpty()
+    }
+
+    @Test
+    fun `round-trips a record with all-null optional correlation fields`() {
+        val record = authzRecord().copy(correlation = DecisionCorrelation())
+        val decoded = DecisionRecord.fromMap(with(DecisionRecord) { record.toMap() })
+        assertThat(decoded).isEqualTo(record)
+    }
+
+    @Test
+    fun `round-trips atomic true and false`() {
+        val atomicTrue = authzRecord().copy(atomic = true)
+        val atomicFalse = authzRecord().copy(atomic = false)
+
+        assertThat(DecisionRecord.fromMap(with(DecisionRecord) { atomicTrue.toMap() }).atomic).isTrue()
+        assertThat(DecisionRecord.fromMap(with(DecisionRecord) { atomicFalse.toMap() }).atomic).isFalse()
+    }
+
+    @Test
+    fun `round-trips a nano-precision Instant without losing precision`() {
+        val nanoPrecise = Instant.parse("2026-09-26T10:00:00.123456789Z")
+        val record = authzRecord().copy(
+            decidedAt = nanoPrecise,
+            humanReview = HumanReview.Completed(by = "operator-1", at = nanoPrecise),
+        )
+
+        val decoded = DecisionRecord.fromMap(with(DecisionRecord) { record.toMap() })
+
+        assertThat(decoded.decidedAt).isEqualTo(nanoPrecise)
+        assertThat((decoded.humanReview as HumanReview.Completed).at).isEqualTo(nanoPrecise)
+    }
 }

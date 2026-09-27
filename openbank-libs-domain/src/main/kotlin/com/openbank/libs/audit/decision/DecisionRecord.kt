@@ -7,6 +7,7 @@ package com.openbank.libs.audit.decision
 import com.openbank.libs.domain.identifiers.Ids
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.format.DateTimeParseException
 import java.util.UUID
 
 /**
@@ -19,6 +20,67 @@ import java.util.UUID
  * [com.openbank.libs.decision.PolicyEvaluation] type maps *onto* [DecisionRecord]; this package
  * never depends the other way.
  */
+
+// --- codec helpers ------------------------------------------------------------------------------
+//
+// Every fromMap()/valueOf()/UUID.fromString()/Instant.parse() call in this file goes through one
+// of these so a malformed payload always throws IllegalArgumentException naming the offending
+// field, instead of a bare ClassCastException or NullPointerException from an unchecked `as` cast
+// that gives no hint which key was wrong (review finding). [req] and [opt] are the ONLY places in
+// this file allowed to cast a payload value.
+
+/**
+ * Reads a REQUIRED key from a decoded payload map. Throws [IllegalArgumentException] naming
+ * [field] (defaults to [key]) when the key is absent, explicitly `null`, or not a [T].
+ */
+@Suppress("UNCHECKED_CAST")
+private inline fun <reified T> req(map: Map<String, Any?>, key: String, field: String = key): T {
+    require(map.containsKey(key) && map[key] != null) { "$field: required key '$key' is missing" }
+    val value = map[key]
+    return value as? T
+        ?: throw IllegalArgumentException(
+            "$field: key '$key' must be a ${T::class.simpleName}, was ${value!!::class.simpleName}",
+        )
+}
+
+/**
+ * Reads an OPTIONAL key from a decoded payload map. Returns `null` when the key is absent OR
+ * explicitly `null` — both encode "unknown" (see the null-policy note on [DecisionRecord.toMap]).
+ * Throws [IllegalArgumentException] naming [field] when the key is present, non-null, and not a
+ * [T].
+ */
+@Suppress("UNCHECKED_CAST")
+private inline fun <reified T> opt(map: Map<String, Any?>, key: String, field: String = key): T? {
+    val value = map[key] ?: return null
+    return value as? T
+        ?: throw IllegalArgumentException(
+            "$field: key '$key' must be a ${T::class.simpleName}, was ${value::class.simpleName}",
+        )
+}
+
+/** Wraps [java.lang.Enum.valueOf] so an unknown constant names the offending [field]. */
+private inline fun <reified E : Enum<E>> parseEnum(name: String, field: String): E = try {
+    enumValueOf<E>(name)
+} catch (e: IllegalArgumentException) {
+    throw IllegalArgumentException(
+        "$field: unknown ${E::class.simpleName} constant '$name'",
+        e,
+    )
+}
+
+/** Wraps [UUID.fromString] so a malformed UUID names the offending [field]. */
+private fun parseUuid(value: String, field: String): UUID = try {
+    UUID.fromString(value)
+} catch (e: IllegalArgumentException) {
+    throw IllegalArgumentException("$field: not a valid UUID: '$value'", e)
+}
+
+/** Wraps [Instant.parse] so a malformed instant names the offending [field]. */
+private fun parseInstant(value: String, field: String): Instant = try {
+    Instant.parse(value)
+} catch (e: DateTimeParseException) {
+    throw IllegalArgumentException("$field: not a valid ISO-8601 instant: '$value'", e)
+}
 
 /** Closed set of automated-decision classes (ADR-0322 D1). */
 enum class DecisionClass { AUTHZ, FRAUD, CREDIT, AGENT }
@@ -105,6 +167,23 @@ data class DecisionReason(val code: String, val ruleId: String? = null) {
         require(code.isNotBlank()) { "DecisionReason.code must not be blank" }
         require(ruleId == null || ruleId.isNotBlank()) { "DecisionReason.ruleId must not be blank when present" }
     }
+
+    companion object {
+        /** Pure-Kotlin encoding. [ruleId] is OMITTED (absent key) when `null` — see the null-policy note on [DecisionRecord.toMap]. */
+        fun DecisionReason.toMap(): Map<String, Any?> = buildMap {
+            put("code", code)
+            ruleId?.let { put("ruleId", it) }
+        }
+
+        /**
+         * Inverse of [toMap]. Accepts `ruleId` either absent or explicitly `null` (legacy
+         * producers). Throws [IllegalArgumentException] naming the field on a malformed map.
+         */
+        fun fromMap(map: Map<String, Any?>, field: String = "DecisionReason"): DecisionReason = DecisionReason(
+            code = req(map, "code", field = "$field.code"),
+            ruleId = opt(map, "ruleId", field = "$field.ruleId"),
+        )
+    }
 }
 
 /** Opaque identifier of the affected party or resource — never a display name (ADR-0322 D1/D3). */
@@ -183,18 +262,21 @@ sealed interface HumanReview {
             is Completed -> mapOf("type" to type, "by" to by, "at" to at.toString())
         }
 
-        /** Inverse of [toMap]. Throws [IllegalArgumentException] on an unknown or missing `type`/field. */
+        /**
+         * Inverse of [toMap]. Throws [IllegalArgumentException] naming the offending field on an
+         * unknown/missing `type` discriminator, a missing `by`/`at`, a wrongly typed value, or a
+         * malformed `at` instant.
+         */
         fun fromMap(map: Map<String, Any?>): HumanReview {
-            val type = map["type"] as? String
+            val type = req<String>(map, "type", field = "HumanReview.type")
             return when (type) {
                 "NONE" -> None
                 "PENDING" -> Pending
                 "COMPLETED" -> Completed(
-                    by = requireNotNull(map["by"] as? String) { "HumanReview.Completed map missing 'by'" },
-                    at = Instant.parse(
-                        requireNotNull(map["at"] as? String) {
-                            "HumanReview.Completed map missing 'at'"
-                        },
+                    by = req(map, "by", field = "HumanReview.Completed.by"),
+                    at = parseInstant(
+                        req(map, "at", field = "HumanReview.Completed.at"),
+                        "HumanReview.Completed.at",
                     ),
                 )
                 else -> throw IllegalArgumentException("Unknown HumanReview type discriminator: '$type'")
@@ -269,15 +351,19 @@ sealed interface DecisionOutcome {
         /** Pure-Kotlin, framework-free encoding: `kind` (subtype) + `name` (enum constant). */
         fun DecisionOutcome.toMap(): Map<String, Any?> = mapOf("kind" to kind, "name" to (this as Enum<*>).name)
 
-        /** Inverse of [toMap]. Throws [IllegalArgumentException] on an unknown or missing `kind`/`name`. */
+        /**
+         * Inverse of [toMap]. Throws [IllegalArgumentException] naming the offending field on a
+         * missing/wrongly typed `kind`/`name`, an unknown `kind` discriminator, or a `name` that
+         * is not a constant of the subtype selected by `kind`.
+         */
         fun fromMap(map: Map<String, Any?>): DecisionOutcome {
-            val kind = requireNotNull(map["kind"] as? String) { "DecisionOutcome map missing 'kind'" }
-            val name = requireNotNull(map["name"] as? String) { "DecisionOutcome map missing 'name'" }
+            val kind = req<String>(map, "kind", field = "DecisionOutcome.kind")
+            val name = req<String>(map, "name", field = "DecisionOutcome.name")
             return when (kind) {
-                "AUTHZ" -> Authz.valueOf(name)
-                "FRAUD" -> Fraud.valueOf(name)
-                "CREDIT" -> Credit.valueOf(name)
-                "AGENT" -> Agent.valueOf(name)
+                "AUTHZ" -> parseEnum<Authz>(name, "DecisionOutcome.name")
+                "FRAUD" -> parseEnum<Fraud>(name, "DecisionOutcome.name")
+                "CREDIT" -> parseEnum<Credit>(name, "DecisionOutcome.name")
+                "AGENT" -> parseEnum<Agent>(name, "DecisionOutcome.name")
                 else -> throw IllegalArgumentException("Unknown DecisionOutcome kind discriminator: '$kind'")
             }
         }
@@ -365,55 +451,74 @@ data class DecisionRecord(
          * [AuditEvent][com.openbank.libs.audit.AuditEvent] `payload` map (`libs-core-purity`
          * forbids a Jackson annotation in this module). [DecisionReason] and the nested
          * [HumanReview]/[DecisionOutcome] discriminators round-trip through [fromMap].
+         *
+         * **Null policy**: [DecisionCorrelation.traceId]/[DecisionCorrelation.correlationId]/
+         * [DecisionCorrelation.channel] (and [DecisionReason.ruleId]) are OMITTED from the map —
+         * absent key, never an explicit `null` value — when they are `null` on the source object.
+         * [fromMap] accepts either shape on read (a key absent, or present and explicitly `null`)
+         * so a payload written by an older producer that still emits the explicit-null shape
+         * still decodes.
          */
-        fun DecisionRecord.toMap(): Map<String, Any?> = mapOf(
-            KEY_DECISION_ID to decisionId.toString(),
-            KEY_DECISION_CLASS to decisionClass.name,
-            KEY_DECIDED_AT to decidedAt.toString(),
-            KEY_INPUT_DIGEST to inputDigest.hex,
-            KEY_ENGINE_KIND to engine.kind.name,
-            KEY_ENGINE_ID to engine.id,
-            KEY_ENGINE_VERSION to engine.version,
-            KEY_OUTCOME to with(DecisionOutcome) { outcome.toMap() },
-            KEY_REASONS to reasons.map { mapOf("code" to it.code, "ruleId" to it.ruleId) },
-            KEY_SUBJECT_REF to subjectRef.value,
-            KEY_TRACE_ID to correlation.traceId,
-            KEY_CORRELATION_ID to correlation.correlationId,
-            KEY_CHANNEL to correlation.channel,
-            KEY_ACT_CHAIN to correlation.actChain,
-            KEY_HUMAN_REVIEW to with(HumanReview) { humanReview.toMap() },
-            KEY_ATOMIC to atomic,
-            KEY_RETENTION_CLASS to retentionClass.name,
-        )
+        fun DecisionRecord.toMap(): Map<String, Any?> = buildMap {
+            put(KEY_DECISION_ID, decisionId.toString())
+            put(KEY_DECISION_CLASS, decisionClass.name)
+            put(KEY_DECIDED_AT, decidedAt.toString())
+            put(KEY_INPUT_DIGEST, inputDigest.hex)
+            put(KEY_ENGINE_KIND, engine.kind.name)
+            put(KEY_ENGINE_ID, engine.id)
+            put(KEY_ENGINE_VERSION, engine.version)
+            put(KEY_OUTCOME, with(DecisionOutcome) { outcome.toMap() })
+            put(KEY_REASONS, reasons.map { reason -> with(DecisionReason) { reason.toMap() } })
+            put(KEY_SUBJECT_REF, subjectRef.value)
+            correlation.traceId?.let { put(KEY_TRACE_ID, it) }
+            correlation.correlationId?.let { put(KEY_CORRELATION_ID, it) }
+            correlation.channel?.let { put(KEY_CHANNEL, it) }
+            put(KEY_ACT_CHAIN, correlation.actChain)
+            put(KEY_HUMAN_REVIEW, with(HumanReview) { humanReview.toMap() })
+            put(KEY_ATOMIC, atomic)
+            put(KEY_RETENTION_CLASS, retentionClass.name)
+        }
 
-        /** Inverse of [toMap]. Throws [IllegalArgumentException]/[NullPointerException] on a malformed map. */
-        @Suppress("UNCHECKED_CAST")
+        /**
+         * Inverse of [toMap]. Throws [IllegalArgumentException] naming the offending field —
+         * never [NullPointerException] or a bare [ClassCastException] — on a missing key, a
+         * wrongly typed value, an unknown enum constant, a malformed UUID, or a malformed
+         * ISO-8601 instant, at any level including the nested `reasons`/`outcome`/`humanReview`
+         * maps.
+         */
         fun fromMap(map: Map<String, Any?>): DecisionRecord {
-            val reasons = (map[KEY_REASONS] as List<Map<String, Any?>>).map {
-                DecisionReason(code = it["code"] as String, ruleId = it["ruleId"] as? String)
+            val reasonEntries = req<List<*>>(map, KEY_REASONS)
+            val reasons = reasonEntries.mapIndexed { index, entry ->
+                val reasonMap = entry as? Map<*, *>
+                    ?: throw IllegalArgumentException(
+                        "$KEY_REASONS[$index]: expected a map but was " +
+                            (entry?.let { it::class.simpleName } ?: "null"),
+                    )
+                @Suppress("UNCHECKED_CAST")
+                DecisionReason.fromMap(reasonMap as Map<String, Any?>, field = "$KEY_REASONS[$index]")
             }
             return DecisionRecord(
-                decisionId = UUID.fromString(map[KEY_DECISION_ID] as String),
-                decisionClass = DecisionClass.valueOf(map[KEY_DECISION_CLASS] as String),
-                decidedAt = Instant.parse(map[KEY_DECIDED_AT] as String),
-                inputDigest = InputDigest(map[KEY_INPUT_DIGEST] as String),
+                decisionId = parseUuid(req(map, KEY_DECISION_ID), KEY_DECISION_ID),
+                decisionClass = parseEnum(req(map, KEY_DECISION_CLASS), KEY_DECISION_CLASS),
+                decidedAt = parseInstant(req(map, KEY_DECIDED_AT), KEY_DECIDED_AT),
+                inputDigest = InputDigest(req(map, KEY_INPUT_DIGEST)),
                 engine = DecisionEngine(
-                    kind = DecisionEngineKind.valueOf(map[KEY_ENGINE_KIND] as String),
-                    id = map[KEY_ENGINE_ID] as String,
-                    version = map[KEY_ENGINE_VERSION] as String,
+                    kind = parseEnum(req(map, KEY_ENGINE_KIND), KEY_ENGINE_KIND),
+                    id = req(map, KEY_ENGINE_ID),
+                    version = req(map, KEY_ENGINE_VERSION),
                 ),
-                outcome = DecisionOutcome.fromMap(map[KEY_OUTCOME] as Map<String, Any?>),
+                outcome = DecisionOutcome.fromMap(req(map, KEY_OUTCOME)),
                 reasons = reasons,
-                subjectRef = SubjectRef(map[KEY_SUBJECT_REF] as String),
+                subjectRef = SubjectRef(req(map, KEY_SUBJECT_REF)),
                 correlation = DecisionCorrelation(
-                    traceId = map[KEY_TRACE_ID] as? String,
-                    correlationId = map[KEY_CORRELATION_ID] as? String,
-                    channel = map[KEY_CHANNEL] as? String,
-                    actChain = map[KEY_ACT_CHAIN] as List<String>,
+                    traceId = opt(map, KEY_TRACE_ID),
+                    correlationId = opt(map, KEY_CORRELATION_ID),
+                    channel = opt(map, KEY_CHANNEL),
+                    actChain = req(map, KEY_ACT_CHAIN),
                 ),
-                humanReview = HumanReview.fromMap(map[KEY_HUMAN_REVIEW] as Map<String, Any?>),
-                atomic = map[KEY_ATOMIC] as Boolean,
-                retentionClass = DecisionRetentionClass.valueOf(map[KEY_RETENTION_CLASS] as String),
+                humanReview = HumanReview.fromMap(req(map, KEY_HUMAN_REVIEW)),
+                atomic = req(map, KEY_ATOMIC),
+                retentionClass = parseEnum(req(map, KEY_RETENTION_CLASS), KEY_RETENTION_CLASS),
             )
         }
     }
