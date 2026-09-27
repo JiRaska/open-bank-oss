@@ -340,7 +340,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
   `{}`, against a must-ALLOW and a must-DENY control on `settlement.create` in the same run. Same shape as
   #3921's service-mesh correction on S2 in this very document: a mitigation cell naming a mechanism that
   was never deployed here. Risk 2 is **re-opened**, not rewritten to match the absent code; the orphan
-  `settlement_activity.rego` is deleted; S1's mTLS clause is corrected too, since verifying the row
+  `settlement_activity.rego`, which does not exist in the tree today, was deleted; S1's mTLS clause is corrected too, since verifying the row
   surfaced that the shared `TemporalClientProducer` configures no SSL context anywhere in the fleet — that
   half is filed as #6066 rather than resolved here.
 
