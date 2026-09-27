@@ -1,6 +1,11 @@
 variable "cert_manager_version" {
-  type    = string
-  default = "v1.16.2"
+  type = string
+  # One minor at a time, latest patch each (cert-manager upgrade guide), toward
+  # 1.21 — the first line supporting EKS 1.36 (#10893):
+  # v1.16.2 -> v1.17.4 -> v1.18.6 -> v1.19.6 -> v1.20.4 -> v1.21.2, each step
+  # merged AND applied (Platform OpenTofu workflow_dispatch) before the next.
+  # crds.enabled=true, so the chart upgrades the CRDs with each step.
+  default = "v1.17.4"
 }
 
 variable "karpenter_version" {
