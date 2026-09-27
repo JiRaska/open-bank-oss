@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.32.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.31.1...ledger-service-v1.32.0) (2026-09-27)
+
+
+### Features
+
+* **ledger:** report an account balance in its own currency ([#11109](https://github.com/JiRaska/open-bank-oss/issues/11109)) ([53ee509](https://github.com/JiRaska/open-bank-oss/commit/53ee509c7850ac85e1b391deb9dd361fa3a10daa)), closes [#11107](https://github.com/JiRaska/open-bank-oss/issues/11107)
+* **treasury:** borrow overnight from the ČNB lombard facility ([#11087](https://github.com/JiRaska/open-bank-oss/issues/11087)) ([7583657](https://github.com/JiRaska/open-bank-oss/commit/75836579e3f5589198dbf89eaac1065be24733de))
+
 ## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.31.0...ledger-service-v1.31.1) (2026-09-26)
 
 

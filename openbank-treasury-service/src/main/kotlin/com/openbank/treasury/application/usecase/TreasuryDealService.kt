@@ -233,7 +233,8 @@ class TreasuryDealService(
             CurrencyPosition(
                 currency = ccy,
                 placed = sum(ProductType.MM_PLACEMENT),
-                borrowed = sum(ProductType.MM_BORROWING),
+                // Lombard borrowing from ČNB is a borrowing: it reduces the net like an interbank one.
+                borrowed = sum(ProductType.MM_BORROWING) + sum(ProductType.CNB_LOMBARD),
                 atCnb = sum(ProductType.CNB_DEPOSIT_FACILITY),
             )
         }
