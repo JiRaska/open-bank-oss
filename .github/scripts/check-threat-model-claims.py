@@ -110,6 +110,14 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 # Empty is the honest state: every finding this gate reports today is a real defect being
 # fixed in the same PR, not baselined debt.
 ALLOWED_UNRESOLVED: dict[str, str] = {
+    # Surfaced by scoping disclaimers to their clause (#11088). Before, a disclaimer anywhere in
+    # the cell exempted all of these without anyone deciding so; now each is a named decision.
+    #
+    # domestic-payment's `domestic_payment_rest_ext.rego` used to sit here: a true claim the
+    # resolver could not see because the policy ships embedded in a generated ConfigMap
+    # (`domestic-payment-opa-bundle.yaml`), not as a standalone file. Fixed at the resolver
+    # (#11089) by teaching it to recognise a `<name>.rego: |` key inside a bundle YAML, rather
+    # than baselining it — the same reason removed the settlement and swift entries below.
     # Widening the gate on 2026-09-03 (subject set 23 -> 45 models; claim regions STRIDE-only ->
     # whole document; resolution substring -> word-boundary on non-comment lines) surfaced 46
     # citations that name something this tree does not contain. Every one was checked by hand
@@ -183,8 +191,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-settlement-service|T — Tampering|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|Residual risks|settlement_rest_ext.rego':
-        "file does not exist; settlement's ext policy is embedded in its bundle generator",
     'openbank-settlement-service|Residual risks|OpaActivityInterceptor':
         '#6055 — a control that was never built; deliberately left failing by the gate that found it',
     'openbank-settlement-service|Residual risks|settlement_activity.rego':
@@ -195,8 +201,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-settlement-service|Change log|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-swift-service|6. Change log|swift_rest_ext.rego':
-        "file does not exist; swift's ext policy is embedded in its bundle generator",
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
     'openbank-transaction-service|6. Change log|PaymentSagaOrchestrator':
@@ -434,6 +438,12 @@ STUB_WINDOW = 8  # lines of a declaration's body inspected for a stub marker
 STUB_MARK = re.compile(r"\bstub\b\s*:|\bTODO\b|\bFIXME\b|not implemented|NotImplemented",
                        re.IGNORECASE)
 
+# A `gen-*opa-bundle*.sh` script writes its source `.rego` blob into the generated ConfigMap
+# under a key spelled exactly as the file's basename would be, e.g. `domestic_payment_rest_ext.rego: |`
+# indented under `data:`. The block scalar indicator (`|` or `>`, optionally chomped `-`/`+`) is
+# what tells this apart from an ordinary line that merely mentions a `.rego` filename in prose.
+EMBEDDED_REGO_KEY = re.compile(r"^\s*([\w.-]+\.rego):\s*[|>][+-]?\s*$", re.MULTILINE)
+
 
 def is_deployed(rel: str) -> bool:
     """Is this file a DEPLOYED artifact — the thing a runtime mitigation must live in?
@@ -513,6 +523,19 @@ class Corpus:
         for f, b in self.blobs.items():
             if f.endswith((".yaml", ".yml", ".properties")):
                 self.config_keys |= self.yaml_paths(b)
+        # A generated OPA-bundle ConfigMap (`gen-*opa-bundle*.sh`) embeds a `.rego` file's
+        # content under a literal `<name>.rego: |` key rather than checking it in as its own
+        # file — domestic-payment, settlement and swift all ship this way (#11088/#11089). A
+        # citation of `domestic_payment_rest_ext.rego` is then a real, deployed control that the
+        # path branch of `resolve()` cannot see, because it only ever looks at `git ls-files`.
+        # Anchored on the YAML key spelling, not a directory prefix, so it also finds a bundle
+        # this gate has never been told about by name.
+        self.embedded_rego: set[str] = set()
+        for f, b in self.blobs.items():
+            if not f.endswith((".yaml", ".yml")):
+                continue
+            for m in EMBEDDED_REGO_KEY.finditer(b):
+                self.embedded_rego.add(m.group(1))
         for f, b in self.blobs.items():
             self.code[f] = "\n".join(
                 ln for ln in b.splitlines()
@@ -571,6 +594,12 @@ class Corpus:
         if SRCPATH.match(sym):
             hit = (sym in self.paths or any(f.endswith("/" + sym) for f in self.files)
                    or pathlib.Path(sym).name in self.names)
+            # A `.rego` file can be deployed with no standalone copy in the tree at all — only
+            # embedded, by a `gen-*opa-bundle*.sh` generator, as a `<name>.rego: |` key inside a
+            # generated ConfigMap YAML (domestic-payment, settlement, swift). That is still a
+            # real, deployed control; a citation of it is not phantom.
+            if not hit and sym.endswith(".rego"):
+                hit = pathlib.Path(sym).name in self.embedded_rego
             self._memo[sym] = hit
             return hit
         # A dotted config key resolves either as a literal (a Kotlin `@ConfigProperty(name=...)`,
@@ -647,7 +676,39 @@ DISCLAIMED = re.compile(
 
 
 def is_disclaimed(mitigation: str) -> bool:
+    """True when ANY clause of the cell disclaims something — used for the report count only."""
     return bool(DISCLAIMED.search(mitigation))
+
+
+# A clause ends at `.`/`;`/`!`/`?` followed by whitespace, or at an em-dash separator. Backtick
+# spans are masked first so a dotted citation (`openbank.x.enabled`) never splits a clause.
+_CLAUSE_END = re.compile(r"(?<=[.;!?])\s+|\s+[\u2014\u2013]\s+|\s+--\s+")
+
+
+def clauses(text: str) -> list[str]:
+    masked = BACKTICK.sub(lambda m: "x" * len(m.group(0)), text)
+    out, start = [], 0
+    for m in _CLAUSE_END.finditer(masked):
+        out.append(text[start:m.start()])
+        start = m.end()
+    out.append(text[start:])
+    return [c for c in out if c.strip()]
+
+
+def disclaimed_citations(mitigation: str) -> set[str]:
+    """Citations that sit in a clause which itself disclaims — and ONLY those.
+
+    The disclaimer used to exempt the whole row: one "present in no " anywhere in a cell
+    silenced PHANTOM/STUB for every other symbol the same cell cited, so a row could narrate one
+    correction and assert any number of fictional controls beside it. Scoping the exemption to
+    the clause that carries the disclaimer keeps the costly-escape-hatch property: to silence a
+    citation you must say, next to it, that it does not exist.
+    """
+    out: set[str] = set()
+    for c in clauses(mitigation):
+        if DISCLAIMED.search(c):
+            out.update(citations(c))
+    return out
 
 
 def self_referential(threat: str, mitigation: str) -> bool:
@@ -687,7 +748,13 @@ def money_path(root: pathlib.Path) -> list[str]:
 def audit(root: pathlib.Path):
     services = subjects_all(root)
     mp = set(money_path(root))
-    corpus = Corpus(root)
+    subjects, n_claims, n_uncited, n_disclaimed, findings, used = \
+        audit_models(root, services, Corpus(root))
+    stale = sorted(set(ALLOWED_UNRESOLVED) - used)
+    return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
+
+
+def audit_models(root: pathlib.Path, services: list[str], corpus: "Corpus"):
     findings: list[tuple[str, str, str, str]] = []
     used: set[str] = set()
     subjects = n_claims = n_uncited = n_disclaimed = 0
@@ -698,13 +765,16 @@ def audit(root: pathlib.Path):
         subjects += 1
         for rid, threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
             n_claims += 1
-            if is_disclaimed(mitig):
+            disclaimed = is_disclaimed(mitig)
+            exempt = disclaimed_citations(mitig) if disclaimed else set()
+            if disclaimed:
                 n_disclaimed += 1
-                continue
             cites = citations(mitig)
-            if not cites:
+            if not cites and not disclaimed:
                 n_uncited += 1
             for sym in cites:
+                if sym in exempt:
+                    continue
                 key = f"{svc}|{rid}|{sym}"
                 if not corpus.resolve(sym):
                     if key in ALLOWED_UNRESOLVED:
@@ -720,7 +790,7 @@ def audit(root: pathlib.Path):
                         continue
                     findings.append(("STUB", svc, rid,
                                      f"cites `{sym}`, whose implementation is a stub ({site})"))
-            if kind != "prose" and self_referential(threat, mitig):
+            if not disclaimed and kind != "prose" and self_referential(threat, mitig):
                 key = f"{svc}|{rid}|SELF-REF"
                 if key in ALLOWED_UNRESOLVED:
                     used.add(key)
@@ -730,8 +800,7 @@ def audit(root: pathlib.Path):
                     ("threat is 'the record claims it happened'; "
                      "mitigation names only record-keeping"),
                 ))
-    stale = sorted(set(ALLOWED_UNRESOLVED) - used)
-    return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
+    return subjects, n_claims, n_uncited, n_disclaimed, findings, used
 
 
 def self_test() -> int:
@@ -864,6 +933,11 @@ def self_test() -> int:
             for _f, _b in blobs.items():
                 if _f.endswith((".yaml", ".yml", ".properties")):
                     self.config_keys |= Corpus.yaml_paths(_b)
+            self.embedded_rego = set()
+            for _f, _b in blobs.items():
+                if _f.endswith((".yaml", ".yml")):
+                    for _m in EMBEDDED_REGO_KEY.finditer(_b):
+                        self.embedded_rego.add(_m.group(1))
             self.code = {f: "\n".join(ln for ln in b.splitlines()
                                       if not ln.lstrip().startswith(("//", "*", "/*", "#", "<!--", "--")))
                          for f, b in blobs.items()}
@@ -876,6 +950,27 @@ def self_test() -> int:
     sub = _FakeCorpus({"openbank-x/src/test/kotlin/B.kt": "class BalanceSecurityContractTest {"})
     case("a SUFFIX of a real class does not resolve", sub.resolve("SecurityContractTest"), False)
     case("the real class still resolves", sub.resolve("BalanceSecurityContractTest"), True)
+
+    # (3b) EMBEDDED .rego. A `gen-*opa-bundle*.sh` generator writes its source `.rego` blob into
+    #      a ConfigMap under a `<name>.rego: |` key instead of checking it in as its own file
+    #      (#11088/#11089) — `resolve()` must find it there, and must NOT be fooled by prose that
+    #      merely names a `.rego` file without the block-scalar key shape.
+    bundle = _FakeCorpus({
+        "openbank-infra/gitops/components/payments/domestic-payment-opa-bundle.yaml":
+            "data:\n  rest.rego: |\n    package openbank.rest\n"
+            "  domestic_payment_rest_ext.rego: |\n    package openbank.rest\n"
+            "    allowed_reasons contains \"x\" if { true }\n",
+    })
+    case("a rego file embedded as a ConfigMap key resolves",
+         bundle.resolve("domestic_payment_rest_ext.rego"), True)
+    case("a phantom .rego name embedded nowhere does not resolve",
+         bundle.resolve("no_such_policy_rest_ext.rego"), False)
+    prose_only = _FakeCorpus({
+        "openbank-infra/gitops/components/payments/README.yaml":
+            "notes: see legacy_rest_ext.rego for the old approach\n",
+    })
+    case("naming a .rego file in prose, with no block-scalar key, does not resolve",
+         prose_only.resolve("legacy_rest_ext.rego"), False)
 
     # (4) DISCRIMINATION. The widening must not simply fail everything: the CORRECTED form of each
     #     red case has to come back clean, or the gate is a blanket and not a check.
@@ -898,6 +993,33 @@ def self_test() -> int:
         (empty / "docs" / "threat-models" / "a.md").write_text("x")
         (empty / "docs" / "threat-models" / "b.md").write_text("y")
         case("subjects are derived from the directory", subjects_all(empty), ["a", "b"])
+
+    # Disclaimers are scoped to their clause (#11088). The positive case is the #11065 shape: one
+    # clause narrates a real correction, the next asserts a control that exists nowhere.
+    mixed = ("`LegacyAuditService` is present in no source file; `PhantomGuardFilter` rejects "
+             "every unauthenticated call")
+    case("a disclaimer exempts only its own clause's citations",
+         sorted(disclaimed_citations(mixed)), ["LegacyAuditService"])
+    case("a dotted citation does not split a clause",
+         clauses("flag `openbank.x.enabled` is present in no config"),
+         ["flag `openbank.x.enabled` is present in no config"])
+    case("a legitimate whole-cell disclaimer still exempts its citation",
+         sorted(disclaimed_citations("**Corrected** — this control does not exist; `AuditService` "
+                                     "is present in no source file in this repository")),
+         ["AuditService"])
+    with tempfile.TemporaryDirectory() as td:
+        r = pathlib.Path(td)
+        (r / "docs" / "threat-models").mkdir(parents=True)
+        (r / "docs" / "threat-models" / "x.md").write_text(
+            "## Threat enumeration (STRIDE)\n\n### S — Spoofing\n\n"
+            "| ID | Threat | Mitigation |\n|----|--------|------------|\n"
+            f"| S1 | Forged caller | {mixed} |\n"
+            "| S2 | Forged caller | **Corrected** — `GoneFilter` does not exist |\n")
+        fake = _FakeCorpus({"openbank-x/src/main/kotlin/A.kt": "class RealThing"})
+        got = audit_models(r, ["x"], fake)[4]
+        case("the phantom beside a disclaimer is a finding (was silenced row-wide)",
+             sorted({d.split('`')[1] for k, _, _, d in got if k == "PHANTOM"}),
+             ["PhantomGuardFilter"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")

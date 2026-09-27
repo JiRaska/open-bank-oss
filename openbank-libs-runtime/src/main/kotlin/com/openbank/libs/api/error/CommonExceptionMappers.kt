@@ -7,6 +7,8 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
@@ -98,6 +100,28 @@ class NoSuchElementExceptionMapper : ExceptionMapper<NoSuchElementException> {
     override fun toResponse(exception: NoSuchElementException): Response = Response.status(404)
         .entity(apiError(404, ErrorCode.NOT_FOUND.code, exception.message ?: "Resource not found"))
         .build()
+}
+
+/**
+ * [ResourceNotFoundException] (libs-domain) → **404**, same envelope as every mapper here. The
+ * shared replacement for the per-service `XNotFoundExceptionMapper` copies; the subclass chooses
+ * the `code`, the message is the exception's own (a not-found message names the caller's id).
+ */
+@Provider
+class ResourceNotFoundExceptionMapper : ExceptionMapper<ResourceNotFoundException> {
+    override fun toResponse(exception: ResourceNotFoundException): Response =
+        Response.status(ErrorCode.NOT_FOUND.httpStatus)
+            .entity(apiError(ErrorCode.NOT_FOUND.httpStatus, exception.code, exception.message ?: "Resource not found"))
+            .build()
+}
+
+/** [ResourceConflictException] (libs-domain) → **409**; see [ResourceNotFoundExceptionMapper]. */
+@Provider
+class ResourceConflictExceptionMapper : ExceptionMapper<ResourceConflictException> {
+    override fun toResponse(exception: ResourceConflictException): Response =
+        Response.status(ErrorCode.CONFLICT.httpStatus)
+            .entity(apiError(ErrorCode.CONFLICT.httpStatus, exception.code, exception.message ?: "Conflict"))
+            .build()
 }
 
 // ADR-0155: a checker can never decide their own PendingApproval — ApprovalStore.decide
