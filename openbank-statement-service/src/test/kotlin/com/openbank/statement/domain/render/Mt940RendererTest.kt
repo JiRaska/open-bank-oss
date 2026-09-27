@@ -57,4 +57,38 @@ class Mt940RendererTest {
         val model = Fixtures.model()
         assertThat(Mt940Renderer.render(model)).isEqualTo(Mt940Renderer.render(model))
     }
+
+    @Test
+    fun `JPY amounts render at zero decimals, not a fixed scale 2`() {
+        val model = Fixtures.model(
+            currency = "JPY",
+            opening = "1000",
+            closing = "1500",
+            entries = listOf(Fixtures.entry(ref = "TX-1", amount = "500", currency = "JPY")),
+        )
+
+        val mt = Mt940Renderer.render(model)
+
+        assertThat(mt).contains(":60F:C260101JPY1000")
+        assertThat(mt).contains(":62F:C260131JPY1500")
+        assertThat(mt).contains(":61:2601160115C500NTRFTX-1")
+        assertThat(mt).doesNotContain("1000,00")
+        assertThat(mt).doesNotContain("500,00")
+    }
+
+    @Test
+    fun `KWD amounts render at three decimals with a comma separator, not a fixed scale 2`() {
+        val model = Fixtures.model(
+            currency = "KWD",
+            opening = "1000.500",
+            closing = "1250.750",
+            entries = listOf(Fixtures.entry(ref = "TX-1", amount = "250.250", currency = "KWD")),
+        )
+
+        val mt = Mt940Renderer.render(model)
+
+        assertThat(mt).contains(":60F:C260101KWD1000,500")
+        assertThat(mt).contains(":62F:C260131KWD1250,750")
+        assertThat(mt).contains(":61:2601160115C250,250NTRFTX-1")
+    }
 }

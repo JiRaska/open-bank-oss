@@ -8,6 +8,7 @@ import com.openbank.statement.domain.model.StatementModel
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.format.DateTimeFormatter
+import java.util.Currency
 
 /**
  * Renders a [StatementModel] (or a consolidated envelope of several pockets) to a deterministic,
@@ -54,7 +55,7 @@ object PdfRenderer {
         line(this, "INFORMATIONAL TOTAL (NOT AN ACCOUNTING FIGURE)")
         line(this, "Pockets are not netted (ADR-0024). The figure below is a non-binding")
         line(this, "reference-currency conversion at the statement-date CNB rate.")
-        line(this, "Grand total ($referenceCurrency): ${money(referenceTotal)}")
+        line(this, "Grand total ($referenceCurrency): ${money(referenceTotal, referenceCurrency)}")
     }
 
     private fun appendPocket(sb: StringBuilder, m: StatementModel) {
@@ -65,19 +66,33 @@ object PdfRenderer {
         line(sb, "Statement no. (legal): ${m.legalSequenceNumber}   electronic: ${m.electronicSequenceNumber}")
         m.supersedesSequence?.let { line(sb, "Supersedes statement no.: $it") }
         rule(sb)
-        line(sb, "Opening balance: ${money(m.openingBalance.amount)} ${m.currency} (${DATE.format(m.periodFrom)})")
+        line(
+            sb,
+            "Opening balance: ${money(m.openingBalance.amount, m.currency)} ${m.currency} " +
+                "(${DATE.format(m.periodFrom)})",
+        )
         for (e in m.entries) {
             val sign = if (e.creditDebit == CreditDebit.DBIT) "-" else "+"
             line(
                 sb,
                 "${DATE.format(e.bookingDate)} (val ${DATE.format(e.valueDate)})  " +
-                    "$sign${money(e.amount)} ${e.currency}  ${e.entryRef}  ${e.description}",
+                    "$sign${money(e.amount, e.currency)} ${e.currency}  ${e.entryRef}  ${e.description}",
             )
         }
-        line(sb, "Closing balance: ${money(m.closingBalance.amount)} ${m.currency} (${DATE.format(m.periodTo)})")
+        line(
+            sb,
+            "Closing balance: ${money(m.closingBalance.amount, m.currency)} ${m.currency} " +
+                "(${DATE.format(m.periodTo)})",
+        )
     }
 
     private fun line(sb: StringBuilder, s: String) = sb.append(s).append('\n')
     private fun rule(sb: StringBuilder) = sb.append("-".repeat(WIDTH)).append('\n')
-    private fun money(v: BigDecimal): String = v.setScale(2, RoundingMode.HALF_UP).toPlainString()
+
+    /**
+     * Renders at the CURRENCY'S OWN ISO 4217 minor-unit scale (JPY 0, EUR/USD/CZK 2, KWD/BHD 3) —
+     * never a fixed scale 2, which silently mis-renders every non-2-decimal currency.
+     */
+    private fun money(v: BigDecimal, currency: String): String =
+        v.setScale(Currency.getInstance(currency).defaultFractionDigits, RoundingMode.HALF_UP).toPlainString()
 }

@@ -69,4 +69,39 @@ class Camt053RendererTest {
         assertThat(xml).contains("A &amp; B &lt;test&gt;")
         assertThat(xml).doesNotContain("A & B <test>")
     }
+
+    @Test
+    fun `JPY balances and entries render at zero decimals, not a fixed scale 2`() {
+        val model = Fixtures.model(
+            currency = "JPY",
+            opening = "1000",
+            closing = "1500",
+            entries = listOf(Fixtures.entry(ref = "TX-1", amount = "500", currency = "JPY")),
+        )
+
+        val xml = Camt053Renderer.render(model)
+
+        assertThat(xml).contains("<Ccy>JPY</Ccy>")
+        assertThat(xml).contains("<Amt Ccy=\"JPY\">500</Amt>")
+        assertThat(xml.substringAfter("<Cd>OPBD</Cd>")).contains("<Amt Ccy=\"JPY\">1000</Amt>")
+        assertThat(xml.substringAfter("<Cd>CLBD</Cd>")).contains("<Amt Ccy=\"JPY\">1500</Amt>")
+        assertThat(xml).doesNotContain("500.00")
+        assertThat(xml).doesNotContain("1000.00")
+    }
+
+    @Test
+    fun `KWD balances and entries render at three decimals, not a fixed scale 2`() {
+        val model = Fixtures.model(
+            currency = "KWD",
+            opening = "1000.500",
+            closing = "1250.750",
+            entries = listOf(Fixtures.entry(ref = "TX-1", amount = "250.250", currency = "KWD")),
+        )
+
+        val xml = Camt053Renderer.render(model)
+
+        assertThat(xml).contains("<Amt Ccy=\"KWD\">250.250</Amt>")
+        assertThat(xml.substringAfter("<Cd>OPBD</Cd>")).contains("<Amt Ccy=\"KWD\">1000.500</Amt>")
+        assertThat(xml.substringAfter("<Cd>CLBD</Cd>")).contains("<Amt Ccy=\"KWD\">1250.750</Amt>")
+    }
 }
