@@ -231,7 +231,10 @@ export const reserveLineSchema = z.object({
   label: z.string(), glAccountCode: z.string().nullable().optional(), amount: money, reserveClass: z.string(),
 })
 export const reserveBaseSchema = z.object({
-  currency: z.string(), lines: z.array(reserveLineSchema), base: money, rate: money, requirement: money,
+  currency: z.string(), lines: z.array(reserveLineSchema), rate: money,
+  /** Null (with requirementNotStated) while a LIABILITY in this currency is unclassified: never a partial sum. */
+  base: money.nullable(), requirement: money.nullable(),
+  requirementNotStated: z.string().nullable().optional(),
 })
 const reserveMappingSchema = z.object({ key: z.string(), reserveClass: z.string(), description: z.string() })
 export const minReservesSchema = z.object({
@@ -242,9 +245,9 @@ export const minReservesSchema = z.object({
   holdings: z.array(reserveLineSchema).nullable(),
   totalHoldings: money.nullable(),
   holdingsNotStated: z.string().nullable(),
-  /** Present only for a book entirely in the holding currency. */
+  /** Requirement on the holding-currency book; null when that book has an unclassified liability. */
   requirement: money.nullable(),
-  /** Holdings minus requirement; negative is a shortfall. Null when requirement or holdings is. */
+  /** Holdings minus requirement; negative is a shortfall. Only for a single-currency book; null when requirement or holdings is. */
   surplus: money.nullable(),
   remunerationRate: money, remuneration: money,
   excluded: z.array(z.object({

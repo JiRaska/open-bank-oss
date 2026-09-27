@@ -211,15 +211,22 @@ function ReserveBaseSection({ c, locale }: { c: ReserveBase; locale: string }) {
   return (
     <section className="card" style={{ marginBottom: 16 }} aria-label={t(`Rezervní základna ${c.currency}`, `Reserve base ${c.currency}`)}>
       <h2 style={h2}>{c.currency}</h2>
-      <p style={{ fontSize: 12, marginBottom: 12 }}>
-        {t('Základna', 'Base')} {money(c.base)} × {(c.rate * 100).toLocaleString(locale)} % = <strong data-testid={`requirement-${c.currency}`}>{money(c.requirement)}</strong>
-      </p>
+      {c.base === null || c.requirement === null ? (
+        <div role="alert" className="card" style={{ marginBottom: 12, borderColor: 'var(--warning, var(--border))' }} data-testid={`requirement-not-stated-${c.currency}`}>
+          <StatusBadge status="NOT_STATED" tone="warning" label={t('Požadavek neuveden', 'Requirement not stated')} />{' '}
+          <span style={{ fontSize: 12 }}>{c.requirementNotStated}</span>
+        </div>
+      ) : (
+        <p style={{ fontSize: 12, marginBottom: 12 }}>
+          {t('Základna', 'Base')} {money(c.base)} × {(c.rate * 100).toLocaleString(locale)} % = <strong data-testid={`requirement-${c.currency}`}>{money(c.requirement)}</strong>
+        </p>
+      )}
       <ReserveLines title={t('Rezervní základna', 'Reserve base')} lines={c.lines} total={c.base} money={money} />
     </section>
   )
 }
 
-function ReserveLines({ title, lines, total, money }: { title: string; lines: ReserveLine[]; total: number; money: (v: number) => string }) {
+function ReserveLines({ title, lines, total, money }: { title: string; lines: ReserveLine[]; total: number | null; money: (v: number) => string }) {
   const { t } = useLanguage()
   return (
     <div style={{ overflowX: 'auto', marginBottom: 12 }}>
@@ -236,7 +243,7 @@ function ReserveLines({ title, lines, total, money }: { title: string; lines: Re
                 <td>{l.label}</td><td>{l.glAccountCode ?? '—'}</td><td>{l.reserveClass}</td><td style={right}>{money(l.amount)}</td>
               </tr>
             ))}
-            <tr style={{ fontWeight: 600 }}><td>{t('Celkem', 'Total')}</td><td /><td /><td style={right}>{money(total)}</td></tr>
+            <tr style={{ fontWeight: 600 }}><td>{t('Celkem', 'Total')}</td><td /><td /><td style={right}>{total === null ? t('neuvedeno', 'not stated') : money(total)}</td></tr>
           </tbody>
         </table>
       )}

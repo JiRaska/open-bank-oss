@@ -387,12 +387,14 @@ const MIN_RESERVES = (opts: {
   totalHoldings?: number | null
   requirement?: number | null
   surplus?: number | null
+  requirementNotStated?: string
 } = {}) => ({
   runId: 'run-6', asOf: '2026-09-30', provenance: 'synthetic', parameterSetId: 'cnb-min-reserves', parameterSetVersion: '1',
   currencies: [{
     currency: 'CZK',
     lines: [reserveLine('Client deposits (retail)', 100000, 'reserve-base', '2200')],
-    base: 100000, rate: 0.02, requirement: 2000,
+    base: opts.requirementNotStated ? null : 100000, rate: 0.02,
+    requirement: opts.requirementNotStated ? null : 2000, requirementNotStated: opts.requirementNotStated ?? null,
   }],
   holdingCurrency: 'CZK',
   holdings: opts.holdingsNotStated ? null : [reserveLine('ČNB current account', opts.totalHoldings ?? 2500, 'cnb-account')],
@@ -437,6 +439,18 @@ describe('ČNB minimum reserve requirement', () => {
     expect(screen.queryByTestId('surplus')).toBeNull()
     // No stand-in zero anywhere on the page for the not-stated figures.
     expect(document.body.textContent).not.toMatch(/\b0[.,]00\b.*(?:ČNB|holdings)/)
+  })
+
+  it('a currency whose base is not stated shows the reason and no base or requirement figure', async () => {
+    router = () => json({
+      ...MIN_RESERVES({ requirementNotStated: 'A LIABILITY balance in this currency is not classified' }),
+      requirement: null, surplus: null,
+    })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('requirement-not-stated-CZK')
+    expect(screen.getByTestId('requirement-not-stated-CZK').textContent).toContain('is not classified')
+    expect(screen.queryByTestId('requirement-CZK')).toBeNull()
+    expect(screen.getByTestId('requirement').textContent).toMatch(/not stated|neuvedeno/)
   })
 
   it('lists excluded and unclassified balances separately, with their amounts and reason', async () => {
