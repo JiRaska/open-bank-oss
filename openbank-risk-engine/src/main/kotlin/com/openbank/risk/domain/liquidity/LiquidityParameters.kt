@@ -15,48 +15,168 @@ import java.math.BigDecimal
  *
  * d238 = BCBS, "Basel III: The Liquidity Coverage Ratio and liquidity risk monitoring tools",
  * January 2013. d295 = BCBS, "Basel III: the net stable funding ratio", October 2014.
+ *
+ * [euCitation] is the same factor under EU law, used by a [LiquidityRegime.EU] parameter set:
+ * "EU 2015/61" = Commission Delegated Regulation (EU) 2015/61 (LCR) as amended by (EU) 2018/1620;
+ * "CRR" = Regulation (EU) No 575/2013 as amended by (EU) 2019/876 (CRR2), Part Six Title IV (NSFR).
+ *
+ * UNVERIFIED under EU law (value kept at the BCBS figure, citation marked UNVERIFIED — not guessed):
+ *  - [NSFR_RSF_L2A], [NSFR_RSF_L2B]: article not confirmed; EU gives Level 2B securitisations a
+ *    lower RSF than other Level 2B, which this engine does not split (one factor for both).
+ *  - [NSFR_RSF_FI_UNDER_6M]: the CRR2 factor for unsecured claims on financial customers < 6
+ *    months is not confirmed to equal the BCBS 15%.
+ *  - [NSFR_RSF_OPERATIONAL_DEPOSIT_AT_FI], [NSFR_RSF_LOAN_UNDER_1Y], [NSFR_ASF_OPERATIONAL_DEPOSIT],
+ *    [NSFR_RSF_OTHER_ASSET]: value agrees with BCBS; article point not confirmed.
+ *  - [LCR_L2B_OTHER_HAIRCUT], [LCR_OTHER_CONTRACTUAL_OUTFLOW]: value agrees; paragraph not confirmed.
+ *
+ * The one VALUE that differs for a category the engine models: [NSFR_RSF_L1_SECURITIES], 0% under
+ * CRR Art. 428r(1) against 5% under d295 ¶37.
  */
-enum class LiquidityFactor(val key: String, val citation: String) {
-    LCR_L1_HAIRCUT("lcr-l1-haircut", "BCBS d238 ¶49 (Level 1 not subject to a haircut)"),
-    LCR_L2A_HAIRCUT("lcr-l2a-haircut", "BCBS d238 ¶52 (15% haircut on Level 2A)"),
-    LCR_L2B_RMBS_HAIRCUT("lcr-l2b-rmbs-haircut", "BCBS d238 ¶54(a) (25% haircut on qualifying RMBS)"),
-    LCR_L2B_OTHER_HAIRCUT("lcr-l2b-other-haircut", "BCBS d238 ¶54(b),(c) (50% haircut, corporate debt / equities)"),
-    LCR_LEVEL2_CAP("lcr-level2-cap", "BCBS d238 ¶46, ¶51, Annex 1 (Level 2 ≤ 40% of the stock)"),
-    LCR_LEVEL2B_CAP("lcr-level2b-cap", "BCBS d238 ¶47, Annex 1 (Level 2B ≤ 15% of the stock)"),
-    LCR_RETAIL_STABLE_RUNOFF("lcr-retail-stable-runoff", "BCBS d238 ¶75 (stable retail, 5%; ¶78 allows 3%)"),
-    LCR_RETAIL_LESS_STABLE_RUNOFF("lcr-retail-less-stable-runoff", "BCBS d238 ¶79 (less stable retail, min 10%)"),
-    LCR_OPERATIONAL_DEPOSIT_RUNOFF("lcr-operational-deposit-runoff", "BCBS d238 ¶93 (operational deposits, 25%)"),
-    LCR_OTHER_CONTRACTUAL_OUTFLOW("lcr-other-contractual-outflow", "BCBS d238 ¶141 (other contractual outflows, 100%)"),
-    LCR_RETAIL_LOAN_INFLOW("lcr-retail-loan-inflow", "BCBS d238 ¶153 (retail / small business inflows, 50%)"),
-    LCR_FI_INFLOW("lcr-fi-inflow", "BCBS d238 ¶154 (financial-institution inflows, 100%)"),
+enum class LiquidityFactor(val key: String, val citation: String, val euCitation: String) {
+    LCR_L1_HAIRCUT(
+        "lcr-l1-haircut",
+        "BCBS d238 ¶49 (Level 1 not subject to a haircut)",
+        "EU 2015/61 Art. 10(1) (Level 1 assets other than EHQ covered bonds, no haircut)",
+    ),
+    LCR_L2A_HAIRCUT(
+        "lcr-l2a-haircut",
+        "BCBS d238 ¶52 (15% haircut on Level 2A)",
+        "EU 2015/61 Art. 11(2) (Level 2A assets, 15% haircut)",
+    ),
+    LCR_L2B_RMBS_HAIRCUT(
+        "lcr-l2b-rmbs-haircut",
+        "BCBS d238 ¶54(a) (25% haircut on qualifying RMBS)",
+        "EU 2015/61 Art. 13(14)(a) (Level 2B securitisations backed by residential loans, 25% haircut)",
+    ),
+    LCR_L2B_OTHER_HAIRCUT(
+        "lcr-l2b-other-haircut",
+        "BCBS d238 ¶54(b),(c) (50% haircut, corporate debt / equities)",
+        "EU 2015/61 Art. 12(1)(b),(c) (Level 2B corporate debt / shares, 50% haircut; haircut paragraph UNVERIFIED)",
+    ),
+    LCR_LEVEL2_CAP(
+        "lcr-level2-cap",
+        "BCBS d238 ¶46, ¶51, Annex 1 (Level 2 ≤ 40% of the stock)",
+        "EU 2015/61 Art. 17(1)(b), Annex I (Level 1 at least 60% of the buffer)",
+    ),
+    LCR_LEVEL2B_CAP(
+        "lcr-level2b-cap",
+        "BCBS d238 ¶47, Annex 1 (Level 2B ≤ 15% of the stock)",
+        "EU 2015/61 Art. 17(1)(c), Annex I (Level 1 + 2A at least 85% of the buffer)",
+    ),
+    LCR_RETAIL_STABLE_RUNOFF(
+        "lcr-retail-stable-runoff",
+        "BCBS d238 ¶75 (stable retail, 5%; ¶78 allows 3%)",
+        "EU 2015/61 Art. 24(1) (stable retail deposits, 5%)",
+    ),
+    LCR_RETAIL_LESS_STABLE_RUNOFF(
+        "lcr-retail-less-stable-runoff",
+        "BCBS d238 ¶79 (less stable retail, min 10%)",
+        "EU 2015/61 Art. 25(1) (other retail deposits, 10%; Art. 25(2)-(3) higher-outflow categories not modelled)",
+    ),
+    LCR_OPERATIONAL_DEPOSIT_RUNOFF(
+        "lcr-operational-deposit-runoff",
+        "BCBS d238 ¶93 (operational deposits, 25%)",
+        "EU 2015/61 Art. 27(1)(a), 27(2) (operational deposits, 25%)",
+    ),
+    LCR_OTHER_CONTRACTUAL_OUTFLOW(
+        "lcr-other-contractual-outflow",
+        "BCBS d238 ¶141 (other contractual outflows, 100%)",
+        "EU 2015/61 Art. 22(1) (liabilities due within 30 days, 100% conservative; paragraph for this category UNVERIFIED)",
+    ),
+    LCR_RETAIL_LOAN_INFLOW(
+        "lcr-retail-loan-inflow",
+        "BCBS d238 ¶153 (retail / small business inflows, 50%)",
+        "EU 2015/61 Art. 32(3)(a) (monies due from non-financial customers, 50%)",
+    ),
+    LCR_FI_INFLOW(
+        "lcr-fi-inflow",
+        "BCBS d238 ¶154 (financial-institution inflows, 100%)",
+        "EU 2015/61 Art. 32(2)(a) (monies due from financial customers, 100%)",
+    ),
     LCR_OPERATIONAL_DEPOSIT_INFLOW(
         "lcr-operational-deposit-inflow",
         "BCBS d238 ¶156, ¶98 (operational deposits held at other institutions, 0%)",
+        "EU 2015/61 Art. 32(3)(d) (operational deposits held at other institutions, 0%)",
     ),
-    LCR_INFLOW_CAP("lcr-inflow-cap", "BCBS d238 ¶69, ¶144 (inflows capped at 75% of outflows)"),
-    NSFR_ASF_CAPITAL("nsfr-asf-capital", "BCBS d295 ¶21(a) (regulatory capital before deductions, 100%)"),
-    NSFR_ASF_RETAIL_STABLE("nsfr-asf-retail-stable", "BCBS d295 ¶22 (stable retail deposits, 95%)"),
-    NSFR_ASF_RETAIL_LESS_STABLE("nsfr-asf-retail-less-stable", "BCBS d295 ¶23 (less stable retail deposits, 90%)"),
-    NSFR_ASF_OPERATIONAL_DEPOSIT("nsfr-asf-operational-deposit", "BCBS d295 ¶24(b) (operational deposits, 50%)"),
-    NSFR_ASF_OTHER("nsfr-asf-other", "BCBS d295 ¶25 (all other liabilities and equity, 0%)"),
-    NSFR_RSF_CASH_AND_RESERVES("nsfr-rsf-cash-and-reserves", "BCBS d295 ¶36(a),(b) (coins, banknotes, reserves, 0%)"),
-    NSFR_RSF_L1_SECURITIES("nsfr-rsf-l1-securities", "BCBS d295 ¶37 (other unencumbered Level 1, 5%)"),
-    NSFR_RSF_L2A("nsfr-rsf-l2a", "BCBS d295 ¶39(a) (unencumbered Level 2A, 15%)"),
-    NSFR_RSF_L2B("nsfr-rsf-l2b", "BCBS d295 ¶40(a) (unencumbered Level 2B, 50%)"),
-    NSFR_RSF_FI_UNDER_6M("nsfr-rsf-fi-under-6m", "BCBS d295 ¶39(b) (other claims on FIs < 6 months, 15%)"),
+    LCR_INFLOW_CAP(
+        "lcr-inflow-cap",
+        "BCBS d238 ¶69, ¶144 (inflows capped at 75% of outflows)",
+        "EU 2015/61 Art. 33(1) (inflows capped at 75% of outflows)",
+    ),
+    NSFR_ASF_CAPITAL(
+        "nsfr-asf-capital",
+        "BCBS d295 ¶21(a) (regulatory capital before deductions, 100%)",
+        "CRR Art. 428o (CET1 / AT1 before deductions, Tier 2 with residual maturity >= 1 year, 100%)",
+    ),
+    NSFR_ASF_RETAIL_STABLE(
+        "nsfr-asf-retail-stable",
+        "BCBS d295 ¶22 (stable retail deposits, 95%)",
+        "CRR Art. 428n (stable retail deposits, 95%)",
+    ),
+    NSFR_ASF_RETAIL_LESS_STABLE(
+        "nsfr-asf-retail-less-stable",
+        "BCBS d295 ¶23 (less stable retail deposits, 90%)",
+        "CRR Art. 428m (other retail deposits, 90%)",
+    ),
+    NSFR_ASF_OPERATIONAL_DEPOSIT(
+        "nsfr-asf-operational-deposit",
+        "BCBS d295 ¶24(b) (operational deposits, 50%)",
+        "CRR Art. 428l (operational deposits, 50%; point UNVERIFIED)",
+    ),
+    NSFR_ASF_OTHER(
+        "nsfr-asf-other",
+        "BCBS d295 ¶25 (all other liabilities and equity, 0%)",
+        "CRR Art. 428k (liabilities without a higher factor, 0%)",
+    ),
+    NSFR_RSF_CASH_AND_RESERVES(
+        "nsfr-rsf-cash-and-reserves",
+        "BCBS d295 ¶36(a),(b) (coins, banknotes, reserves, 0%)",
+        "CRR Art. 428r(1) (central bank reserves and unencumbered Level 1 assets, 0%)",
+    ),
+    NSFR_RSF_L1_SECURITIES(
+        "nsfr-rsf-l1-securities",
+        "BCBS d295 ¶37 (other unencumbered Level 1, 5%)",
+        "CRR Art. 428r(1) (unencumbered Level 1 assets excl. EHQ covered bonds, 0%)",
+    ),
+    NSFR_RSF_L2A(
+        "nsfr-rsf-l2a",
+        "BCBS d295 ¶39(a) (unencumbered Level 2A, 15%)",
+        "CRR Part Six Title IV Ch. 4 (unencumbered Level 2A, 15%; article UNVERIFIED, BCBS value kept)",
+    ),
+    NSFR_RSF_L2B(
+        "nsfr-rsf-l2b",
+        "BCBS d295 ¶40(a) (unencumbered Level 2B, 50%)",
+        "CRR Part Six Title IV Ch. 4 (unencumbered Level 2B, 50%; article UNVERIFIED, BCBS value kept)",
+    ),
+    NSFR_RSF_FI_UNDER_6M(
+        "nsfr-rsf-fi-under-6m",
+        "BCBS d295 ¶39(b) (other claims on FIs < 6 months, 15%)",
+        "CRR Art. 428s-428ad (claims on financial customers < 6 months; factor UNVERIFIED, BCBS 15% kept)",
+    ),
     NSFR_RSF_OPERATIONAL_DEPOSIT_AT_FI(
         "nsfr-rsf-operational-deposit-at-fi",
         "BCBS d295 ¶40(d) (operational deposits held at other FIs, 50%)",
+        "CRR Art. 428ad (operational deposits at other institutions, 50%; point UNVERIFIED)",
     ),
     NSFR_RSF_LOAN_UNDER_1Y(
         "nsfr-rsf-loan-under-1y",
         "BCBS d295 ¶40(e), ¶29 (non-HQLA < 1 year incl. retail loans, 50%)",
+        "CRR Art. 428ad (loans to non-financial customers < 1 year, 50%; point UNVERIFIED)",
     ),
-    NSFR_RSF_LOAN_1Y_LOW_RW("nsfr-rsf-loan-1y-low-rw", "BCBS d295 ¶41(b) (loans ≥ 1 year, RW ≤ 35%, 65%)"),
-    NSFR_RSF_LOAN_1Y_OTHER("nsfr-rsf-loan-1y-other", "BCBS d295 ¶42(b) (performing loans ≥ 1 year, RW > 35%, 85%)"),
+    NSFR_RSF_LOAN_1Y_LOW_RW(
+        "nsfr-rsf-loan-1y-low-rw",
+        "BCBS d295 ¶41(b) (loans ≥ 1 year, RW ≤ 35%, 65%)",
+        "CRR Art. 428ag (performing loans >= 1 year, RW <= 35%, 65%)",
+    ),
+    NSFR_RSF_LOAN_1Y_OTHER(
+        "nsfr-rsf-loan-1y-other",
+        "BCBS d295 ¶42(b) (performing loans ≥ 1 year, RW > 35%, 85%)",
+        "CRR Art. 428ah (performing loans >= 1 year, RW > 35%, 85%)",
+    ),
     NSFR_RSF_OTHER_ASSET(
         "nsfr-rsf-other-asset",
         "BCBS d295 ¶43(c) (all other assets incl. non-performing loans, 100%)",
+        "CRR Art. 428ah-428ai (other assets incl. non-performing, 100%; article UNVERIFIED)",
     ),
     ;
 
@@ -151,6 +271,26 @@ data class LiquidityClassification(
         glAccountCode?.let { glAccounts[it] } ?: glAccountType?.let { glAccountTypes[it.uppercase()] }
 }
 
+/** Which body of rules a parameter set implements, and so which citation each factor carries. */
+enum class LiquidityRegime(val wire: String, val scope: String) {
+    BCBS("bcbs", "BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied."),
+    EU(
+        "eu",
+        "EU rules: Delegated Regulation (EU) 2015/61 (as amended by 2018/1620) for the LCR and Regulation (EU) " +
+            "575/2013 Part Six Title IV (CRR2) for the NSFR, for the categories this engine models.",
+    ),
+    ;
+
+    companion object {
+        fun parse(raw: String): LiquidityRegime = entries.firstOrNull { it.wire == raw.trim().lowercase() }
+            ?: throw IllegalArgumentException(
+                "unknown liquidity regime '$raw'; one of ${entries.joinToString {
+                    it.wire
+                }}",
+            )
+    }
+}
+
 /** A versioned, cited parameter set: every result names the [id] and [version] it was computed with. */
 data class LiquidityParameters(
     val id: String,
@@ -158,6 +298,7 @@ data class LiquidityParameters(
     val source: String,
     val factors: Map<LiquidityFactor, BigDecimal>,
     val classification: LiquidityClassification,
+    val regime: LiquidityRegime,
 ) {
     init {
         require(id.isNotBlank() && version.isNotBlank()) { "liquidity parameter set needs an id and a version" }
@@ -170,6 +311,12 @@ data class LiquidityParameters(
 
     operator fun get(factor: LiquidityFactor): BigDecimal = factors.getValue(factor)
 
+    /** The citation for [factor] under this set's [regime]. */
+    fun citation(factor: LiquidityFactor): String = when (regime) {
+        LiquidityRegime.BCBS -> factor.citation
+        LiquidityRegime.EU -> factor.euCitation
+    }
+
     companion object {
         /** Builds a set from configuration keys; an unknown key is an error, not a silent no-op. */
         fun fromKeys(
@@ -178,11 +325,12 @@ data class LiquidityParameters(
             source: String,
             factorsByKey: Map<String, BigDecimal>,
             classification: LiquidityClassification,
+            regime: LiquidityRegime,
         ): LiquidityParameters {
             val unknown = factorsByKey.keys.filter { LiquidityFactor.byKey(it) == null }
             require(unknown.isEmpty()) { "unknown liquidity factor keys: ${unknown.sorted().joinToString()}" }
             val factors = factorsByKey.mapKeys { (k, _) -> LiquidityFactor.byKey(k)!! }
-            return LiquidityParameters(id, version, source, factors, classification)
+            return LiquidityParameters(id, version, source, factors, classification, regime)
         }
     }
 }

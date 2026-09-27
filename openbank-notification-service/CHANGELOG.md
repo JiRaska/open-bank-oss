@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.1...notification-service-v0.34.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.0...notification-service-v0.33.1) (2026-09-19)
 
 
