@@ -5,6 +5,7 @@
 package com.openbank.sepainstant.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -14,15 +15,20 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 
 @QuarkusTest
-@QuarkusTestResource(com.openbank.sepainstant.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_sepa_instant_it")],
+)
 class SctInstAccessControlIT {
 
     @Test
-    fun `anonymous cannot submit an SCT Inst payment`(): Unit {
+    fun `anonymous cannot submit an SCT Inst payment`() {
         Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
-            body("""{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""")
+            body(
+                """{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""",
+            )
         } When {
             post("/api/v1/sepa-instant")
         } Then {
@@ -32,11 +38,13 @@ class SctInstAccessControlIT {
 
     @Test
     @TestSecurity(user = "viewer-only", roles = ["ROLE_VIEWER"])
-    fun `viewer cannot submit an SCT Inst payment`(): Unit {
+    fun `viewer cannot submit an SCT Inst payment`() {
         Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
-            body("""{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""")
+            body(
+                """{ "debtorAccountId": "${UUID.randomUUID()}", "debtorIban": "CZ00", "debtorName": "A", "creditorIban": "DE00", "creditorName": "B", "creditorBic": "COBADEFFXXX", "amount": 1, "currency": "EUR" }""",
+            )
         } When {
             post("/api/v1/sepa-instant")
         } Then {
@@ -46,7 +54,7 @@ class SctInstAccessControlIT {
 
     @Test
     @TestSecurity(user = "viewer-only", roles = ["ROLE_VIEWER"])
-    fun `viewer can list SCT Inst payments`(): Unit {
+    fun `viewer can list SCT Inst payments`() {
         Given {
             contentType("application/json")
         } When {
@@ -57,7 +65,7 @@ class SctInstAccessControlIT {
     }
 
     @Test
-    fun `anonymous cannot list SCT Inst payments`(): Unit {
+    fun `anonymous cannot list SCT Inst payments`() {
         Given {
             contentType("application/json")
         } When {

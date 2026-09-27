@@ -171,7 +171,7 @@ openbank:
     provenance: ${OPENBANK_RISK_PROVENANCE:synthetic}
     treasury:
       # ADR-0315 D6: carry the bank's money-market deals (from treasury's events) into every
-      # snapshot as MONEY_MARKET_DEAL instruments on 1500/1501/1510/2300/2301. Off keeps those
+      # snapshot as MONEY_MARKET_DEAL instruments on 1500/1501/1510/2300/2301/2320. Off keeps those
       # accounts GL-level, as before deals were modelled.
       enabled: ${OPENBANK_RISK_TREASURY_ENABLED:true}
     lending:

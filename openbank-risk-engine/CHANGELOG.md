@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.12.0...risk-engine-v0.13.0) (2026-09-27)
+
+
+### Features
+
+* **treasury:** borrow overnight from the ČNB lombard facility ([#11087](https://github.com/JiRaska/open-bank-oss/issues/11087)) ([7583657](https://github.com/JiRaska/open-bank-oss/commit/75836579e3f5589198dbf89eaac1065be24733de))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.11.0...risk-engine-v0.12.0) (2026-09-27)
 
 

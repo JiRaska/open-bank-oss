@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.infrastructure.observability
 
+import com.openbank.libs.observability.standardPercentiles
 import com.openbank.settlement.application.port.out.OriginationOutcome
 import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementStep
@@ -108,8 +109,7 @@ class SettlementMetricsAdapter : SettlementMetricsPort {
             DistributionSummary.builder(BOOKED_AMOUNT_METRIC)
                 .tag("service", SERVICE)
                 .tag("currency", currency)
-                .publishPercentiles(P50, P95, P99)
-                .publishPercentileHistogram()
+                .standardPercentiles()
                 .description("Amount of settlements booked to the ledger")
                 .register(r)
                 .record(amount.toDouble())
@@ -143,8 +143,7 @@ class SettlementMetricsAdapter : SettlementMetricsPort {
     private fun cycleTimer(registry: MeterRegistry, outcome: String): Timer = Timer.builder(CYCLE_DURATION_METRIC)
         .tag("service", SERVICE)
         .tag("outcome", outcome)
-        .publishPercentiles(P50, P95, P99)
-        .publishPercentileHistogram()
+        .standardPercentiles()
         .description("Time from settlement origination to its terminal state")
         .register(registry)
 
@@ -161,11 +160,5 @@ class SettlementMetricsAdapter : SettlementMetricsPort {
         const val OUTCOME_REJECTED = "rejected"
 
         private val TERMINAL_OUTCOMES = listOf(OUTCOME_BOOKED, OUTCOME_REJECTED)
-
-        // The fleet-standard percentile set (libs DomainMetrics publishes the same three).
-        // Declared as constants: detekt MagicNumber fires on each literal in publishPercentiles.
-        private const val P50 = 0.5
-        private const val P95 = 0.95
-        private const val P99 = 0.99
     }
 }
