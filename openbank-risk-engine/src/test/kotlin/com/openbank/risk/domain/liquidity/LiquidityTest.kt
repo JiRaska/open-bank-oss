@@ -212,6 +212,9 @@ class LiquidityTest {
         assertThat(asf.factorKey).isEqualTo("nsfr-asf-central-bank-under-6m")
         assertThat(asf.weighted).isEqualByComparingTo("0")
         assertThat(r.notes).contains(Liquidity.PLEDGED_COLLATERAL_NOTE)
+        assertThat(Liquidity.PLEDGED_COLLATERAL_NOTE).startsWith("${Liquidity.PLEDGED_COLLATERAL_NOTE_CODE}: ")
+        assertThat(r.notes.single { it.startsWith(Liquidity.PLEDGED_COLLATERAL_NOTE_CODE) })
+            .isEqualTo(Liquidity.PLEDGED_COLLATERAL_NOTE)
     }
 
     @Test

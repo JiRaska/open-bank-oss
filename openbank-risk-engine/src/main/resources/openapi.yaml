@@ -1178,6 +1178,11 @@ components:
         notes:
           type: array
           items: {type: string}
+          description: >-
+            Free-text caveats about this run. A note may start with a stable machine-readable code
+            followed by ": " (e.g. "PLEDGED_COLLATERAL_NOT_MODELLED: ...") so a downstream consumer
+            can detect it by code instead of matching free text; the remainder is human-readable and
+            may change wording between releases.
         assumptions: {$ref: '#/components/schemas/LiquidityAssumptions'}
 
     ExposureLine:

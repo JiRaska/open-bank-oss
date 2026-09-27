@@ -138,13 +138,21 @@ object Liquidity {
             "the engine does not do yet, so the total is reported only for a single-currency book."
 
     /**
+     * Stable machine-readable prefix for [PLEDGED_COLLATERAL_NOTE], so a downstream consumer (e.g. the
+     * finrep COREP mappers) can detect this note by code instead of matching free text.
+     */
+    const val PLEDGED_COLLATERAL_NOTE_CODE = "PLEDGED_COLLATERAL_NOT_MODELLED"
+
+    /**
      * Present only while a central-bank secured funding balance (ČNB lombard, GL 2320) is non-zero.
      * The lombard is secured on collateral pledged at the ČNB; encumbered assets are not HQLA
      * (EU 2015/61 Art. 7(2); BCBS d238 ¶31 — paragraph UNVERIFIED) and carry a higher RSF. The snapshot has no collateral
      * data, so nothing is removed from the stock — this note says so instead of faking the pledge.
+     * Starts with [PLEDGED_COLLATERAL_NOTE_CODE] followed by ": " so it can be matched by code.
      */
     const val PLEDGED_COLLATERAL_NOTE =
-        "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it is not " +
+        "$PLEDGED_COLLATERAL_NOTE_CODE: " +
+            "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it is not " +
             "modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock and the LCR " +
             "may be overstated, and the RSF of the pledged assets understated."
 
