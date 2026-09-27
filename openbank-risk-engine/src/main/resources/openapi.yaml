@@ -17,7 +17,10 @@ info:
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
   # 1.6.0 -> 1.7.0: additive — position kind TREASURY_DEAL: the bank's money-market deals from
   # treasury's events as contract-level MONEY_MARKET_DEAL instruments (ADR-0315 D6).
-  version: 1.7.0
+  # 1.7.0 -> 1.11.0: additive — the capital total is stated in CZK at the ČNB fixing in effect on
+  #        asOf (Capital.fxRates lists every rate used; Capital.totalNotStated says why a total is
+  #        absent). 1.8.0-1.10.0 are claimed by open PRs #11015, #11016, #11040.
+  version: 1.11.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -325,8 +328,12 @@ paths:
         paragraph; the own-funds requirement (8% × RWA, bcbs189 ¶50); and CET1 / Tier 1 / Total
         capital ratios when own funds are in the snapshot (`ratiosNotComputable` says why not).
         BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. The ratios use
-        CREDIT-RISK RWA only, so they are an upper bound. Per currency; total, requirement and
-        ratios only for a single-currency book. A GL balance the classification does not name is
+        CREDIT-RISK RWA only, so they are an upper bound. Per currency, plus a CZK `total` and
+        requirement: every other currency's EAD and RWA converted at the ČNB fixing in effect at
+        00:00 Prague on asOf (the ledger FX revaluation's rule; a weekend takes the prior business
+        day's still-valid fixing), each rate listed in `fxRates`. A missing fixing leaves `total`
+        null with `totalNotStated` — never a partial total. Ratios only for a single-currency book
+        (own funds are not converted). A GL balance the classification does not name is
         listed in `unclassified` and counted nowhere. Derived on request, never stored.
       parameters:
         - $ref: '#/components/parameters/RunId'
@@ -1310,7 +1317,24 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/CurrencyCapital'}
             - {type: 'null'}
-          description: Present only for a single-currency book
+          description: >-
+            The book in CZK (currency "CZK") at the ČNB fixing for asOf. Null, with totalNotStated,
+            when a currency with exposures has no fixing in effect. ownFunds is present only when no
+            currency other than CZK books own funds (own funds are not converted).
+        fxRates:
+          type: array
+          description: Every rate the CZK total was converted with; empty for an all-CZK book or when no total is stated
+          items:
+            type: object
+            required: [currency, rate, fixingDate, source]
+            properties:
+              currency: {type: string}
+              rate: {type: number, description: CZK per ONE unit of currency (per-100 quotes normalised by fx-service)}
+              fixingDate: {type: string, format: date}
+              source: {type: string}
+        totalNotStated:
+          type: [string, 'null']
+          description: Why total is null (the missing currency and date); null when it is stated
         ownFundsRequirement:
           type: [number, 'null']
           description: min-total-capital-ratio (8%, bcbs189 ¶50) × total credit-risk RWA
