@@ -107,11 +107,45 @@ class C7400MapperTest {
     }
 
     @Test
-    fun `an inflow component the mapper does not know fails the render instead of disappearing`() {
+    fun `an inflow component the mapper does not know makes the total a gap naming it, not an exception`() {
         val extra = lines + line("lcr-reverse-repo-inflow", "10", "1")
-        assertThatThrownBy {
-            C7400Mapper.map(RiskLiquidityLookup.found(result(lines = extra, total = "390")), asOf)
-        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("lcr-reverse-repo-inflow")
+        val t = C7400Mapper.map(RiskLiquidityLookup.found(result(lines = extra, total = "390")), asOf)
+        listOf("c0010", "c0140").forEach { col ->
+            assertThat(t.at("r0010", col).isDataGap).describedAs(col).isTrue()
+            assertThat(t.at("r0010", col).gapReason)
+                .contains("engine reports component 'lcr-reverse-repo-inflow' this template does not map yet")
+        }
+        assertThat(t.at("r0030", "c0140").isDataGap).isFalse()
+        assertThat(t.at("r0030", "c0140").value).isEqualByComparingTo("300")
+    }
+
+    @Test
+    fun `an unknown inflow still counts toward the tie, so a mismatched engine total still fails`() {
+        val extra = lines + line("lcr-reverse-repo-inflow", "10", "1")
+        assertThatThrownBy { C7400Mapper.map(RiskLiquidityLookup.found(result(lines = extra, total = "380")), asOf) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `a maturing MM placement is a financial-customer inflow in r0180 at 100 percent, and totals tie with it`() {
+        val withPlacement = lines + line(C7400Mapper.FI_PLACEMENT, "50", "1.00")
+        val t = C7400Mapper.map(RiskLiquidityLookup.found(result(lines = withPlacement, total = "430")), asOf)
+        assertThat(t.at("r0180", "c0010").value).isEqualByComparingTo("130")
+        assertThat(t.at("r0180", "c0140").value).isEqualByComparingTo("130")
+        assertThat(t.at("r0160", "c0140").value).isEqualByComparingTo("130")
+        assertThat(t.at("r0010", "c0140").value).isEqualByComparingTo("430")
+        listOf("r0010", "r0160", "r0180").forEach { r ->
+            assertThat(t.at(r, "c0140").isDataGap).describedAs(r).isFalse()
+        }
+    }
+
+    @Test
+    fun `a placement inflow at a rate other than 100 percent is a gap in r0180 and the totals`() {
+        val withPlacement = lines + line(C7400Mapper.FI_PLACEMENT, "50", "0.50")
+        val t = C7400Mapper.map(RiskLiquidityLookup.found(result(lines = withPlacement, total = "405")), asOf)
+        assertThat(t.at("r0180", "c0140").isDataGap).isTrue()
+        assertThat(t.at("r0180", "c0140").gapReason).contains(C7400Mapper.FI_PLACEMENT)
+        assertThat(t.at("r0010", "c0140").isDataGap).isTrue()
     }
 
     @Test
