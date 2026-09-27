@@ -5,6 +5,7 @@
 package com.openbank.party.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.api.error.UnauthorizedExceptionMapper
 import io.quarkus.security.AuthenticationFailedException
 import io.quarkus.security.ForbiddenException
 import io.quarkus.security.UnauthorizedException
@@ -21,7 +22,9 @@ class SecurityAbortExceptionMapperTest {
 
     @Test
     fun `maps UnauthorizedException to a 401 UNAUTHORIZED ApiError`() {
-        val response = QuarkusUnauthorizedExceptionMapper()
+        // libs-runtime's mapper (the local duplicate was removed, #10911): same status, code and
+        // envelope as the removed one; only the constant message differs.
+        val response = UnauthorizedExceptionMapper()
             .toResponse(UnauthorizedException("Not Authenticated"))
 
         assertThat(response.status).isEqualTo(401)
@@ -29,7 +32,7 @@ class SecurityAbortExceptionMapperTest {
         assertThat(error.status).isEqualTo(401)
         assertThat(error.code).isEqualTo("UNAUTHORIZED")
         // fixed message — the raw exception text is not leaked into the response
-        assertThat(error.message).isEqualTo("Unauthorized")
+        assertThat(error.message).isEqualTo("Authentication required")
         assertThat(error.traceId).isNotBlank()
     }
 
