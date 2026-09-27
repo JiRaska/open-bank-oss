@@ -1,13 +1,14 @@
 ---
 date: 2026-09-24
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [architecture, ledger, accounting-close, ai-agents]
 summary: "openbank-treasury-service owns the bank's own deals: a deal lifecycle with four-eyes booking, GL posting through the ledger API, nostro reconciliation and ČNB minimum reserves; AI agents draft tickets and never book."
+followup: "#10872, #10877, #10992, #10995, #11006 merged (deal MVP with four-eyes booking, GL posting, ČNB facility as HQLA, daily accrual, senior limit-override); #11036 (limit utilisation), #11041 (FX spot), #11052 (nostro reconciliation via camt.053) and #11087 (ČNB lombard facility) still open, tracked on #10896"
 ---
 
 # ADR-0315 — Treasury service domain: deals, GL posting, nostro and minimum reserves
