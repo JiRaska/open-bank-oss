@@ -41,10 +41,33 @@ class RiskCapitalApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @Inject
+    lateinit var treasury: com.openbank.risk.application.port.out.TreasuryDealBook
+
+    /** The ČNB deposit behind the 4000 on 1510: with the treasury read on, 1510 is contract-level. */
+    private val cnbDeal = java.util.UUID.randomUUID()
+
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
         ledger.inputs = Fixtures.tiedOut()
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$cnbDeal'")
+    }
+
+    private fun seedCnbDeposit(principal: String) = kotlinx.coroutines.runBlocking {
+        treasury.apply(
+            com.openbank.risk.application.port.out.TreasuryDealEvent(
+                state = "SETTLED",
+                dealId = cnbDeal,
+                product = "CNB_DEPOSIT_FACILITY",
+                counterpartyId = "CNB",
+                currency = "CZK",
+                principal = BigDecimal(principal),
+                rate = BigDecimal("2.50"),
+                valueDate = java.time.LocalDate.parse("2026-05-28"),
+                maturityDate = java.time.LocalDate.parse("2026-06-01"),
+            ),
+        )
     }
 
     private fun snapshot(asOf: String, status: String): String = given().contentType("application/json")
@@ -74,6 +97,7 @@ class RiskCapitalApiIT {
             subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
         )
         lending.loans = listOf(loan)
+        seedCnbDeposit("4000.00")
         val body = capital(snapshot("2026-05-29", "TIED_OUT"))
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d424-sa")

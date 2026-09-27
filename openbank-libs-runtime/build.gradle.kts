@@ -116,6 +116,10 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
+    // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
+    // class is absent at runtime is silently dropped, so the test needs arc itself.
+    testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
     // MultipartParser.MalformedMessageException lives in the reactive-server artifact; the
     // classification test instantiates the real class so the by-name map key can never drift
@@ -144,6 +148,11 @@ dependencies {
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
+    // KeyedCallFilterClientTest drives the REAL Quarkus REST client engine (the JAX-RS client under
+    // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
+    // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
+    // Test-only; already in gradle/verification-metadata.xml because every service resolves it.
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client:3.38.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

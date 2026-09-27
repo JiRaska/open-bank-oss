@@ -5,7 +5,7 @@
 # seed-vault-gaps.sh populated by copying this very value out of `account-service` — one credential
 # in two places, with a Keycloak rotation obliged to find both (#3485,
 # rules.yaml: oidc_secret_convention).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: audit-service-oidc

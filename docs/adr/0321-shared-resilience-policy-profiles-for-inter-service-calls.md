@@ -54,7 +54,7 @@ openbank-libs, and make every inter-service REST adapter declare exactly one.
 | Profile | Use for | Timeout | Retry | Circuit breaker | Bulkhead |
 |---|---|---|---|---|---|
 | `money-sync` | synchronous money-path writes and gates (sanctions, ledger posting, SCA) | 3 s | at most 1 retry, 200 ms + 100 ms jitter, **only** on connect/timeout/5xx and only when the call carries an idempotency key; never on 4xx | volume 10, ratio 0.5, delay 5 s, success 2 | 20 concurrent |
-| `read` | idempotent reads (directory, catalog, balances) | 2 s | 2 retries, 200 ms + 100 ms jitter, on connect/timeout/5xx | volume 10, ratio 0.5, delay 5 s | 50 concurrent |
+| `read` | idempotent reads (directory, catalog, balances) | 2 s | 2 retries, 200 ms + 100 ms jitter, on connect/timeout/5xx | volume 10, ratio 0.5, delay 5 s, success 2 | 50 concurrent |
 | `external-scheme` | clearing, SEPA/SWIFT, CNB, any `@SyntheticTaintExternalBoundary` client | 10 s | 2 retries, 1 s + 500 ms jitter, idempotent calls only | volume 4, ratio 0.5, delay 10 s, success 2 | 10 concurrent |
 | `batch` | scheduled and back-office calls with no user waiting | 30 s | 3 retries, 2 s + 1 s jitter | volume 10, ratio 0.5, delay 30 s | 5 concurrent |
 
@@ -64,7 +64,8 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 
 **D2 — Declaration.** A profile is a set of Kotlin constants in openbank-libs-runtime
 (`com.openbank.libs.resilience`) used as the annotation arguments, plus a marker annotation
-`@ResilienceProfile("money-sync")` on the adapter method (not yet implemented, #10930).
+`@ResilienceProfile("money-sync")` on the adapter method (catalogue, marker and the keyed-only
+classifiers below delivered in `com.openbank.libs.resilience`; no adapter adopts them yet, #10930).
 
 The `money-sync` rule "retry only when the call carries an idempotency key" is a *runtime*
 property of the call, which static annotation constants cannot express. It is implemented with
@@ -96,8 +97,9 @@ static, and the keyed/unkeyed decision is made per call by which exception type 
 custom interceptor or SmallRye FT's programmatic `TypedGuard` API were rejected for this: both
 move the policy out of the annotation the `resilience-profile` gate reads. Per-environment tuning uses
 MicroProfile FT's own config override (`<class>/<method>/Timeout/value`) — never a new literal.
-A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")` (the annotation does not exist yet; it lands with the profile catalogue, #10930), visible beside the
-call — the same review shape as `SyntheticTaintExternalBoundary`.
+A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")`, visible beside the
+call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation exists in libs-runtime; the gate that reads it
+has not landed (#10930).
 
 **D3 — Metrics.** Every profiled adapter records through `ResilientCallMetrics`, which gains a
 closed `profile` tag next to `adapter` and `outcome`. Breaker state and bulkhead rejections come

@@ -74,8 +74,9 @@ class RiskLiquidityApiIT {
         lending.loans = listOf(loan)
         val body = liquidity(snapshot("2026-09-30", "TIED_OUT"))
 
-        assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d238-d295")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
+        // EU rules are the default for this bank (#10860): Delegated Regulation (EU) 2015/61 + CRR2.
+        assertThat(body["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")
@@ -98,9 +99,16 @@ class RiskLiquidityApiIT {
         assertThat(lcr["hqla"]["lines"].isEmpty).isTrue()
 
         val a = body["assumptions"]
-        assertThat(a["scope"].asText()).contains("2015/61 deviations not applied")
+        assertThat(a["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
+        assertThat(a["scope"].asText()).contains("2015/61").contains("575/2013")
         assertThat(a["factors"].size()).isEqualTo(29)
-        assertThat(a["factors"].all { it["citation"].asText().contains("BCBS d2") }).isTrue()
+        assertThat(
+            a["factors"].all {
+                it["citation"].asText().let { c -> c.startsWith("EU 2015/61") || c.startsWith("CRR ") }
+            },
+        ).isTrue()
+        assertThat(a["factors"].single { it["key"].asText() == "nsfr-rsf-l1-securities" }["value"].decimalValue())
+            .isEqualByComparingTo("0")
         assertThat(a["classification"]["retailStableShare"].decimalValue()).isEqualByComparingTo("0")
     }
 
