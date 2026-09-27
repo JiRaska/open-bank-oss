@@ -54,7 +54,7 @@ openbank-libs, and make every inter-service REST adapter declare exactly one.
 | Profile | Use for | Timeout | Retry | Circuit breaker | Bulkhead |
 |---|---|---|---|---|---|
 | `money-sync` | synchronous money-path writes and gates (sanctions, ledger posting, SCA) | 3 s | at most 1 retry, 200 ms + 100 ms jitter, **only** on connect/timeout/5xx and only when the call carries an idempotency key; never on 4xx | volume 10, ratio 0.5, delay 5 s, success 2 | 20 concurrent |
-| `read` | idempotent reads (directory, catalog, balances) | 2 s | 2 retries, 200 ms + 100 ms jitter, on connect/timeout/5xx | volume 10, ratio 0.5, delay 5 s | 50 concurrent |
+| `read` | idempotent reads (directory, catalog, balances) | 2 s | 2 retries, 200 ms + 100 ms jitter, on connect/timeout/5xx | volume 10, ratio 0.5, delay 5 s, success 2 | 50 concurrent |
 | `external-scheme` | clearing, SEPA/SWIFT, CNB, any `@SyntheticTaintExternalBoundary` client | 10 s | 2 retries, 1 s + 500 ms jitter, idempotent calls only | volume 4, ratio 0.5, delay 10 s, success 2 | 10 concurrent |
 | `batch` | scheduled and back-office calls with no user waiting | 30 s | 3 retries, 2 s + 1 s jitter | volume 10, ratio 0.5, delay 30 s | 5 concurrent |
 
