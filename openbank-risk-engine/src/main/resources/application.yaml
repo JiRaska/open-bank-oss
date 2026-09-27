@@ -178,6 +178,17 @@ openbank:
       # ADR-0314 D4: read lending's loan book into every snapshot (loans become contract-level
       # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
       enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
+    eod-snapshot:
+      # ADR-0314: once per business day, drive the SAME SnapshotUseCase.createSnapshot the
+      # POST /api/v1/risk/snapshots endpoint calls, for today's as-of date — replay-idempotent on
+      # (asOf, inputHash), so a re-run or a restart mid-day is a no-op, not a duplicate. Off by
+      # default: ADR-0314 shipped operator-driven, and this scheduler is opt-in per environment,
+      # same shape as openbank.risk.lending.enabled above.
+      enabled: ${OPENBANK_RISK_EOD_SNAPSHOT_ENABLED:false}
+      # `openbank.risk.eod-snapshot.cron` defaults to "0 30 22 * * ?" in the @Scheduled annotation
+      # itself (EodSnapshotScheduler) — same property-naming and Europe/Prague zone convention as
+      # ledger-service's openbank.ledger.accounting-day.cron (AccountingDayScheduler). No key here
+      # unless an environment needs to override it, same as that scheduler's own application.yaml.
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
     # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
     # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),
