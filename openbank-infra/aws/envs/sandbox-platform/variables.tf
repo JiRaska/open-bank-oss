@@ -26,9 +26,12 @@ variable "argocd_version" {
 }
 
 variable "cnpg_version" {
-  description = "CloudNativePG operator Helm chart version (cnpg/cloudnative-pg; chart 0.28.2 = operator 1.29.1)."
+  description = "CloudNativePG operator Helm chart version (cnpg/cloudnative-pg; chart 0.29.1 = operator 1.30.1)."
   type        = string
-  default     = "0.28.2"
+  # 1.30.x supports Kubernetes 1.34-1.36; 1.29.x (1.33-1.35) is EOL 2026-09-29.
+  # 1.30 is the LAST minor with in-tree `barmanObjectStore` backups (removed in
+  # 1.31): moving past 1.30 requires the Barman Cloud plugin migration first.
+  default = "0.29.1"
 }
 
 variable "arc_controller_version" {

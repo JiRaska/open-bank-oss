@@ -578,6 +578,22 @@ resource "helm_release" "cnpg" {
   repository       = "https://cloudnative-pg.github.io/charts"
   chart            = "cloudnative-pg"
   version          = var.cnpg_version
+
+  # In-place instance-manager upgrades. By default an operator upgrade rolls
+  # EVERY Postgres pod to inject the new instance manager, and a single-instance
+  # Cluster has no replica to switch over to, so each one restarts (a few
+  # minutes of downtime per DB, all clusters at once). With this set, the
+  # operator swaps the instance-manager binary inside the running pod and the
+  # postmaster keeps running: no restart, no switchover. Trade-off: the pod's
+  # init-container image keeps the old version until the pod is next recreated.
+  # A change to the instance pod TEMPLATE itself still rolls pods regardless.
+  set = [
+    {
+      name  = "config.data.ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES"
+      value = "true"
+      type  = "string"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
