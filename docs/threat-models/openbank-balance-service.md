@@ -193,7 +193,7 @@ also be deleted (nothing else in balance-service depends on it).
 
 - **2026-09-02** — Doc correction, no behavior change: §3 and the S1 residual named three controls
   by names that do not exist in the tree. (1) The `@PermitAll` regression guard was credited to
-  `BalanceResourceSecurityTest`; that class is in no Kotlin source — the guard is real and is
+  `BalanceResourceSecurityTest`, but no such class exists in Kotlin source — the guard is real and is
   `BalanceSecurityContractTest`, which asserts by reflection that no `BalanceResource` /
   `ReconciliationResource` endpoint is `@PermitAll` and that every one carries `@RolesAllowed`.
   (2) The write endpoints were described as `@RolesAllowed(SERVICE, ...)`; the constant is

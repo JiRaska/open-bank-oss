@@ -112,14 +112,6 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 ALLOWED_UNRESOLVED: dict[str, str] = {
     # Surfaced by scoping disclaimers to their clause (#11088). Before, a disclaimer anywhere in
     # the cell exempted all of these without anyone deciding so; now each is a named decision.
-    'document-service|Change log|openbank.billing.billing.event':
-        'change-log correction: the next sentence says "No such topic exists"',
-    'openbank-balance-service|7. Change log|BalanceResourceSecurityTest':
-        'change-log correction: the preceding clause says these names "do not exist in the tree"',
-    'openbank-security-scanner|5. Residual risks|SecurityContractTest':
-        'the same sentence says "There is no fleet-wide" such class; phrasing is outside DISCLAIMED',
-    'openbank-settlement-service|Change log|settlement_activity.rego':
-        'change-log entry records that the orphan policy file was deleted',
     'openbank-domestic-payment|6. Change log|domestic_payment_rest_ext.rego':
         'true claim: the policy ships embedded in '
         '`openbank-infra/gitops/components/payments/domestic-payment-opa-bundle.yaml`, not as a '
