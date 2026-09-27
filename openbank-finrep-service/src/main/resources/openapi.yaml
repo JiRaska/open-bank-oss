@@ -24,7 +24,7 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.8.0
+  version: 1.9.0
 tags:
   - name: FINREP
   - name: COREP
@@ -138,8 +138,13 @@ paths:
       tags: [COREP]
       summary: Render a COREP template as of a reporting date
       description: >-
-        Derives the template from the ledger GL trial balance as of `asOf`. Only `C_01.00`
-        (Own Funds) is implemented in this increment; any other value is rejected.
+        `C_01.00` (Own Funds) is derived from the ledger GL trial balance as of `asOf`. `C_02.00`
+        (Own Funds Requirements, EBA framework 4.0 CA2 layout, column c0010) is read from the risk
+        engine's Pillar 1 standardised-approach result for the most recent TIED_OUT snapshot at
+        exactly `asOf` (ADR-0313 D6); `evidence` does not apply to it. Row r0010 (TREA), the classes
+        the engine does not model and market/operational/CVA risk are always `isDataGap: true`, and
+        every credit-risk row is a gap with its reason when no tied snapshot exists or the read is
+        not enabled. Any other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
         never plugs capital as assets minus liabilities. With no recognised capital source every
@@ -153,7 +158,7 @@ paths:
           in: path
           required: true
           description: EBA COREP template identifier
-          schema: { type: string, enum: [C_01.00] }
+          schema: { type: string, enum: [C_01.00, C_02.00] }
         - name: asOf
           in: query
           required: false

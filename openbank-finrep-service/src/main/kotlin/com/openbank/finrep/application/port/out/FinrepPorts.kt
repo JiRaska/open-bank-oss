@@ -51,3 +51,48 @@ interface LedgerPort {
 
     suspend fun listClosedPeriods(): List<ClosedPeriodDto>
 }
+
+/**
+ * One exposure class of a risk-engine capital result (ADR-0313 D6): the class key as the engine
+ * reports it (e.g. `sovereign-and-central-bank`) with its exposure and risk-weighted exposure.
+ */
+data class RiskExposureClass(val exposureClass: String, val ead: BigDecimal, val rwa: BigDecimal)
+
+/**
+ * The Pillar 1 standardised-approach credit-risk result of ONE tied-out risk-engine snapshot at
+ * the report date. [classes] and [totalRwa] are present only for a single-currency book (the engine
+ * does not convert currencies); [unclassifiedBalances] counts balances the engine could not
+ * classify, so they carry no RWA.
+ */
+data class RiskCapitalResult(
+    val runId: String,
+    val asOf: LocalDate,
+    val parameterSetId: String,
+    val parameterSetVersion: String,
+    val currency: String?,
+    val classes: List<RiskExposureClass>,
+    val totalRwa: BigDecimal?,
+    val currencyCount: Int,
+    val unclassifiedBalances: Int,
+)
+
+/**
+ * What a capital lookup found: the [result], or why there is none. [unavailableReason] is a
+ * data-gap reason for the report, never an error: an unconfigured or empty source is a visible gap.
+ */
+data class RiskCapitalLookup(val result: RiskCapitalResult?, val unavailableReason: String?) {
+    init {
+        require((result == null) != (unavailableReason == null)) { "exactly one of result or reason" }
+    }
+
+    companion object {
+        fun found(result: RiskCapitalResult) = RiskCapitalLookup(result, null)
+        fun unavailable(reason: String) = RiskCapitalLookup(null, reason)
+    }
+}
+
+/** Read-only view of the risk engine's capital result (ADR-0313 D6). */
+interface RiskCapitalPort {
+    /** The most recent TIED_OUT snapshot's capital at exactly [asOf], or why there is none. */
+    suspend fun capitalAt(asOf: LocalDate): RiskCapitalLookup
+}

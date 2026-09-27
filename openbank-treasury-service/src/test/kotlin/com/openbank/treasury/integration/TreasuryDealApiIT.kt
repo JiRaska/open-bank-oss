@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -49,7 +50,10 @@ class TreasuryDealApiIT {
     @Inject
     lateinit var ledger: FakeLedger
 
-    private val today: LocalDate = LocalDate.now()
+    // The service decides settlement/maturity eligibility off its injected Clock, which is
+    // Clock.systemUTC() (DefaultClockProducer) — derive "today" the same way, not from local time,
+    // or this drifts a day out of step with the service between local midnight and UTC midnight.
+    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
 
     private fun draftBody(principal: String, counterparty: String = "SIMBK-A", product: String = "MM_PLACEMENT") = """
         {"product":"$product","counterpartyId":"$counterparty","currency":"CZK",

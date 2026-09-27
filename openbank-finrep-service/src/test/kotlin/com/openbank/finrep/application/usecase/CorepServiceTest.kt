@@ -33,7 +33,7 @@ class CorepServiceTest {
     fun `live working preview never reads frozen evidence implicitly`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 7, 31)
         coEvery { ledgerPort.getLiveTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
-        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital)
 
         service.getTemplate(GetCorepTemplateQuery("C_01.00", asOf, TrialBalanceEvidence.LIVE_PREVIEW))
 
@@ -49,7 +49,7 @@ class CorepServiceTest {
             TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
-        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital)
 
         val template = service.getTemplate(GetCorepTemplateQuery(templateId = "C_01.00", asOf = asOf))
 
@@ -63,13 +63,13 @@ class CorepServiceTest {
     fun `getTemplate throws for an unknown or unimplemented COREP template id`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
-        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital)
 
         assertThatThrownBy {
-            runBlocking { service.getTemplate(GetCorepTemplateQuery(templateId = "C_02.00", asOf = asOf)) }
+            runBlocking { service.getTemplate(GetCorepTemplateQuery(templateId = "C_05.01", asOf = asOf)) }
         }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("C_02.00")
+            .hasMessageContaining("C_05.01")
     }
 
     @Test
@@ -83,7 +83,7 @@ class CorepServiceTest {
             ),
             ledgerSays = true,
         )
-        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital)
 
         val template = service.getTemplate(GetCorepTemplateQuery(templateId = "C_01.00", asOf = asOf))
         val expectedGaps = template.cells.count { it.isDataGap }
@@ -99,7 +99,7 @@ class CorepServiceTest {
     fun `COREP is tagged balanced=not_applicable rather than pretending it balanced`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
-        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital)
 
         service.getTemplate(GetCorepTemplateQuery(templateId = "C_01.00", asOf = asOf))
 
@@ -115,10 +115,10 @@ class CorepServiceTest {
     fun `an unimplemented COREP template is counted as a framework-tagged failure`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
-        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry), noRiskCapital)
 
         assertThatThrownBy {
-            runBlocking { service.getTemplate(GetCorepTemplateQuery(templateId = "C_02.00", asOf = asOf)) }
+            runBlocking { service.getTemplate(GetCorepTemplateQuery(templateId = "C_05.01", asOf = asOf)) }
         }.isInstanceOf(IllegalArgumentException::class.java)
 
         assertThat(
@@ -135,4 +135,57 @@ class CorepServiceTest {
      */
     private fun snapshot(lines: List<TrialBalanceLineDto>, ledgerSays: Boolean?) =
         TrialBalanceSnapshot(lines = lines, ledgerReportsBalanced = ledgerSays)
+
+    // --- ADR-0313 D6: C 02.00 from the risk engine ---
+
+    @Test
+    fun `C_02_00 is read from the risk engine and never from the ledger`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 9, 30)
+        val found = object : com.openbank.finrep.application.port.out.RiskCapitalPort {
+            override suspend fun capitalAt(asOf: LocalDate) =
+                com.openbank.finrep.application.port.out.RiskCapitalLookup.found(
+                    com.openbank.finrep.application.port.out.RiskCapitalResult(
+                        "run-1", asOf, "bcbs-d424-sa", "1", "CZK",
+                        listOf(
+                            com.openbank.finrep.application.port.out.RiskExposureClass(
+                                "bank",
+                                BigDecimal("100"),
+                                BigDecimal("150"),
+                            ),
+                        ),
+                        BigDecimal("150"), 1, 0,
+                    ),
+                )
+        }
+        val template = CorepService(ledgerPort, FinrepMetricsAdapter(registry), found)
+            .getTemplate(GetCorepTemplateQuery(templateId = "C_02.00", asOf = asOf))
+        assertThat(template.templateId).isEqualTo("C_02.00")
+        assertThat(template.cells.single { it.rowRef == "r0120" }.value).isEqualByComparingTo("150")
+        coVerify(exactly = 0) { ledgerPort.getTrialBalance(any()) }
+        coVerify(exactly = 0) { ledgerPort.getLiveTrialBalance(any()) }
+    }
+
+    @Test
+    fun `an unreachable risk engine is a counted failure, not a report of zeros`(): Unit = runBlocking {
+        val down = object : com.openbank.finrep.application.port.out.RiskCapitalPort {
+            override suspend fun capitalAt(
+                asOf: LocalDate,
+            ): com.openbank.finrep.application.port.out.RiskCapitalLookup = error("connection refused")
+        }
+        assertThatThrownBy {
+            runBlocking {
+                CorepService(ledgerPort, FinrepMetricsAdapter(registry), down)
+                    .getTemplate(GetCorepTemplateQuery(templateId = "C_02.00", asOf = LocalDate.of(2026, 9, 30)))
+            }
+        }.hasMessageContaining("connection refused")
+        assertThat(
+            registry.find("openbank.finrep.template.failures").tag("framework", "corep")
+                .tag("reason", "risk_engine_unavailable").counter()?.count(),
+        ).isEqualTo(1.0)
+    }
+
+    private val noRiskCapital = object : com.openbank.finrep.application.port.out.RiskCapitalPort {
+        override suspend fun capitalAt(asOf: java.time.LocalDate) =
+            com.openbank.finrep.application.port.out.RiskCapitalLookup.unavailable("not wired in this test")
+    }
 }
