@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.config.yaml)
@@ -49,6 +50,8 @@ dependencies {
     // Consumer-driven contract for lending's loan-book read (ADR-0314 D4); the pact is replayed by
     // lending's @PactFolder provider test.
     testImplementation(libs.pact.consumer)
+    // Provider replay of finrep's snapshot-list + capital pact (ADR-0313 D6) from the git-pact folder.
+    testImplementation(libs.pact.provider)
 }
 
 kover {
