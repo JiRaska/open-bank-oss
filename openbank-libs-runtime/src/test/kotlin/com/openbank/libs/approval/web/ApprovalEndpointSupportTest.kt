@@ -58,6 +58,12 @@ class ApprovalEndpointSupportTest {
 
         assertThat(response.status).isEqualTo(200)
         val body = response.entity as ApprovalResponse
+        // Every field of PendingApproval -> ApprovalResponse (toApprovalResponse()), pinned here
+        // because this is the only mapping test the move to libs-runtime (#11079) left behind —
+        // transaction-service's own ApprovalResourceMappingTest asserted `id` and `action` too,
+        // and those two were not otherwise covered anywhere in this class.
+        assertThat(body.id).isEqualTo(approval.id)
+        assertThat(body.action).isEqualTo("opsmessage.compose")
         assertThat(body.status).isEqualTo("APPROVED")
         assertThat(body.decidedBy).isEqualTo("checker-1")
         assertThat(body.makerId).isEqualTo("maker-1")
