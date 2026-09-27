@@ -4,6 +4,7 @@
 
 package com.openbank.risk.application
 
+import com.openbank.risk.application.port.`in`.CapitalAnalysis
 import com.openbank.risk.application.port.`in`.SnapshotOutcome
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.FxFixingRate
@@ -67,7 +68,7 @@ class CapitalServiceTest {
         Position(PositionKind.GL_ACCOUNT, "1002", "ASSET", "EUR", null, BigDecimal("100")),
     )
 
-    private fun analyse(asOf: String, repo: WindowRepo) = runBlocking {
+    private fun analyse(asOf: String, repo: WindowRepo): CapitalAnalysis = runBlocking {
         CapitalService(Snapshots(LocalDate.parse(asOf), book), CapitalTestParameters.shipped(), repo).analyse(runId)
     }
 
