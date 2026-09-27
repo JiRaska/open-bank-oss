@@ -186,6 +186,8 @@ export const forecastRowSchema = z.object({
   fromDay: z.number().int(), toDay: z.number().int(), from: z.string(), to: z.string(),
   contractualInflows: money, contractualOutflows: money, behaviouralInflows: money, behaviouralOutflows: money,
   inflows: money, outflows: money, net: money, cumulative: money,
+  // Lowest end-of-day cumulative inside the row: a weekly row's `cumulative` is end-of-week only.
+  minCumulative: money,
 })
 export const currencyForecastSchema = z.object({
   currency: z.string(), hqla: hqlaSchema.nullable().optional(), openingLiquidity: money,

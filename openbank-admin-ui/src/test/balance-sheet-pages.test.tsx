@@ -378,10 +378,10 @@ describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
   })
 })
 
-const fRow = (fromDay: number, toDay: number, behaviouralOutflows: number, cumulative: number) => ({
+const fRow = (fromDay: number, toDay: number, behaviouralOutflows: number, cumulative: number, minCumulative = cumulative) => ({
   fromDay, toDay, from: '2026-10-01', to: `2026-10-${String(toDay).padStart(2, '0')}`,
   contractualInflows: 0, contractualOutflows: 0, behaviouralInflows: 0, behaviouralOutflows,
-  inflows: 0, outflows: behaviouralOutflows, net: behaviouralOutflows, cumulative,
+  inflows: 0, outflows: behaviouralOutflows, net: behaviouralOutflows, cumulative, minCumulative,
 })
 const FORECAST = (survival: number | null, hqla: boolean) => ({
   runId: 'run-6', asOf: '2026-09-30', provenance: 'synthetic', curveSetId: 'cs-1', curveSetProvenance: 'synthetic',
@@ -427,6 +427,18 @@ describe('Liquidity forecast (survival horizon)', () => {
     expect(screen.getByTestId('survival-CZK').textContent).toMatch(/day 1|1\. den/)
     expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(2)
     expect(screen.getByText(/no HQLA held in this currency|nemá žádná HQLA/)).toBeTruthy()
+  })
+
+  it('marks a weekly row that dips negative mid-week even though it ends positive', async () => {
+    const body = FORECAST(null, true)
+    body.currencies[0].ladder = [fRow(1, 1, -450, 550), fRow(31, 37, 0, 120, -80)]
+    router = route(body)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    expect(screen.getByTestId('min-cumulative-CZK-31').textContent).toMatch(/80/)
+    const negative = document.querySelectorAll('tr[data-negative="true"]')
+    expect(negative.length).toBe(1)
+    expect(negative[0].textContent).toMatch(/31–37/)
   })
 
   it('sends the chosen horizon', async () => {

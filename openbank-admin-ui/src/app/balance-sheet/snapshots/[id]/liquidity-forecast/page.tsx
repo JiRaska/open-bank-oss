@@ -145,12 +145,14 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
                       <th scope="col" style={{ textAlign: 'right' }}>{t('Behaviorální přítoky', 'Behavioural inflows')}</th>
                       <th scope="col" style={{ textAlign: 'right' }}>{t('Behaviorální odtoky', 'Behavioural outflows')}</th>
                       <th scope="col" style={{ textAlign: 'right' }}>{t('Netto', 'Net')}</th>
-                      <th scope="col" style={{ textAlign: 'right' }}>{t('Kumulativně', 'Cumulative')}</th>
+                      <th scope="col" style={{ textAlign: 'right' }}>{t('Kumulativně (konec)', 'Cumulative (end)')}</th>
+                      <th scope="col" style={{ textAlign: 'right' }}>{t('Minimum v řádku', 'Lowest in row')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {c.ladder.map(r => {
-                      const negative = r.cumulative < 0
+                      // A weekly row can end positive after a mid-week negative: mark it on the row minimum.
+                      const negative = r.minCumulative < 0
                       return (
                         <tr key={r.fromDay} data-negative={negative ? 'true' : undefined} style={negative ? { background: 'var(--danger-bg, transparent)' } : undefined}>
                           <td>{r.fromDay === r.toDay ? r.fromDay : `${r.fromDay}–${r.toDay}`}</td>
@@ -161,6 +163,7 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
                           <td style={{ textAlign: 'right' }}>{money(r.behaviouralOutflows)}</td>
                           <td style={{ textAlign: 'right' }}>{money(r.net)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{money(r.cumulative)}</td>
+                          <td style={{ textAlign: 'right' }} data-testid={`min-cumulative-${c.currency}-${r.fromDay}`}>{money(r.minCumulative)}</td>
                         </tr>
                       )
                     })}
