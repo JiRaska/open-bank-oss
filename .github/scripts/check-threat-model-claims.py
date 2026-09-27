@@ -110,6 +110,23 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 # Empty is the honest state: every finding this gate reports today is a real defect being
 # fixed in the same PR, not baselined debt.
 ALLOWED_UNRESOLVED: dict[str, str] = {
+    # Surfaced by scoping disclaimers to their clause (#11088). Before, a disclaimer anywhere in
+    # the cell exempted all of these without anyone deciding so; now each is a named decision.
+    'document-service|Change log|openbank.billing.billing.event':
+        'change-log correction: the next sentence says "No such topic exists"',
+    'openbank-balance-service|7. Change log|BalanceResourceSecurityTest':
+        'change-log correction: the preceding clause says these names "do not exist in the tree"',
+    'openbank-security-scanner|5. Residual risks|SecurityContractTest':
+        'the same sentence says "There is no fleet-wide" such class; phrasing is outside DISCLAIMED',
+    'openbank-settlement-service|Change log|settlement_activity.rego':
+        'change-log entry records that the orphan policy file was deleted',
+    'openbank-domestic-payment|6. Change log|domestic_payment_rest_ext.rego':
+        'true claim: the policy ships embedded in '
+        '`openbank-infra/gitops/components/payments/domestic-payment-opa-bundle.yaml`, not as a '
+        'standalone .rego file, so the path resolver cannot see it',
+    'openbank-tpp-registry-service|5. Residual risks / assumptions|TppRegistryClient':
+        'STALE claim hidden by the old row-level disclaimer: the class no longer exists in psd2 '
+        'src/main. Correct the model and delete this entry (#11088)',
     # Widening the gate on 2026-09-03 (subject set 23 -> 45 models; claim regions STRIDE-only ->
     # whole document; resolution substring -> word-boundary on non-comment lines) surfaced 46
     # citations that name something this tree does not contain. Every one was checked by hand
@@ -647,7 +664,39 @@ DISCLAIMED = re.compile(
 
 
 def is_disclaimed(mitigation: str) -> bool:
+    """True when ANY clause of the cell disclaims something — used for the report count only."""
     return bool(DISCLAIMED.search(mitigation))
+
+
+# A clause ends at `.`/`;`/`!`/`?` followed by whitespace, or at an em-dash separator. Backtick
+# spans are masked first so a dotted citation (`openbank.x.enabled`) never splits a clause.
+_CLAUSE_END = re.compile(r"(?<=[.;!?])\s+|\s+[\u2014\u2013]\s+|\s+--\s+")
+
+
+def clauses(text: str) -> list[str]:
+    masked = BACKTICK.sub(lambda m: "x" * len(m.group(0)), text)
+    out, start = [], 0
+    for m in _CLAUSE_END.finditer(masked):
+        out.append(text[start:m.start()])
+        start = m.end()
+    out.append(text[start:])
+    return [c for c in out if c.strip()]
+
+
+def disclaimed_citations(mitigation: str) -> set[str]:
+    """Citations that sit in a clause which itself disclaims — and ONLY those.
+
+    The disclaimer used to exempt the whole row: one "present in no " anywhere in a cell
+    silenced PHANTOM/STUB for every other symbol the same cell cited, so a row could narrate one
+    correction and assert any number of fictional controls beside it. Scoping the exemption to
+    the clause that carries the disclaimer keeps the costly-escape-hatch property: to silence a
+    citation you must say, next to it, that it does not exist.
+    """
+    out: set[str] = set()
+    for c in clauses(mitigation):
+        if DISCLAIMED.search(c):
+            out.update(citations(c))
+    return out
 
 
 def self_referential(threat: str, mitigation: str) -> bool:
@@ -687,7 +736,13 @@ def money_path(root: pathlib.Path) -> list[str]:
 def audit(root: pathlib.Path):
     services = subjects_all(root)
     mp = set(money_path(root))
-    corpus = Corpus(root)
+    subjects, n_claims, n_uncited, n_disclaimed, findings, used = \
+        audit_models(root, services, Corpus(root))
+    stale = sorted(set(ALLOWED_UNRESOLVED) - used)
+    return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
+
+
+def audit_models(root: pathlib.Path, services: list[str], corpus: "Corpus"):
     findings: list[tuple[str, str, str, str]] = []
     used: set[str] = set()
     subjects = n_claims = n_uncited = n_disclaimed = 0
@@ -698,13 +753,16 @@ def audit(root: pathlib.Path):
         subjects += 1
         for rid, threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
             n_claims += 1
-            if is_disclaimed(mitig):
+            disclaimed = is_disclaimed(mitig)
+            exempt = disclaimed_citations(mitig) if disclaimed else set()
+            if disclaimed:
                 n_disclaimed += 1
-                continue
             cites = citations(mitig)
-            if not cites:
+            if not cites and not disclaimed:
                 n_uncited += 1
             for sym in cites:
+                if sym in exempt:
+                    continue
                 key = f"{svc}|{rid}|{sym}"
                 if not corpus.resolve(sym):
                     if key in ALLOWED_UNRESOLVED:
@@ -720,7 +778,7 @@ def audit(root: pathlib.Path):
                         continue
                     findings.append(("STUB", svc, rid,
                                      f"cites `{sym}`, whose implementation is a stub ({site})"))
-            if kind != "prose" and self_referential(threat, mitig):
+            if not disclaimed and kind != "prose" and self_referential(threat, mitig):
                 key = f"{svc}|{rid}|SELF-REF"
                 if key in ALLOWED_UNRESOLVED:
                     used.add(key)
@@ -730,8 +788,7 @@ def audit(root: pathlib.Path):
                     ("threat is 'the record claims it happened'; "
                      "mitigation names only record-keeping"),
                 ))
-    stale = sorted(set(ALLOWED_UNRESOLVED) - used)
-    return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
+    return subjects, n_claims, n_uncited, n_disclaimed, findings, used
 
 
 def self_test() -> int:
@@ -898,6 +955,33 @@ def self_test() -> int:
         (empty / "docs" / "threat-models" / "a.md").write_text("x")
         (empty / "docs" / "threat-models" / "b.md").write_text("y")
         case("subjects are derived from the directory", subjects_all(empty), ["a", "b"])
+
+    # Disclaimers are scoped to their clause (#11088). The positive case is the #11065 shape: one
+    # clause narrates a real correction, the next asserts a control that exists nowhere.
+    mixed = ("`LegacyAuditService` is present in no source file; `PhantomGuardFilter` rejects "
+             "every unauthenticated call")
+    case("a disclaimer exempts only its own clause's citations",
+         sorted(disclaimed_citations(mixed)), ["LegacyAuditService"])
+    case("a dotted citation does not split a clause",
+         clauses("flag `openbank.x.enabled` is present in no config"),
+         ["flag `openbank.x.enabled` is present in no config"])
+    case("a legitimate whole-cell disclaimer still exempts its citation",
+         sorted(disclaimed_citations("**Corrected** — this control does not exist; `AuditService` "
+                                     "is present in no source file in this repository")),
+         ["AuditService"])
+    with tempfile.TemporaryDirectory() as td:
+        r = pathlib.Path(td)
+        (r / "docs" / "threat-models").mkdir(parents=True)
+        (r / "docs" / "threat-models" / "x.md").write_text(
+            "## Threat enumeration (STRIDE)\n\n### S — Spoofing\n\n"
+            "| ID | Threat | Mitigation |\n|----|--------|------------|\n"
+            f"| S1 | Forged caller | {mixed} |\n"
+            "| S2 | Forged caller | **Corrected** — `GoneFilter` does not exist |\n")
+        fake = _FakeCorpus({"openbank-x/src/main/kotlin/A.kt": "class RealThing"})
+        got = audit_models(r, ["x"], fake)[4]
+        case("the phantom beside a disclaimer is a finding (was silenced row-wide)",
+             sorted({d.split('`')[1] for k, _, _, d in got if k == "PHANTOM"}),
+             ["PhantomGuardFilter"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")
