@@ -313,8 +313,7 @@ class CorepServiceTest {
         assertThat(template.templateId).isEqualTo("C_74.00")
         assertThat(template.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }.value)
             .isEqualByComparingTo("100")
-        assertThat(template.cells.single { it.rowRef == "m0010" && it.colRef == "c0140" }.value)
-            .isEqualByComparingTo("75")
+        assertThat(template.cells.none { it.rowRef == "m0010" }).isTrue()
         assertThat(
             registry.get("openbank.finrep.templates.rendered").tag("template", "C_74.00").counter().count(),
         ).isEqualTo(1.0)

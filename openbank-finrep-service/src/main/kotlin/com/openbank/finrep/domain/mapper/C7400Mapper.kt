@@ -32,13 +32,11 @@ import java.time.LocalDate
  *   r0180 … not classified as operational deposits [row code UNVERIFIED] — [lcr-fi-inflow]
  *   r0260 Inflows from secured lending            [row code UNVERIFIED] — DATA GAP (not modelled)
  *   r0200 Monies due from central banks           [row code UNVERIFIED] — DATA GAP (not modelled)
- *   m0010 Inflows after the 75 % cap (memo; the cap is applied in C 76.00, this is not a C 74.00
- *         row)                                    [row code UNVERIFIED] — the engine's `cappedInflows`
  *
- * The 75 % cap (Art. 33(1)): the engine reports both the uncapped total (`totalInflows`, → r0010) and
- * the capped one (`cappedInflows`, → m0010, with `inflowCap` = cap factor × total outflows). Both are
- * mapped. m0010 is a gap when the engine's cap is not 75 % of its total outflows or a cap field is
- * absent; a capped figure that is not min(uncapped, cap) fails the render.
+ * The 75 % cap (Art. 33(1)): r0010 is the engine's UNCAPPED `totalInflows`. The capped inflow is not a
+ * C 74.00 row — it belongs to C 76.00 (LCR calculation, not yet mapped), so no row is emitted for it.
+ * The engine's cap is still validated: a `cappedInflows` that is not min(`totalInflows`, `inflowCap`)
+ * fails the render, since it would mean the engine's inflow figures disagree with each other.
  *
  * Ties (the render fails if they do not hold): Σ weighted of the inflow lines must equal the engine's
  * `totalInflows` within per-line rounding ((n + 1) × 0.005, as C 73.00), so a component finrep did not
@@ -64,7 +62,6 @@ object C7400Mapper {
     private const val COL_UNVERIFIED = " [column code UNVERIFIED]"
     private val HALF_CENT = BigDecimal("0.005")
     private val CENT = BigDecimal("0.01")
-    private val EU_CAP = BigDecimal("0.75")
 
     const val NON_FINANCIAL = "lcr-retail-loan-inflow"
     const val FINANCIAL = "lcr-fi-inflow"
@@ -78,7 +75,7 @@ object C7400Mapper {
     )
 
     /** Rows this mapper emits whose code has not been checked against the EBA DPM. */
-    val UNVERIFIED_ROWS: Set<String> = setOf("m0010", "r0030", "r0160", "r0170", "r0180", "r0200", "r0260")
+    val UNVERIFIED_ROWS: Set<String> = setOf("r0030", "r0160", "r0170", "r0180", "r0200", "r0260")
 
     /** Columns this mapper emits whose code has not been checked against the EBA DPM. */
     val UNVERIFIED_COLUMNS: Set<String> = setOf(COL_INFLOW)
@@ -94,6 +91,7 @@ object C7400Mapper {
         val result = lookup.result
         val gap = lookup.unavailableReason ?: gapReason(checkNotNull(result))
         val parts = if (gap == null) components(checkNotNull(result)) else emptyMap()
+        if (gap == null) checkCap(checkNotNull(result))
         val currency = result?.currency ?: "CZK"
 
         fun part(key: String) = parts[key] ?: Component.EMPTY
@@ -124,7 +122,6 @@ object C7400Mapper {
                 add(cell(row, COL_INFLOW, label + COL_UNVERIFIED, c.inflow, gap ?: c.rateGap))
             }
             addAll(unmodelledCells(currency, gap))
-            add(cappedCell(result, currency, gap ?: rows.first().third.rateGap))
         }
         return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })))
     }
@@ -144,20 +141,6 @@ object C7400Mapper {
         )
     }
 
-    /** Memo m0010: the engine's inflows after the cap, or the gap (inherited, or [capGap]) why they cannot be stated. */
-    private fun cappedCell(result: RiskLiquidityResult?, currency: String, inherited: String?): CorepCell {
-        val reason = inherited ?: capGap(checkNotNull(result))
-        return CorepCell(
-            "m0010",
-            COL_INFLOW,
-            "Memo: inflows after the 75 % cap (Art. 33(1)), as the risk engine applied it$UNVERIFIED$COL_UNVERIFIED",
-            if (reason == null) checkNotNull(result?.cappedInflows) else BigDecimal.ZERO,
-            currency,
-            reason != null,
-            reason,
-        )
-    }
-
     private fun gapReason(result: RiskLiquidityResult): String? = when {
         result.currencyCount > 1 || result.totalInflows == null ->
             "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
@@ -168,27 +151,14 @@ object C7400Mapper {
         else -> null
     }
 
-    /**
-     * The capped figure is stated only when the engine's cap is Art. 33(1)'s 75 % of its total outflows;
-     * a capped figure that is not min(uncapped, cap) fails the render.
-     */
-    private fun capGap(result: RiskLiquidityResult): String? {
-        val cap = result.inflowCap
-        val capped = result.cappedInflows
-        val outflows = result.totalOutflows
+    /** The engine's capped inflows must be min(uncapped, cap); C 76.00 will report them, C 74.00 does not. */
+    private fun checkCap(result: RiskLiquidityResult) {
+        val cap = result.inflowCap ?: return
+        val capped = result.cappedInflows ?: return
         val uncapped = checkNotNull(result.totalInflows)
-        if (cap == null || capped == null || outflows == null) {
-            return "Risk-engine snapshot ${result.runId} reports no inflow cap, so the capped inflows cannot be stated."
-        }
         check(capped.subtract(uncapped.min(cap)).abs() <= CENT) {
             "risk-engine capped inflows are $capped, but min(total inflows $uncapped, cap $cap) is not " +
                 "(snapshot ${result.runId})"
-        }
-        return if (cap.subtract(outflows.multiply(EU_CAP)).abs() <= CENT) {
-            null
-        } else {
-            "Risk-engine snapshot ${result.runId} caps inflows at $cap, which is not 75 % of its total outflows " +
-                "$outflows (Delegated Regulation 2015/61 Art. 33(1)); the capped inflows cannot be stated."
         }
     }
 

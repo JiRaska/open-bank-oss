@@ -72,26 +72,17 @@ class C7400MapperTest {
     }
 
     @Test
-    fun `both the uncapped and the capped inflows are mapped when the engine applied the 75 percent cap`() {
+    fun `no row is emitted for the capped inflows, which belong to C 76_00`() {
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result()), asOf)
         assertThat(t.at("r0010", "c0140").value).isEqualByComparingTo("380")
-        assertThat(t.at("m0010", "c0140").value).isEqualByComparingTo("300")
-        assertThat(t.at("m0010", "c0140").isDataGap).isFalse()
+        assertThat(t.cells.map { it.rowRef }.toSet())
+            .containsExactlyInAnyOrder("r0010", "r0030", "r0160", "r0170", "r0180", "r0200", "r0260")
     }
 
     @Test
-    fun `a cap that is not 75 percent of outflows makes the capped row a gap, not the uncapped rows`() {
-        val t = C7400Mapper.map(RiskLiquidityLookup.found(result(cap = "360", capped = "360")), asOf)
-        assertThat(t.at("m0010", "c0140").isDataGap).isTrue()
-        assertThat(t.at("m0010", "c0140").gapReason).contains("Art. 33(1)")
-        assertThat(t.at("r0010", "c0140").isDataGap).isFalse()
-    }
-
-    @Test
-    fun `an engine that reports no cap leaves the capped row a gap`() {
+    fun `an engine that reports no cap still renders the uncapped rows`() {
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result(cap = null, capped = null)), asOf)
-        assertThat(t.at("m0010", "c0140").isDataGap).isTrue()
-        assertThat(t.at("m0010", "c0140").gapReason).contains("no inflow cap")
+        assertThat(t.at("r0010", "c0140").isDataGap).isFalse()
     }
 
     @Test
@@ -131,7 +122,6 @@ class C7400MapperTest {
         )
         assertThat(t.at("r0030", "c0140").isDataGap).isTrue()
         assertThat(t.at("r0010", "c0140").isDataGap).isTrue()
-        assertThat(t.at("m0010", "c0140").isDataGap).isTrue()
         assertThat(t.at("r0030", "c0010").isDataGap).isFalse()
         assertThat(t.at("r0180", "c0140").isDataGap).isFalse()
     }

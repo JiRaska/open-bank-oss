@@ -160,8 +160,8 @@ paths:
         `[row code UNVERIFIED]` in their label. `C_74.00` (LCR inflows, Delegated Regulation (EU)
         2015/61 Arts. 32-34; columns c0010 amount and c0140 inflow subject to the 75 % cap, the
         latter labelled `[column code UNVERIFIED]`) is read from the same LCR result; r0010 is the
-        engine's uncapped total inflows and memo row m0010 its inflows after the Art. 33(1) cap (a
-        gap when the engine's cap is not 75 % of its outflows); secured lending (r0260) and central
+        engine's uncapped total inflows (the inflows after the Art. 33(1) cap belong to C 76.00 and
+        are not emitted; a capped figure that is not min(uncapped, cap) fails the render); secured lending (r0260) and central
         bank claims (r0200) are always `isDataGap: true`, the inflow column of a component whose
         engine factor is not the 2015/61 rate is a gap, every row is a gap under the same conditions
         as `C_72.00`, and unverified row codes carry `[row code UNVERIFIED]`. Any other template id

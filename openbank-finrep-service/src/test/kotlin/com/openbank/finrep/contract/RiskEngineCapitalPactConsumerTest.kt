@@ -35,8 +35,10 @@ import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.QueryParam
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
 import java.time.LocalDate
 
 /**
@@ -363,8 +365,8 @@ class RiskEngineCapitalPactConsumerTest {
         assertThat(lcr.inflowCap).isEqualByComparingTo("150.00")
         assertThat(lcr.cappedInflows).isEqualByComparingTo("50.00")
         assertThat(lcr.inflowCapBinding).isFalse()
-        // With the unclassified balance cleared the render ties, states the inflow and the capped
-        // figure, proving every inflow field is read, not merely parsed ...
+        // With the unclassified balance cleared the render ties, states the inflow and validates the
+        // cap, proving every inflow field is read, not merely parsed ...
         val tied = C7400Mapper.map(
             RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0)),
             LocalDate.parse(REPORTING_DATE),
@@ -372,9 +374,14 @@ class RiskEngineCapitalPactConsumerTest {
         assertThat(tied.cells.single { it.rowRef == "r0030" && it.colRef == "c0140" }.value)
             .isEqualByComparingTo("50.00")
         assertThat(tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }.isDataGap).isFalse()
-        val capped = tied.cells.single { it.rowRef == "m0010" && it.colRef == "c0140" }
-        assertThat(capped.isDataGap).isFalse()
-        assertThat(capped.value).isEqualByComparingTo("50.00")
+        // The cap fields are read to validate capped == min(uncapped, cap); a capped figure that is not
+        // fails the render (the capped total itself belongs to C 76.00, not a C 74.00 row).
+        assertThatThrownBy {
+            C7400Mapper.map(
+                RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0, cappedInflows = BigDecimal("49.00"))),
+                LocalDate.parse(REPORTING_DATE),
+            )
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("capped inflows are 49.00")
         // ... and the example as served (one unclassified balance) must refuse the totals and say why.
         val served = C7400Mapper.map(RiskLiquidityLookup.found(result), LocalDate.parse(REPORTING_DATE))
         val totalRow = served.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }
