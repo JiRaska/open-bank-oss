@@ -547,3 +547,16 @@ set) apply equally to the new `ledger.approval.decide` action.
   oracle over other callers' keys beyond what the unchanged replay body already returned.
   **STRIDE-R:** it strengthens non-repudiation, because a caller's audit record can now tell "posted"
   from "already posted". No validation, posting, lock or outbox path changes. Rollback: drop the header.
+- **2026-09-27** — **Read-only balance in an account's own currency (#11107).**
+  `GET /api/v1/journals/accounts/{code}/balance?asOf=&currency=` sums the native `amount` of booked
+  lines on one GL account in one transaction currency (every other aggregate here sums the CZK
+  `base_amount`), so a foreign-currency nostro such as 1002 EUR has a balance in EUR. It is gated
+  exactly like the trial balance (`@RolesAllowed` read roles, OPA `ledger.read`); no new action, no
+  rego change, no write, lock or outbox path. **STRIDE-T (misstatement):** only lines whose own
+  currency equals `currency` contribute, which also excludes the FX revaluation's base-only CZK legs;
+  `scope` defaults to `REAL_ONLY` as on the trial balance. `AccountCurrencyBalanceIT` asserts the exact
+  sum against real Postgres with a base-only line, a later line, a PENDING line and another account's
+  lines present; dropping the currency predicate turns 3 of its 4 tests red. **STRIDE-I:** it reveals
+  one account's total that the trial balance already reveals to the same callers, in a different
+  unit. Required `asOf`/`currency` are nullable + `requireNotNull` (400), an unknown code is 404.
+  Rollback: remove the endpoint.

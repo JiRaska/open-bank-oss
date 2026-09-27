@@ -112,6 +112,13 @@ class LedgerServiceIdempotencyPropertyTest {
         override suspend fun subLedgerBalances(asOf: LocalDate, subAccountId: UUID?): List<SubLedgerBalance> =
             error("not exercised")
 
+        override suspend fun accountBalanceInCurrency(
+            glAccountId: UUID,
+            currency: String,
+            asOf: LocalDate,
+            scope: com.openbank.ledger.domain.model.LedgerScope,
+        ): Pair<java.math.BigDecimal, java.math.BigDecimal> = error("not exercised")
+
         override suspend fun controlAccountTieOut(controlAccountId: UUID, asOf: LocalDate): List<ControlAccountTieOut> =
             error("not exercised")
     }
