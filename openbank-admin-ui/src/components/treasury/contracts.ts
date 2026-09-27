@@ -97,3 +97,78 @@ export type Positions = z.infer<typeof positionsSchema>
 
 /** The service's own error codes (ExceptionMappers.kt). */
 export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
+
+// Nostro reconciliation (ADR-0315 D7, #10896): NostroResource + the NostroStatement* /
+// NostroReconciliation schemas in openapi.yaml. Differences are `number` in the OpenAPI document,
+// but nothing in the service guarantees they are always computed — a `null` is not the same claim
+// as a `0`, so this stays nullable and the page must never render one as the other.
+export const nostroStatementSchema = z.object({
+  id: z.string(),
+  statementId: z.string(),
+  iban: z.string(),
+  glCode: z.string(),
+  currency: z.string(),
+  statementDate: z.iso.date(),
+  openingBalance: decimal,
+  closingBalance: decimal,
+  entryCount: z.number().int(),
+  sha256: z.string(),
+  uploadedBy: z.string(),
+  uploadedAt: timestamp,
+})
+
+export const matchTypeSchema = z.enum(['EXACT', 'AMOUNT_DATE'])
+export const statementDirectionSchema = z.enum(['CRDT', 'DBIT'])
+export const ledgerSideSchema = z.enum(['DEBIT', 'CREDIT'])
+
+export const nostroStatementEntrySchema = z.object({
+  sequence: z.number().int(),
+  amount: decimal,
+  currency: z.string(),
+  direction: statementDirectionSchema,
+  bookingDate: z.iso.date(),
+  reference: z.string().nullable(),
+})
+
+export const nostroLedgerLineSchema = z.object({
+  journalId: z.string(),
+  lineId: z.string(),
+  transactionId: z.string(),
+  entryDate: z.iso.date(),
+  side: ledgerSideSchema,
+  amount: decimal,
+  currency: z.string(),
+  description: z.string().nullable(),
+})
+
+export const nostroMatchSchema = z.object({
+  matchType: matchTypeSchema,
+  entry: nostroStatementEntrySchema,
+  ledgerLine: nostroLedgerLineSchema,
+})
+
+export const nostroReconciliationSchema = z.object({
+  statementUuid: z.string(),
+  statementId: z.string(),
+  iban: z.string(),
+  glCode: z.string(),
+  currency: z.string(),
+  statementDate: z.iso.date(),
+  statementOpeningBalance: decimal,
+  ledgerOpeningBalance: decimal,
+  openingDifference: decimal.nullable(),
+  statementClosingBalance: decimal,
+  ledgerClosingBalance: decimal,
+  closingDifference: decimal.nullable(),
+  reconciled: z.boolean(),
+  matches: z.array(nostroMatchSchema),
+  unmatchedStatementEntries: z.array(nostroStatementEntrySchema),
+  unmatchedLedgerLines: z.array(nostroLedgerLineSchema),
+})
+
+export type NostroStatement = z.infer<typeof nostroStatementSchema>
+export type MatchType = z.infer<typeof matchTypeSchema>
+export type NostroStatementEntry = z.infer<typeof nostroStatementEntrySchema>
+export type NostroLedgerLine = z.infer<typeof nostroLedgerLineSchema>
+export type NostroMatch = z.infer<typeof nostroMatchSchema>
+export type NostroReconciliation = z.infer<typeof nostroReconciliationSchema>

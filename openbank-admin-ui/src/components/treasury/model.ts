@@ -6,7 +6,7 @@
 // without rendering, and so every page agrees on who may do what.
 import type { Tone } from '@/components/ui/tone'
 import { hasPermission } from '@/lib/auth/roles'
-import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealState, type Product } from './contracts'
+import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealState, type MatchType, type Product } from './contracts'
 import type { WriteResult } from './api'
 
 type T = (cs: string, en: string) => string
@@ -108,6 +108,27 @@ export function dealActions(
     ownDeal: pending && ownDeal,
   }
 }
+
+export const MATCH_TYPE_TONE: Record<MatchType, Tone> = { EXACT: 'success', AMOUNT_DATE: 'warning' }
+
+export function matchTypeLabel(m: MatchType, t: T): string {
+  switch (m) {
+    case 'EXACT': return t('Přesná shoda', 'Exact match')
+    case 'AMOUNT_DATE': return t('Podle částky a data', 'Amount + date')
+  }
+}
+
+/**
+ * A `null` difference is NOT a `0` — the server has not computed it, and the two must never render
+ * the same (Instant.EPOCH-style trap: a sentinel a reader agrees is "clean" is not evidence it is).
+ * Returns null so the caller renders a dash/placeholder instead of a number.
+ */
+export function formatDifference(v: number | null, money: (n: number) => string): string | null {
+  return v === null ? null : money(v)
+}
+
+/** A non-zero difference (after the null check above) is the one thing this page must highlight. */
+export const isNonZeroDifference = (v: number | null): boolean => v !== null && v !== 0
 
 /** A readable sentence for a refused write — never a bare status line (graceful-state rule). */
 export function refusalText(res: WriteResult<unknown>, action: string, t: T): string {
