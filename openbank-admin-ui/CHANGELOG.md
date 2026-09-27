@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.259.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.258.0...admin-ui-v0.259.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** add treasury senior limit-override action ([#11006](https://github.com/JiRaska/open-bank-oss/issues/11006)) ([847a5a1](https://github.com/JiRaska/open-bank-oss/commit/847a5a177eff554db4859c16ce538a6a70990d8b))
+
 ## [0.258.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.257.0...admin-ui-v0.258.0) (2026-09-26)
 
 
