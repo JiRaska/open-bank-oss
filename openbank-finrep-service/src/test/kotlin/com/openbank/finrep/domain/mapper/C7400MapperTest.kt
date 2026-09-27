@@ -39,8 +39,9 @@ class C7400MapperTest {
         capped: String? = "300",
         currencies: Int = 1,
         unclassified: Int = 0,
+        parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
     ) = RiskLiquidityResult(
-        "run-7", asOf, "bcbs-d238-d295", "2", "CZK", emptyList(),
+        "run-7", asOf, parameterSet, "2", "CZK", emptyList(),
         BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, currencies, unclassified,
         totalOutflows = BigDecimal(outflows),
         inflows = lines,
@@ -122,6 +123,7 @@ class C7400MapperTest {
         )
         assertThat(t.at("r0030", "c0140").isDataGap).isTrue()
         assertThat(t.at("r0010", "c0140").isDataGap).isTrue()
+        assertThat(t.at("r0030", "c0140").gapReason).contains("0.40", "'eu-2015-61-crr2'").doesNotContain("d238")
         assertThat(t.at("r0030", "c0010").isDataGap).isFalse()
         assertThat(t.at("r0180", "c0140").isDataGap).isFalse()
     }
@@ -143,6 +145,26 @@ class C7400MapperTest {
             val t = C7400Mapper.map(lookup, asOf)
             assertThat(t.cells).allSatisfy { assertThat(it.isDataGap).isTrue() }
         }
+    }
+
+    @Test
+    fun `a run on a non-EU parameter set blanks every 2015-61 inflow cell and names the set`() {
+        val t = C7400Mapper.map(RiskLiquidityLookup.found(result(parameterSet = "bcbs-d238-d295")), asOf)
+        listOf("r0010", "r0030", "r0160", "r0170", "r0180").forEach { row ->
+            assertThat(t.at(row, "c0140").isDataGap).isTrue()
+            assertThat(t.at(row, "c0140").gapReason).contains("'bcbs-d238-d295'", "run-7", "eu-2015-61-crr2")
+            assertThat(t.at(row, "c0010").isDataGap).isFalse()
+        }
+    }
+
+    @Test
+    fun `an empty book is an empty-book gap, not a multi-currency one`() {
+        val t = C7400Mapper.map(
+            RiskLiquidityLookup.found(result(lines = emptyList(), total = null, currencies = 0)),
+            asOf,
+        )
+        assertThat(t.cells).allSatisfy { assertThat(it.isDataGap).isTrue() }
+        assertThat(t.at("r0010", "c0010").gapReason).contains("empty book").doesNotContain("multi-currency")
     }
 
     @Test

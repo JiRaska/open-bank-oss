@@ -39,13 +39,14 @@ import java.time.LocalDate
  * fails the render, since it would mean the engine's inflow figures disagree with each other.
  *
  * Ties (the render fails if they do not hold): Σ weighted of the inflow lines must equal the engine's
- * `totalInflows` within per-line rounding ((n + 1) × 0.005, as C 73.00), so a component finrep did not
+ * `totalInflows` within [RiskEngineFigures.roundingTolerance] (shared with C 72.00 / C 73.00), so a component finrep did not
  * read cannot silently fall out of r0010; and an inflow `factorKey` this mapper does not know fails
  * the render instead of disappearing.
  *
  * Data gaps (ADR-0097 — never a real-looking zero): every row when the read is disabled, no tied
- * snapshot exists, the book is multi-currency, or balances are unclassified (any could be an asset
- * with an inflow); r0260 / r0200 always (the snapshot carries no reverse repos, secured lending or
+ * snapshot exists, the book is multi-currency or empty, or balances are unclassified (any could be an
+ * asset with an inflow); every c0140 cell when the run's liquidity parameter set is not the EU 2015/61
+ * set ([RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET]); r0260 / r0200 always (the snapshot carries no reverse repos, secured lending or
  * central-bank claims maturing within 30 days — the CNB overnight deposit is Level 1 HQLA, C 72.00);
  * and column c0140 of a component whose applied factor is not the 2015/61 rate for that row
  * (non-financial customers 50 % Art. 32(3)(a), financial customers 100 % Art. 32(2)(a), operational
@@ -60,7 +61,6 @@ object C7400Mapper {
     private const val COL_INFLOW = "c0140"
     private const val UNVERIFIED = " [row code UNVERIFIED]"
     private const val COL_UNVERIFIED = " [column code UNVERIFIED]"
-    private val HALF_CENT = BigDecimal("0.005")
     private val CENT = BigDecimal("0.01")
 
     const val NON_FINANCIAL = "lcr-retail-loan-inflow"
@@ -92,6 +92,7 @@ object C7400Mapper {
         val gap = lookup.unavailableReason ?: gapReason(checkNotNull(result))
         val parts = if (gap == null) components(checkNotNull(result)) else emptyMap()
         if (gap == null) checkCap(checkNotNull(result))
+        val valueGap = valueGap(gap, result)
         val currency = result?.currency ?: "CZK"
 
         fun part(key: String) = parts[key] ?: Component.EMPTY
@@ -119,7 +120,7 @@ object C7400Mapper {
         val cells = buildList {
             rows.forEach { (row, label, c) ->
                 add(cell(row, COL_AMOUNT, label, c.amount, gap))
-                add(cell(row, COL_INFLOW, label + COL_UNVERIFIED, c.inflow, gap ?: c.rateGap))
+                add(cell(row, COL_INFLOW, label + COL_UNVERIFIED, c.inflow, valueGap ?: c.rateGap))
             }
             addAll(unmodelledCells(currency, gap))
         }
@@ -141,7 +142,12 @@ object C7400Mapper {
         )
     }
 
+    /** The gap for every c0140 (2015/61 inflow) cell: the whole-template gap, else the parameter-set gap. */
+    private fun valueGap(gap: String?, result: RiskLiquidityResult?): String? =
+        gap ?: result?.let { RiskEngineFigures.parameterSetGap(it.parameterSetId, it.parameterSetVersion, it.runId) }
+
     private fun gapReason(result: RiskLiquidityResult): String? = when {
+        result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
         result.currencyCount > 1 || result.totalInflows == null ->
             "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
                 "inflow total can be stated (snapshot ${result.runId})."
@@ -174,25 +180,25 @@ object C7400Mapper {
             Component(
                 amount = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.amount) },
                 inflow = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.weighted) },
-                rateGap = rateGap(key, lines, result.runId),
+                rateGap = rateGap(key, lines, result),
             )
         }
         val sum = parts.values.fold(BigDecimal.ZERO) { acc, c -> acc.add(c.inflow) }
         val engine = checkNotNull(result.totalInflows)
-        val tolerance = HALF_CENT.multiply(BigDecimal(result.inflows.size + 1))
-        check(sum.subtract(engine).abs() <= tolerance) {
+        check(RiskEngineFigures.tiesWithinRounding(sum, engine, result.inflows.size)) {
             "risk-engine inflow components sum to $sum, but its total inflows are $engine (snapshot ${result.runId})"
         }
         return parts
     }
 
-    private fun rateGap(key: String, lines: List<RiskInflowLine>, runId: String): String? {
+    private fun rateGap(key: String, lines: List<RiskInflowLine>, result: RiskLiquidityResult): String? {
         val eu = EU_RATES.getValue(key)
         val off = lines.map { it.factor }.filter { it.compareTo(eu) != 0 }.distinct()
         return if (off.isEmpty()) {
             null
         } else {
-            "Risk-engine snapshot $runId applies a $key rate of ${off.joinToString()} (BCBS d238), which is not " +
+            "Risk-engine snapshot ${result.runId} applies a $key rate of ${off.joinToString()} (parameter set " +
+                "'${result.parameterSetId}'), which is not " +
                 "the Delegated Regulation 2015/61 rate of $eu for this row; the inflow cannot be stated."
         }
     }
