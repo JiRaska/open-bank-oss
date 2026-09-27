@@ -68,6 +68,8 @@ export function utilisation(row: Pick<Counterparty, 'limit' | 'exposure'>): numb
 export type DealActions = {
   submit: boolean; cancel: boolean; approve: boolean; reject: boolean
   settle: boolean; mature: boolean; reverse: boolean
+  /** Senior override of a breached limit (ADR-0315 D4) — a role and state narrower than approve. */
+  overrideLimit: boolean
   /** Approve is withheld because the viewer created or submitted this deal (four-eyes courtesy). */
   ownDeal: boolean
 }
@@ -78,12 +80,22 @@ export type DealActions = {
  * viewer's principal name (principalNameFromToken — the claim treasury records as createdBy /
  * submittedBy) matches either — a courtesy, not the control: the server's 422 still is.
  */
-export function dealActions(deal: Pick<Deal, 'state' | 'createdBy' | 'submittedBy'>, actor: string | null, roles: string[]): DealActions {
+export function dealActions(
+  deal: Pick<Deal, 'state' | 'createdBy' | 'submittedBy'> & Partial<Pick<Deal, 'limitCheck' | 'limitOverride'>>,
+  actor: string | null,
+  roles: string[],
+): DealActions {
   const dealer = hasPermission(roles, 'treasury:deal:create')
   const approver = hasPermission(roles, 'treasury:deal:approve')
   const canCancel = hasPermission(roles, 'treasury:deal:cancel')
+  const canOverrideLimit = hasPermission(roles, 'treasury:deal:override-limit')
   const ownDeal = actor !== null && (deal.createdBy === actor || deal.submittedBy === actor)
   const pending = deal.state === 'PENDING_APPROVAL'
+  // Mirrors the domain's own guard (Deal.overrideLimit): PENDING_APPROVAL, breached, and not
+  // already overridden — an override already recorded needs a fresh submit/limit check, not a
+  // second one. Four-eyes (never the deal's own creator/submitter) is the server's 422; withheld
+  // here too as the same courtesy `approve` gets.
+  const overridable = pending && deal.limitCheck?.breached === true && !deal.limitOverride
   return {
     submit: dealer && deal.state === 'DRAFT',
     cancel: canCancel && (deal.state === 'DRAFT' || pending),
@@ -92,6 +104,7 @@ export function dealActions(deal: Pick<Deal, 'state' | 'createdBy' | 'submittedB
     settle: approver && deal.state === 'BOOKED',
     mature: approver && deal.state === 'SETTLED',
     reverse: approver && (deal.state === 'BOOKED' || deal.state === 'SETTLED'),
+    overrideLimit: canOverrideLimit && overridable && !ownDeal,
     ownDeal: pending && ownDeal,
   }
 }

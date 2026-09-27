@@ -20,6 +20,12 @@ enum class PositionKind {
      * account. [Position.instrumentId] names the snapshot instrument it came from.
      */
     LOAN,
+
+    /**
+     * One of the bank's own money-market deals (contract level, ADR-0315 D6), on the principal
+     * account treasury posts it to. [Position.instrumentId] names the snapshot instrument.
+     */
+    TREASURY_DEAL,
 }
 
 /**
