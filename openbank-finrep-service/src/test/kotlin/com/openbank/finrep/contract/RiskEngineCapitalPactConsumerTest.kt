@@ -120,7 +120,7 @@ class RiskEngineCapitalPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("runId", java.util.UUID.fromString(EXAMPLE_RUN_ID))
                 o.stringValue("asOf", REPORTING_DATE)
-                o.stringType("parameterSetId", "bcbs-d238-d295")
+                o.stringType("parameterSetId", "eu-2015-61-crr2")
                 o.stringType("parameterSetVersion", "2")
                 o.eachLike("currencies") { c -> currencyLiquidity(c) }
                 o.`object`("total") { t -> currencyLiquidity(t) }

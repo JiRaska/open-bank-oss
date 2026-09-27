@@ -65,6 +65,14 @@ data class TransitionResponse(
     val note: String?,
 )
 
+data class LimitOverrideResponse(
+    val by: String,
+    val reason: String,
+    val at: Instant,
+    val coversExposureUpTo: BigDecimal,
+    val limitAtOverride: BigDecimal,
+)
+
 data class JournalRefResponse(val event: String, val idempotencyKey: String, val journalId: UUID, val postedAt: Instant)
 
 data class DealResponse(
@@ -87,6 +95,8 @@ data class DealResponse(
     val approvedBy: String?,
     val rationale: String?,
     val limitCheck: LimitCheckResponse?,
+    /** A senior approver's recorded override of a limit breach (ADR-0315 D4); null when none. */
+    val limitOverride: LimitOverrideResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
     val history: List<TransitionResponse>,
@@ -113,6 +123,9 @@ data class DealResponse(
             approvedBy = d.approvedBy?.id,
             rationale = d.rationale,
             limitCheck = d.limitCheck?.let(LimitCheckResponse::from),
+            limitOverride = d.limitOverride?.let {
+                LimitOverrideResponse(it.by.id, it.reason, it.at, it.coversExposureUpTo, it.limitAtOverride)
+            },
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
             history = d.history.map {

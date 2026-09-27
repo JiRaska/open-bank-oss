@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "0.257.0",
+  "version": "0.258.0",
   "private": true,
   "type": "module",
   "scripts": {
