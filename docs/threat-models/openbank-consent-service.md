@@ -174,7 +174,8 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   to return to server-only TLS).
 
 - **2026-09-27** — **Exception-mapper consolidation (#10911 phase 2, money-path), no wire change.**
-  `ConsentNotFoundMapper`/`ConsentAlreadyActiveMapper` are deleted; `ConsentNotFoundException`/
+  `ConsentNotFoundMapper`/`ConsentAlreadyActiveMapper` (deleted by this PR — no longer present in
+  tracked source) are removed; `ConsentNotFoundException`/
   `ConsentAlreadyActiveException` now extend `com.openbank.libs.domain.error.ResourceNotFoundException`/
   `ResourceConflictException`, handled by libs-runtime's `ResourceNotFoundExceptionMapper`/
   `ResourceConflictExceptionMapper` (added, unused, by #10923). Status, `code`
