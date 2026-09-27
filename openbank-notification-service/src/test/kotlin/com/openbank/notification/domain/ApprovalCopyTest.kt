@@ -55,6 +55,21 @@ class ApprovalCopyTest {
     }
 
     @Test
+    fun `a standing order names its amount and payee, an SDD mandate names the kind only (#10281)`() {
+        val so = vars + ("kind" to "STANDING_ORDER")
+        val (_, csSo) = ApprovalCopy.render(NotificationTemplate.APPROVAL_REQUIRED, so, NotificationLanguage.CS)
+        assertThat(csSo).contains("zřízení trvalého příkazu na <b>1 000,00 CZK</b>", "pro Payee Example")
+        val (_, enSo) = ApprovalCopy.render(NotificationTemplate.APPROVAL_REQUIRED, so, NotificationLanguage.EN)
+        assertThat(enSo).contains("a standing order of <b>1 000,00 CZK</b>")
+
+        val sdd = vars + ("kind" to "SDD_MANDATE")
+        val (_, csSdd) = ApprovalCopy.render(NotificationTemplate.APPROVAL_REQUIRED, sdd, NotificationLanguage.CS)
+        assertThat(csSdd).contains("chce provést zřízení souhlasu s inkasem").doesNotContain("1 000,00 CZK")
+        val (_, enSdd) = ApprovalCopy.render(NotificationTemplate.APPROVAL_REQUIRED, sdd, NotificationLanguage.EN)
+        assertThat(enSdd).contains("a direct-debit mandate").doesNotContain("1 000,00 CZK")
+    }
+
+    @Test
     fun `null language renders English, as every older template does`() {
         val (subject, _) = ApprovalCopy.render(NotificationTemplate.APPROVAL_EXPIRED, vars, null)
         assertThat(subject).isEqualTo("Request expired")

@@ -195,8 +195,8 @@ private fun LiquidityAnalysis.assumptions(): LiquidityAssumptionsDto {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         source = parameters.source,
-        scope = "BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.",
-        factors = LiquidityFactor.entries.map { FactorDto(it.key, parameters[it], it.citation) },
+        scope = parameters.regime.scope,
+        factors = LiquidityFactor.entries.map { FactorDto(it.key, parameters[it], parameters.citation(it)) },
         classification = LiquidityClassificationDto(
             retailStableShare = c.retailStableShare,
             operationalDepositShare = c.operationalDepositShare,

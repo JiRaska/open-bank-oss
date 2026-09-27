@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -73,6 +71,8 @@ quarkus:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
   openbank:
     sanctions:

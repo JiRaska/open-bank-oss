@@ -152,58 +152,107 @@ openbank:
       # instruments tied out on Loans Receivable). Off = Loans Receivable stays GL-level.
       enabled: ${OPENBANK_RISK_LENDING_ENABLED:true}
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
-    # EUR is BCBS d368 (April 2016) Annex 2 Table 1. CZK is NOT in that table and is deliberately
-    # absent: its sizes must be taken from the EBA supervisory-outlier-test RTS by the operator
-    # (e.g. OPENBANK_RISK_IRRBB_SHOCK_SIZES="EUR=200/250/100;CZK=<from the RTS>"). Until then CZK
-    # is reported "shock sizes not configured", never shocked with a guess.
+    # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
+    # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),
+    # OJ L 24.4.2024. Annex Part A lists CZK and EUR by name, both 200/250/100 (#10896). The same
+    # EUR values are in BCBS d368 Annex 2 Table 1; CZK is not in d368. The regulation names the six
+    # scenarios (Art. 1(1)) without formulas; the formulas and scalars (x=4, 0.65/0.9, 0.8/0.6) are
+    # BCBS d368 Annex 2 as carried into EBA/GL/2018/02 Annex III, which the regulation builds on
+    # (recital 1). Art. 3(7) floor: -150 bp at immediate maturity, +3 bp per year, 0 % from 50 years,
+    # and an observed rate already below it is kept (PostShockFloor implements exactly that).
+    # A currency outside Annex Part A must be calibrated per Annex Part B, never guessed.
     irrbb:
-      shock-sizes: ${OPENBANK_RISK_IRRBB_SHOCK_SIZES:EUR=200/250/100}
-      shock-source: ${OPENBANK_RISK_IRRBB_SHOCK_SOURCE:BCBS d368 (Apr 2016) Annex 2 Table 1 and shock formulas (x=4)}
-      # Post-shock floor `atZeroBp/slopeBpPerYear` is optional and unset here: d368 leaves floors
-      # to national supervisors (not above zero). Set OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR and
-      # OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE from the applicable supervisory text.
-    # ADR-0313 phase 1: LCR and NSFR. A VERSIONED parameter set — bump parameter-set-version on any
-    # change here; every /liquidity result names the id and version it was computed with.
-    # BCBS standard factors: d238 = "Basel III: The Liquidity Coverage Ratio and liquidity risk
-    # monitoring tools" (Jan 2013); d295 = "Basel III: the net stable funding ratio" (Oct 2014).
-    # EU CRR / Delegated Regulation (EU) 2015/61 deviations are NOT applied.
+      shock-sizes: ${OPENBANK_RISK_IRRBB_SHOCK_SIZES:EUR=200/250/100;CZK=200/250/100}
+      shock-source: ${OPENBANK_RISK_IRRBB_SHOCK_SOURCE:Delegated Regulation (EU) 2024/856 Annex Part A (CZK, EUR); scenario formulas BCBS d368 Annex 2 / EBA/GL/2018/02 Annex III (x=4)}
+      post-shock-floor: ${OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR:-150/3}
+      post-shock-floor-source: ${OPENBANK_RISK_IRRBB_POST_SHOCK_FLOOR_SOURCE:Delegated Regulation (EU) 2024/856 Art. 3(7)}
+    # ADR-0313 phase 1: LCR and NSFR. VERSIONED parameter sets — bump a set's version on any
+    # change to it; every /liquidity result names the id and version it was computed with.
+    # BCBS: d238 = "Basel III: The Liquidity Coverage Ratio and liquidity risk monitoring tools"
+    # (Jan 2013); d295 = "Basel III: the net stable funding ratio" (Oct 2014). EU (default, #10860):
+    # Delegated Regulation (EU) 2015/61 and CRR Part Six Title IV.
     # Every key below is required (LiquidityConfig is a mapping; the domain rejects missing or
     # unknown factor keys and values outside [0, 1]), so nothing here has a code default.
     liquidity:
-      parameter-set-id: bcbs-d238-d295
-      # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
-      parameter-set-version: "2"
-      source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
-      factors:
-        lcr-l1-haircut: 0                    # d238 ¶49
-        lcr-l2a-haircut: 0.15                # d238 ¶52
-        lcr-l2b-rmbs-haircut: 0.25           # d238 ¶54(a)
-        lcr-l2b-other-haircut: 0.50          # d238 ¶54(b),(c)
-        lcr-level2-cap: 0.40                 # d238 ¶46, ¶51, Annex 1
-        lcr-level2b-cap: 0.15                # d238 ¶47, Annex 1
-        lcr-retail-stable-runoff: 0.05       # d238 ¶75 (¶78: a jurisdiction may allow 3%)
-        lcr-retail-less-stable-runoff: 0.10  # d238 ¶79 (minimum)
-        lcr-operational-deposit-runoff: 0.25 # d238 ¶93
-        lcr-other-contractual-outflow: 1.00  # d238 ¶141
-        lcr-retail-loan-inflow: 0.50         # d238 ¶153
-        lcr-fi-inflow: 1.00                  # d238 ¶154
-        lcr-operational-deposit-inflow: 0    # d238 ¶156 (and ¶98)
-        lcr-inflow-cap: 0.75                 # d238 ¶69, ¶144
-        nsfr-asf-capital: 1.00               # d295 ¶21(a)
-        nsfr-asf-retail-stable: 0.95         # d295 ¶22
-        nsfr-asf-retail-less-stable: 0.90    # d295 ¶23
-        nsfr-asf-operational-deposit: 0.50   # d295 ¶24(b)
-        nsfr-asf-other: 0                    # d295 ¶25
-        nsfr-rsf-cash-and-reserves: 0        # d295 ¶36(a),(b)
-        nsfr-rsf-l1-securities: 0.05         # d295 ¶37
-        nsfr-rsf-l2a: 0.15                   # d295 ¶39(a)
-        nsfr-rsf-l2b: 0.50                   # d295 ¶40(a)
-        nsfr-rsf-fi-under-6m: 0.15           # d295 ¶39(b)
-        nsfr-rsf-operational-deposit-at-fi: 0.50 # d295 ¶40(d)
-        nsfr-rsf-loan-under-1y: 0.50         # d295 ¶40(e), amortising split per ¶29
-        nsfr-rsf-loan-1y-low-rw: 0.65        # d295 ¶41(b)
-        nsfr-rsf-loan-1y-other: 0.85         # d295 ¶42(b)
-        nsfr-rsf-other-asset: 1.00           # d295 ¶43(c)
+      # Which set below is applied. The platform is an EU (Czech) credit institution, so the EU set
+      # is the default; the BCBS set stays declared and selectable (OPENBANK_RISK_LIQUIDITY_PARAMETER_SET_ID).
+      # Bump a set's version on any change to its factors; every result names id and version.
+      parameter-set-id: eu-2015-61-crr2
+      parameter-sets:
+        bcbs-d238-d295:
+          # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
+          version: "2"
+          regime: bcbs
+          source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
+          factors:
+            lcr-l1-haircut: 0                    # d238 ¶49
+            lcr-l2a-haircut: 0.15                # d238 ¶52
+            lcr-l2b-rmbs-haircut: 0.25           # d238 ¶54(a)
+            lcr-l2b-other-haircut: 0.50          # d238 ¶54(b),(c)
+            lcr-level2-cap: 0.40                 # d238 ¶46, ¶51, Annex 1
+            lcr-level2b-cap: 0.15                # d238 ¶47, Annex 1
+            lcr-retail-stable-runoff: 0.05       # d238 ¶75 (¶78: a jurisdiction may allow 3%)
+            lcr-retail-less-stable-runoff: 0.10  # d238 ¶79 (minimum)
+            lcr-operational-deposit-runoff: 0.25 # d238 ¶93
+            lcr-other-contractual-outflow: 1.00  # d238 ¶141
+            lcr-retail-loan-inflow: 0.50         # d238 ¶153
+            lcr-fi-inflow: 1.00                  # d238 ¶154
+            lcr-operational-deposit-inflow: 0    # d238 ¶156 (and ¶98)
+            lcr-inflow-cap: 0.75                 # d238 ¶69, ¶144
+            nsfr-asf-capital: 1.00               # d295 ¶21(a)
+            nsfr-asf-retail-stable: 0.95         # d295 ¶22
+            nsfr-asf-retail-less-stable: 0.90    # d295 ¶23
+            nsfr-asf-operational-deposit: 0.50   # d295 ¶24(b)
+            nsfr-asf-other: 0                    # d295 ¶25
+            nsfr-rsf-cash-and-reserves: 0        # d295 ¶36(a),(b)
+            nsfr-rsf-l1-securities: 0.05         # d295 ¶37
+            nsfr-rsf-l2a: 0.15                   # d295 ¶39(a)
+            nsfr-rsf-l2b: 0.50                   # d295 ¶40(a)
+            nsfr-rsf-fi-under-6m: 0.15           # d295 ¶39(b)
+            nsfr-rsf-operational-deposit-at-fi: 0.50 # d295 ¶40(d)
+            nsfr-rsf-loan-under-1y: 0.50         # d295 ¶40(e), amortising split per ¶29
+            nsfr-rsf-loan-1y-low-rw: 0.65        # d295 ¶41(b)
+            nsfr-rsf-loan-1y-other: 0.85         # d295 ¶42(b)
+            nsfr-rsf-other-asset: 1.00           # d295 ¶43(c)
+        # Commission Delegated Regulation (EU) 2015/61 (LCR, as amended by (EU) 2018/1620) and
+        # Regulation (EU) 575/2013 Part Six Title IV, Art. 428a-428az (NSFR, as amended by CRR2).
+        # Only categories the engine models; factors marked UNVERIFIED keep the BCBS value (see
+        # LiquidityFactor KDoc). Retail higher-outflow categories (Art. 25(2)-(3)) and non-operational
+        # corporate deposits (Art. 28) are not modelled: no GL class maps to them.
+        eu-2015-61-crr2:
+          version: "1"
+          regime: eu
+          source: "Delegated Regulation (EU) 2015/61 as amended by (EU) 2018/1620 (LCR) and Regulation (EU) 575/2013 Part Six Title IV as amended by (EU) 2019/876 (NSFR); UNVERIFIED factors keep the BCBS d238/d295 value"
+          factors:
+            lcr-l1-haircut: 0                           # 2015/61 Art. 10(1)
+            lcr-l2a-haircut: 0.15                       # 2015/61 Art. 11(2)
+            lcr-l2b-rmbs-haircut: 0.25                  # 2015/61 Art. 13(14)(a)
+            lcr-l2b-other-haircut: 0.50                 # 2015/61 Art. 12(1)(b),(c) — haircut paragraph UNVERIFIED
+            lcr-level2-cap: 0.40                        # 2015/61 Art. 17(1)(b), Annex I
+            lcr-level2b-cap: 0.15                       # 2015/61 Art. 17(1)(c), Annex I
+            lcr-retail-stable-runoff: 0.05              # 2015/61 Art. 24(1)
+            lcr-retail-less-stable-runoff: 0.10         # 2015/61 Art. 25(1); Art. 25(2)-(3) categories not modelled
+            lcr-operational-deposit-runoff: 0.25        # 2015/61 Art. 27(1)(a), 27(2)
+            lcr-other-contractual-outflow: 1.00         # 2015/61 Art. 22(1) — paragraph UNVERIFIED, conservative 100%
+            lcr-retail-loan-inflow: 0.50                # 2015/61 Art. 32(3)(a)
+            lcr-fi-inflow: 1.00                         # 2015/61 Art. 32(2)(a)
+            lcr-operational-deposit-inflow: 0           # 2015/61 Art. 32(3)(d)
+            lcr-inflow-cap: 0.75                        # 2015/61 Art. 33(1)
+            nsfr-asf-capital: 1.00                      # CRR Art. 428o
+            nsfr-asf-retail-stable: 0.95                # CRR Art. 428n
+            nsfr-asf-retail-less-stable: 0.90           # CRR Art. 428m
+            nsfr-asf-operational-deposit: 0.50          # CRR Art. 428l — point UNVERIFIED
+            nsfr-asf-other: 0                           # CRR Art. 428k
+            nsfr-rsf-cash-and-reserves: 0               # CRR Art. 428r(1)
+            nsfr-rsf-l1-securities: 0                   # CRR Art. 428r(1) — DIFFERS from d295 ¶37 (5%)
+            nsfr-rsf-l2a: 0.15                          # UNVERIFIED — BCBS d295 ¶39(a) value kept
+            nsfr-rsf-l2b: 0.50                          # UNVERIFIED — BCBS d295 ¶40(a) value kept
+            nsfr-rsf-fi-under-6m: 0.15                  # UNVERIFIED — BCBS d295 ¶39(b) value kept
+            nsfr-rsf-operational-deposit-at-fi: 0.50    # CRR Art. 428ad — point UNVERIFIED
+            nsfr-rsf-loan-under-1y: 0.50                # CRR Art. 428ad — point UNVERIFIED
+            nsfr-rsf-loan-1y-low-rw: 0.65               # CRR Art. 428ag
+            nsfr-rsf-loan-1y-other: 0.85                # CRR Art. 428ah
+            nsfr-rsf-other-asset: 1.00                  # CRR Art. 428ah-428ai — article UNVERIFIED
       classification:
         # d238 ¶80: deposit-insurance coverage and depositor relationship are not in the data, so
         # ALL retail deposits are "less stable". Raise only with evidence of ¶75 eligibility.
@@ -261,6 +310,86 @@ openbank:
         gl-account-types:
           INCOME: current-year-result
           EXPENSE: current-year-result
+    # ADR-0313 phase 2: Pillar 1 credit-risk capital, STANDARDISED APPROACH. A VERSIONED parameter
+    # set — bump parameter-set-version on any change here; every /capital result names the id and
+    # version it was computed with. Risk weights: BCBS d424 "Basel III: Finalising post-crisis
+    # reforms" (Dec 2017), Part I. Minimum ratios: bcbs189 "Basel III: A global regulatory framework
+    # ..." (Dec 2010, rev. June 2011) ¶50. EU CRR Part Three Title II Chapter 2 is NOT applied.
+    # Every key is required (CapitalConfig is a mapping; the domain rejects missing or unknown keys,
+    # risk weights outside [0, 12.5] and minimum ratios outside (0, 1]) — nothing has a code default.
+    capital:
+      sa:
+        parameter-set-id: bcbs-d424-sa
+        parameter-set-version: "1"
+        source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
+        factors:
+          rw-sovereign-unrated: 1.00             # d424 ¶7 Table 1 (unrated)
+          # d424 ¶8 is a NATIONAL DISCRETION ("a lower risk weight may be applied") for the bank's
+          # own central bank in domestic currency, funded in it. 0 is the value the discretion is
+          # normally exercised with; it applies ONLY in classification.domestic-currency below, and
+          # is shown as a discretion in every result. Set it to rw-sovereign-unrated to decline it.
+          rw-sovereign-domestic-currency: 0
+          rw-bank-scra-grade-a: 0.40             # d424 ¶21 Table 7 base (¶22-23)
+          rw-bank-scra-grade-b: 0.75             # d424 ¶21 Table 7 base (¶25-27)
+          rw-bank-scra-grade-c: 1.50             # d424 ¶21 Table 7 base (¶28-29)
+          rw-retail-regulatory: 0.75             # d424 ¶55
+          rw-retail-other: 1.00                  # d424 ¶57
+          rw-corporate-unrated: 1.00             # d424 ¶40 Table 10 (unrated), ¶41
+          rw-defaulted: 1.50                     # d424 ¶92 (specific provisions < 20%)
+          rw-cash: 0                             # d424 ¶96(i)
+          rw-cash-items-in-collection: 0.20      # d424 ¶97
+          rw-other-asset: 1.00                   # d424 ¶95
+          min-cet1-ratio: 0.045                  # bcbs189 ¶50
+          min-tier1-ratio: 0.06                  # bcbs189 ¶50
+          min-total-capital-ratio: 0.08          # bcbs189 ¶50 (the 8% own-funds requirement)
+        classification:
+          # d424 ¶55's criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's "individual
+          # person" cannot be verified from the snapshot: not-defaulted loans are "other retail"
+          # (¶57, 100%). corporate-unrated (¶40-41 / ¶58, also 100%) is the equivalent reading for
+          # SMEs; regulatory-retail (75%) only with evidence of ALL ¶55 criteria.
+          retail-treatment: other-retail
+          # No external ratings and no counterparty capital disclosures in the data: every bank
+          # exposure is SCRA (d424 ¶17(b), ¶21), and ¶23 / ¶26 send a counterparty whose published
+          # requirements are not made available to Grade C. Short-term weights (¶30, original
+          # maturity ≤ 3 months) need maturities a GL balance does not carry, so base weights.
+          bank-scra-grade: C
+          # The currency the d424 ¶8 discretion covers (the ČNB, in CZK).
+          domestic-currency: CZK
+          # GL code -> class. ONLY accounts named here (or by type below) are classified; any
+          # other ASSET balance is listed as not classified, never weighted. Deliberately absent:
+          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash), 1100-1113 clearing
+          # and scheme settlement (counterparty not known), 1400-1403 loan loss allowance (not
+          # allocated to loans, so ¶92 netting cannot use it), 1990-1997 FX position accounts.
+          gl-accounts:
+            "1001": bank                         # nostro
+            "1002": bank                         # nostro EUR
+            "1500": bank                         # money-market placements with banks
+            "1501": bank
+            "1520": bank                         # accrued interest follows its principal
+            "1521": bank
+            "1510": central-bank                 # ČNB deposit facility (ADR-0315)
+            "1200": retail                       # Loans Receivable, only when read at GL level
+            "1201": retail                       # (lending read off); contract-level loans are
+            "1202": retail                       # weighted per instrument with their IFRS 9 stage
+            "1203": retail
+            "1300": other-asset                  # interest receivable (¶95)
+            "1301": other-asset
+            "1302": other-asset
+            "1303": other-asset
+            "6000": own-funds-cet1               # CET1 capital instruments
+            "6010": own-funds-cet1               # CET1 share premium
+            "6020": own-funds-cet1               # retained earnings
+            "6030": own-funds-cet1               # other reserves
+            "6040": own-funds-cet1-deduction     # CET1 regulatory deductions (debit balance)
+            "6050": own-funds-at1
+            "6060": own-funds-tier2
+          # Not credit exposures. EQUITY outside 6000-6060 is NOT own funds; INCOME / EXPENSE not
+          # yet closed to retained earnings are not counted as capital either.
+          gl-account-types:
+            LIABILITY: not-an-exposure
+            EQUITY: not-an-exposure
+            INCOME: not-an-exposure
+            EXPENSE: not-an-exposure
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -283,6 +412,15 @@ authz:
 
 "%prod":
   quarkus:
+    http:
+      # East-west mTLS listener (8443): the listener must VALIDATE the caller's certificate.
+      # `quarkus.http.ssl.client-auth` is BUILD TIME, so it has to live in this file (#10441);
+      # under %prod because with no certificate configured dev/@QuarkusTest would refuse to start.
+      ssl:
+        client-auth: required
+      # Keep plain HTTP/8159: with client-auth REQUIRED Quarkus otherwise drops the HTTP listener
+      # and every existing caller and probe gets connection refused (#10505).
+      insecure-requests: enabled
     # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
     # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
     # this stays under %prod: the client certificate only exists in the cluster.

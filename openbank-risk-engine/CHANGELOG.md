@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.10.0...risk-engine-v0.11.0) (2026-09-26)
+
+
+### Features
+
+* **risk-engine:** IRRBB CZK shocks and post-shock floor from Delegated Regulation 2024/856 ([#10970](https://github.com/JiRaska/open-bank-oss/issues/10970)) ([d02b5ec](https://github.com/JiRaska/open-bank-oss/commit/d02b5ecd029030cd76533ea3ea20da0f0d6aa1d1))
+* **risk-engine:** Pillar 1 credit-risk capital, standardised approach (BCBS d424), with an admin-ui page (ADR-0313 phase 2) ([#10900](https://github.com/JiRaska/open-bank-oss/issues/10900)) ([67ae139](https://github.com/JiRaska/open-bank-oss/commit/67ae1397d549e5000d05dce095ba45658aea458b))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.9.0...risk-engine-v0.10.0) (2026-09-25)
 
 

@@ -10,6 +10,7 @@ import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import org.jboss.resteasy.reactive.RestResponse
 
 /**
  * Resilience boundary around the ledger-service call (mirrors the transaction-service guard). The
@@ -23,4 +24,15 @@ class LedgerCallGuard(@RestClient private val ledgerClient: LedgerRestClient) {
     @Timeout(2000)
     @CircuitBreaker(requestVolumeThreshold = 5, failureRatio = 0.5, delay = 10000)
     fun postJournal(request: PostJournalRequest): Uni<JournalResponse> = ledgerClient.postJournal(request)
+
+    /**
+     * [postJournal] keeping the response headers (#10904). A retry after a lost response answers
+     * `Idempotent-Replayed: true` for a journal the FIRST attempt booked, so a replay here means "the
+     * ledger already held it", which is what an operator acting on the result needs to know.
+     */
+    @Retry(maxRetries = 3, delay = 500, jitter = 100)
+    @Timeout(2000)
+    @CircuitBreaker(requestVolumeThreshold = 5, failureRatio = 0.5, delay = 10000)
+    fun postJournalWithHeaders(request: PostJournalRequest): Uni<RestResponse<JournalResponse>> =
+        ledgerClient.postJournalWithHeaders(request)
 }
