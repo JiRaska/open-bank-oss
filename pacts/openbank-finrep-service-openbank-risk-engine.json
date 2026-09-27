@@ -51,6 +51,7 @@
             "currency": "CZK",
             "totalRwa": 0.0
           },
+          "totalNotStated": null,
           "unclassified": [
             {
               "glAccountCode": "9999"
@@ -172,14 +173,6 @@
               "matchers": [
                 {
                   "match": "decimal"
-                }
-              ]
-            },
-            "$.total.currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
                 }
               ]
             },

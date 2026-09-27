@@ -118,9 +118,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     # (`domestic-payment-opa-bundle.yaml`), not as a standalone file. Fixed at the resolver
     # (#11089) by teaching it to recognise a `<name>.rego: |` key inside a bundle YAML, rather
     # than baselining it — the same reason removed the settlement and swift entries below.
-    'openbank-tpp-registry-service|5. Residual risks / assumptions|TppRegistryClient':
-        'STALE claim hidden by the old row-level disclaimer: the class no longer exists in psd2 '
-        'src/main. Correct the model and delete this entry (#11088)',
     # Widening the gate on 2026-09-03 (subject set 23 -> 45 models; claim regions STRIDE-only ->
     # whole document; resolution substring -> word-boundary on non-comment lines) surfaced 46
     # citations that name something this tree does not contain. Every one was checked by hand

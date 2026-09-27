@@ -6,6 +6,7 @@ package com.openbank.analytics.infrastructure.erasure
 
 import com.openbank.analytics.application.port.out.CryptoErasure
 import com.openbank.libs.analytics.AggregateKey
+import com.openbank.libs.security.sanitizeForLog
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 
@@ -20,9 +21,7 @@ class NoOpCryptoErasure : CryptoErasure {
 
     private val log = Logger.getLogger(NoOpCryptoErasure::class.java)
 
-    // CodeQL java/log-injection: key.aggregateType/aggregateId are caller-supplied. Strip CR/LF
-    // so an attacker can't forge additional log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     /** No key material is destroyed here, so no caller may report an erasure on this binding. */
     override val performsErasure: Boolean = false
