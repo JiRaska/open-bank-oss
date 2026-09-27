@@ -206,6 +206,11 @@ mp:
   authz:
     enforce: "false"
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   aml:
     # #3413: point cases at the party that owns the account, after the fact. Sweep-only —
     # never on the case-creation path, so account-service being down cannot lose a case.

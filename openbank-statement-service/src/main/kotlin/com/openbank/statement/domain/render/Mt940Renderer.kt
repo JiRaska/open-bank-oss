@@ -45,7 +45,7 @@ object Mt940Renderer {
     /** `:60F:`/`:62F:` — C|D mark, YYMMDD date, 3-char currency, amount with comma decimal. */
     private fun balanceField(amount: BigDecimal, currency: String, date: LocalDate): String {
         val mark = if (amount.signum() < 0) "D" else "C"
-        return "$mark${YYMMDD.format(date)}$currency${amount(amount.abs())}"
+        return "$mark${YYMMDD.format(date)}$currency${amount(amount.abs(), currency)}"
     }
 
     /** `:61:` statement line — value date, entry date, C|D mark, amount, NTRF type, reference. */
@@ -53,11 +53,19 @@ object Mt940Renderer {
         val mark = if (e.creditDebit == CreditDebit.DBIT) "D" else "C"
         return "${YYMMDD.format(
             e.valueDate,
-        )}${MMDD.format(e.bookingDate)}$mark${amount(e.amount.abs())}NTRF${truncate(e.entryRef, 16)}"
+        )}${MMDD.format(e.bookingDate)}$mark${amount(e.amount.abs(), e.currency)}NTRF${truncate(e.entryRef, 16)}"
     }
 
-    /** Non-negative amount, comma decimal separator, exactly two fraction digits. */
-    private fun amount(v: BigDecimal): String = v.setScale(2, RoundingMode.HALF_UP).toPlainString().replace('.', ',')
+    /**
+     * Non-negative amount, comma decimal separator, at the CURRENCY'S OWN ISO 4217 minor-unit scale
+     * (JPY 0, EUR/USD/CZK 2, KWD/BHD 3) — never a fixed scale 2, which silently mis-renders every
+     * non-2-decimal currency. SWIFT's `15d` amount format always carries the decimal comma, even with
+     * no fraction digits, so a zero-scale amount renders as `500,` and never as a bare `500`.
+     */
+    private fun amount(v: BigDecimal, currency: String): String {
+        val s = v.setScale(CurrencyScale.of(currency), RoundingMode.HALF_UP).toPlainString().replace('.', ',')
+        return if (s.contains(',')) s else "$s,"
+    }
 
     private fun truncate(s: String, max: Int): String = if (s.length <= max) s else s.substring(0, max)
 }
