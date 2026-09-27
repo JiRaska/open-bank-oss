@@ -270,3 +270,15 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   caller input is now validated *before* persistence rather than by the schema, closing a 500 and
   the case-variant idempotency-key gap described in §4.
 - **2026-09-21** — **Account reads move to the service's own machine identity (#10486 batch 5).** `AccountRestClient` (`GET /api/v1/accounts/active`, `GET /api/v1/accounts/{id}`) now mints its bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-billing` (`ROLE_API` only), instead of the shared `openbank-services` client. account-service grants it exactly `account.list` and `account.read` (`service-billing-account-read`). **STRIDE-S:** a new credential. Keycloak generates its secret in the live realm; the owner's provisioning script stores it at Vault KV `keycloak/billing-service` (`client_secret`); the `billing-service-m2m-oidc` ExternalSecret projects it, and the repo never sees it. The env ref is `optional: false`, so an unseeded entry blocks the new pod loudly. Compromise reaches only those two account reads. The fee-posting ledger client and the catalog and balance clients stay on the shared client until their own edges migrate (`M2mOidcClientIdentityWiringTest`). Rollback: revert the commit.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11061),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.

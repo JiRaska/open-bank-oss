@@ -335,3 +335,15 @@ also be deleted (nothing else in balance-service depends on it).
   Risk class = **availability/information disclosure** (500s on an operator control endpoint).
   Rollback: revert the guard; no stored data or schema changes.
 - **2026-09-21** — **Two per-service identities on the balance writes (#10486 batch 2).** `service-transaction-balance-hold` (`service-account-openbank-transaction`: `balance.hold` + `balance.holdRelease`) and `service-settlement-balance-move` (`service-account-openbank-settlement`: `balance.debit` + `balance.credit`), each gated on `input.principal.id`. No RBAC change: `BalanceResource` already admits `ROLE_API` on all four writes, which means OPA was — and is — the whole control for any ROLE_API caller; `balance_rest_ext_test.rego` now proves another ROLE_API service account is DENIED all four, each identity is denied every other balance action (incl. `initialize`, `overdraftLimit`, `reconciliation.run`, `approval.decide`), and neither rule admits the shared client. Removing either `principal.id` line turns 3 tests red. `AUTHZ_ENFORCE` is `"true"` for balance-service in gitops. Rollback: revert together with the callers.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11061),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
