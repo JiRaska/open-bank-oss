@@ -4,6 +4,7 @@
 
 package com.openbank.risk.application
 
+import com.openbank.risk.application.port.`in`.CapitalAnalysis
 import com.openbank.risk.application.port.`in`.SnapshotOutcome
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.FxFixingRate
@@ -17,7 +18,6 @@ import com.openbank.risk.domain.model.PositionKind
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutStatus
-import com.openbank.risk.application.port.`in`.CapitalAnalysis
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
