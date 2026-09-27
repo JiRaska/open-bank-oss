@@ -530,7 +530,7 @@ spec:
 # (set party_id user attribute after registration — issue #1270 PR3).
 # client: customer-edge-admin in openbank-customers realm, serviceAccountsEnabled=true,
 # manage-users role assigned. Vault path: openbank/customer-edge-admin.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: customer-edge-admin-oidc
