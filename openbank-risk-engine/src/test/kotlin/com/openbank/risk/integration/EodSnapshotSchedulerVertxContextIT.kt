@@ -100,6 +100,14 @@ class EodSnapshotSchedulerVertxContextIT {
                     "silently disabled)",
             )
             .isTrue()
+
+        val stored = onEventLoop { snapshotRepository.listRecent(10) }.first { it.asOf == expectedAsOf }
+        assertThat(stored.requestedBy)
+            .describedAs(
+                "a scheduler-dispatched run must record the scheduler's own requester constant, " +
+                    "not null and not an operator's principal",
+            )
+            .isEqualTo("system:risk-engine-eod-snapshot")
     }
 
     @Test
