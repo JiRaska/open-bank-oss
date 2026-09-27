@@ -51,7 +51,8 @@ class ResilienceProfilesTest {
         }
         with(ResilienceProfiles.Read) {
             assertThat(listOf(TIMEOUT_MS, DELAY_MS, JITTER_MS, CB_DELAY_MS)).containsExactly(2_000L, 200L, 100L, 5_000L)
-            assertThat(listOf(MAX_RETRIES, CB_REQUEST_VOLUME_THRESHOLD, BULKHEAD)).containsExactly(2, 10, 50)
+            assertThat(listOf(MAX_RETRIES, CB_REQUEST_VOLUME_THRESHOLD, CB_SUCCESS_THRESHOLD, BULKHEAD))
+                .containsExactly(2, 10, 2, 50)
         }
         with(ResilienceProfiles.ExternalScheme) {
             assertThat(listOf(TIMEOUT_MS, DELAY_MS, JITTER_MS, CB_DELAY_MS))

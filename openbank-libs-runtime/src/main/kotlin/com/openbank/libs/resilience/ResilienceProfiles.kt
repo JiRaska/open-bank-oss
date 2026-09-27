@@ -37,7 +37,15 @@ object ResilienceProfiles {
     /** The closed set of profile names, [CUSTOM] included. */
     val ALL: Set<String> = setOf(MONEY_SYNC, READ, EXTERNAL_SCHEME, BATCH, CUSTOM)
 
-    /** Synchronous money-path writes and gates (sanctions, ledger posting, SCA). */
+    /**
+     * Synchronous money-path writes and gates (sanctions, ledger posting, SCA).
+     *
+     * Measured 2026-09-27 (this PR): the one fleet `@CircuitBreaker` site whose other four values
+     * match this profile's shape exactly (`Timeout(3000)` + `Retry(1, 200, 100)` +
+     * `CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)`) is
+     * `TppRegistryService.attemptEbaSync`, which sets `successThreshold = 2`. `N=1`; confirms the
+     * existing constant, does not newly derive it.
+     */
     object MoneySync {
         const val TIMEOUT_MS = 3_000L
         const val MAX_RETRIES = 1
@@ -50,7 +58,20 @@ object ResilienceProfiles {
         const val BULKHEAD = 20
     }
 
-    /** Idempotent reads (directory, catalog, balances). */
+    /**
+     * Idempotent reads (directory, catalog, balances).
+     *
+     * Measured 2026-09-27 (this PR, re-measuring PR #11072's finding): every fleet
+     * `@CircuitBreaker` site whose other four values match this profile's shape exactly
+     * (`Timeout(2000)` + `Retry(2, 200, 100)` +
+     * `CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)`) sets
+     * `successThreshold = 2`: `N=7` — `ScaChallengeClient.getChallenge` (account-service,
+     * consent-service, delegation-service), `ResourceOwnershipClient.verifyOwnership` and
+     * `PartyEligibilityClient.eligibilityOf` (delegation-service), `NotificationDispatchGuard
+     * .sendPushNotification` (sca-service), `TppRegistryClient.requireAuthorized`
+     * (psd2-service). ADR-0321 left this field blank for `read`; the fleet did not — `2`, not
+     * MicroProfile FT's default `1`.
+     */
     object Read {
         const val TIMEOUT_MS = 2_000L
         const val MAX_RETRIES = 2
@@ -59,13 +80,20 @@ object ResilienceProfiles {
         const val CB_REQUEST_VOLUME_THRESHOLD = 10
         const val CB_FAILURE_RATIO = 0.5
         const val CB_DELAY_MS = 5_000L
-
-        /** Not specified by the ADR for this profile; MicroProfile FT's own default. */
-        const val CB_SUCCESS_THRESHOLD = 1
+        const val CB_SUCCESS_THRESHOLD = 2
         const val BULKHEAD = 50
     }
 
-    /** Clearing, SEPA/SWIFT, CNB, any `@SyntheticTaintExternalBoundary` client. Idempotent calls only. */
+    /**
+     * Clearing, SEPA/SWIFT, CNB, any `@SyntheticTaintExternalBoundary` client. Idempotent calls
+     * only.
+     *
+     * Measured 2026-09-27 (this PR): no fleet site matches this profile's full shape exactly, but
+     * the two sites sharing its circuit-breaker shape alone (`requestVolumeThreshold = 4,
+     * failureRatio = 0.5, delay = 10_000`) — `CnbRateProviderAdapter.fetchWithResilience`
+     * (fx-service) and `FxServiceCnbRateAdapter.fetchWithResilience` (ledger-service) — both set
+     * `successThreshold = 2`. `N=2`; confirms the existing constant.
+     */
     object ExternalScheme {
         const val TIMEOUT_MS = 10_000L
         const val MAX_RETRIES = 2
@@ -78,7 +106,17 @@ object ResilienceProfiles {
         const val BULKHEAD = 10
     }
 
-    /** Scheduled and back-office calls with no user waiting. */
+    /**
+     * Scheduled and back-office calls with no user waiting.
+     *
+     * Measured 2026-09-27 (this PR): zero fleet `@CircuitBreaker` sites carry this profile's
+     * circuit-breaker shape (`requestVolumeThreshold = 10, failureRatio = 0.5, delay = 30_000`) —
+     * the outbox dispatchers that share this profile's long `Timeout`/`Retry` values all use
+     * `delay = 5_000` on their `@CircuitBreaker` instead, a different shape. With no fleet
+     * population to measure, this constant is NOT a measured modal value like [Read]'s — it is
+     * left at MicroProfile FT's own default (`1`) because there is nothing else to set it to.
+     * Re-measure when a real `batch`-profile adopter exists.
+     */
     object Batch {
         const val TIMEOUT_MS = 30_000L
         const val MAX_RETRIES = 3
@@ -87,8 +125,6 @@ object ResilienceProfiles {
         const val CB_REQUEST_VOLUME_THRESHOLD = 10
         const val CB_FAILURE_RATIO = 0.5
         const val CB_DELAY_MS = 30_000L
-
-        /** Not specified by the ADR for this profile; MicroProfile FT's own default. */
         const val CB_SUCCESS_THRESHOLD = 1
         const val BULKHEAD = 5
     }
