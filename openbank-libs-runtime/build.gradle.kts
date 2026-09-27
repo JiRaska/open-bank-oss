@@ -116,6 +116,10 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
+    // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
+    // class is absent at runtime is silently dropped, so the test needs arc itself.
+    testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
     // MultipartParser.MalformedMessageException lives in the reactive-server artifact; the
     // classification test instantiates the real class so the by-name map key can never drift
@@ -149,6 +153,11 @@ dependencies {
     // 2.0.5 is what the Quarkus BOM resolves for every service; the catalog's 1.20.4 bundles a
     // docker-java that current Docker Engines reject (API < 1.40), which would silently skip it.
     testImplementation("org.testcontainers:testcontainers:2.0.5")
+    // KeyedCallFilterClientTest drives the REAL Quarkus REST client engine (the JAX-RS client under
+    // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
+    // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
+    // Test-only; already in gradle/verification-metadata.xml because every service resolves it.
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client:3.38.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -190,10 +199,13 @@ kover {
                 classes("com.openbank.libs.persistence.outbox.AbstractOutboxEntity")
             }
         }
+        // Measured 2026-09-26 over two independent koverXmlReport runs (both 75.65% LINE, no
+        // variance observed): floor = floor(min(run1, run2)) - 2, per the fleet's
+        // flaky-koverVerify ratchet convention. Ratchet-only: never lower this.
         verify {
             rule {
                 bound {
-                    minValue = 50
+                    minValue = 73
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

@@ -48,8 +48,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   oidc-client:
     auth-server-url: http://localhost:8080/realms/openbank
@@ -180,6 +178,8 @@ mp:
         json: false
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%test":
@@ -203,6 +203,11 @@ mp:
       enabled: false
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   balance:
     projection:
       # ADR-0039 Phase D-2 (cutover, 2026-06-17): the balance is now a projection of the ledger — it

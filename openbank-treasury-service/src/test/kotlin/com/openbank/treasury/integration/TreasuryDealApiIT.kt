@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -49,7 +50,10 @@ class TreasuryDealApiIT {
     @Inject
     lateinit var ledger: FakeLedger
 
-    private val today: LocalDate = LocalDate.now()
+    // The service decides settlement/maturity eligibility off its injected Clock, which is
+    // Clock.systemUTC() (DefaultClockProducer) — derive "today" the same way, not from local time,
+    // or this drifts a day out of step with the service between local midnight and UTC midnight.
+    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
 
     private fun draftBody(principal: String, counterparty: String = "SIMBK-A", product: String = "MM_PLACEMENT") = """
         {"product":"$product","counterpartyId":"$counterparty","currency":"CZK",
@@ -203,6 +207,32 @@ class TreasuryDealApiIT {
     fun `9 - a dealer cannot approve (RBAC) and an unknown deal is 404`() {
         action(selfId, "approve").then().statusCode(403)
         given().`when`().get("/api/v1/treasury/deals/${UUID.randomUUID()}").then().statusCode(404)
+    }
+
+    // --- ADR-0315 D4: senior override of a limit breach ---
+
+    @Test
+    @Order(11)
+    @TestSecurity(user = "sara.senior", roles = ["ROLE_TREASURY_SENIOR_APPROVER"])
+    fun `11 - a senior records a limit override with a reason, which books nothing yet`() {
+        action(breachId, "override-limit", """{"reason":""}""").then().statusCode(400)
+        action(breachId, "override-limit", """{"reason":"ALCO-approved temporary excess"}""").then().statusCode(200)
+            .body("state", equalTo("PENDING_APPROVAL"))
+            .body("limitOverride.by", equalTo("sara.senior"))
+            .body("limitOverride.reason", equalTo("ALCO-approved temporary excess"))
+        action(breachId, "approve").then().statusCode(403) // a senior cannot book (RBAC)
+        assertThat(state(breachId)).isEqualTo("PENDING_APPROVAL")
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `12 - an ordinary approver cannot override, but books the overridden breach`() {
+        action(dealId, "override-limit", """{"reason":"x"}""").then().statusCode(403)
+        // The override is read back from the database here, so this also proves V4 and the mapping.
+        action(breachId, "approve").then().statusCode(200)
+            .body("state", equalTo("BOOKED"))
+            .body("limitOverride.by", equalTo("sara.senior"))
     }
 
     private fun state(id: String): String = jdbc { c ->

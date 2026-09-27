@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.31.0...ledger-service-v1.31.1) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.30.0...ledger-service-v1.31.0) (2026-09-26)
+
+
+### Features
+
+* **ledger:** report idempotent replays with an Idempotent-Replayed header ([#10906](https://github.com/JiRaska/open-bank-oss/issues/10906)) ([b6f1225](https://github.com/JiRaska/open-bank-oss/commit/b6f122594e53d55dcea8c2ce4a44b06c81d3411f))
+
 ## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.29.4...ledger-service-v1.30.0) (2026-09-25)
 
 

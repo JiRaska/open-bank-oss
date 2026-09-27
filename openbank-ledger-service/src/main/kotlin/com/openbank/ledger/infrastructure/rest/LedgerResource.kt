@@ -169,10 +169,14 @@ class LedgerResource(
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
             synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
         )
-        val entry = ledgerUseCase.postJournal(command)
+        val outcome = ledgerUseCase.postJournalWithOutcome(command)
+        val entry = outcome.entry
         return Response.created(URI.create("/api/v1/journals/${entry.id}"))
             .entity(entry.toResponse())
             .type(MediaType.APPLICATION_JSON)
+            // #10904: a replayed idempotency key answers with the same 201 and the same body as the
+            // original posting. This header is the only thing telling the caller nothing was posted.
+            .header(IDEMPOTENT_REPLAYED_HEADER, outcome.replayed.toString())
             .build()
     }
 
@@ -399,3 +403,9 @@ private fun ReplayBookedChangesResult.toResponse() = ReplayBookedChangesResponse
     accountsTouched = accountsTouched,
     netDeltaByCurrency = netDeltaByCurrency,
 )
+
+/**
+ * Response header on `POST /api/v1/journals`: `true` when the idempotency key had already been posted
+ * and the call only replayed it, `false` when this call posted the journal (#10904).
+ */
+const val IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"

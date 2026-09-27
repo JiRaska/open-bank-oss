@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive ADR-0312 business-signing routes (entity signing policy, trusted payees, approvals).
-  version: 1.20.0
+  version: 1.21.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -733,12 +733,17 @@ paths:
   /api/v1/entities/{entityId}/approval-requests:
     post:
       tags: [Business signing]
-      summary: Hold a payment for co-signature (kind PAYMENT)
+      summary: Hold a payment, standing order or SDD mandate for co-signature
       description: >-
-        `payload` is the exact rail request body (minus secrets) and is frozen: its canonical JSON
-        SHA-256 is `payloadSha256`, which every co-signer's SCA is dynamically linked to. The
+        `payload` is the exact upstream request body (minus secrets) and is frozen: its canonical
+        JSON SHA-256 is `payloadSha256`, which every co-signer's SCA is dynamically linked to. The
         initiator's SCA challenge must already be consumed by customer-edge (payment initiation,
-        linked to amount/currency/creditor) and counts as the first signature.
+        linked to amount/currency/creditor) and counts as the first signature. `kind`
+        STANDING_ORDER and SDD_MANDATE (#10281) are recurring outflows, held and released exactly
+        like a payment: a standing order is banded by its per-execution amount, an SDD mandate by
+        its maximum amount or, without one, by the strictest rule; neither takes the trusted-payee
+        shortcut. An SDD mandate carries `creditorIdentifier` and `mandateReference` instead of
+        `creditorIban`, and its co-signatures link the payload hash only.
       parameters: [ { $ref: '#/components/parameters/EntityId' } ]
       requestBody:
         required: true
@@ -1373,12 +1378,18 @@ components:
         currency: { type: string, minLength: 3, maxLength: 3 }
     SigningEvaluateRequest:
       type: object
-      required: [amount, currency, creditorIban, rail]
+      required: [rail]
       properties:
-        amount: { type: number }
-        currency: { type: string, minLength: 3, maxLength: 3 }
-        creditorIban: { type: string }
-        rail: { type: string, description: 'DOMESTIC, SEPA, SEPA_INSTANT, SWIFT — informational' }
+        kind:
+          type: string
+          enum: [PAYMENT, STANDING_ORDER, SDD_MANDATE]
+          description: Defaults to PAYMENT. STANDING_ORDER and SDD_MANDATE never take the trusted-payee shortcut.
+        amount: { type: number, description: Required except for an SDD_MANDATE without a maximum (strictest rule) }
+        currency: { type: string, minLength: 3, maxLength: 3, description: Required with amount }
+        creditorIban: { type: string, description: Required except for SDD_MANDATE }
+        rail:
+          type: string
+          description: 'DOMESTIC, SEPA, SEPA_INSTANT, SWIFT, STANDING_ORDER, SDD_MANDATE — informational'
     SigningEvaluation:
       type: object
       required: [required, eligibleSignerIds, trusted, ruleIndex, policyVersion, isDerivedFromRegister]
@@ -1466,21 +1477,24 @@ components:
       type: object
       required: [payload, initiatorSignature]
       properties:
-        kind: { type: string, enum: [PAYMENT] }
+        kind: { type: string, enum: [PAYMENT, STANDING_ORDER, SDD_MANDATE], description: Defaults to PAYMENT }
         initiatorSignature: { $ref: '#/components/schemas/ApprovalSignatureRequest' }
         payload:
           type: object
-          required: [rail, amount, currency, creditorIban, railRequest]
+          required: [rail, railRequest]
           additionalProperties: true
           description: The frozen document. Its canonical JSON SHA-256 is payloadSha256.
           properties:
             rail: { type: string }
             amount: { type: string, description: Decimal; a JSON number is accepted too }
             currency: { type: string, minLength: 3, maxLength: 3 }
-            creditorIban: { type: string }
+            creditorIban: { type: string, description: Required for PAYMENT and STANDING_ORDER }
             creditorName: { type: string, nullable: true }
             reference: { type: string, nullable: true }
             debtorAccountId: { type: string, nullable: true }
+            frequency: { type: string, nullable: true, description: STANDING_ORDER only }
+            creditorIdentifier: { type: string, description: 'SDD_MANDATE: the SEPA creditor identifier (required)' }
+            mandateReference: { type: string, description: 'SDD_MANDATE: the mandate reference / UMR (required)' }
             railRequest:
               type: object
               additionalProperties: true
@@ -1512,7 +1526,10 @@ components:
         claimToken: { type: string, format: uuid, nullable: true, description: When sent, must equal the winning claim }
     ApprovalKind:
       type: string
-      enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE]
+      description: >-
+        Extensible (#10281 added STANDING_ORDER and SDD_MANDATE): a client must treat an unknown
+        kind as a generic request, never fail on it.
+      x-extensible-enum: [PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE, STANDING_ORDER, SDD_MANDATE]
     ApprovalStatus:
       type: string
       enum: [AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED]
@@ -1534,7 +1551,9 @@ components:
           type: object
           nullable: true
           additionalProperties: true
-          description: For PAYMENT — amount, currency, creditorIban, creditorName, rail.
+          description: >-
+            For PAYMENT and STANDING_ORDER — amount, currency, creditorIban, creditorName, rail
+            (+ frequency); for SDD_MANDATE — creditorName, creditorIdentifier, mandateReference, rail.
         policyVersion: { type: integer }
         required: { type: integer }
         collected: { type: integer }

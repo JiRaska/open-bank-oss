@@ -81,8 +81,17 @@ data class GetSubLedgerBalancesQuery(val asOf: LocalDate, val subAccountId: UUID
 
 data class GetControlAccountTieOutQuery(val controlAccountId: UUID, val asOf: LocalDate)
 
+/**
+ * A posted journal plus whether THIS call created it or replayed an existing idempotency key (#10904).
+ * Both answer with the same entry, so without the flag a caller cannot tell a posting from a no-op.
+ */
+data class PostJournalOutcome(val entry: JournalEntry, val replayed: Boolean)
+
 interface LedgerUseCase {
     suspend fun postJournal(command: PostJournalCommand): JournalEntry
+
+    /** [postJournal], also saying whether the idempotency key was already posted (#10904). */
+    suspend fun postJournalWithOutcome(command: PostJournalCommand): PostJournalOutcome
     suspend fun reverseJournal(command: ReverseJournalCommand): JournalEntry
     suspend fun getJournal(query: GetJournalQuery): JournalEntry
     suspend fun getJournalsByTransaction(query: GetJournalsByTransactionQuery): List<JournalEntry>

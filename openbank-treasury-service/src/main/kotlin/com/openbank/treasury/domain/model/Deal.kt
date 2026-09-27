@@ -108,6 +108,8 @@ data class Deal(
     val limitCheck: LimitCheck? = null,
     /** An AI agent's inputs and rationale for a draft it proposed (ADR-0315 D10); null for humans. */
     val rationale: String? = null,
+    /** A senior approver's recorded override of a counterparty-limit breach (ADR-0315 D4). */
+    val limitOverride: LimitOverride? = null,
     val history: List<DealTransition> = emptyList(),
 ) {
     init {
@@ -153,16 +155,54 @@ data class Deal(
         requireHuman(actor, "approve")
         requireState(DealState.PENDING_APPROVAL, "approve")
         requireSecondPerson(actor)
-        // ADR-0315 D4: a breach blocks booking. The senior-approver override is not built yet.
-        if (check.breached) throw LimitBreachedException(check)
+        // ADR-0315 D4: a breach blocks booking unless a second, senior approver recorded an override
+        // with a reason that still covers it. The booking approver is yet another person.
+        if (check.breached) requireOverrideCovers(actor, check)
         return transition(DealState.BOOKED, actor, at, limitNote(check)).copy(approvedBy = actor, limitCheck = check)
+    }
+
+    /**
+     * ADR-0315 D4: a SENIOR approver records an override of a counterparty-limit breach, with a
+     * reason. Only for a PENDING_APPROVAL deal whose current check IS breached (an override of a
+     * deal within limit would be a blank cheque for a later, larger breach). Human only, and never
+     * the deal's creator or submitter. The override covers the exposure measured now; if exposure
+     * grows before booking, approval refuses again.
+     */
+    fun overrideLimit(actor: Actor, reason: String, check: LimitCheck, at: Instant): Deal {
+        requireHuman(actor, "override the limit of")
+        requireState(DealState.PENDING_APPROVAL, "override the limit of")
+        require(reason.isNotBlank()) { "a limit override needs a reason" }
+        check(check.breached) {
+            "the deal is within its limit (headroom ${check.headroomAfter}); there is nothing to override"
+        }
+        val role = when (actor.id) {
+            createdBy.id -> "creator"
+            submittedBy?.id -> "submitter"
+            else -> null
+        }
+        role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not override its limit") }
+        val override = LimitOverride(actor, reason, at, check.exposureAfter, check.limit)
+        return copy(
+            limitOverride = override,
+            limitCheck = check,
+            updatedAt = at,
+            history = history + DealTransition(
+                from = state,
+                to = state,
+                actor = actor,
+                at = at,
+                note = "limit override: exposure ${check.exposureAfter} > limit ${check.limit} " +
+                    "${check.currency}; reason: $reason",
+            ),
+        )
     }
 
     fun reject(actor: Actor, reason: String, at: Instant): Deal {
         requireHuman(actor, "reject")
         requireState(DealState.PENDING_APPROVAL, "reject")
         require(reason.isNotBlank()) { "a rejection needs a reason" }
-        return transition(DealState.DRAFT, actor, at, "rejected: $reason").copy(submittedBy = null, limitCheck = null)
+        return transition(DealState.DRAFT, actor, at, "rejected: $reason")
+            .copy(submittedBy = null, limitCheck = null, limitOverride = null)
     }
 
     fun cancel(actor: Actor, at: Instant): Deal {
@@ -213,6 +253,15 @@ data class Deal(
         updatedAt = at,
         history = history + DealTransition(from = state, to = to, actor = actor, at = at, note = note),
     )
+
+    /** A breach books only under a senior override that still covers it, and not by that senior. */
+    private fun requireOverrideCovers(actor: Actor, check: LimitCheck) {
+        val override = limitOverride
+        if (override == null || check.exposureAfter > override.coversExposureUpTo) throw LimitBreachedException(check)
+        if (actor.id == override.by.id) {
+            throw FourEyesViolationException("four-eyes: the senior who overrode the limit must not also book the deal")
+        }
+    }
 
     /** Four-eyes: the approver is neither the creator nor the submitter. */
     private fun requireSecondPerson(actor: Actor) {
@@ -326,3 +375,12 @@ object DayCount {
             .setScale(MONEY_SCALE, RoundingMode.HALF_UP)
     }
 }
+
+/** A senior approver's override of a limit breach, bounded to the exposure it was granted for (ADR-0315 D4). */
+data class LimitOverride(
+    val by: Actor,
+    val reason: String,
+    val at: Instant,
+    val coversExposureUpTo: BigDecimal,
+    val limitAtOverride: BigDecimal,
+)

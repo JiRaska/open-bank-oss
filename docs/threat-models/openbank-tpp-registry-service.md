@@ -52,15 +52,33 @@ PSD2 service returns 503 rather than fail-open.
   service caching registry responses for a short, configurable TTL
   (`openbank.tpp.cache-ttl-seconds`, default 60) and named the resulting window as a residual risk.
   Neither half is real: the property occurs nowhere in the repository except this document, and
-  psd2-service has no registry-response cache at all — `TppRegistryClient` is a plain REST client
-  with no `@CacheResult` (#4011), no TTL and no store, so every authorisation check is a live call. The
+  psd2-service has no registry-response cache at all — `TppRegistryRestClient` (the interface) and
+  `TppAuthorizationGuard` (the caller, `openbank-psd2-service/.../infrastructure/client/TppRegistryClient.kt`)
+  are a plain REST client with no `@CacheResult` (#4011), no TTL and no store, so every authorisation
+  check is a live call. The
   only TTL in psd2's configuration is `idempotency-ttl-seconds`, which belongs to the idempotency
   store and is unrelated. Kept rather than deleted because the correction runs the *safe* way — the
   documented risk window is narrower than stated, not wider — and because a future cache would
-  reintroduce exactly this residual, so the reasoning is worth preserving. See the 2026-09-03
-  change-log entry.
+  reintroduce exactly this residual, so the reasoning is worth preserving. See the 2026-09-03 and
+  2026-09-27 change-log entries.
 
 ## 6. Change log
+
+- **2026-09-27** — Doc correction, no behavior change (#11088): §5 cited `TppRegistryClient` as the
+  "plain REST client" backing the no-cache claim. That exact symbol has never existed as a Kotlin
+  class/interface in this repository's tracked history of the file — `git grep -n '\bTppRegistryClient\b'`
+  outside this document matches only the *filename* `TppRegistryClient.kt` (in
+  `openbank-psd2-service/detekt-baseline.xml`, `ktlint-baseline.xml`, and the architecture doc's
+  package-tree listing), never a declared symbol. The file has, for its whole recorded history,
+  declared two symbols instead: the interface `TppRegistryRestClient` (the `@RegisterRestClient`
+  REST client the doc meant) and `TppAuthorizationGuard` (the `@ApplicationScoped` caller carrying
+  `@Timeout`/`@Retry`/`@CircuitBreaker`). This surfaced via
+  `.github/scripts/check-threat-model-claims.py`'s clause-scoped disclaimer fix (#11089), which
+  stopped the neighbouring "does not exist" disclaimer in this same cell from also silencing this
+  citation. **Not a new security gap and not a behaviour change**: the underlying claim — no
+  `@CacheResult`, no TTL, no store, every authorisation check a live call — remains true of both
+  real symbols; only the cited name was wrong (an informal shorthand for the file, not a real
+  class). Citation corrected to `TppRegistryRestClient` / `TppAuthorizationGuard` above.
 
 - **2026-09-03** — Doc correction, no behavior change: §5 listed an "In-memory role cache TTL"
   residual risk, asserting that PSD2 service caches registry responses and that the window is tuned

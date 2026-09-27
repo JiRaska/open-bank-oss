@@ -85,6 +85,16 @@ the run dies with `QuarkusBindException`) — so a genuine lint violation reache
 gate looked like it had merely flaked. Read which tasks actually appear in the output, and re-run
 the cheap checks (`ktlintCheck detekt`, seconds) on their own after fixing a test failure.
 
+- **The shared Gradle build cache is live infrastructure while any build runs on the machine —
+  clearing it mid-build produces spurious `NoSuchFileException` task failures, not a clean slate.**
+  `~/.gradle/caches/build-cache-1` is written to and read from concurrently by every Gradle process
+  on the host; deleting it while another session's build is in flight races that build's own
+  writes/reads and fails its tasks with a missing-file error that looks like a build system bug.
+  Only clear it when nothing is building.
+- **Never `pkill -f gradle-wrapper.jar` (or any pattern-based kill) on a shared machine.** This host
+  runs multiple parallel agent sessions; a pattern match kills every Gradle daemon on the box,
+  including builds you did not start. Kill only PIDs your own session launched.
+
 ## Skills
 
 - `/ship-check` — authoritative pre-merge preflight; mirrors the CI gates.
@@ -405,6 +415,41 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
   fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 
+- **MicroProfile `ResponseExceptionMapper` never sees the outgoing request's headers, and a
+  connect/timeout failure produces no response for it to map at all.** It only gets a chance once a
+  response comes back, so conditioning a retry decision on a request property (e.g. an
+  idempotency/retry header) has to happen earlier in the pipeline — pair a `ClientRequestFilter`
+  (to stash the property) with a `ClientResponseFilter` (to read it back), and handle
+  `ProcessingException` separately for the no-response case (ADR-0321, #11014).
+- **Idempotency lookup-then-save is a race, not a guard.** Two concurrent requests carrying the
+  same `Idempotency-Key` can both pass a `find`-then-`persist` check and both proceed. Reserve the
+  key atomically first (Redis `SET NX`, or a Lua script) and save with a compare-and-set that never
+  overwrites a *different* request fingerprint stored under the same key; release the reservation
+  only on failure — never after a committed success and never on a replay. A durable DB-level dedupe
+  table must also compare the fingerprint, not just the key's presence, or eviction from Redis lets
+  the first payment's key replay against a different payload (#10922, #10948, #10958).
+- **A canonical form used for hashing/fingerprinting must be injective, or two different requests
+  hash the same.** `key=value` pairs joined by `\n` collide whenever a value itself contains `\n` or
+  `=` — the delimiter is ambiguous. Use a length-prefixed encoding, or RFC 8785 (JSON Canonicalization
+  Scheme, which orders keys by UTF-16 code unit) instead of an ad hoc join (#11017, #10926).
+- **`java.net.http.HttpClient` re-resolves DNS at connect time — checking a hostname's IP once and
+  proceeding does not stop DNS rebinding.** A validated-then-cached IP is not what the client
+  actually connects to; the JDK does its own resolution on every request. Pin the vetted IP into the
+  request (e.g. via a custom `Authenticator`/socket factory or an explicit connect-to override), not
+  just into a pre-flight check (#11021).
+- **RESTEasy Reactive's `UriInfo.path` starts with a leading `/` — a prefix check written without
+  it silently never matches.** `path.startsWith("api/v1/...")` against an actual path of
+  `/api/v1/...` is always false, so a filter gated on that check never runs, and nothing errors: the
+  request just skips the gate. A mock-based unit test that stubs `UriInfo` cannot see this — only a
+  real-HTTP `@QuarkusTest` reproduces the actual path shape. Two eIDAS/QSEAL/deprecation filters in
+  psd2 shipped this way (#10997, fixed by #11008; advisory gate added in #11030).
+- **OpenBao/Vault Transit `rewrap` has no documented `associated_data` parameter, and an unknown
+  field is silently ignored (with a warning), not rejected.** Passing AAD to `rewrap` the way you
+  would to `encrypt`/`decrypt` looks like it works — the call succeeds — but proves nothing about
+  whether the ciphertext is actually bound to that context. Verify AAD binding against a real
+  OpenBao/Vault container (attempt a rewrap with mismatched AAD and confirm it fails), never against
+  a stub that just echoes success (#11038).
+
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
   `function-signature` violation surfaces the first time you touch an older file. Let `ktlintFormat`
@@ -542,6 +587,13 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   artifacts, and make the exclusions the thing a human has to justify.
 
 ### OPA / authorization
+- **`@DefaultBean` on a security producer (e.g. a `PolicyDecisionPoint`) turns a build-time
+  ambiguity into silent fail-open displacement.** `@DefaultBean` exists specifically to let a
+  second, more specific producer for the same type quietly WIN over it with no error — the opposite
+  of what a security-critical bean needs. A second `PolicyDecisionPoint` producer surviving in a
+  service's own `src/main` should fail `quarkusBuild` as an ambiguous CDI dependency, forcing a
+  human to resolve which decision point is authoritative, not have one silently displace the other.
+  Use plain `@Produces` behind an opt-in `@IfBuildProperty` instead (#10952).
 - **`input.principal.type == "SERVICE"` can never fire — don't write it.** `AuthorizeInterceptor`
   only ever emits `ANONYMOUS`/`AI_AGENT`/`HUMAN`; M2M callers authenticate with a Keycloak
   client_credentials JWT, which the interceptor classifies as `HUMAN`, and no realm client is ever
@@ -664,6 +716,12 @@ fire from *outside* it, so they stay here:
   `mermaid-parses` gate, which parses every block with admin-ui's own mermaid.
 
 ### Multi-agent / parallel work
+- **A review fix pushed to a PR branch AFTER auto-merge fires is silently lost — the squash already
+  happened.** `gh pr merge --auto` squash-merges the moment checks go green, which can be before a
+  requested review fix lands; a push after that point updates a branch whose PR is already closed,
+  and nothing errors on the push. Check `gh pr view --json state` before pushing a fix, and if the
+  PR already merged, cherry-pick the lost commit into a new PR instead of assuming the push landed
+  (#10927, recovered as #10990).
 - **Commit and push early — a `/private/tmp` worktree can vanish mid-edit.** Several agent
   sessions share this machine and a worktree directory is one `worktree remove`/cleanup away from
   gone; the branch ref survives, your uncommitted diff does not. Stage in small commits and push

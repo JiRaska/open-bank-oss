@@ -33,6 +33,11 @@ export const journalRefSchema = z.object({
   event: z.string(), idempotencyKey: z.string(), journalId: z.string(), postedAt: timestamp,
 })
 
+/** A senior approver's recorded override of a limit breach (ADR-0315 D4). */
+export const limitOverrideSchema = z.object({
+  by: z.string(), reason: z.string(), at: timestamp, coversExposureUpTo: decimal, limitAtOverride: decimal,
+})
+
 export const dealSchema = z.object({
   dealId: z.string(),
   product: productSchema,
@@ -53,6 +58,9 @@ export const dealSchema = z.object({
   approvedBy: z.string().nullable(),
   rationale: z.string().nullable(),
   limitCheck: limitCheckSchema.nullable(),
+  // Optional too, not just nullable: older fixtures/mocks in this test suite predate the field,
+  // and a response that omits it (rather than sending null) must not fail parsing (unavailable).
+  limitOverride: limitOverrideSchema.nullable().optional(),
   createdAt: timestamp,
   updatedAt: timestamp,
   history: z.array(transitionSchema),

@@ -127,8 +127,8 @@ private const val NSFR_HORIZON_YEARS = 1L
 private const val STAGE_3 = "STAGE_3"
 
 /**
- * LCR (BCBS d238) and NSFR (BCBS d295) of a tied-out snapshot — BCBS standard factors, no EU CRR /
- * Delegated Regulation (EU) 2015/61 deviations. Per currency; a total only for a single-currency
+ * LCR and NSFR of a tied-out snapshot under the configured parameter set — BCBS d238 / d295, or the
+ * EU Delegated Regulation (EU) 2015/61 / CRR2 set ([LiquidityRegime]). Per currency; a total only for a single-currency
  * book (the engine has no reporting-currency conversion yet — the same rule as IRRBB).
  */
 object Liquidity {
@@ -151,7 +151,9 @@ object Liquidity {
                 when (p.kind) {
                     PositionKind.SUB_LEDGER -> acc.customerAccount(p)
                     PositionKind.LOAN -> acc.loan(p, p.instrumentId?.let(byId::get), asOf)
-                    PositionKind.GL_ACCOUNT -> {
+                    // A money-market deal is classified by its principal account (1510 = HQLA L1),
+                    // exactly as its GL-level balance was before deals were modelled (ADR-0315 D6).
+                    PositionKind.GL_ACCOUNT, PositionKind.TREASURY_DEAL -> {
                         val cls = params.classification.classOf(p.glAccountCode, p.glAccountType)
                         if (cls == null) {
                             if (p.amount.signum() != 0) {
@@ -213,7 +215,7 @@ object Liquidity {
         private val cls get() = params.classification
 
         private fun line(label: String, code: String?, amount: BigDecimal, f: LiquidityFactor) =
-            LiquidityLine(label, code, amount, params[f], f.key, f.citation)
+            LiquidityLine(label, code, amount, params[f], f.key, params.citation(f))
 
         /** A customer balance in the trial-balance convention: credit (negative) is a deposit, debit an overdraft. */
         fun customerAccount(p: Position) {
@@ -363,7 +365,10 @@ object Liquidity {
                             liability,
                             null,
                             null,
-                            "BCBS d295 ¶17, ¶21(a): ASF counts capital before deductions",
+                            when (params.regime) {
+                                LiquidityRegime.BCBS -> "BCBS d295 ¶17, ¶21(a): ASF counts capital before deductions"
+                                LiquidityRegime.EU -> "CRR Art. 428o: ASF counts capital items before deductions"
+                            },
                         )
                 GlClass.CAPITAL_TIER2 -> {
                     val longPart = liability.multiply(cls.tier2OverOneYearShare, BigMath.MC)

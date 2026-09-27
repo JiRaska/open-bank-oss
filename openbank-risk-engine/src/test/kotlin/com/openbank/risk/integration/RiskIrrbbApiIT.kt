@@ -117,9 +117,10 @@ class RiskIrrbbApiIT {
 
         assertThat(body["outlierTest"]["tier1Supplied"].asBoolean()).isFalse()
         assertThat(body["outlierTest"]["ratio"].isNull).isTrue()
-        assertThat(body["assumptions"]["shockSource"].asText()).contains("d368")
-        assertThat(body["assumptions"]["shockSizes"].single()["parallelBp"].decimalValue()).isEqualByComparingTo("200")
-        assertThat(body["assumptions"]["postShockFloor"].isNull).isTrue()
+        assertThat(body["assumptions"]["shockSource"].asText()).contains("2024/856")
+        val eurSizes = body["assumptions"]["shockSizes"].single { it["currency"].asText() == "EUR" }
+        assertThat(eurSizes["parallelBp"].decimalValue()).isEqualByComparingTo("200")
+        assertThat(body["assumptions"]["postShockFloorSource"].asText()).contains("Art. 3(7)")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
 
         val withTier1 = irrbb(run, set, "&tier1Capital=10000")
@@ -130,14 +131,25 @@ class RiskIrrbbApiIT {
 
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
-    fun `a CZK book is reported as not configured, never shocked with a guess`() {
+    fun `a CZK book is shocked with the Delegated Regulation 2024-856 sizes and floor`() {
+        // #10896: CZK is listed by name in Annex Part A of Delegated Regulation (EU) 2024/856 at
+        // 200/250/100 bp; Art. 3(7) sets the floor at -150 bp rising 3 bp a year to 0 % at 50 years.
+        // These are the SHIPPED defaults; a change to them must fail here, not pass silently.
         ledger.inputs = Fixtures.tiedOut()
         val asOf = "2026-01-30"
         val body = irrbb(snapshot(asOf, "TIED_OUT"), curveSet(asOf), "&tier1Capital=1000")
-        assertThat(body["shockNotConfigured"].map { it.asText() }).containsExactly("CZK")
-        assertThat(body["scenarios"].all { it["currencies"].isEmpty }).isTrue()
+        assertThat(body["shockNotConfigured"].map { it.asText() }).isEmpty()
         assertThat(body["gaps"].single()["currency"].asText()).isEqualTo("CZK")
-        assertThat(body["outlierTest"]["ratio"].isNull).isTrue()
+        assertThat(body["scenarios"]).hasSize(6)
+        assertThat(body["scenarios"].all { s -> s["currencies"].any { it["currency"].asText() == "CZK" } }).isTrue()
+        val czk = body["assumptions"]["shockSizes"].single { it["currency"].asText() == "CZK" }
+        assertThat(czk["parallelBp"].decimalValue()).isEqualByComparingTo("200")
+        assertThat(czk["shortBp"].decimalValue()).isEqualByComparingTo("250")
+        assertThat(czk["longBp"].decimalValue()).isEqualByComparingTo("100")
+        val floor = body["assumptions"]["postShockFloor"]
+        assertThat(floor["atZeroBp"].decimalValue()).isEqualByComparingTo("-150")
+        assertThat(floor["slopeBpPerYear"].decimalValue()).isEqualByComparingTo("3")
+        assertThat(body["outlierTest"]["ratio"].isNull).isFalse()
     }
 
     @Test

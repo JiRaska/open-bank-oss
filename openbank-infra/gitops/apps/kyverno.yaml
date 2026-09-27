@@ -18,21 +18,26 @@ spec:
   source:
     repoURL: https://kyverno.github.io/kyverno/
     chart: kyverno
-    targetRevision: 3.2.6
+    targetRevision: 3.9.1
     helm:
       valuesObject:
         # Sandbox FinOps: single replica per component (raise + add PDBs for prod,
         # where the admission webhook must be HA or it can block all admissions).
         admissionController:
           replicas: 1
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
           container:
+            # Under container:, not beside replicas. The admission controller is the
+            # one component whose chart reads resources from
+            # admissionController.container.resources (3.2.6 and 3.9.1 alike); the
+            # top-level key this block used to sit at was ignored, so the pod ran on
+            # the chart default 128Mi/384Mi while this file said 256Mi/512Mi (#9805).
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
             # The amazon-ecr-credential-helper (registryCredentialHelpers=…,amazon)
             # caches its ECR auth token under $HOME/.ecr. HOME defaults to
             # /home/nonroot, which is on the readOnlyRootFilesystem, so the write
@@ -69,67 +74,40 @@ spec:
               memory: 256Mi
         cleanupController:
           replicas: 1
-        # The chart default bitnami/kubectl:1.28.5 was REMOVED from Docker Hub
-        # (Aug 2025 Bitnami catalogue retirement) → ImagePullBackOff on all five
-        # cleanupJobs + both Helm hooks (policyReportsCleanup/webhooksCleanup),
-        # cleanup stops, reports pile up, the post-upgrade hook even blocks ArgoCD
-        # sync. We first tried registry.k8s.io/kubectl, but that is DISTROLESS — no
-        # shell — and these jobs run `/bin/bash -c <script>` (count reports, delete
-        # conditionally), so it StartErrors (exit 128). The right drop-in is the
-        # SAME bitnami image, just relocated to the `bitnamilegacy` archive org: it
-        # has bash and runs as the baked-in nonroot UID 1001, so it satisfies the
-        # chart's securityContext.runAsNonRoot + readOnlyRootFilesystem with no
-        # runAsUser override (verified on-cluster). All seven are TOP-LEVEL chart
-        # values — nesting cleanupJobs under cleanupController silently no-ops it.
-        # Follow-up: bitnamilegacy is a frozen archive; move to a self-hosted
-        # kubectl+shell image in ECR for a maintained long-term base.
-        # ttlSecondsAfterFinished (chart value, per cleanup job) — a finished Job object
-        # self-deletes after 48h. failedJobsHistoryLimit alone does NOT clear a tombstone:
-        # it caps how many failed Jobs are kept, so the LAST failure survives forever even
-        # after every later run succeeded, and KubeJobFailed keeps firing on that dead
-        # object. Measured 2026-08-16: 9 of 25 firing alerts were KubeJobFailed and 7 were
-        # stale this way, two of them these kyverno cleanup jobs (which run every 5-10 min,
-        # so the surviving tombstone was hours behind a long line of successes).
-        cleanupJobs:
-          admissionReports:
-            ttlSecondsAfterFinished: 172800
-            image:
-              repository: docker.io/bitnamilegacy/kubectl
-              tag: 1.28.5
-          clusterAdmissionReports:
-            ttlSecondsAfterFinished: 172800
-            image:
-              repository: docker.io/bitnamilegacy/kubectl
-              tag: 1.28.5
-          ephemeralReports:
-            ttlSecondsAfterFinished: 172800
-            image:
-              repository: docker.io/bitnamilegacy/kubectl
-              tag: 1.28.5
-          clusterEphemeralReports:
-            ttlSecondsAfterFinished: 172800
-            image:
-              repository: docker.io/bitnamilegacy/kubectl
-              tag: 1.28.5
-          updateRequests:
-            ttlSecondsAfterFinished: 172800
-            image:
-              repository: docker.io/bitnamilegacy/kubectl
-              tag: 1.28.5
-        policyReportsCleanup:
-          image:
-            repository: docker.io/bitnamilegacy/kubectl
-            tag: 1.28.5
-        webhooksCleanup:
-          image:
-            repository: docker.io/bitnamilegacy/kubectl
-            tag: 1.28.5
-        # Never let the policy webhook take down the cluster: if Kyverno is down,
-        # fail OPEN (admit) rather than block every pod. Tighten to Fail for the
-        # money-path once Kyverno itself is HA.
+        # Chart 3.9.1 (Kyverno 1.19) has no cleanupJobs any more (report cleanup moved
+        # into the controllers), and policyReportsCleanup/webhooksCleanup no longer
+        # run kubectl: the 1.18 cleanup binary dropped it. The bitnamilegacy/kubectl
+        # overrides that kept 3.2.6's cleanup jobs pulling (Bitnami catalogue
+        # retirement, Aug 2025) are therefore gone — kept, they would render as
+        # "ghcr.io/docker.io/bitnamilegacy/kubectl" because the chart now prefixes a
+        # default registry, and break the pre-delete hooks.
+        #
+        # Webhook scope: config.webhooks is a single {namespaceSelector,objectSelector}
+        # object since 1.19 (a list before). The old value here was a list carrying
+        # `failurePolicy: Ignore`, a key Kyverno's WebhookConfig type has never had
+        # (pkg/config/types.go: namespaceSelector + objectSelector only), so it was
+        # inert: webhooks have always used each policy's failurePolicy (default Fail).
+        # Under 3.9.1 the list cannot merge with the chart's map default and renders
+        # "{}". Setting it to null drops the key, so the chart renders exactly what
+        # runs today: exclude only the kyverno namespace. Failing OPEN, if wanted, is
+        # features.forceFailurePolicyIgnore — a behaviour change, not part of this bump.
         config:
-          webhooks:
-            - failurePolicy: Ignore
+          webhooks: null
+        features:
+          # 1.13 flipped the chart default to disabled (CVE-2024-48921). The pricing
+          # PolicyException (components/kyverno/pricing-image-exception.yaml) is
+          # load-bearing, so keep exceptions on, from any namespace, as on 1.12.
+          # Narrowing `namespace` is a separate, reviewable tightening.
+          policyExceptions:
+            enabled: true
+            namespace: ""
+          # 1.15 turned on generating ValidatingAdmissionPolicies from eligible
+          # ClusterPolicies. That would move our Enforce validate rules to the API
+          # server, outside the webhook's namespace exclusions — keep 1.12 behaviour.
+          generateValidatingAdmissionPolicy:
+            enabled: false
+          validatingAdmissionPolicyReports:
+            enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
