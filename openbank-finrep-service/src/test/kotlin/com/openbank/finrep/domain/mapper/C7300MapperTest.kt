@@ -90,10 +90,46 @@ class C7300MapperTest {
     }
 
     @Test
-    fun `an outflow the mapper does not know fails the render instead of vanishing`() {
+    fun `an outflow the mapper does not know makes the total a gap naming it, not an exception`() {
         val extra = lines + line("lcr-committed-facility", "10", "0.05")
-        assertThatThrownBy { C7300Mapper.map(RiskLiquidityLookup.found(result(lines = extra, total = "550.5")), asOf) }
-            .hasMessageContaining("lcr-committed-facility")
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result(lines = extra, total = "550.5")), asOf)
+        listOf("c0010", "c0060").forEach { col ->
+            assertThat(t.at("r0010", col).isDataGap).describedAs(col).isTrue()
+            assertThat(t.at("r0010", col).gapReason)
+                .contains("engine reports component 'lcr-committed-facility' this template does not map yet")
+        }
+        // Known components are still stated, and a sum that silently omits the unknown one is never shown.
+        assertThat(t.at("r0110", "c0060").isDataGap).isFalse()
+        assertThat(t.at("r0110", "c0060").value).isEqualByComparingTo("100")
+        assertThat(t.at("r0030", "c0060").isDataGap).isFalse()
+    }
+
+    @Test
+    fun `an unknown outflow still counts toward the tie, so a mismatched engine total still fails`() {
+        val extra = lines + line("lcr-committed-facility", "10", "0.05")
+        assertThatThrownBy { C7300Mapper.map(RiskLiquidityLookup.found(result(lines = extra, total = "550")), asOf) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `a CNB lombard maps to secured funding with a central bank at 0 percent and the total ties with it`() {
+        val withLombard = lines + line(C7300Mapper.CB_SECURED, "700", "0")
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result(lines = withLombard, total = "550")), asOf)
+        assertThat(t.at("r0950", "c0010").value).isEqualByComparingTo("700")
+        assertThat(t.at("r0950", "c0060").value).isEqualByComparingTo("0")
+        assertThat(t.at("r0950", "c0060").isDataGap).isFalse()
+        assertThat(t.at("r0950", "c0010").label).endsWith("[row code UNVERIFIED]")
+        assertThat(t.at("r0010", "c0010").value).isEqualByComparingTo("6150")
+        assertThat(t.at("r0010", "c0060").value).isEqualByComparingTo("550")
+        assertThat(t.at("r0010", "c0060").isDataGap).isFalse()
+    }
+
+    @Test
+    fun `a CNB lombard at a non-zero rate is not the 2015-61 rate, so its outflow is a gap`() {
+        val withLombard = lines + line(C7300Mapper.CB_SECURED, "700", "0.25")
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result(lines = withLombard, total = "725")), asOf)
+        assertThat(t.at("r0950", "c0060").isDataGap).isTrue()
+        assertThat(t.at("r0010", "c0060").isDataGap).isTrue()
     }
 
     @Test
