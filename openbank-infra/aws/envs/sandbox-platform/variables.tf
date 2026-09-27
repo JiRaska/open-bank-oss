@@ -9,12 +9,14 @@ variable "cert_manager_version" {
   # v1.18: default privateKey.rotationPolicy flips Never -> Always. Reviewed
   # every Certificate/ClusterIssuer in this tree (#11146): the root CA
   # (openbank-sandbox-ca, gitops/components/platform/clusterissuer.yaml) is
-  # already pinned rotationPolicy: Never explicitly (#11124); the two
-  # ingress-shim Certificates with mobile SPKI pinning (customer-edge,
-  # keycloak) already carry the cert-manager.io/private-key-rotation-policy:
-  # "Never" annotation. The other 34 Certificates are internal mTLS leaves
-  # trusted via the openbank-ca chain, not pinned to a leaf public key, so
-  # picking up the new Always default on renewal is harmless for them.
+  # already pinned rotationPolicy: Never explicitly (#11124); the three
+  # ingress-shim Certificates with mobile SPKI pinning (customer.open-bank.tech
+  # /customer-edge, kc.open-bank.tech/keycloak, rum.open-bank.tech/rum-gateway,
+  # the last fixed in #11152) already carry the
+  # cert-manager.io/private-key-rotation-policy: "Never" annotation. The other
+  # Certificates are internal mTLS leaves trusted via the openbank-ca chain,
+  # not pinned to a leaf public key, so picking up the new Always default on
+  # renewal is harmless for them.
   #
   # v1.19 (#11157): install v1.19.1+ only (v1.19.0 has a known unexpected-
   # renewal bug, github.com/cert-manager/cert-manager/issues/8158, fixed in
@@ -28,7 +30,23 @@ variable "cert_manager_version" {
   # resources directly; only the controller itself does, via its own
   # ClusterRole. No Certificate/ClusterIssuer API field removals/renames, no
   # Helm values shape change for our `helm_release.cert_manager` block.
-  default = "v1.19.6"
+  #
+  # v1.20 (#11158): v1.20.4 is the latest 1.20.x patch (checked GitHub
+  # releases 2026-09-27: v1.20.0..v1.20.4, no later tag). Supported Kubernetes
+  # range is 1.32-1.35 (cert-manager.io/docs/releases) — our sandbox control
+  # plane is 1.35, in range. v1.20.3 restates the same cert-manager-edit
+  # ClusterRole restriction noted above (GHSA-8rvj-mm4h-c258) — still n/a,
+  # same grep as v1.19. Default container UID/GID moves 1000/0 -> 65532/65532
+  # (chart default, not pinned by any `set` here) — the cert-manager namespace
+  # carries no pod-security-admission label (create_namespace=true, no PSA
+  # annotation applied), so nothing enforces the old UID; n/a. The
+  # DefaultPrivateKeyRotationPolicyAlways feature gate reaching GA (no longer
+  # disable-able) only changes the *default* for a Certificate with no
+  # explicit policy — it does not override the three annotation pins above,
+  # which set the field directly. No CRD field removals/renames, no Helm
+  # values shape change for our `helm_release.cert_manager` block, no new
+  # required flags.
+  default = "v1.20.4"
 }
 
 variable "karpenter_version" {
