@@ -4,10 +4,11 @@
 
 package com.openbank.account.integration
 
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.account.it.StubScaChallengeClient
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -30,7 +31,10 @@ import java.util.UUID
  * proposal cannot execute; the owner's SCA-bound approval flips it to APPROVED.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @QuarkusTestResource(SavingsProposalIT.InMemoryDelegationChannel::class)
 class SavingsProposalIT {
 

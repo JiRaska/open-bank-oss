@@ -9,10 +9,10 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.0.0
+  version: 1.2.0
   description: |
-    Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings and
-    the ČNB overnight deposit facility.
+    Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings, the
+    ČNB overnight deposit facility and ČNB lombard (marginal lending) borrowings.
 
     **Transactional outbox.** Events are written to `treasury_outbox` in the same transaction as
     the deal row, its timeline entry and its ledger journal reference, and dispatched afterwards
@@ -88,7 +88,7 @@ components:
   schemas:
     ProductType:
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY]
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
 
     SourceService:
       type: string

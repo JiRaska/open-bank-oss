@@ -18,11 +18,14 @@ import java.util.UUID
  * - [MM_PLACEMENT]: the bank LENDS to another bank (an asset, consumes that bank's credit limit).
  * - [MM_BORROWING]: the bank BORROWS from another bank (a liability, consumes no credit limit).
  * - [CNB_DEPOSIT_FACILITY]: overnight deposit at the Czech National Bank (an asset, CZK only).
+ * - [CNB_LOMBARD]: overnight borrowing from the ČNB marginal lending (lombard) facility against
+ *   eligible collateral (a liability, CZK only, #10896). The collateral pledge is NOT modelled.
  */
-enum class ProductType(val isAsset: Boolean) {
+enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
     MM_PLACEMENT(isAsset = true),
     MM_BORROWING(isAsset = false),
-    CNB_DEPOSIT_FACILITY(isAsset = true),
+    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true),
+    CNB_LOMBARD(isAsset = false, isCnbFacility = true),
 }
 
 /**
@@ -120,13 +123,17 @@ data class Deal(
         require(rate <= MAX_RATE) { "rate is an annual percentage and must not exceed $MAX_RATE" }
         require(!valueDate.isBefore(tradeDate)) { "valueDate must not precede tradeDate" }
         require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
-        if (product == ProductType.CNB_DEPOSIT_FACILITY) {
-            require(currency == CZK) { "the ČNB deposit facility is CZK only" }
+        if (product.isCnbFacility) {
+            val facility = if (product == ProductType.CNB_LOMBARD) "lombard facility" else "deposit facility"
+            require(currency == CZK) { "the ČNB $facility is CZK only" }
             require(counterpartyId == CNB_COUNTERPARTY_ID) {
-                "the ČNB deposit facility's counterparty is $CNB_COUNTERPARTY_ID"
+                "the ČNB $facility's counterparty is $CNB_COUNTERPARTY_ID"
             }
             require(maturityDate == DayCount.nextBusinessDay(valueDate)) {
-                "the ČNB deposit facility is overnight: maturityDate must be the next business day"
+                "the ČNB $facility is overnight: maturityDate must be the next business day"
+            }
+            if (product == ProductType.CNB_LOMBARD) {
+                require(rate.signum() > 0) { "the ČNB lombard rate must be positive" }
             }
         } else {
             require(counterpartyId != CNB_COUNTERPARTY_ID) { "interbank products cannot face the central bank" }
@@ -324,7 +331,7 @@ data class Deal(
                 require(!rationale.isNullOrBlank()) { "an agent-drafted deal must carry its rationale (ADR-0315 D10)" }
             }
             val maturity = when {
-                product == ProductType.CNB_DEPOSIT_FACILITY -> DayCount.nextBusinessDay(valueDate)
+                product.isCnbFacility -> DayCount.nextBusinessDay(valueDate)
                 maturityDate == null -> DayCount.nextBusinessDay(valueDate) // overnight
                 else -> maturityDate
             }

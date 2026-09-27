@@ -5,6 +5,7 @@ package com.openbank.account.integration
 
 import com.openbank.libs.security.Roles
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -30,7 +31,10 @@ import java.util.UUID
  * deliberate design decision left to the second approver, not something this contract asserts away.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 class AccountSearchApiIT {
 
     private val partyId = UUID.fromString("00000000-1111-0000-0000-000000000001")
