@@ -61,7 +61,11 @@ class PercentilesTest {
 
         // Same configured percentiles.
         assertThat(helperTimer.takeSnapshot().percentileValues().map { it.percentile() })
-            .containsExactlyInAnyOrderElementsOf(handBuiltTimer.takeSnapshot().percentileValues().map { it.percentile() })
+            .containsExactlyInAnyOrderElementsOf(
+                handBuiltTimer.takeSnapshot().percentileValues().map {
+                    it.percentile()
+                },
+            )
 
         // Same histogram flag, proved via a real scrape: `_bucket` series only appear when
         // publishPercentileHistogram() was called. This is the assertion that actually fails if
@@ -99,7 +103,11 @@ class PercentilesTest {
         assertThat(helperSummary!!.id).isEqualTo(handBuiltSummary!!.id)
 
         assertThat(helperSummary.takeSnapshot().percentileValues().map { it.percentile() })
-            .containsExactlyInAnyOrderElementsOf(handBuiltSummary.takeSnapshot().percentileValues().map { it.percentile() })
+            .containsExactlyInAnyOrderElementsOf(
+                handBuiltSummary.takeSnapshot().percentileValues().map {
+                    it.percentile()
+                },
+            )
 
         assertThat(viaHelper.scrape()).contains("openbank_test_summary_bucket")
         assertThat(viaHandBuilt.scrape()).contains("openbank_test_summary_bucket")
