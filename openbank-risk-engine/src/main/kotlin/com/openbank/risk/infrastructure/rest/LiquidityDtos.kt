@@ -234,7 +234,10 @@ private fun LiquidityAnalysis.assumptions(): LiquidityAssumptionsDto {
             "100% (¶43(c)) — a proxy for d295 footnote 19's > 90 days past due, which the data does not carry.",
         notInData =
         "No undrawn committed facilities (d238 ¶131), no term deposits, no issued debt, no derivatives and " +
-            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, not zero-weighted.",
+            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, " +
+            "not zero-weighted. " +
+            "The one secured funding line is the ČNB lombard (GL 2320, 0% outflow / 0% ASF); the collateral " +
+            "pledged for it is not in the snapshot, so HQLA may be overstated while it is outstanding.",
         currencyAggregation = Liquidity.AGGREGATION_NOTE,
     )
 }

@@ -208,7 +208,8 @@ openbank:
       parameter-sets:
         bcbs-d238-d295:
           # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
-          version: "2"
+          # "3": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
+          version: "3"
           regime: bcbs
           source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
           factors:
@@ -222,6 +223,7 @@ openbank:
             lcr-retail-less-stable-runoff: 0.10  # d238 ¶79 (minimum)
             lcr-operational-deposit-runoff: 0.25 # d238 ¶93
             lcr-other-contractual-outflow: 1.00  # d238 ¶141
+            lcr-central-bank-secured-outflow: 0  # d238 ¶114-115
             lcr-retail-loan-inflow: 0.50         # d238 ¶153
             lcr-fi-inflow: 1.00                  # d238 ¶154
             lcr-operational-deposit-inflow: 0    # d238 ¶156 (and ¶98)
@@ -231,6 +233,7 @@ openbank:
             nsfr-asf-retail-less-stable: 0.90    # d295 ¶23
             nsfr-asf-operational-deposit: 0.50   # d295 ¶24(b)
             nsfr-asf-other: 0                    # d295 ¶25
+            nsfr-asf-central-bank-under-6m: 0    # d295 ¶25 — sub-paragraph UNVERIFIED
             nsfr-rsf-cash-and-reserves: 0        # d295 ¶36(a),(b)
             nsfr-rsf-l1-securities: 0.05         # d295 ¶37
             nsfr-rsf-l2a: 0.15                   # d295 ¶39(a)
@@ -247,7 +250,8 @@ openbank:
         # LiquidityFactor KDoc). Retail higher-outflow categories (Art. 25(2)-(3)) and non-operational
         # corporate deposits (Art. 28) are not modelled: no GL class maps to them.
         eu-2015-61-crr2:
-          version: "1"
+          # "2": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
+          version: "2"
           regime: eu
           source: "Delegated Regulation (EU) 2015/61 as amended by (EU) 2018/1620 (LCR) and Regulation (EU) 575/2013 Part Six Title IV as amended by (EU) 2019/876 (NSFR); UNVERIFIED factors keep the BCBS d238/d295 value"
           factors:
@@ -261,6 +265,7 @@ openbank:
             lcr-retail-less-stable-runoff: 0.10         # 2015/61 Art. 25(1); Art. 25(2)-(3) categories not modelled
             lcr-operational-deposit-runoff: 0.25        # 2015/61 Art. 27(1)(a), 27(2)
             lcr-other-contractual-outflow: 1.00         # 2015/61 Art. 22(1) — paragraph UNVERIFIED, conservative 100%
+            lcr-central-bank-secured-outflow: 0         # 2015/61 Art. 28(3)(a)
             lcr-retail-loan-inflow: 0.50                # 2015/61 Art. 32(3)(a)
             lcr-fi-inflow: 1.00                         # 2015/61 Art. 32(2)(a)
             lcr-operational-deposit-inflow: 0           # 2015/61 Art. 32(3)(d)
@@ -270,6 +275,7 @@ openbank:
             nsfr-asf-retail-less-stable: 0.90           # CRR Art. 428m
             nsfr-asf-operational-deposit: 0.50          # CRR Art. 428l — point UNVERIFIED
             nsfr-asf-other: 0                           # CRR Art. 428k
+            nsfr-asf-central-bank-under-6m: 0           # CRR Art. 428k — paragraph UNVERIFIED
             nsfr-rsf-cash-and-reserves: 0               # CRR Art. 428r(1)
             nsfr-rsf-l1-securities: 0                   # CRR Art. 428r(1) — DIFFERS from d295 ¶37 (5%)
             nsfr-rsf-l2a: 0.15                          # UNVERIFIED — BCBS d295 ¶39(a) value kept
@@ -322,6 +328,12 @@ openbank:
           "2301": other-liability
           "2310": other-liability
           "2311": other-liability
+          # 2320 "Borrowings from CNB (lombard)" (#10896): OVERNIGHT, secured on collateral pledged at
+          # the ČNB. 0% LCR outflow (2015/61 Art. 28(3)(a); d238 ¶114-115) and 0% ASF as a central-bank
+          # liability < 6 months (CRR Art. 428k, paragraph UNVERIFIED; d295 ¶25, sub-paragraph
+          # UNVERIFIED). The pledged collateral is NOT modelled: while 2320 is non-zero every result
+          # carries a note that HQLA may be overstated.
+          "2320": central-bank-secured-funding
           "1300": other-asset
           "1301": other-asset
           "1302": other-asset

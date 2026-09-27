@@ -198,4 +198,26 @@ class LiquidityTest {
         assertThat(r.total).isNull()
         assertThat(r.notes.single()).isEqualTo(Liquidity.AGGREGATION_NOTE)
     }
+
+    @Test
+    fun `a CNB lombard balance on 2320 is classified at 0 percent outflow and ASF, and carries the collateral note`() {
+        val r = run(listOf(gl("2320", "LIABILITY", "-1000"), gl("1510", "ASSET", "1000")))
+        assertThat(r.unclassified).isEmpty()
+        val out = r.total!!.lcr.outflows.single { it.glAccountCode == "2320" }
+        assertThat(out.factorKey).isEqualTo("lcr-central-bank-secured-outflow")
+        assertThat(out.amount).isEqualByComparingTo("1000")
+        assertThat(out.weighted).isEqualByComparingTo("0")
+        assertThat(out.citation).contains("Art. 28(3)(a)")
+        val asf = r.total!!.nsfr.asf.single { it.glAccountCode == "2320" }
+        assertThat(asf.factorKey).isEqualTo("nsfr-asf-central-bank-under-6m")
+        assertThat(asf.weighted).isEqualByComparingTo("0")
+        assertThat(r.notes).contains(Liquidity.PLEDGED_COLLATERAL_NOTE)
+    }
+
+    @Test
+    fun `no collateral note without a lombard balance, nor for a zero one`() {
+        assertThat(run(listOf(gl("1510", "ASSET", "1000"))).notes).doesNotContain(Liquidity.PLEDGED_COLLATERAL_NOTE)
+        assertThat(run(listOf(gl("2320", "LIABILITY", "0"), gl("1510", "ASSET", "1000"))).notes)
+            .doesNotContain(Liquidity.PLEDGED_COLLATERAL_NOTE)
+    }
 }

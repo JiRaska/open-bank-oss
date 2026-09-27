@@ -137,6 +137,17 @@ object Liquidity {
         "Computed per currency. A total across currencies needs conversion to one reporting currency, which " +
             "the engine does not do yet, so the total is reported only for a single-currency book."
 
+    /**
+     * Present only while a central-bank secured funding balance (ČNB lombard, GL 2320) is non-zero.
+     * The lombard is secured on collateral pledged at the ČNB; encumbered assets are not HQLA
+     * (EU 2015/61 Art. 7(2); BCBS d238 ¶31 — paragraph UNVERIFIED) and carry a higher RSF. The snapshot has no collateral
+     * data, so nothing is removed from the stock — this note says so instead of faking the pledge.
+     */
+    const val PLEDGED_COLLATERAL_NOTE =
+        "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it is not " +
+            "modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock and the LCR " +
+            "may be overstated, and the RSF of the pledged assets understated."
+
     fun compute(
         positions: List<Position>,
         instruments: List<Instrument>,
@@ -145,6 +156,7 @@ object Liquidity {
     ): LiquidityResult {
         val byId = instruments.associateBy { it.id }
         val unclassified = mutableListOf<UnclassifiedBalance>()
+        var centralBankSecuredFunding = false
         val currencies = positions.map { it.currency }.distinct().sorted().map { ccy ->
             val acc = Accumulator(params)
             positions.filter { it.currency == ccy }.forEach { p ->
@@ -166,6 +178,9 @@ object Liquidity {
                                 )
                             }
                         } else {
+                            if (cls == GlClass.CENTRAL_BANK_SECURED_FUNDING && p.amount.signum() != 0) {
+                                centralBankSecuredFunding = true
+                            }
                             acc.glAccount(p, cls)
                         }
                     }
@@ -178,7 +193,10 @@ object Liquidity {
             currencies = currencies,
             totalCurrency = currencies.singleOrNull()?.currency,
             unclassified = unclassified,
-            notes = listOfNotNull(AGGREGATION_NOTE.takeIf { currencies.size > 1 }),
+            notes = listOfNotNull(
+                AGGREGATION_NOTE.takeIf { currencies.size > 1 },
+                PLEDGED_COLLATERAL_NOTE.takeIf { centralBankSecuredFunding },
+            ),
         )
     }
 
@@ -384,6 +402,10 @@ object Liquidity {
                 GlClass.OTHER_LIABILITY -> {
                     outflows += line(label, code, liability, LiquidityFactor.LCR_OTHER_CONTRACTUAL_OUTFLOW)
                     asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
+                }
+                GlClass.CENTRAL_BANK_SECURED_FUNDING -> {
+                    outflows += line(label, code, liability, LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW)
+                    asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M)
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
             }

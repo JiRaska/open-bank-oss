@@ -29,6 +29,14 @@ import java.math.BigDecimal
  *    [NSFR_RSF_OTHER_ASSET]: value agrees with BCBS; article point not confirmed.
  *  - [LCR_L2B_OTHER_HAIRCUT], [LCR_OTHER_CONTRACTUAL_OUTFLOW]: value agrees; paragraph not confirmed.
  *
+ *  - [NSFR_ASF_CENTRAL_BANK_UNDER_6M]: 0% agrees with BCBS; the CRR Art. 428k paragraph / point
+ *    naming central-bank liabilities < 6 months is not confirmed, and the BCBS d295 sub-paragraph
+ *    of ¶25 is not confirmed either.
+ *
+ * Central-bank secured funding (ČNB lombard, GL 2320, #10896): [LCR_CENTRAL_BANK_SECURED_OUTFLOW]
+ * is 0% under EU 2015/61 Art. 28(3)(a) and BCBS d238 ¶114-115. The pledged collateral is NOT
+ * modelled (see [Liquidity.PLEDGED_COLLATERAL_NOTE]).
+ *
  * The one VALUE that differs for a category the engine models: [NSFR_RSF_L1_SECURITIES], 0% under
  * CRR Art. 428r(1) against 5% under d295 ¶37.
  */
@@ -83,6 +91,11 @@ enum class LiquidityFactor(val key: String, val citation: String, val euCitation
         "BCBS d238 ¶141 (other contractual outflows, 100%)",
         "EU 2015/61 Art. 22(1) (liabilities due within 30 days, 100% conservative; paragraph for this category UNVERIFIED)",
     ),
+    LCR_CENTRAL_BANK_SECURED_OUTFLOW(
+        "lcr-central-bank-secured-outflow",
+        "BCBS d238 ¶114-115 (secured funding transactions with the central bank, 0%)",
+        "EU 2015/61 Art. 28(3)(a) (secured lending and capital market-driven transactions with a central bank, 0%)",
+    ),
     LCR_RETAIL_LOAN_INFLOW(
         "lcr-retail-loan-inflow",
         "BCBS d238 ¶153 (retail / small business inflows, 50%)",
@@ -127,6 +140,11 @@ enum class LiquidityFactor(val key: String, val citation: String, val euCitation
         "nsfr-asf-other",
         "BCBS d295 ¶25 (all other liabilities and equity, 0%)",
         "CRR Art. 428k (liabilities without a higher factor, 0%)",
+    ),
+    NSFR_ASF_CENTRAL_BANK_UNDER_6M(
+        "nsfr-asf-central-bank-under-6m",
+        "BCBS d295 ¶25 (funding from central banks with residual maturity < 6 months, 0%; sub-paragraph UNVERIFIED)",
+        "CRR Art. 428k (liabilities to central banks with residual maturity < 6 months, 0%; paragraph UNVERIFIED)",
     ),
     NSFR_RSF_CASH_AND_RESERVES(
         "nsfr-rsf-cash-and-reserves",
@@ -218,6 +236,11 @@ enum class GlClass(val wire: String, val description: String) {
     OTHER_LIABILITY(
         "other-liability",
         "Other liability without stated maturity: assumed due within 30 days (d238 ¶141), 0% ASF (d295 ¶25(b))",
+    ),
+    CENTRAL_BANK_SECURED_FUNDING(
+        "central-bank-secured-funding",
+        "Secured borrowing from the central bank, residual maturity < 6 months (ČNB lombard): " +
+            "0% outflow (d238 ¶114-115), 0% ASF (d295 ¶25); pledged collateral not modelled",
     ),
     CURRENT_YEAR_RESULT("current-year-result", "Income / expense not yet closed to equity: 0% ASF (d295 ¶25(a))"),
     ;
