@@ -709,13 +709,13 @@ components:
           type: [number, 'null']
           description: >
             Ledger GL net (debit − credit of native amounts in the statement currency) as of the
-            day before the statement's earliest date. NULL only when the ledger does not hold the
+            opening (OPBD) balance's date. NULL only when the ledger does not hold the
             GL account (see balanceNotStated).
         openingDifference: {type: [number, 'null'], description: NULL whenever ledgerOpeningBalance is}
         statementClosingBalance: {type: number}
         ledgerClosingBalance:
           type: [number, 'null']
-          description: Ledger GL net in the statement currency as of the statement date. NULL as ledgerOpeningBalance.
+          description: Ledger GL net in the statement currency as of the closing (CLBD) balance's date. NULL as ledgerOpeningBalance.
         closingDifference: {type: [number, 'null'], description: NULL whenever ledgerClosingBalance is}
         balanceNotStated:
           type: [string, 'null']
@@ -739,3 +739,10 @@ components:
         unmatchedLedgerLines:
           type: array
           items: {$ref: '#/components/schemas/NostroLedgerLine'}
+        outOfPeriodEntries:
+          type: array
+          description: >
+            Statement entries booked outside the period its balances describe (after the OPBD date,
+            up to the CLBD date). Refused at upload today; a statement stored before that rule still
+            reconciles, and each such entry is listed here AND in unmatchedStatementEntries.
+          items: {$ref: '#/components/schemas/NostroStatementEntry'}

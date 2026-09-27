@@ -218,6 +218,45 @@ class NostroReconciliationApiIT {
         upload(fixture("SYNTH-IT-DEALER")).then().statusCode(403)
     }
 
+    /**
+     * A statement stored under #11052's rules may carry an entry dated after its CLBD date. The
+     * period check is an UPLOAD rule: reading such a row must still reconcile (200), with the entry
+     * unmatched and flagged in outOfPeriodEntries — never a 400/500 on a statement already accepted.
+     */
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a stored statement with an entry after its closing date still reconciles, the entry flagged`() {
+        val id: String = upload(fixture("SYNTH-IT-LEGACY-${UUID.randomUUID()}".take(40)))
+            .then().statusCode(201).extract().path("id")
+        // What a pre-V8-rule upload could have stored: entry 1 booked the day after CLBD.
+        jdbc { c ->
+            c.prepareStatement(
+                "update nostro_statement_entries set booking_date = ? where statement_uuid = ?::uuid and sequence = 1",
+            ).use { ps ->
+                ps.setObject(1, NostroFixtures.DATE.plusDays(1))
+                ps.setString(2, id)
+                check(ps.executeUpdate() == 1)
+            }
+        }
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(200)
+            .body("outOfPeriodEntries", hasSize<Any>(1))
+            .body("outOfPeriodEntries[0].sequence", equalTo(1))
+            .body("outOfPeriodEntries[0].bookingDate", equalTo(NostroFixtures.DATE.plusDays(1).toString()))
+            .body("unmatchedStatementEntries.sequence", org.hamcrest.Matchers.hasItem(1))
+            .body("reconciled", equalTo(false))
+    }
+
+    private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
+        val cfg = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            cfg.getValue("quarkus.datasource.username", String::class.java),
+            cfg.getValue("quarkus.datasource.password", String::class.java),
+        ).use(block)
+    }
+
     private fun entryRows(id: String): Int {
         val cfg = ConfigProvider.getConfig()
         DriverManager.getConnection(

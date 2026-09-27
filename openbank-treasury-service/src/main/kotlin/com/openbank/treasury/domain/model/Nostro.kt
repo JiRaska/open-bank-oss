@@ -59,7 +59,19 @@ data class NostroStatement(
         require(ChronoUnit.DAYS.between(openingDate, statementDate) <= MAX_SPAN_DAYS) {
             "statement $statementId spans $openingDate..$statementDate, more than $MAX_SPAN_DAYS days"
         }
-        entries.firstOrNull { it.bookingDate !in firstDate..statementDate }?.let {
+    }
+
+    /**
+     * Entries booked outside ([openingDate], [statementDate]]. Refused at UPLOAD
+     * ([requireWithinPeriod]); a statement stored before that rule still loads, and reconciliation
+     * lists these as unmatched and flagged rather than refusing the whole statement.
+     */
+    val outOfPeriodEntries: List<StatementEntry>
+        get() = entries.filter { it.bookingDate !in firstDate..statementDate }
+
+    /** The upload-time rule: every entry inside the period its balances describe, else a 400. */
+    fun requireWithinPeriod(): NostroStatement = apply {
+        outOfPeriodEntries.firstOrNull()?.let {
             throw IllegalArgumentException(
                 "statement $statementId entry ${it.sequence} is booked on ${it.bookingDate}, outside the " +
                     "period its balances describe (after $openingDate, up to $statementDate)",
@@ -126,6 +138,9 @@ data class NostroReconciliation(
         }
     }
 
+    /** Unmatched entries booked outside the statement's own period (only on statements stored before that was refused). */
+    val outOfPeriodEntries: List<StatementEntry> get() = statement.outOfPeriodEntries
+
     val openingDifference: BigDecimal? get() = ledgerOpeningBalance?.let { statement.openingBalance.subtract(it) }
     val closingDifference: BigDecimal? get() = ledgerClosingBalance?.let { statement.closingBalance.subtract(it) }
 
@@ -160,17 +175,19 @@ object NostroMatcher {
         ledgerClosingBalance: BigDecimal?,
         balanceNotStated: String? = null,
     ): NostroReconciliation {
+        // An out-of-period entry is never paired: the lines were read over the period only.
+        val outside = statement.outOfPeriodEntries.toSet()
         val openEntries = statement.entries.toMutableList()
         val openLines = ledgerLines.toMutableList()
         val matches = mutableListOf<NostroMatch>()
 
-        for (entry in statement.entries) {
+        for (entry in statement.entries.filterNot { it in outside }) {
             val line = openLines.firstOrNull { sameMovement(entry, it) && referenceAgrees(entry, it) } ?: continue
             matches += NostroMatch(entry, line, MatchType.EXACT)
             openEntries.remove(entry)
             openLines.remove(line)
         }
-        for (entry in openEntries.toList()) {
+        for (entry in openEntries.filterNot { it in outside }) {
             val candidates = openLines.filter { sameMovement(entry, it) }
             val rivals = openEntries.filter { e -> candidates.any { sameMovement(e, it) } }
             if (candidates.size == 1 && rivals.size == 1) {

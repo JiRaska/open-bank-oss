@@ -79,7 +79,7 @@ object Camt053Parser {
             openingBalance = signed(opening),
             closingBalance = signed(closing),
             entries = entries,
-        )
+        ).requireWithinPeriod()
     }
 
     private fun entry(sequence: Int, ntry: Element): StatementEntry {
