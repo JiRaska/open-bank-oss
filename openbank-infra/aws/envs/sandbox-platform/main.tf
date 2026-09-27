@@ -437,6 +437,14 @@ resource "helm_release" "argocd" {
       name  = "notifications.enabled"
       value = "false"
     },
+    # Chart 10.0.0 flipped global.networkPolicy.create false -> true, adding
+    # upstream NetworkPolicies to every argocd component. Kept false so the
+    # 3.4 -> 3.5 upgrade changes no traffic path; enabling them is a separate,
+    # testable change (repo-server/redis ingress, webhook and metrics callers).
+    {
+      name  = "global.networkPolicy.create"
+      value = "false"
+    },
     # Server-Side Diff, cluster-wide. ServerSideApply=true (our default sync
     # option) otherwise triggers ArgoCD's *Structured-Merge* diff, which builds a
     # typed value from the live object using ArgoCD's BUNDLED OpenAPI schema. On
