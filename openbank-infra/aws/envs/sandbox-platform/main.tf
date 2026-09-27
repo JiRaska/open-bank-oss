@@ -60,7 +60,37 @@ resource "helm_release" "cert_manager" {
 # created in the substrate root), so the ServiceAccount needs no IRSA
 # annotation; only the name must match ("karpenter").
 # ---------------------------------------------------------------------------
+# Karpenter CRDs, applied BEFORE the controller. Helm installs a chart's crds/
+# directory on first install only and never upgrades it, so a chart-only bump
+# leaves the cluster on the previous version's CRDs while the new controller
+# expects the new schema (the upgrade guide's standing advice is to manage CRDs
+# separately). These are the files the chart ships (pkg/apis/crds at the pinned
+# tag), vendored per version so the plan shows exactly what changes. Server-side
+# apply with force_conflicts takes field ownership from Helm's original install
+# without deleting the CRD — a CRD delete would cascade to every NodePool,
+# NodeClaim and EC2NodeClass. prevent_destroy guards that same cascade.
+resource "kubectl_manifest" "karpenter_crd" {
+  for_each = fileset("${path.module}/karpenter-crds/${var.karpenter_version}", "*.yaml")
+
+  yaml_body         = file("${path.module}/karpenter-crds/${var.karpenter_version}/${each.value}")
+  server_side_apply = true
+  force_conflicts   = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "helm_release" "karpenter" {
+  depends_on = [kubectl_manifest.karpenter_crd]
+
+  lifecycle {
+    precondition {
+      condition     = length(fileset("${path.module}/karpenter-crds/${var.karpenter_version}", "*.yaml")) > 0
+      error_message = "No vendored CRDs in karpenter-crds/${var.karpenter_version}/ — vendor pkg/apis/crds from that Karpenter tag with the version bump."
+    }
+  }
+
   name       = "karpenter"
   namespace  = "kube-system"
   repository = "oci://public.ecr.aws/karpenter"

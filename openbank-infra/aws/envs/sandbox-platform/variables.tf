@@ -16,7 +16,17 @@ variable "karpenter_version" {
   # within range; the v1 CRDs are unchanged so the controller-only upgrade clears
   # the panic without CRD surgery. Bump this in lockstep whenever
   # envs/sandbox-substrate raises the cluster version.
-  default = "1.12.1"
+  #
+  # 1.12.1 -> 1.13.1 (#10893): EKS 1.36 needs Karpenter >= 1.13, and 1.13.1
+  # still supports 1.35, so this lands BEFORE the control-plane bump — the order
+  # that avoids a repeat of the crashloop above (controller never behind the
+  # control plane). Upgrade guide: no breaking changes in 1.13. The CRDs DID
+  # change (additive EC2NodeClass fields, list/map-type markers), and Helm never
+  # upgrades crds/, so they are applied from karpenter-crds/<version>/ ahead of
+  # the chart — a new version needs that directory vendored alongside this bump,
+  # or the plan fails (a precondition on helm_release.karpenter) rather than
+  # silently skipping the CRDs.
+  default = "1.13.1"
 }
 
 variable "argocd_version" {
