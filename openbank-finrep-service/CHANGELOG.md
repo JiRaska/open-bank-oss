@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.12.0...finrep-service-v0.13.0) (2026-09-27)
+
+
+### Features
+
+* **finrep:** render C 02.00 from the engine's CZK total ([#11169](https://github.com/JiRaska/open-bank-oss/issues/11169)) ([7f567a9](https://github.com/JiRaska/open-bank-oss/commit/7f567a976ca57f26daf2d3eafb2a8a68850f451d))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.11.0...finrep-service-v0.12.0) (2026-09-27)
 
 
