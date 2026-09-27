@@ -5531,6 +5531,7 @@ gates:
     mode: advisory
     rationale: "Per-service Cipher/Transit code duplicates key handling, AAD binding and fail-closed error handling that ADR-0320 P3 centralises in libs; a ratchet stops new copies while card-issuance migrates."
     review_after: "2027-03-26"
+    verified: "2026-09-27 — ran check-field-crypto-in-libs.py on the branch: 2857 subjects, 8 service files with local field crypto, all 8 baselined, exit 0; advisory until card-issuance (ADR-0262) migrates to FieldProtector"
     budget_seconds: 10
     min_subjects: 1000   # 2857 service src/main .kt/.java/.sql files scanned 2026-09-27
     selftest: python3 .github/scripts/check-field-crypto-in-libs.py --self-test

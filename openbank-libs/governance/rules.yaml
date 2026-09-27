@@ -3545,6 +3545,7 @@ field_protection:
   # ADVISORY until card-issuance (first consumer, ADR-0262) migrates, per ADR-0320's
   # advisory-first convention for P1/P3 gates.
   enforced: advisory
+  target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
   ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
 
 realm_devci_artifact_parity:
