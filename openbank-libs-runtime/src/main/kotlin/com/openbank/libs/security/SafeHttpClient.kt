@@ -97,21 +97,21 @@ class SafeHttpClient private constructor(
                 InetSocketAddress(pinned, target.port),
                 Duration.ofMillis(minOf(connectTimeout.toMillis(), remainingMs(deadline))),
             )
-        var socket: Socket = raw
         try {
             raw.soTimeout = boundedTimeoutMs(deadline)
-            if (target.scheme == "https") socket = wrapTls(raw, target)
-            check(socket.inetAddress == pinned) { "connected address differs from the vetted one" }
-            val out = socket.getOutputStream()
-            out.write(head)
-            request.body?.let(out::write)
-            out.flush()
-            val input = BufferedInputStream(DeadlineInputStream(socket, deadline, readTimeout.toMillis()))
-            return readResponse(input, request.method.uppercase())
+            val exchange = { socket: Socket ->
+                check(socket.inetAddress == pinned) { "connected address differs from the vetted one" }
+                val out = socket.getOutputStream()
+                out.write(head)
+                request.body?.let(out::write)
+                out.flush()
+                val input = BufferedInputStream(DeadlineInputStream(socket, deadline, readTimeout.toMillis()))
+                readResponse(input, request.method.uppercase())
+            }
+            return if (target.scheme == "https") overTls(raw, target, exchange) else exchange(raw)
         } finally {
             // Every path — handshake failure, timeout, parse error — releases the raw socket too.
-            runCatching { socket.close() }
-            if (socket !== raw) runCatching { raw.close() }
+            runCatching { raw.close() }
         }
     }
 
@@ -152,7 +152,12 @@ class SafeHttpClient private constructor(
         }
     }
 
-    private fun wrapTls(raw: Socket, target: EgressTarget): Socket {
+    /**
+     * Runs [exchange] over a TLS layer on [raw]. The I/O happens HERE, on the same `tls` whose
+     * parameters (HTTPS endpoint identification, SNI, TLS 1.2+) were just set and whose handshake
+     * completed — so no unverified SSLSocket ever escapes this function.
+     */
+    private fun <T> overTls(raw: Socket, target: EgressTarget, exchange: (Socket) -> T): T {
         val ctx = sslContextOverride ?: SSLContext.getDefault()
         // host here is the ORIGINAL name (no trailing dot): it becomes the SSLSession peer host, so
         // the default trust manager's HTTPS identity check runs against the name, never the pinned IP.
@@ -164,11 +169,10 @@ class SafeHttpClient private constructor(
         tls.sslParameters = params
         try {
             tls.startHandshake()
-        } catch (e: IOException) {
+            return exchange(tls)
+        } finally {
             runCatching { tls.close() }
-            throw e
         }
-        return tls
     }
 
     private fun requestHead(target: EgressTarget, request: EgressRequest): ByteArray {
