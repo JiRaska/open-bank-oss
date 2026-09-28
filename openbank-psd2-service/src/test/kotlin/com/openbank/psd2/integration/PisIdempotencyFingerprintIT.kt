@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
@@ -14,6 +15,7 @@ import com.openbank.psd2.infrastructure.client.TppAuthorizationGuard
 import com.openbank.psd2.infrastructure.client.TppAuthorizationResponse
 import com.openbank.psd2.infrastructure.client.TppRegistryRestClient
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -48,7 +50,10 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @QuarkusTest
 @TestProfile(PisIdempotencyFingerprintIT.Profile::class)
-@QuarkusTestResource(com.openbank.psd2.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_psd2_it")],
+)
 class PisIdempotencyFingerprintIT {
 
     class Profile : QuarkusTestProfile {
