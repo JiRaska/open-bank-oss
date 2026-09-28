@@ -30,7 +30,7 @@ spec:
   source:
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
     chart: opentelemetry-collector
-    targetRevision: 0.158.0
+    targetRevision: 0.173.1
     helm:
       valuesObject:
         fullnameOverride: rum-gateway
@@ -91,9 +91,9 @@ spec:
             nginx.ingress.kubernetes.io/limit-rps: "20"
             nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
             nginx.ingress.kubernetes.io/proxy-body-size: "512k"
-            nginx.ingress.kubernetes.io/configuration-snippet: |
-              more_set_headers "X-Content-Type-Options: nosniff";
-              more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains";
+            # No header annotation: the two headers this host needs (nosniff,
+            # HSTS) are set by the controller on every response (ADR-0324
+            # interim hardening), so the former configuration-snippet is gone.
           hosts:
             - host: rum.open-bank.tech
               paths:
@@ -208,7 +208,7 @@ spec:
           exporters:
             # TB-3: in-VPC hop to Tempo. The redacted, validated spans join the
             # same backend → one trace from the user's tap to the ledger write.
-            otlp/tempo:
+            otlp_grpc/tempo:
               endpoint: tempo.observability.svc:4317
               tls:
                 insecure: true
@@ -223,7 +223,7 @@ spec:
               traces:
                 receivers: [otlp]
                 processors: [memory_limiter, redaction, transform, probabilistic_sampler, batch]
-                exporters: [otlp/tempo]
+                exporters: [otlp_grpc/tempo]
         resources:
           requests:
             cpu: 100m

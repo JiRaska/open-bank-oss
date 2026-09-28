@@ -1,7 +1,9 @@
 # Public API Ingress for the payment pipeline (payments namespace).
-# Routes /api/v1/sepa-payments, /api/v1/domestic-payments, /api/v1/payments/instant
+# Routes /api/v1/sepa-payments, /api/v1/domestic-payments, /api/v1/sepa-instant-payments
 # and /api/v1/transactions to the respective ClusterIP services. All paths require
-# a bearer token (Keycloak openbank realm); the services validate it via OIDC.
+# a bearer token (Keycloak openbank realm), and the SERVICES validate it via OIDC —
+# the edge does NOT authenticate these requests (there is no auth-url here). The edge
+# only terminates TLS and rate-limits.
 #
 # Separate from the admin-ui Ingress (admin.open-bank.tech) — this is the developer
 # REST API surface, not the operator UI.
@@ -19,11 +21,15 @@ metadata:
     nginx.ingress.kubernetes.io/limit-rps: "20"
     nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
     nginx.ingress.kubernetes.io/limit-connections: "10"
-    # Payment APIs require auth — enforce at ingress level too (belt+suspenders).
-    nginx.ingress.kubernetes.io/auth-response-headers: Authorization
-    # Preserve the original Host header so OIDC issuer validation works correctly
-    # (Keycloak discovery returns the public issuer, not the cluster-internal one).
-    nginx.ingress.kubernetes.io/proxy-set-headers: "payments/payments-api-headers"
+    # No edge auth and no header rewriting, on purpose. Two annotations that claimed
+    # otherwise were removed (#11258) because ingress-nginx never acted on either:
+    #   - `auth-response-headers` only copies headers back from an `auth-url`
+    #     sub-request; with no auth-url the controller skips the whole external-auth
+    #     block, so it enforced nothing (auth is the services' OIDC check, above).
+    #   - `proxy-set-headers` is a controller-ConfigMap key, not an Ingress annotation,
+    #     and the `payments/payments-api-headers` ConfigMap it named never existed.
+    # The original Host already reaches the backends: ingress-nginx sends
+    # `proxy_set_header Host $best_http_host` for every location by default.
 spec:
   ingressClassName: nginx
   tls:

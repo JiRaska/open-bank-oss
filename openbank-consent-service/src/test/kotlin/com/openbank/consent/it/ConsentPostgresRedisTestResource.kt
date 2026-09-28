@@ -29,7 +29,7 @@ class ConsentPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val pg = PostgreSQLContainer(
-            DockerImageName.parse("docker.io/library/postgres:16.3-alpine")
+            DockerImageName.parse("docker.io/library/postgres:18.6-alpine")
                 .asCompatibleSubstituteFor("postgres"),
         )
             .withUsername("openbank")

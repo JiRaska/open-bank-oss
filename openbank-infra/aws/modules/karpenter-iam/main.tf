@@ -154,7 +154,7 @@ data "aws_iam_policy_document" "controller" {
     resources = ["*"]
   }
 
-  # Three EC2 describe/read actions the upstream v1.13.1 getting-started policy
+  # Three EC2 describe/read actions the upstream v1.13.1 getting-started policy (unchanged in v1.14.1)
   # (ResourceDiscoveryPolicy's "AllowRegionalReadActions" statement) grants that
   # ours never has: ec2:DescribeCapacityReservations and ec2:DescribePlacementGroups
   # were already absent under Karpenter 1.12.1 (noted in #11123); ec2:DescribeInstanceStatus

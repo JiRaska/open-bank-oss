@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors.
+#
+# ingress-nginx configuration the Helm chart (apps/ingress-nginx.yaml) cannot carry:
+# chart 4.15.1 has no `extraObjects`, so a ConfigMap the controller MOUNTS has to come
+# from a plain manifest directory.
+#   - ingress-nginx-modsecurity-v1: the WAF engine config that replaced developer-portal's
+#     Critical-risk `modsecurity-snippet` annotation (ADR-0324 interim hardening).
+#
+# Ordering with apps/ingress-nginx.yaml is self-healing in both directions: the namespace
+# is created by that app (CreateNamespace=false here, retry below), and a controller pod
+# that references a ConfigMap which does not exist yet waits in ContainerCreating while
+# the previous pod keeps serving.
+#
+# Deleted together with apps/ingress-nginx.yaml in ADR-0324 Phase 5.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx-config
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/ingress-nginx
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
