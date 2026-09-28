@@ -22,10 +22,11 @@ import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.DelegatedAccessGrant
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
@@ -90,7 +91,10 @@ import java.util.concurrent.TimeUnit
  * passes from git and fails from the broker (or the reverse).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR"])
 @Provider("openbank-account-service")
 @PactFolder("../pacts")

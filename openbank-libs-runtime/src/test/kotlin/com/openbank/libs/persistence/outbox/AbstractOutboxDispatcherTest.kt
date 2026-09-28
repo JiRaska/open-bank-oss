@@ -243,6 +243,25 @@ class AbstractOutboxDispatcherTest {
     }
 
     @Test
+    fun `an unnamed dispatcher's service getter returns the derived name, not an empty string`() {
+        // Distinct from the two `deriveServiceName` tests below, which call the static helper
+        // directly: this one goes through the real `service` property getter on a live instance
+        // that never overrides it, so it also kills a mutant that replaces `getService`'s (or its
+        // lazy-delegate lambda's) return value with "" — a class of mutant the static-helper-only
+        // tests cannot see because they never read the property at all.
+        class WidgetOutboxDispatcher(
+            override val outboxRepository: OutboxRepository,
+            override val outboxEventPublisher: OutboxEventPublisher,
+        ) : AbstractOutboxDispatcher(mockk(relaxed = true)) {
+            fun exposedService(): String = service
+        }
+
+        val dispatcher = WidgetOutboxDispatcher(FakeRepo(emptyList()), FakePublisher())
+
+        assertThat(dispatcher.exposedService()).isEqualTo("widget")
+    }
+
+    @Test
     fun `service defaults to a kebab-case derivation of the concrete class name`() {
         assertThat(AbstractOutboxDispatcher.deriveServiceName("PartyOutboxDispatcher")).isEqualTo("party")
         assertThat(AbstractOutboxDispatcher.deriveServiceName("SepaPaymentOutboxDispatcher"))

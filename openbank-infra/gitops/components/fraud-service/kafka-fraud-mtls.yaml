@@ -57,7 +57,7 @@ spec:
 # ── ExternalSecret: fraud-service keystore ──────────────────────────────────
 # Projects the Strimzi-minted KafkaUser secret (user.p12 + user.password)
 # from `messaging` into `fraud` via the ClusterSecretStore.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -79,7 +79,7 @@ spec:
 ---
 # ── ExternalSecret: cluster CA truststore ───────────────────────────────────
 # Projects the cluster CA truststore from `messaging` into `fraud`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
