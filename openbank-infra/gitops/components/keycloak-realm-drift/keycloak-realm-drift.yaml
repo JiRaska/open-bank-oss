@@ -164,7 +164,7 @@ spec:
             # reviewable and unit-tested. This container clones the public repo (unauthenticated,
             # depth 1 — the same pattern sbom-drift-scanner uses) and executes it.
             - name: capture-and-compare
-              image: docker.io/alpine/k8s:1.34.1
+              image: docker.io/alpine/k8s:1.34.12
               command: ["/bin/sh", "-ec"]
               securityContext:
                 allowPrivilegeEscalation: false
@@ -368,7 +368,7 @@ spec:
             # Phase 2 — publish the report, THEN fail. Order is load-bearing: the alert must fire
             # with the detail already readable, not with a promise of it.
             - name: publish
-              image: docker.io/alpine/k8s:1.34.1
+              image: docker.io/alpine/k8s:1.34.12
               command: ["/bin/sh", "-ec"]
               securityContext:
                 allowPrivilegeEscalation: false

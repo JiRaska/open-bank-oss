@@ -1,0 +1,8 @@
+# Per-file COUNT of slash-less JAX-RS path-prefix checks (#10997). Measured 2026-09-26 on
+# origin/main. All three entries are the psd2 filters #10997 identified; #11008 (open) fixes all
+# three by normalising the leading slash — once it merges this file should be regenerated to
+# empty (`python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --print-baseline`).
+# A count that DROPS below its baseline is reported STALE, so the shrink itself is enforced.
+openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/rest/filter/BespokeDeprecationFilter.kt	1
+openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/rest/filter/EidasMtlsFilter.kt	3
+openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/rest/filter/QsealSignatureFilter.kt	2

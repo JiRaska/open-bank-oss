@@ -134,6 +134,19 @@ class PaymentSessionStore {
          * Mask a Czech IBAN to country + last 4 ("CZ…6789"), the only account form a payer is shown
          * (ADR-0095). Falls back to a generic mask for anything not IBAN-shaped. Package-visible for
          * unit tests.
+         *
+         * **Audited against `com.openbank.libs.security.PiiMask.iban` (#11027, fleet PII-masking
+         * adoption sweep) and kept, not migrated — the two are NOT behaviourally identical.**
+         * `PiiMask.iban` keeps the first 4 + last 4 characters and pads the middle with one `*` per
+         * hidden character (`CZ6508000000192000145399` -> `CZ65****************5399`, 25 chars, same
+         * length as the input). This function keeps only the 2-char country code + last 4, joined by
+         * a single literal `…` ("CZ…5399"), and always returns a fixed-shape string regardless of the
+         * input's length — that fixed shape is the point: the nearby-pay UI (ADR-0095) shows the payer
+         * a short, constant-width string on a BLE-paired phone screen, not a length-revealing mask.
+         * Adopting `PiiMask.iban` here would leak the account's IBAN length to the payer and would
+         * change a UI string real users see today. See
+         * `PaymentSessionStoreMaskIbanVsLibAuditTest` for a table-driven proof the two diverge on
+         * every non-trivial input.
          */
         fun maskIban(iban: String?): String {
             val clean = iban?.replace(" ", "").orEmpty()

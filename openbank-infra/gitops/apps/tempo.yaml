@@ -20,9 +20,13 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://grafana.github.io/helm-charts
+    # grafana/helm-charts `tempo` was deprecated 2026-01-30 (last: 1.24.4 / Tempo
+    # 2.9.0, affected by GHSA-ffqx-q65f-36jf). Its successor lives in the
+    # grafana-community repo; 2.4.0 ships Tempo 2.10.8 (fix landed in 2.10.3),
+    # staying on the 2.x line — chart 3.x moves to Tempo 3.0 (storage/config breaks).
+    repoURL: https://grafana-community.github.io/helm-charts
     chart: tempo
-    targetRevision: 1.24.4
+    targetRevision: 2.4.0
     helm:
       valuesObject:
         fullnameOverride: tempo

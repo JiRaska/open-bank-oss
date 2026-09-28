@@ -213,8 +213,8 @@ jobs:
           if docker info >/dev/null 2>&1; then
             echo "docker daemon: UP"
             echo "--- the question the cloud sandbox failed: can we pull a real database image? ---"
-            if timeout 180 docker pull postgres:16.3-alpine >/dev/null 2>&1; then
-              echo "TESTCONTAINERS-CAPABLE: yes (postgres:16.3-alpine pulled)"
+            if timeout 180 docker pull postgres:18.6-alpine >/dev/null 2>&1; then
+              echo "TESTCONTAINERS-CAPABLE: yes (postgres:18.6-alpine pulled)"
             else
               echo "::warning::postgres image pull FAILED on this runner — Testcontainers-backed issues are out of scope here too"
             fi
