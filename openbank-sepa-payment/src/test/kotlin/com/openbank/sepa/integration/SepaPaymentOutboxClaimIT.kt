@@ -44,6 +44,9 @@ class SepaPaymentOutboxClaimIT {
     class NoDispatchProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.outbox.dispatch-enabled" to "false",
+            // The global WireMock test resources enable oidc-client at RUNTIME; a custom profile
+            // re-augments, so the build-time value must agree or Quarkus refuses to boot.
+            "quarkus.oidc-client.enabled" to "true",
         )
     }
 
