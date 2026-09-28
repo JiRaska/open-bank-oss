@@ -149,4 +149,17 @@ class QsealSignatureFilterTest {
 
         assertThat(captured.captured.status).isEqualTo(401)
     }
+
+    // #10997: the runtime path form carries a leading slash; the write surface must still be checked.
+    @Test
+    fun `enforce mode rejects a missing signature on a slash-prefixed path`() {
+        val filter = QsealSignatureFilter(enforce = true)
+        val ctx = ctxFor("POST", "/v1/payments/sepa-credit-transfers", null, null, null, "{}".toByteArray())
+        val captured = slot<Response>()
+        every { ctx.abortWith(capture(captured)) } returns Unit
+
+        filter.filter(ctx)
+
+        assertThat(captured.captured.status).isEqualTo(401)
+    }
 }

@@ -21,7 +21,7 @@ spec:
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
     chart: kube-prometheus-stack
-    targetRevision: 87.0.0
+    targetRevision: 91.8.1
     helm:
       valuesObject:
         # Alerting plane (ADR-0082 / ADR-0077 Phase 4). Enabled with a lean

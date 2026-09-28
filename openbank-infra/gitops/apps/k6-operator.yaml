@@ -24,10 +24,10 @@ spec:
   source:
     repoURL: https://grafana.github.io/helm-charts
     chart: k6-operator
-    targetRevision: 4.4.1
+    targetRevision: 4.6.0
     # Chart defaults are correct for our use (per-run k6 pods push results to
     # Prometheus remote-write configured on the TestRun, not the operator). The
-    # k6-operator 4.4.1 chart enforces a strict values schema — an unknown key
+    # k6-operator chart (4.4.1 onward) enforces a strict values schema — an unknown key
     # like `prometheus:` fails `helm template` (ComparisonError → never installs
     # the CRDs, which in turn invalidated the TestRun in observability-components).
   destination:

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.262.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.0...admin-ui-v0.262.1) (2026-09-28)
+
+
+### Security
+
+* **kafka:** replace abandoned kafka-ui with kafbat fork v1.5.0 ([#11254](https://github.com/JiRaska/open-bank-oss/issues/11254)) ([eda65ac](https://github.com/JiRaska/open-bank-oss/commit/eda65ac12e5980d6d449ee4ebabefb6af49b951d)), closes [#11253](https://github.com/JiRaska/open-bank-oss/issues/11253)
+
 ## [0.262.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.261.0...admin-ui-v0.262.0) (2026-09-28)
 
 

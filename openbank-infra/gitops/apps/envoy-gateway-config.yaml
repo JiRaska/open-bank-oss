@@ -1,0 +1,33 @@
+# Envoy Gateway configuration (ADR-0324 Phase 0): GatewayClass `envoy`, the EnvoyProxy
+# that shapes the second NLB, the shared Gateway, metrics scraping and NetworkPolicies.
+# Retries until the envoy-gateway-crds / envoy-gateway Applications have registered the
+# CRDs and created the namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway-config
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/envoy-gateway
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

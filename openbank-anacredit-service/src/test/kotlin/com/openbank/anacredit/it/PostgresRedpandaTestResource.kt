@@ -68,7 +68,7 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     companion object {
-        private const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        private const val POSTGRES_IMAGE = "postgres:18.6-alpine"
         private const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
 
         /**

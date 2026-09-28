@@ -15,7 +15,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
 
     private companion object {
-        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
     }
 
     override fun start(): Map<String, String> {
