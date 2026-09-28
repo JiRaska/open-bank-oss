@@ -4674,7 +4674,7 @@ gates:
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
-  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml runs), the
+  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml ran then), the
   # customers template had FOUR independent import-blocking defects and could never have
   # rebuilt its realm: five `"comment"` keys (Jackson fails the whole import on an unrecognized
   # field), a 490-char client description over the 255 column cap, a 37-char authenticator in a
