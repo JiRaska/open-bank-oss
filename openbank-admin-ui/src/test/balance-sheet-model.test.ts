@@ -79,6 +79,14 @@ describe('curve quote parsing', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.errors.map(e => `${e.line}:${e.code}`)).toEqual(['1:index', '2:tenor', '3:rate', '5:duplicate', '6:format'])
   })
+  it('rejects misplaced or repeated percent signs instead of changing the quote value', () => {
+    const r = parseQuotes('CZEONIA ON 3%5\nCZEONIA 3M %3\nESTR 1Y 3%%')
+    expect(r).toEqual({ ok: false, errors: [
+      { line: 1, code: 'rate' },
+      { line: 2, code: 'rate' },
+      { line: 3, code: 'rate' },
+    ] })
+  })
   it('refuses an empty upload', () => {
     expect(parseQuotes('# nothing')).toEqual({ ok: false, errors: [{ line: 0, code: 'empty' }] })
   })

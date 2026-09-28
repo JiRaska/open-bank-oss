@@ -117,7 +117,12 @@ export function parseQuotes(text: string): QuoteParse {
     if (cols.length !== 3) { errors.push({ line: i + 1, code: 'format' }); return }
     const [index, tenorRaw, rateRaw] = cols
     const tenor = tenorRaw.toUpperCase()
-    const rate = Number(rateRaw.replace('%', '').replace(',', '.'))
+    // A percent sign is accepted only as a single suffix. Removing its first
+    // occurrence would turn malformed input such as "3%5" into a valid 35% quote.
+    const rateText = rateRaw.endsWith('%') ? rateRaw.slice(0, -1) : rateRaw
+    const rate = /^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(rateText)
+      ? Number(rateText.replaceAll(',', '.'))
+      : NaN
     if (!(CURVE_INDICES as readonly string[]).includes(index.toUpperCase())) { errors.push({ line: i + 1, code: 'index' }); return }
     if (!TENOR.test(tenor)) { errors.push({ line: i + 1, code: 'tenor' }); return }
     if (!Number.isFinite(rate) || rate < -5 || rate > 50) { errors.push({ line: i + 1, code: 'rate' }); return }
