@@ -1067,6 +1067,23 @@ money_path_services:
                                             # PENDING_APPROVAL state already is. Writes are human-only in
                                             # treasury_rest_ext.rego.
 
+# CNPG clusters that are not owned by a money-path service but sit on the money path one hop
+# away (ADR-0325). They get the money-path cluster shape -- instances >= 2, required hostname
+# anti-affinity, PDB on -- enforced by check-cnpg-update-resilience.py, which also fails an entry
+# whose cluster is gone, whose namespace no money-path workload calls, or that the per-service
+# derivation already covers. Explicit rather than derived: namespace-level one-hop derivation
+# measured 9 clusters on 2026-09-28, most of them not money-path (goalert-db, apicurio-db, ...).
+# Not here: OpenBao (namespace vault) stores on integrated Raft, not CNPG.
+money_path_platform_databases:
+  - cluster: temporal/temporal-db
+    reason: >-
+      Temporal persists every payment saga's workflow and visibility state here; while it is
+      down no transfer saga can start, advance or run its compensation.
+  - cluster: iam/keycloak-db
+    reason: >-
+      Keycloak cannot issue or refresh tokens without it, and every money-path API call and
+      service-to-service client_credentials grant depends on a Keycloak-issued JWT.
+
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
 # availability + latency target applied uniformly across every money_path_services entry
