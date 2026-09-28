@@ -15,8 +15,8 @@
 # grants Ingress write to no workload identity (only ArgoCD and cluster admins can),
 # and this rule binds both of those as well — there is no exclude block on purpose.
 #
-# THE SET is every annotation the controller-v1.15.1 risk table
-# (docs/user-guide/nginx-configuration/annotations-risk.md) classes Critical. The
+# THE SET is every annotation the controller-v1.15.1 risk table classes Critical
+# (https://github.com/kubernetes/ingress-nginx/blob/controller-v1.15.1/docs/user-guide/nginx-configuration/annotations-risk.md). The
 # controller is archived upstream, so that table can no longer change underneath
 # this list.
 #
