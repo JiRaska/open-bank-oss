@@ -144,6 +144,9 @@ component_management:
     - component_id: lending-service
       name: lending-service
       flag_regexes: ["^openbank-lending-service$"]
+    - component_id: client-product-catalog
+      name: client-product-catalog
+      flag_regexes: ["^openbank-client-product-catalog$"]
     - component_id: libs
       name: libs
       flag_regexes: ["^openbank-libs$"]

@@ -60,7 +60,37 @@ resource "helm_release" "cert_manager" {
 # created in the substrate root), so the ServiceAccount needs no IRSA
 # annotation; only the name must match ("karpenter").
 # ---------------------------------------------------------------------------
+# Karpenter CRDs, applied BEFORE the controller. Helm installs a chart's crds/
+# directory on first install only and never upgrades it, so a chart-only bump
+# leaves the cluster on the previous version's CRDs while the new controller
+# expects the new schema (the upgrade guide's standing advice is to manage CRDs
+# separately). These are the files the chart ships (pkg/apis/crds at the pinned
+# tag), vendored per version so the plan shows exactly what changes. Server-side
+# apply with force_conflicts takes field ownership from Helm's original install
+# without deleting the CRD — a CRD delete would cascade to every NodePool,
+# NodeClaim and EC2NodeClass. prevent_destroy guards that same cascade.
+resource "kubectl_manifest" "karpenter_crd" {
+  for_each = fileset("${path.module}/karpenter-crds/${var.karpenter_version}", "*.yaml")
+
+  yaml_body         = file("${path.module}/karpenter-crds/${var.karpenter_version}/${each.value}")
+  server_side_apply = true
+  force_conflicts   = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "helm_release" "karpenter" {
+  depends_on = [kubectl_manifest.karpenter_crd]
+
+  lifecycle {
+    precondition {
+      condition     = length(fileset("${path.module}/karpenter-crds/${var.karpenter_version}", "*.yaml")) > 0
+      error_message = "No vendored CRDs in karpenter-crds/${var.karpenter_version}/ — vendor pkg/apis/crds from that Karpenter tag with the version bump."
+    }
+  }
+
   name       = "karpenter"
   namespace  = "kube-system"
   repository = "oci://public.ecr.aws/karpenter"
@@ -437,6 +467,14 @@ resource "helm_release" "argocd" {
       name  = "notifications.enabled"
       value = "false"
     },
+    # Chart 10.0.0 flipped global.networkPolicy.create false -> true, adding
+    # upstream NetworkPolicies to every argocd component. Kept false so the
+    # 3.4 -> 3.5 upgrade changes no traffic path; enabling them is a separate,
+    # testable change (repo-server/redis ingress, webhook and metrics callers).
+    {
+      name  = "global.networkPolicy.create"
+      value = "false"
+    },
     # Server-Side Diff, cluster-wide. ServerSideApply=true (our default sync
     # option) otherwise triggers ArgoCD's *Structured-Merge* diff, which builds a
     # typed value from the live object using ArgoCD's BUNDLED OpenAPI schema. On
@@ -578,6 +616,22 @@ resource "helm_release" "cnpg" {
   repository       = "https://cloudnative-pg.github.io/charts"
   chart            = "cloudnative-pg"
   version          = var.cnpg_version
+
+  # In-place instance-manager upgrades. By default an operator upgrade rolls
+  # EVERY Postgres pod to inject the new instance manager, and a single-instance
+  # Cluster has no replica to switch over to, so each one restarts (a few
+  # minutes of downtime per DB, all clusters at once). With this set, the
+  # operator swaps the instance-manager binary inside the running pod and the
+  # postmaster keeps running: no restart, no switchover. Trade-off: the pod's
+  # init-container image keeps the old version until the pod is next recreated.
+  # A change to the instance pod TEMPLATE itself still rolls pods regardless.
+  set = [
+    {
+      name  = "config.data.ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES"
+      value = "true"
+      type  = "string"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------

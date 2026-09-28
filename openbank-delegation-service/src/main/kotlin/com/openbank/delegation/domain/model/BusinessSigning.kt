@@ -201,6 +201,25 @@ object SigningPolicyEvaluator {
         return forRule(policy, index, rule, activeSignerIds, groups)
     }
 
+    /**
+     * A recurring outflow (#10281, ADR-0312 addendum): a standing order is banded by its
+     * PER-EXECUTION amount, an SDD mandate by its maximum amount — and one with no maximum (every
+     * mandate today: sdd-service stores none) by the strictest rule. Never the trusted-payee
+     * shortcut: the trusted-payee cap bounds ONE payment, and a recurring instruction has no
+     * cumulative bound, so trust would turn a capped exception into an uncapped standing one.
+     */
+    fun evaluateRecurring(
+        policy: SigningPolicy,
+        activeSignerIds: Set<UUID>,
+        groups: Map<String, SignerGroup>,
+        amount: SigningAmount?,
+    ): SigningEvaluation {
+        if (amount == null) return evaluateAdministrative(policy, activeSignerIds, groups)
+        val matched = policy.rules.indexOfFirst { it.matches(amount) }
+        val index = if (matched >= 0) matched else policy.rules.indexOf(policy.strictestRule())
+        return forRule(policy, index, policy.rules[index], activeSignerIds, groups)
+    }
+
     /** POLICY_CHANGE / PAYEE_ADD / PAYEE_REMOVE: the strictest round, never a trusted shortcut. */
     fun evaluateAdministrative(
         policy: SigningPolicy,
@@ -239,7 +258,20 @@ object SigningPolicyEvaluator {
         cap == null || (cap.currency == amount.currency && amount.amount <= cap.amount)
 }
 
-enum class ApprovalKind { PAYMENT, PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE }
+/**
+ * [releasable] kinds are held instructions the edge forwards upstream once signed (single-use
+ * release claim); the others are administrative changes applied in the transaction of their last
+ * signature. STANDING_ORDER and SDD_MANDATE (#10281) set up a RECURRING outflow and are held
+ * exactly like a payment.
+ */
+enum class ApprovalKind(val releasable: Boolean) {
+    PAYMENT(true),
+    PAYEE_ADD(false),
+    PAYEE_REMOVE(false),
+    POLICY_CHANGE(false),
+    STANDING_ORDER(true),
+    SDD_MANDATE(true),
+}
 
 /**
  * AWAITING_INITIATOR: an administrative request (POLICY_CHANGE / PAYEE_ADD / PAYEE_REMOVE) created

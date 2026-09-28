@@ -5,6 +5,7 @@
 package com.openbank.account.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
@@ -25,7 +26,10 @@ import java.util.concurrent.TimeUnit
  * scheduler that happens to serialise the requests still proves "no double effect".
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 class AccountConcurrencyIT {
 
     private val productId = UUID.fromString("00000000-2222-0000-0000-000000000001")
@@ -80,13 +84,19 @@ class AccountConcurrencyIT {
 
         val responses = race(n) { openRequest(partyId, idempotencyKey) }
 
-        // The loser path must resolve to the winner's account — never a second account
-        // (silent double effect: two IBANs, two AccountCreated events) and never a 5xx.
+        // Never a second account (silent double effect: two IBANs, two AccountCreated events) and
+        // never a 5xx. Since #10916 the REST layer claims the key atomically, so a contender that
+        // arrives while the winner is still executing answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS
+        // (retry later); one that arrives after it finished replays the winner's 201.
         assertThat(responses.map { it.statusCode })
             .describedAs("statuses %s", responses.map { "${it.statusCode}: ${it.body.asString().take(120)}" })
-            .containsOnly(201)
-        assertThat(responses.map { it.jsonPath().getString("id") }.toSet())
-            .describedAs("every contender must see the SAME account")
+            .containsOnly(201, 409)
+            .contains(201)
+        responses.filter { it.statusCode == 409 }.forEach {
+            assertThat(it.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_REQUEST_IN_PROGRESS")
+        }
+        assertThat(responses.filter { it.statusCode == 201 }.map { it.jsonPath().getString("id") }.toSet())
+            .describedAs("every successful contender must see the SAME account")
             .hasSize(1)
 
         assertThat(accountsOfParty(partyId)).hasSize(1)
