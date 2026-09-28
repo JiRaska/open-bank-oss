@@ -18,6 +18,7 @@ metadata:
   name: pact-broker
   namespace: pact-broker
   annotations:
+    openbank.io/edge-exposure: internal
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/custom-headers: pact-broker/pact-broker-edge-headers-v1

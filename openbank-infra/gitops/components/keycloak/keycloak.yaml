@@ -213,6 +213,7 @@ metadata:
   name: keycloak
   namespace: iam
   annotations:
+    openbank.io/edge-exposure: public
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Security headers: HSTS with preload (2-year max-age per preload list requirement)
@@ -265,6 +266,7 @@ metadata:
   name: keycloak-admin-block
   namespace: iam
   annotations:
+    openbank.io/edge-exposure: public
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/denylist-source-range: "0.0.0.0/0,::/0"
 spec:

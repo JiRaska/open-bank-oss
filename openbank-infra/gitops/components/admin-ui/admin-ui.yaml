@@ -885,6 +885,7 @@ metadata:
   name: admin-ui
   namespace: admin-ui
   annotations:
+    openbank.io/edge-exposure: internal
     # Browser-trusted Let's Encrypt via DNS-01; external-dns publishes this
     # host's A/ALIAS record. On letsencrypt-prod: open-bank.tech resolves and the
     # staging cert proved the DNS-01 flow, so this serves a browser-trusted leaf.

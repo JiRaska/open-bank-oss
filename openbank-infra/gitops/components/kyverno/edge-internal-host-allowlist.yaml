@@ -1,0 +1,117 @@
+# Per-host edge exposure (ADR-0324, mixed model decided 2026-09-28).
+#
+# The edge NLBs stay public: customer-facing hosts (customer, api, developer, rum, kc,
+# copilot, glitchtip SDK ingest) must be reachable from anywhere. Operator-only hosts (admin, langfuse, pact) are
+# restricted to a source allow-list at the ingress controller, per Ingress.
+#
+# An Ingress opts in with the ANNOTATION `openbank.io/edge-exposure: internal` (an
+# annotation, not a label, because Helm charts such as GlitchTip expose ingress
+# annotations but not labels). This policy
+# then writes `nginx.ingress.kubernetes.io/whitelist-source-range` from the non-public
+# Secret kyverno/edge-internal-allowlist, which ExternalSecrets fills from OpenBao KV
+# `platform/edge-allowlist` (property `cidrs`, comma-separated). The addresses never
+# appear in this public repository.
+#
+# Fail closed, never open:
+#   - If the Secret is missing or unreadable, the apiCall errors and failurePolicy: Fail
+#     rejects the Ingress write; the previously admitted object keeps its allow-list.
+#   - The validate rule rejects an internal Ingress whose allow-list is empty or contains
+#     0.0.0.0/0, whatever the mutation produced.
+#
+# Requires the real client IP at nginx: the ingress-nginx Service runs
+# externalTrafficPolicy: Local. With Cluster, nginx sees node IPs and this allow-list
+# would reject every legitimate request.
+#
+# Whether each Ingress in THIS repo declares its exposure is enforced in CI by
+# check-ingress-edge-exposure.py, not here: Ingresses owned by other repositories
+# (pricing) are admitted unchanged unless they carry the label.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: edge-internal-allowlist
+  namespace: kyverno
+  annotations:
+    # Not a credential, but an operator allow-list goes stale the same way:
+    # re-confirm every CIDR by this date.
+    openbank.io/rotation-deadline: "2027-03-31"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: edge-internal-allowlist
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: cidrs
+      remoteRef:
+        key: platform/edge-allowlist
+        property: cidrs
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: edge-internal-host-allowlist
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Edge allow-list for internal hosts (ADR-0324)
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Writes nginx whitelist-source-range on every Ingress annotated
+      openbank.io/edge-exposure=internal from the non-public Secret
+      kyverno/edge-internal-allowlist, and rejects an internal Ingress whose
+      allow-list is empty or open to 0.0.0.0/0.
+spec:
+  failurePolicy: Fail
+  background: false
+  rules:
+    - name: inject-allowlist
+      match:
+        any:
+          - resources:
+              kinds: [networking.k8s.io/v1/Ingress]
+              operations: [CREATE, UPDATE]
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"openbank.io/edge-exposure\" || '' }}"
+            operator: Equals
+            value: internal
+      context:
+        - name: cidrs
+          apiCall:
+            urlPath: /api/v1/namespaces/kyverno/secrets/edge-internal-allowlist
+            jmesPath: "base64_decode(data.cidrs)"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              nginx.ingress.kubernetes.io/whitelist-source-range: "{{ cidrs }}"
+    - name: require-allowlist
+      match:
+        any:
+          - resources:
+              kinds: [networking.k8s.io/v1/Ingress]
+              operations: [CREATE, UPDATE]
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"openbank.io/edge-exposure\" || '' }}"
+            operator: Equals
+            value: internal
+      validate:
+        message: >-
+          Internal Ingress '{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}'
+          has no source allow-list or allows 0.0.0.0/0. The list comes from OpenBao KV
+          platform/edge-allowlist (ADR-0324); seed it before exposing an internal host.
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/whitelist-source-range\" || '' }}"
+                operator: Equals
+                value: ""
+              - key: "{{ contains(request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/whitelist-source-range\" || '', '0.0.0.0/0') }}"
+                operator: Equals
+                value: true

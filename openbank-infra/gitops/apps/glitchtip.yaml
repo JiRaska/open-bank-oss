@@ -95,6 +95,8 @@ spec:
           className: nginx
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
+            # Public on purpose: SDK crash ingest from customer apps (ADR-0324 mixed edge).
+            openbank.io/edge-exposure: public
             # ADR-0234: declared exemption from the identity-aware edge gate.
             # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
             # authenticates by DSN and cannot follow a 302 to the console login,

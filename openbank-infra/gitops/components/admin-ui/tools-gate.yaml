@@ -73,6 +73,7 @@ metadata:
     app.kubernetes.io/name: admin-ui
     app.kubernetes.io/component: tools-gate
   annotations:
+    openbank.io/edge-exposure: internal
     # No cert-manager annotation: this host's certificate is issued by the
     # `admin-ui` Ingress. Referencing the same secret reuses that leaf rather
     # than asking for a second certificate for a host that already has one.
@@ -180,6 +181,7 @@ metadata:
     app.kubernetes.io/name: admin-ui
     app.kubernetes.io/component: tools-gate
   annotations:
+    openbank.io/edge-exposure: internal
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/auth-url: "http://admin-ui.admin-ui.svc.cluster.local:3000/api/gate?tool=alertmanager"
     nginx.ingress.kubernetes.io/auth-signin: "https://admin.open-bank.tech/auth/login?callbackUrl=$escaped_request_uri"
@@ -212,6 +214,7 @@ metadata:
     app.kubernetes.io/name: admin-ui
     app.kubernetes.io/component: tools-gate
   annotations:
+    openbank.io/edge-exposure: internal
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/auth-url: "http://admin-ui.admin-ui.svc.cluster.local:3000/api/gate?tool=pyrra"
     nginx.ingress.kubernetes.io/auth-signin: "https://admin.open-bank.tech/auth/login?callbackUrl=$escaped_request_uri"

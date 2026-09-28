@@ -471,6 +471,23 @@ gates:
       # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
       python3 .github/scripts/check-litellm-model-costs.py --enforce
 
+  - id: ingress-edge-exposure
+    name: "every gitops Ingress declares openbank.io/edge-exposure public|internal (ADR-0324 mixed edge)"
+    group: gitops
+    budget_seconds: 10
+    mode: enforced
+    min_subjects: 10   # 17 today: 15 Ingress manifests + 2 chart-rendered (glitchtip, rum-gateway)
+    rationale: "The edge NLBs are public; only Ingresses annotated internal get the Kyverno source allow-list. An Ingress with no annotation is silently public, and a hand-written whitelist-source-range would put operator CIDRs into this public repo."
+    review_after: "2027-03-31"
+    selftest: python3 .github/scripts/check-ingress-edge-exposure.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ingress-edge-exposure.py"]
+    run: |
+      # Falsified both ways before wiring in: 17 findings on origin/main (no Ingress declared an
+      # exposure), 0 on this branch; 9 self-test cases incl. label-instead-of-annotation and a
+      # disabled chart ingress that must not count.
+      python3 .github/scripts/check-ingress-edge-exposure.py .
+
   - id: untrusted-pg-extension
     name: "an untrusted CREATE EXTENSION needs a CNPG Database resource (works local, crashloops deployed)"
     group: data
