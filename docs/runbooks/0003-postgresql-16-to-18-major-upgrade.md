@@ -195,7 +195,7 @@ metadata:
   namespace: ledger
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     size: 10Gi
     storageClass: gp3

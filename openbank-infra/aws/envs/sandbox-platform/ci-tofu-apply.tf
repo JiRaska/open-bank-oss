@@ -93,6 +93,24 @@ resource "aws_iam_role_policy_attachment" "ci_tofu_plan_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
+# The plan renders helm_release.karpenter, which pulls its chart from public.ecr.aws.
+# Anonymous pulls there are rate limited per source IP, and shared GitHub-hosted runners
+# exhaust it ("429: toomanyrequests: Data limit exceeded" failed a plan and an apply on
+# 2026-09-28). An authenticated pull needs a bearer token; ReadOnlyAccess does not grant
+# the two calls that mint it. Pull-only: no push, no repository management.
+resource "aws_iam_role_policy" "ci_tofu_plan_ecr_public_pull" {
+  name = "ecr-public-pull-token"
+  role = aws_iam_role.ci_tofu_plan.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ecr-public:GetAuthorizationToken", "sts:GetServiceBearerToken"]
+      Resource = "*"
+    }]
+  })
+}
+
 # ---------------------------------------------------------------------------
 # APPLY role — AdministratorAccess, assumable ONLY by the platform-tofu workflow
 # file on main (job_workflow_ref pin). AdministratorAccess because the env

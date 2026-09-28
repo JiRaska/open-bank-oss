@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/part-of: openbank
+    kubernetes.io/metadata.name: pricing
+    openbank.io/component: pricing
+  name: pricing

@@ -5,7 +5,7 @@
 # Seed with: bao kv put openbank/cloud-finops INFRACOST_API_KEY=<key>
 # Until it is seeded the Secret does not exist and the collector pod sits at
 # CreateContainerConfigError (no `optional: true` on purpose — loud beats a silent $0 estimate).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: cloud-finops-infracost

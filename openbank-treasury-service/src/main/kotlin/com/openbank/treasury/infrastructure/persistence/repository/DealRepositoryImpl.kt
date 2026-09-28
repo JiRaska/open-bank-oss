@@ -19,6 +19,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.DealTransition
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.LimitOverride
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.infrastructure.persistence.entity.CounterpartyEntity
@@ -30,7 +31,9 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -185,18 +188,49 @@ class DealRepositoryImpl(
     )
 
     override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal {
-        val consuming = listOf(DealState.PENDING_APPROVAL.name, DealState.BOOKED.name, DealState.SETTLED.name)
-        val assets = listOf(ProductType.MM_PLACEMENT.name, ProductType.CNB_DEPOSIT_FACILITY.name)
         val rows = Panache.withSession {
             find(
                 "counterpartyId = ?1 and currency = ?2 and state in ?3 and product in ?4",
                 counterpartyId,
                 currency,
-                consuming,
-                assets,
+                LIMIT_CONSUMING_STATE_NAMES,
+                LIMIT_CONSUMING_PRODUCT_NAMES,
             ).list()
         }.awaitSuspending()
         return rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
+    }
+
+    /**
+     * Deals currently PENDING_APPROVAL that carry a senior limit override (ADR-0315 D4, #10896).
+     * NOT filtered by counterparty or currency in SQL: the limit line an override counts against is
+     * [Deal.limitCurrency], which is not the `currency` column for every product, so the grouping
+     * happens in the domain ([Deal.holdsActiveLimitOverride]). A re-submission (which clears
+     * `limitOverrideBy` via [Deal.reject]) or moving off PENDING_APPROVAL retires the override.
+     */
+    override suspend fun pendingLimitOverrides(): List<Deal> = withHistories(
+        Panache.withSession {
+            find("state = ?1 and limitOverrideBy is not null", DealState.PENDING_APPROVAL.name).list()
+        }.awaitSuspending(),
+    )
+
+    /**
+     * Idempotent on the key: an accrual pass and a maturity can record the same day concurrently.
+     * The ledger already deduplicated the journal; here the loser of the unique-key race only
+     * confirms the winner's row exists instead of failing the pass.
+     */
+    override suspend fun recordJournal(journal: LedgerJournalRef) {
+        val recorded = suspend {
+            Panache.withSession { journals.find("idempotencyKey", journal.idempotencyKey).count() }.awaitSuspending() >
+                0
+        }
+        if (recorded()) return
+        try {
+            Panache.withTransaction { persistJournal(journal) }.awaitSuspending()
+        } catch (e: PersistenceException) {
+            if (!recorded()) throw e
+        } catch (e: PgException) {
+            if (!recorded()) throw e
+        }
     }
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
@@ -245,7 +279,24 @@ class DealRepositoryImpl(
         limitExposureBefore = deal.limitCheck?.exposureBefore
         limitDealAmount = deal.limitCheck?.dealAmount
         rationale = deal.rationale
+        limitOverrideBy = deal.limitOverride?.by?.id
+        limitOverrideReason = deal.limitOverride?.reason
+        limitOverrideAt = deal.limitOverride?.at
+        limitOverrideExposure = deal.limitOverride?.coversExposureUpTo
+        limitOverrideLimit = deal.limitOverride?.limitAtOverride
         updatedAt = deal.updatedAt
+    }
+
+    /** Senior overrides are always human (the domain refuses any other actor). */
+    private fun DealEntity.overrideOrNull(): LimitOverride? {
+        val by = limitOverrideBy ?: return null
+        return LimitOverride(
+            by = Actor(by, ActorType.HUMAN),
+            reason = checkNotNull(limitOverrideReason) { "deal $dealId: override without a reason" },
+            at = checkNotNull(limitOverrideAt) { "deal $dealId: override without a time" },
+            coversExposureUpTo = checkNotNull(limitOverrideExposure) { "deal $dealId: override without an exposure" },
+            limitAtOverride = checkNotNull(limitOverrideLimit) { "deal $dealId: override without a limit" },
+        )
     }
 
     private fun DealEntity.toDomain(history: List<DealTransition>): Deal {
@@ -274,7 +325,14 @@ class DealRepositoryImpl(
                 null
             },
             rationale = rationale,
+            limitOverride = overrideOrNull(),
             history = history,
         )
+    }
+
+    private companion object {
+        /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
+        val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
+        val LIMIT_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
     }
 }

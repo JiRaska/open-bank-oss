@@ -4,6 +4,9 @@
 
 package com.openbank.sepa.application.usecase
 
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.iso20022.Pacs004Reader
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
@@ -33,8 +36,15 @@ import java.time.Instant
 import java.util.Locale
 import java.util.UUID
 
-class SepaPaymentNotFoundException(paymentId: UUID) : RuntimeException("SEPA payment not found: $paymentId")
-class InvalidSepaPaymentStateTransitionException(message: String) : RuntimeException(message)
+// #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
+// ResourceNotFoundExceptionMapper handles the 404 (default code "NOT_FOUND", matching the
+// deleted local SepaPaymentNotFoundMapper's ErrorCode.NOT_FOUND.code byte for byte). See
+// SepaPaymentExceptionMapperEquivalenceTest.
+class SepaPaymentNotFoundException(paymentId: UUID) : ResourceNotFoundException("SEPA payment not found: $paymentId")
+
+// Same as above, mapped 409 by ResourceConflictExceptionMapper (default code "CONFLICT",
+// matching the deleted local InvalidSepaPaymentStateTransitionMapper byte for byte).
+class InvalidSepaPaymentStateTransitionException(message: String) : ResourceConflictException(message)
 
 @Suppress("TooManyFunctions", "LongParameterList", "UnusedPrivateMember")
 @ApplicationScoped
@@ -80,12 +90,23 @@ class SepaPaymentService(
     }
 
     override suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment {
-        paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+        // #10916: the durable half of the Idempotency-Key check. The Redis record can expire or be
+        // evicted while this UNIQUE row lives forever, so a key reused for a DIFFERENT payment must
+        // be refused here too, not answered with the first payment. A legacy row (no stored hash)
+        // or a caller without one keeps the plain replay.
+        paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
+            val stored = existing.requestHash
+            if (stored != null && command.requestHash != null && stored != command.requestHash) {
+                throw IdempotencyKeyReusedException()
+            }
+            return existing
+        }
 
         val now = Instant.now(clock)
         val payment = SepaPayment(
             id = UUID.randomUUID(),
             idempotencyKey = command.idempotencyKey,
+            requestHash = command.requestHash,
             type = command.type,
             status = SepaPaymentStatus.RECEIVED,
             debtorAccountId = command.debtorAccountId,
