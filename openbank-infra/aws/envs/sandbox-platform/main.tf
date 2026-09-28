@@ -327,6 +327,18 @@ resource "kubectl_manifest" "nodepool_default" {
             name  = "default"
           }
           expireAfter = "720h"
+          # #11304: a DEADLINE on node termination. 2026-09-28 a drifted node's pods
+          # drained but 22 EBS volumes never detached; with no grace period Karpenter's
+          # termination controller waits on VolumesDetached (AwaitingVolumeDetachment)
+          # forever, and ~22 CNPG clusters stayed down until the instance was terminated
+          # by hand. Past this deadline Karpenter stops waiting on PDBs, do-not-disrupt and
+          # volume detachment and terminates the instance -- which is what releases the
+          # volumes. 1h, not less: CNPG instance pods carry a 30-minute
+          # terminationGracePeriodSeconds (stopDelay) and Karpenter deletes pods early
+          # enough to honour it, so a shorter deadline would cut clean Postgres shutdowns.
+          # This field is part of the NodeClaim hash: applying it drifts every node of
+          # this pool ONCE, which the one-node Drifted budget below serialises.
+          terminationGracePeriod = "1h"
         }
       }
       disruption = {
@@ -366,6 +378,11 @@ resource "kubectl_manifest" "nodepool_default" {
           # Standard 5-field cron: no disruption 20:00–07:00 UTC daily
           { schedule = "0 20 * * *", duration = "11h", nodes = "0%" },
           { nodes = "50%" },
+          # #11304: drift (AMI release, kubelet/NodeClass change) replaces ONE node at a
+          # time. Karpenter applies the most restrictive matching budget, so consolidation
+          # keeps its 50% while a fleet-wide drift can no longer take out half the pool at
+          # once -- the 2026-09-28 wedge landed on top of a fleet-wide CNPG bump.
+          { nodes = "1", reasons = ["Drifted"] },
         ]
       }
       # Hard cap against runaway provisioning: without it Karpenter once

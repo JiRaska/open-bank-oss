@@ -35,6 +35,16 @@ resolves to no workload, or whose workload names no CNPG cluster, is itself a fi
 is declared in NO_DATABASE with a reason -- so a renamed image or a new service cannot quietly
 shrink the set this gate checks. NO_DATABASE entries go stale in both directions.
 
+PLATFORM DATABASES (`rules.yaml: money_path_platform_databases`)
+A money-path service can be down without its own database being down: Temporal (every payment
+saga's state lives in temporal-db) and Keycloak (every money-path call carries a token it mints
+from keycloak-db) sit on the path one hop away. That hop is NOT derived: at namespace granularity
+"a money-path workload calls a Service in namespace N" also pulls in goalert-db (observability),
+apicurio-db (messaging) and the databases of every non-money-path peer -- 9 clusters, measured
+2026-09-28, most of them wrong. So the set is an explicit list with a reason per entry, and the
+derivation is used to keep it honest instead: an entry whose cluster does not exist, whose
+namespace no money-path workload calls, or that the service derivation already covers, is stale.
+
 Usage:
     check-cnpg-update-resilience.py              # gate (exit 1 on any finding)
     check-cnpg-update-resilience.py --self-test  # prove the gate can fail
@@ -56,6 +66,7 @@ GITOPS = Path("openbank-infra/gitops")
 RULES = Path("openbank-libs/governance/rules.yaml")
 SKIP_PATH_PARTS = ("dr-restore-templates",)
 WORKLOAD_KINDS = ("Deployment", "Rollout", "StatefulSet")
+HOST_RX = re.compile(r"\b([a-z0-9][a-z0-9-]*)\.([a-z0-9-]+)\.svc\b")
 SVC_RX = re.compile(r"\b([a-z0-9][a-z0-9-]*?)-(?:rw|ro|r)\.([a-z0-9-]+)\.svc\b")
 IMAGE_RX = re.compile(r'"image":\s*"([^"]+)"')
 
@@ -88,10 +99,11 @@ def _image_name(ref: str) -> str:
     return ref.split("@", 1)[0].rsplit("/", 1)[-1].split(":", 1)[0]
 
 
-def scan() -> tuple[dict[str, dict], dict[str, set], list[str]]:
-    """Return (clusters by ns/name, cluster refs by image name, parse errors)."""
+def scan() -> tuple[dict[str, dict], dict[str, set], list[str], dict[str, set]]:
+    """Return (clusters by ns/name, cluster refs by image, parse errors, called namespaces by image)."""
     clusters: dict[str, dict] = {}
     refs: dict[str, set] = {}
+    calls: dict[str, set] = {}
     errors: list[str] = []
     for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
         rel = path.relative_to(REPO)
@@ -121,14 +133,16 @@ def scan() -> tuple[dict[str, dict], dict[str, set], list[str]]:
                 text = json.dumps(doc)
                 ns = meta.get("namespace") or _ns_from_kustomization(path) or ""
                 found = {f"{n}/{c}" for c, n in SVC_RX.findall(text)}
+                called = {n for h, n in HOST_RX.findall(text) if not re.search(r"-(?:rw|ro|r)$", h)}
                 for img in IMAGE_RX.findall(text):
+                    calls.setdefault(_image_name(img), set()).update(called)
                     refs.setdefault(_image_name(img), set()).update(found)
                     refs[_image_name(img)].add(f"@{ns}")  # marker: workload exists
-    return clusters, refs, errors
+    return clusters, refs, errors, calls
 
 
 def check() -> tuple[list[str], int]:
-    clusters, refs, findings = scan()
+    clusters, refs, findings, calls = scan()
     rules = gatelib.load_yaml(REPO / RULES)
     money = list(rules.get("money_path_services") or [])
     if not money:
@@ -166,14 +180,36 @@ def check() -> tuple[list[str], int]:
             )
         for k in owned:
             mp_clusters.setdefault(k, svc)
-    for key, c in sorted(clusters.items()):
-        if c["pending"] and key not in mp_clusters:
-            findings.append(f"{c['path']}: Cluster {key} carries {PENDING_ANN} but is not a money-path cluster -- stale")
     for svc in NO_DATABASE:
         if svc not in money:
             findings.append(f"NO_DATABASE[{svc}] is stale: not in money_path_services")
 
+    # 2b. platform databases a money-path service depends on one hop away (explicit, kept honest)
+    money_calls = set().union(*(calls.get(s, set()) for s in money)) if money else set()
+    for i, entry in enumerate(rules.get("money_path_platform_databases") or []):
+        key = (entry or {}).get("cluster") if isinstance(entry, dict) else None
+        where = f"{RULES}: money_path_platform_databases[{i}]"
+        if not key or not str((entry or {}).get("reason", "")).strip():
+            findings.append(f"{where} needs both `cluster: <ns>/<name>` and a non-empty `reason`")
+            continue
+        if key not in clusters:
+            findings.append(f"{where} is stale: no CNPG Cluster {key} in {GITOPS}")
+            continue
+        if key in mp_clusters:
+            findings.append(f"{where} is stale: {key} is already derived from {mp_clusters[key]}")
+            continue
+        if key.split("/", 1)[0] not in money_calls:
+            findings.append(
+                f"{where} is stale: no money-path workload calls any Service in namespace"
+                f" {key.split('/', 1)[0]}, so {key} is not on the money path"
+            )
+            continue
+        mp_clusters[key] = "platform dependency"
+
     # 3. money-path: a second instance, on a second node, with its PDB
+    for key, c in sorted(clusters.items()):
+        if c["pending"] and key not in mp_clusters:
+            findings.append(f"{c['path']}: Cluster {key} carries {PENDING_ANN} but is not a money-path cluster -- stale")
     for key, svc in sorted(mp_clusters.items()):
         c = clusters[key]
         spec = c["spec"]
@@ -233,6 +269,18 @@ _HA = """  primaryUpdateMethod: switchover
     topologyKey: kubernetes.io/hostname
     podAntiAffinityType: required
 """
+_PLATFORM = """money_path_platform_databases:
+  - cluster: wf/wf-db
+    reason: sagas
+"""
+_WF = """apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: wf-db
+  namespace: wf
+spec:
+  instances: {inst}
+{extra}"""
 _DEPLOY = """apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -247,6 +295,8 @@ spec:
           env:
             - name: JDBC
               value: jdbc:postgresql://pay-db-rw.st.svc:5432/pay
+            - name: WF
+              value: wf-frontend.wf.svc:7233
 """
 
 
@@ -254,14 +304,14 @@ def self_test() -> int:
     global REPO
     ok = True
 
-    def run(files: dict[str, str]) -> list[str]:
+    def run(files: dict[str, str], extra_rules: str = _PLATFORM) -> list[str]:
         global REPO
         with tempfile.TemporaryDirectory() as td:
             fake = Path(td)
             d = fake / GITOPS / "components" / "st"
             d.mkdir(parents=True)
             (fake / RULES).parent.mkdir(parents=True)
-            (fake / RULES).write_text("money_path_services:\n  - openbank-pay-service\n")
+            (fake / RULES).write_text("money_path_services:\n  - openbank-pay-service\n" + extra_rules)
             for n, body in files.items():
                 (d / n).write_text(body)
             REPO = fake
@@ -275,6 +325,7 @@ def self_test() -> int:
         "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA)
         + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="  primaryUpdateMethod: switchover\n"),
         "deploy.yaml": _DEPLOY,
+        "wf.yaml": _WF.format(inst=2, extra=_HA),
     }
     if run(good):
         print(f"SELF-TEST FAIL: a compliant corpus was reported: {run(good)}"); ok = False
@@ -307,6 +358,13 @@ def self_test() -> int:
         + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="  primaryUpdateMethod: switchover\n")}
     if run(deferred):
         print(f"SELF-TEST FAIL: a deferred-affinity cluster was reported: {run(deferred)}"); ok = False
+    cases["single-instance platform database (the temporal-db shape)"] = (
+        {**good, "wf.yaml": _WF.format(inst=1, extra=_HA)}, "wf/wf-db (platform dependency) has instances=1")
+    cases["platform entry naming a namespace no money-path workload calls"] = (
+        {**good, "deploy.yaml": _DEPLOY.replace("wf-frontend.wf.svc", "wf-frontend.elsewhere.svc")},
+        "no money-path workload calls any Service in namespace wf")
+    cases["platform entry naming a cluster that does not exist"] = (
+        {k: v for k, v in good.items() if k != "wf.yaml"}, "no CNPG Cluster wf/wf-db")
     for label, (files, needle) in cases.items():
         got = run(files)
         if not any(needle in f for f in got):
