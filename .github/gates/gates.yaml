@@ -4862,19 +4862,19 @@ gates:
       # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
       python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
-    name: OPA bundle must be installable (client-side apply annotation ceiling)
+    name: GitOps ConfigMaps must be installable (client-side apply annotation ceiling)
     group: gitops
     mode: enforced
     selftest: python3 .github/scripts/check-opa-bundle-apply-size.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-opa-bundle-apply-size.py"]
     run: |
-      # A bundle over ~256 KB cannot be installed by client-side apply: the whole
+      # A ConfigMap over ~256 KB cannot be installed by client-side apply: the whole
       # object goes into last-applied-configuration and the API server rejects it
       # with "metadata.annotations: Too long". Argo then retries forever while the
-      # cluster keeps serving the PREVIOUS policy, and the Application reads as
-      # OutOfSync/Progressing rather than failed. Five services, four money-path,
-      # were drifted this way before the check existed.
+      # cluster keeps serving the PREVIOUS object. Policy bundles caused five
+      # drifted services; a binary Keycloak theme later hit the same ceiling
+      # because this gate scanned only OPA filenames and ignored binaryData.
       python3 .github/scripts/check-opa-bundle-apply-size.py
   - id: configproperty-kotlin-defaults
     name: "@ConfigProperty constructor params must not carry a Kotlin default"
