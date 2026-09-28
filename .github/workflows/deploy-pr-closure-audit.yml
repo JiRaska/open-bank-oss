@@ -19,7 +19,8 @@ jobs:
     if: >-
       github.event.pull_request.merged == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-')
+      (startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-') ||
+       startsWith(github.event.pull_request.head.ref, 'chore/admin-ui-deploy-'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -63,7 +64,9 @@ jobs:
             exit 1
           fi
           jq -r --arg repo "$REPO" \
-            '.[] | select(.headRefName | startswith("chore/gitops-auto-deploy-")) |
+            '.[] | select(.headRefName |
+              startswith("chore/gitops-auto-deploy-") or
+              startswith("chore/admin-ui-deploy-")) |
              select(.headRepository.nameWithOwner == $repo and .baseRefName == "main") |
              .number' \
             "$work/open.json" > "$work/successor-numbers"
