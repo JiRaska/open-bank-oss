@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.3...sca-service-v0.17.0) (2026-09-28)
+
+
+### Features
+
+* **sca:** bind initiate Idempotency-Key to a request fingerprint ([#10949](https://github.com/JiRaska/open-bank-oss/issues/10949)) ([6032da8](https://github.com/JiRaska/open-bank-oss/commit/6032da8ea9ee58f6f6bc06fb08cf99ba5705117c))
+
 ## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.2...sca-service-v0.16.3) (2026-09-26)
 
 

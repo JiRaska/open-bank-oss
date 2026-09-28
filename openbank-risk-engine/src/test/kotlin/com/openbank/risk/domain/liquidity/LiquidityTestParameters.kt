@@ -11,13 +11,22 @@ import io.smallrye.config.source.yaml.YamlConfigSource
 
 /** The parameter set exactly as application.yaml ships it, loaded through [LiquidityConfig]. */
 object LiquidityTestParameters {
-    fun shipped(): LiquidityParameters {
+    const val EU_SET = "eu-2015-61-crr2"
+    const val BCBS_SET = "bcbs-d238-d295"
+
+    /** The DEFAULT set (the one `parameter-set-id` selects). */
+    fun shipped(): LiquidityParameters = config().toParameters()
+
+    /** A declared set by id, with the shipped classification. */
+    fun shipped(id: String): LiquidityParameters = config().toParameters(id)
+
+    private fun config(): LiquidityConfig {
         val url = requireNotNull(LiquidityTestParameters::class.java.classLoader.getResource("application.yaml"))
         val config = SmallRyeConfigBuilder()
             .withSources(YamlConfigSource(url))
             .withMapping(LiquidityConfig::class.java)
             .build()
-        return config.getConfigMapping(LiquidityConfig::class.java).toParameters()
+        return config.getConfigMapping(LiquidityConfig::class.java)
     }
 
     /** [shipped] with a different classification; the factors are never touched. */

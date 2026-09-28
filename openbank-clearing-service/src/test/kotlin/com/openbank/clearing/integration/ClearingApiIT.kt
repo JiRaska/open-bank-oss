@@ -5,6 +5,7 @@
 package com.openbank.clearing.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -31,7 +32,10 @@ import java.util.UUID
  * asserted exactly (BigDecimal compareTo, not float equality).
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.clearing.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_clearing_it")],
+)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class ClearingApiIT {
 

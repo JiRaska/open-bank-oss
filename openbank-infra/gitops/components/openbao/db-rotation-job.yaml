@@ -73,8 +73,8 @@ spec:
           containers:
             - name: configure
               # Pin the same image tag as the server (openbao.yaml targetRevision 0.28.3
-              # deploys openbao 2.5.4). Update together when the server image is bumped.
-              image: quay.io/openbao/openbao:2.5.4
+              # deploys openbao 2.5.5). Update together when the server image is bumped.
+              image: quay.io/openbao/openbao:2.5.5
               command: ["/bin/sh", "/config/configure.sh"]
               securityContext:
                 allowPrivilegeEscalation: false

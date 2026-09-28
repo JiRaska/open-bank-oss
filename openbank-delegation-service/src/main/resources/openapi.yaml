@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive ADR-0312 business-signing routes (entity signing policy, trusted payees, approvals).
-  version: 1.21.0
+  version: 1.22.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -43,6 +43,7 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
         '400': { description: Missing idempotency key, name, or account scope }
         '403': { description: Authenticated active profile does not equal ownerPartyId }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
         '422': { description: An account is not owned by the active profile }
         '503':
           description: Authoritative account ownership cannot currently be established; safe to retry
@@ -160,7 +161,8 @@ paths:
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
-        '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422': { description: Eligibility gate, the grantor does not own the resource (ADR-0232 D5, threat model T1) }
         '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
   /api/v1/delegations/preview:
     post:
@@ -234,7 +236,13 @@ paths:
         '400': { description: Missing grantorPartyId or Idempotency-Key }
         '403': { description: Caller is not the issuing party }
         '404': { description: Unknown task }
-        '409': { description: Task was already confirmed or the grant lifecycle changed }
+        '409':
+          description: >-
+            Task was already confirmed or the grant lifecycle changed, or
+            IDEMPOTENCY_REQUEST_IN_PROGRESS (a request with this Idempotency-Key is still being
+            processed). This operation's fingerprint covers only the ids already present in the
+            cache key (task id + grantorPartyId), not a request body, so
+            IDEMPOTENCY_KEY_REUSED can never be returned here.
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -994,6 +1002,21 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/SigningError' }
+    IdempotencyConflict:
+      description: >-
+        Idempotency-Key conflict: either IDEMPOTENCY_KEY_REUSED (the key was already used for a
+        different request) or IDEMPOTENCY_REQUEST_IN_PROGRESS (a request with this key is still
+        being processed). Body is the fleet-wide libs error envelope (traceId/status/code/message).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              traceId: { type: string }
+              status: { type: integer, enum: [409] }
+              code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_REQUEST_IN_PROGRESS] }
+              message: { type: string }
+              timestamp: { type: string, format: date-time }
   schemas:
     DelegationPortfolioRequest:
       type: object

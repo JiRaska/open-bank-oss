@@ -59,7 +59,7 @@ spec:
               # Slim, not alpine: musl's DNS resolver has bitten this fleet before on
               # cross-namespace/external lookups elsewhere; glibc-based slim avoids re-litigating
               # that here for a job whose whole job IS a DNS lookup to api.github.com.
-              image: docker.io/library/python:3.12-slim
+              image: docker.io/library/python:3.12.14-slim
               imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false

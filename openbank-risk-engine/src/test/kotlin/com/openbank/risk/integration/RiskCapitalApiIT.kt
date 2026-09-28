@@ -41,10 +41,33 @@ class RiskCapitalApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @Inject
+    lateinit var treasury: com.openbank.risk.application.port.out.TreasuryDealBook
+
+    /** The ČNB deposit behind the 4000 on 1510: with the treasury read on, 1510 is contract-level. */
+    private val cnbDeal = java.util.UUID.randomUUID()
+
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
         ledger.inputs = Fixtures.tiedOut()
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$cnbDeal'")
+    }
+
+    private fun seedCnbDeposit(principal: String) = kotlinx.coroutines.runBlocking {
+        treasury.apply(
+            com.openbank.risk.application.port.out.TreasuryDealEvent(
+                state = "SETTLED",
+                dealId = cnbDeal,
+                product = "CNB_DEPOSIT_FACILITY",
+                counterpartyId = "CNB",
+                currency = "CZK",
+                principal = BigDecimal(principal),
+                rate = BigDecimal("2.50"),
+                valueDate = java.time.LocalDate.parse("2026-05-28"),
+                maturityDate = java.time.LocalDate.parse("2026-06-01"),
+            ),
+        )
     }
 
     private fun snapshot(asOf: String, status: String): String = given().contentType("application/json")
@@ -74,6 +97,7 @@ class RiskCapitalApiIT {
             subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
         )
         lending.loans = listOf(loan)
+        seedCnbDeposit("4000.00")
         val body = capital(snapshot("2026-05-29", "TIED_OUT"))
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d424-sa")
@@ -107,6 +131,80 @@ class RiskCapitalApiIT {
         assertThat(a["classification"]["bankScraGrade"].asText()).isEqualTo("C")
         assertThat(a["creditRiskMitigation"].asText()).startsWith("None applied")
         assertThat(a["offBalanceSheet"].asText()).contains("no credit conversion factor")
+    }
+
+    @Inject
+    @jakarta.enterprise.inject.Any
+    lateinit var connector: io.smallrye.reactive.messaging.memory.InMemoryConnector
+
+    /** A ČNB fixing through the real consumer: validity Fri 00:00 - Mon 00:00 Prague, as fx-service stamps it. */
+    private fun publishFixing(date: String, currency: String, ratePerUnit: String) {
+        val d = java.time.LocalDate.parse(date)
+        val prague = java.time.ZoneId.of("Europe/Prague")
+        connector.source<String>("fx-fixing-in").send(
+            """
+            {"source":"CNB","fixingDate":"$date","sequence":1,"quoteCurrency":"CZK",
+             "validFrom":"${d.atStartOfDay(
+                prague,
+            ).toInstant()}","validTo":"${d.plusDays(3).atStartOfDay(prague).toInstant()}",
+             "rates":[{"rateId":"${java.util.UUID.randomUUID()}","currency":"$currency","ratePerUnit":$ratePerUnit}],
+             "occurredAt":"${date}T12:30:00Z"}
+            """.trimIndent(),
+        )
+        val deadline = System.nanoTime() + 10_000_000_000L
+        while (TestDb.count(
+                "SELECT count(*) FROM fx_fixing_rate WHERE fixing_date = DATE '$date' AND currency = '$currency'",
+            ) == 0 &&
+            System.nanoTime() < deadline
+        ) {
+            Thread.sleep(100)
+        }
+    }
+
+    private fun eurBook() = LedgerInputs(
+        asOf = Fixtures.AS_OF,
+        trialBalance = listOf(
+            tb("1001", "ASSET", "CZK", "1500.00", "0"),
+            tb("2100", "LIABILITY", "CZK", "0", "1500.00"),
+            tb("1002", "ASSET", "EUR", "100.00", "0"),
+            tb("4100", "INCOME", "EUR", "0", "100.00"),
+        ),
+        subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
+    )
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a EUR and CZK book on a Sunday is totalled in CZK at the Friday ČNB fixing`() {
+        publishFixing("2026-09-18", "GBP", "28.5") // an unrelated currency, never used
+        publishFixing("2026-09-25", "EUR", "24.335")
+        ledger.inputs = eurBook()
+        val body = capital(snapshot("2026-09-27", "TIED_OUT"))
+
+        val total = body["total"]
+        assertThat(total["currency"].asText()).isEqualTo("CZK")
+        // 1500 × 150% + 100 × 24.335 × 150% = 2250 + 3650.25 (both nostros are Grade C banks)
+        assertThat(total["totalRwa"].decimalValue()).isEqualByComparingTo("5900.25")
+        assertThat(total["classes"].single()["exposureClass"].asText()).isEqualTo("bank")
+        assertThat(body["ownFundsRequirement"].decimalValue()).isEqualByComparingTo("472.02")
+        assertThat(body["totalNotStated"].isNull).isTrue()
+        val fx = body["fxRates"].single()
+        assertThat(fx["currency"].asText()).isEqualTo("EUR")
+        assertThat(fx["rate"].decimalValue()).isEqualByComparingTo("24.335")
+        assertThat(fx["fixingDate"].asText()).isEqualTo("2026-09-25")
+        assertThat(fx["source"].asText()).isEqualTo("CNB")
+        assertThat(body["currencies"].map { it["currency"].asText() }).containsExactly("CZK", "EUR")
+        assertThat(body["assumptions"]["currencyAggregation"].asText()).contains("ČNB fixing")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a EUR book with no fixing in effect states no total and says why`() {
+        ledger.inputs = eurBook()
+        val body = capital(snapshot("2026-08-05", "TIED_OUT"))
+        assertThat(body["total"].isNull).isTrue()
+        assertThat(body["ownFundsRequirement"].isNull).isTrue()
+        assertThat(body["totalNotStated"].asText()).contains("EUR").contains("2026-08-05")
+        assertThat(body["fxRates"].isEmpty).isTrue()
     }
 
     @Test

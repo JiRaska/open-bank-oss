@@ -11,6 +11,7 @@ import { useSession } from 'next-auth/react'
 import {
   Activity,
   FilePlus,
+  Gauge,
   Handshake,
   Inbox,
   Landmark,
@@ -122,6 +123,7 @@ const treasuryNav: NavItem[] = [
   { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create' },
   { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve' },
   { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view' },
+  { nameCs: 'Čerpání limitů',   nameEn: 'Limit utilisation', href: '/treasury/limits',         icon: Gauge,     permission: 'treasury:view' },
   { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view' },
 ]
 
