@@ -39,7 +39,10 @@ class PidResourceExceptionMapperEquivalenceTest {
 
     @Test
     fun `PartyAlreadyExistsException maps to 409 CONFLICT, same as the deleted local mapper`() {
-        val response = ResourceConflictExceptionMapper().toResponse(PartyAlreadyExistsException("Party already exists: p1"))
+        val response =
+            ResourceConflictExceptionMapper().toResponse(
+                PartyAlreadyExistsException("Party already exists: p1"),
+            )
 
         assertThat(response.status).isEqualTo(409)
         val error = response.entity as ApiError
