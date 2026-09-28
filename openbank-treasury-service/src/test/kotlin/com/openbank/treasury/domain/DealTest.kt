@@ -204,6 +204,87 @@ class DealTest {
             }.isInstanceOf(LimitBreachedException::class.java)
         }
 
+        // --- ADR-0315 D4: senior override ---
+
+        private val senior = com.openbank.treasury.domain.model.Actor(
+            "sara.senior",
+            com.openbank.treasury.domain.model.ActorType.HUMAN,
+        )
+
+        private fun breachedPending(): Pair<com.openbank.treasury.domain.model.Deal, LimitCheck> {
+            val d = placement(principal = "600000.00")
+            val pending = d.submit(dealer, withinLimit(d), NOW)
+            return pending to LimitCheck.of(bankA, d, BigDecimal("500000.00"))
+        }
+
+        @Test
+        fun `a senior override lets a different approver book the breached deal`() {
+            val (pending, breach) = breachedPending()
+            val overridden = pending.overrideLimit(senior, "ALCO-approved temporary excess", breach, NOW)
+            assertThat(overridden.limitOverride!!.by).isEqualTo(senior)
+            assertThat(overridden.limitOverride!!.coversExposureUpTo).isEqualByComparingTo("1100000.00")
+            assertThat(overridden.history.last().note).contains("limit override").contains("ALCO-approved")
+            val booked = overridden.approve(approver, breach, NOW)
+            assertThat(booked.state).isEqualTo(com.openbank.treasury.domain.model.DealState.BOOKED)
+        }
+
+        @Test
+        fun `an active override counts on its counterparty's limit-currency line only, until booked`() {
+            val (pending, breach) = breachedPending()
+            val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
+            val cp = overridden.counterpartyId
+            assertThat(pending.holdsActiveLimitOverride(cp, pending.limitCurrency)).isFalse()
+            assertThat(overridden.holdsActiveLimitOverride(cp, overridden.limitCurrency)).isTrue()
+            assertThat(overridden.holdsActiveLimitOverride("SIMBK-OTHER", overridden.limitCurrency)).isFalse()
+            val other = com.openbank.treasury.domain.model.Deal.SUPPORTED_CURRENCIES.first {
+                it !=
+                    overridden.limitCurrency
+            }
+            assertThat(overridden.holdsActiveLimitOverride(cp, other)).isFalse()
+            val booked = overridden.approve(approver, breach, NOW)
+            assertThat(booked.holdsActiveLimitOverride(cp, booked.limitCurrency)).isFalse()
+        }
+
+        @Test
+        fun `the senior who overrode cannot also book the deal`() {
+            val (pending, breach) = breachedPending()
+            val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
+            assertThatThrownBy { overridden.approve(senior, breach, NOW) }
+                .isInstanceOf(com.openbank.treasury.domain.model.FourEyesViolationException::class.java)
+        }
+
+        @Test
+        fun `an override does not cover exposure that grew after it`() {
+            val (pending, breach) = breachedPending()
+            val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
+            val grown = LimitCheck.of(bankA, placement(principal = "600000.00"), BigDecimal("600000.00"))
+            assertThatThrownBy {
+                overridden.approve(approver, grown, NOW)
+            }.isInstanceOf(LimitBreachedException::class.java)
+        }
+
+        @Test
+        fun `no override without a breach, without a reason, by the dealer, or by a machine`() {
+            val d = placement(principal = "100000.00")
+            val within = d.submit(dealer, withinLimit(d), NOW)
+            assertThatThrownBy { within.overrideLimit(senior, "reason", withinLimit(d), NOW) }
+                .isInstanceOf(IllegalStateException::class.java)
+            val (pending, breach) = breachedPending()
+            assertThatThrownBy { pending.overrideLimit(senior, " ", breach, NOW) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { pending.overrideLimit(dealer, "reason", breach, NOW) }
+                .isInstanceOf(com.openbank.treasury.domain.model.FourEyesViolationException::class.java)
+            assertThatThrownBy { pending.overrideLimit(agent, "reason", breach, NOW) }
+                .isInstanceOf(com.openbank.treasury.domain.model.ActorNotPermittedException::class.java)
+        }
+
+        @Test
+        fun `a rejection drops the override, so a resubmitted deal needs a fresh one`() {
+            val (pending, breach) = breachedPending()
+            val back = pending.overrideLimit(senior, "reason", breach, NOW).reject(approver, "rework", NOW)
+            assertThat(back.limitOverride).isNull()
+        }
+
         @Test
         fun `exactly at the limit is not a breach`() {
             val d = placement(principal = "1000000.00")
@@ -261,6 +342,37 @@ class DealTest {
                 placement(product = ProductType.CNB_DEPOSIT_FACILITY, counterparty = "SIMBK-A")
             }.isInstanceOf(IllegalArgumentException::class.java)
             assertThatThrownBy { placement(counterparty = "CNB") }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+
+        @Test
+        fun `ČNB lombard is overnight, CZK, facing ČNB, with a positive rate, and Friday matures Monday`() {
+            fun lombard(
+                currency: String = "CZK",
+                counterparty: String = "CNB",
+                rate: String = "5.75",
+                valueDate: LocalDate = MONDAY,
+            ) = placement(
+                product = ProductType.CNB_LOMBARD,
+                counterparty = counterparty,
+                currency = currency,
+                rate = rate,
+                maturity = MONDAY.plusDays(30), // ignored: the facility is overnight
+                valueDate = valueDate,
+            )
+            assertThat(lombard().maturityDate).isEqualTo(LocalDate.parse("2026-09-22"))
+            val fri = lombard(valueDate = FRIDAY)
+            assertThat(fri.maturityDate).isEqualTo(LocalDate.parse("2026-09-28"))
+            assertThat(fri.days).isEqualTo(3)
+            // 1 000 000 × 5.75 % × 3 / 360 = 479.1666… -> 479.17
+            assertThat(lombard(valueDate = FRIDAY).copy(principal = BigDecimal("1000000.00")).interest)
+                .isEqualByComparingTo("479.17")
+            assertThat(fri.product.isAsset).describedAs("a borrowing: consumes no limit").isFalse()
+            assertThat(LimitCheck.of(bankA, fri, BigDecimal.ZERO).dealAmount).isEqualByComparingTo("0")
+            assertThatThrownBy { lombard(currency = "EUR") }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { lombard(counterparty = "SIMBK-A") }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { lombard(rate = "0") }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { fri.copy(maturityDate = FRIDAY.plusDays(1)) }
+                .isInstanceOf(IllegalArgumentException::class.java)
         }
 
         @Test

@@ -47,6 +47,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
 | **S**poofing | A person's device key enrolled to a COMPANY party approves any challenge raised for that company, unattributed (#10281 item 1) | Enrolment reads the party's register type from party-service and refuses anything but `INDIVIDUAL`/`SOLE_TRADER` (422); a register that cannot answer fails closed (503). Pre-existing entity-bound rows: inventory + reviewed purge (`openbank-sca-service/scripts/purge_entity_bound_devices.py`, dry-run default, `--expect-count` gate) |
 | **T**ampering | A co-signature on one business approval spent on another approval, or on an edited payload (#10281 item 2) | `APPROVAL` purpose: the device signs the canonical `id|decision|APPROVAL|approvalRequestId|payloadSha256[|amount|currency|creditorIban]` (amount `0.00` form, currency and IBAN upper-case and compact); initiate refuses an `APPROVAL` challenge without both (400); consume compares both, so a mismatch is 409 and does not burn the challenge |
 | **R**epudiation | A decision record that names only a credential cannot answer "who approved" once the transient decision expires (#10281 item 3) | The resolved challenge row carries `decided_by_party_id` + `decided_by_credential_id` (from the enrolled device) and `on_behalf_of_party_id` (the entity as context); both are returned by consume |
+| **T**ampering | An `Idempotency-Key` reused with a different initiate body is answered with the first challenge, so the caller acts on a challenge minted for another purpose or redirect (#10946) | The key is claimed atomically in Redis (`reserve`) together with a SHA-256 fingerprint of method, path and the canonical request body (libs `RequestFingerprints`: sorted keys, null == absent) BEFORE any challenge is minted. A different body under the key is 409 `IDEMPOTENCY_KEY_REUSED`, a concurrent duplicate is 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`; neither mints anything. A failed initiate releases its marker. Residual: records stored before the fingerprint existed replay without a check until their 300 s TTL lapses; there is no DB-level check, so the binding lasts only as long as the Redis record |
 
 ## 5. Residual risks / assumptions
 
@@ -60,6 +61,25 @@ is the **authentication assurance gate** for payments and consent — defeating 
   attested in production (sandbox: enrollment is open, behind the customer-edge auth of ADR-0065).
 
 ## 6. Change log
+
+- **2026-09-26** — Challenge initiation binds its Idempotency-Key to a request fingerprint
+  (#10916, #10946). The key is reserved atomically before a challenge is minted. Same key + same
+  body still replays; same key + different body is now 409 `IDEMPOTENCY_KEY_REUSED` instead of a
+  replay of the first challenge, and a concurrent duplicate is 409
+  `IDEMPOTENCY_REQUEST_IN_PROGRESS`. No new endpoint, caller or privilege; the inbound surface
+  gains one error response (409, two codes).
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
 
 - **2026-09-19** — Business approvals and attribution (#10281 items 1 and 3, plus the SCA half of
   item 2). New outbound call sca → party-service (`GET /api/v1/parties/{id}`, `partyType` only,

@@ -8,6 +8,7 @@ package com.openbank.agent.infrastructure.policy
 import com.openbank.agent.application.port.out.PolicyDecisionPoint
 import com.openbank.agent.domain.policy.PolicyDecision
 import com.openbank.agent.domain.policy.PolicyQuery
+import com.openbank.libs.security.sanitizeForLog
 import io.quarkus.arc.properties.IfBuildProperty
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -29,9 +30,7 @@ class OpaPolicyDecisionPoint : PolicyDecisionPoint {
 
     private val log = Logger.getLogger(OpaPolicyDecisionPoint::class.java)
 
-    // CodeQL java/log-injection: query.tool/query.agent trace back to the MCP caller. Strip
-    // CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     override fun evaluate(query: PolicyQuery): PolicyDecision {
         val input = buildMap<String, Any?> {

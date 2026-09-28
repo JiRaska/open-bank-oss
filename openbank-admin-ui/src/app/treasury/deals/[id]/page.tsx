@@ -66,11 +66,11 @@ function DealDetail({ id }: { id: string }) {
   const labels: Record<DealAction, string> = {
     submit: t('Předložit', 'Submit'), approve: t('Schválit', 'Approve'), reject: t('Zamítnout', 'Reject'),
     cancel: t('Zrušit obchod', 'Cancel deal'), settle: t('Vypořádat', 'Settle'), mature: t('Ukončit ke splatnosti', 'Mature'),
-    reverse: t('Stornovat', 'Reverse'),
+    reverse: t('Stornovat', 'Reverse'), 'override-limit': t('Překročit limit', 'Override limit'),
   }
 
   const act = async (action: DealAction) => {
-    const needsReason = action === 'reject' || action === 'reverse'
+    const needsReason = action === 'reject' || action === 'reverse' || action === 'override-limit'
     if (needsReason && !reason.trim()) return
     setBusy(true)
     setNotice(null)
@@ -104,7 +104,12 @@ function DealDetail({ id }: { id: string }) {
 
   const a = dealActions(deal, actor, roles)
   const plain: DealAction[] = (['submit', 'approve', 'settle', 'mature', 'cancel'] as const).filter(k => a[k])
-  const withReason: DealAction[] = (['reject', 'reverse'] as const).filter(k => a[k])
+  // override-limit needs a mandatory reason exactly like reject/reverse, so it shares the same
+  // reason input and disabled-until-filled behaviour rather than a separate dialog.
+  const withReason: DealAction[] = [
+    ...(['reject', 'reverse'] as const).filter(k => a[k]),
+    ...(a.overrideLimit ? (['override-limit'] as const) : []),
+  ]
 
   return (
     <div>
@@ -150,6 +155,14 @@ function DealDetail({ id }: { id: string }) {
         ) : (
           <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('Limit se kontroluje při předložení a schválení.', 'The limit is checked at submit and at approval.')}</p>
         )}
+        {deal.limitOverride && (
+          <p style={{ fontSize: 13, marginTop: 8 }}>
+            {t(
+              `Limit překročen senior schvalovatelem ${deal.limitOverride.by} — pokrývá expozici do ${money(deal.limitOverride.coversExposureUpTo)}. Důvod: ${deal.limitOverride.reason}`,
+              `Limit overridden by senior approver ${deal.limitOverride.by} — covers exposure up to ${money(deal.limitOverride.coversExposureUpTo)}. Reason: ${deal.limitOverride.reason}`,
+            )}
+          </p>
+        )}
       </div>
 
       {(plain.length > 0 || withReason.length > 0 || a.ownDeal) && (
@@ -164,7 +177,7 @@ function DealDetail({ id }: { id: string }) {
             ))}
             {withReason.length > 0 && (
               <>
-                <input className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder={t('Důvod (povinný)', 'Reason (required)')} aria-label={t('Důvod zamítnutí nebo storna', 'Reason for rejection or reversal')} style={{ width: 220 }} />
+                <input className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder={t('Důvod (povinný)', 'Reason (required)')} aria-label={t('Důvod zamítnutí, storna nebo překročení limitu', 'Reason for rejection, reversal or limit override')} style={{ width: 220 }} />
                 {withReason.map(k => (
                   <button key={k} type="button" className="btn btn-secondary btn-sm" disabled={busy || !reason.trim()} onClick={() => void act(k)}>{labels[k]}</button>
                 ))}

@@ -174,6 +174,19 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-06** — Hold placement is now replay-safe (#8351, ADR-0287). `placeHold` checks the
   caller-supplied natural key (accountId, currency, referenceId) before reserving and replays the
   original hold on a retry — previously a retried `POST /{accountId}/holds` reserved TWICE, keeping
@@ -193,7 +206,7 @@ also be deleted (nothing else in balance-service depends on it).
 
 - **2026-09-02** — Doc correction, no behavior change: §3 and the S1 residual named three controls
   by names that do not exist in the tree. (1) The `@PermitAll` regression guard was credited to
-  `BalanceResourceSecurityTest`; that class is in no Kotlin source — the guard is real and is
+  `BalanceResourceSecurityTest`, but no such class exists in Kotlin source — the guard is real and is
   `BalanceSecurityContractTest`, which asserts by reflection that no `BalanceResource` /
   `ReconciliationResource` endpoint is `@PermitAll` and that every one carries `@RolesAllowed`.
   (2) The write endpoints were described as `@RolesAllowed(SERVICE, ...)`; the constant is
