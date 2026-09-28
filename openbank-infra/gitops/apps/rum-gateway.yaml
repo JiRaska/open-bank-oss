@@ -30,7 +30,7 @@ spec:
   source:
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
     chart: opentelemetry-collector
-    targetRevision: 0.158.0
+    targetRevision: 0.173.1
     helm:
       valuesObject:
         fullnameOverride: rum-gateway
@@ -208,7 +208,7 @@ spec:
           exporters:
             # TB-3: in-VPC hop to Tempo. The redacted, validated spans join the
             # same backend → one trace from the user's tap to the ledger write.
-            otlp/tempo:
+            otlp_grpc/tempo:
               endpoint: tempo.observability.svc:4317
               tls:
                 insecure: true
@@ -223,7 +223,7 @@ spec:
               traces:
                 receivers: [otlp]
                 processors: [memory_limiter, redaction, transform, probabilistic_sampler, batch]
-                exporters: [otlp/tempo]
+                exporters: [otlp_grpc/tempo]
         resources:
           requests:
             cpu: 100m
