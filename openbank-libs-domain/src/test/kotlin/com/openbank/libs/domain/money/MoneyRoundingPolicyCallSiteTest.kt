@@ -5,6 +5,7 @@
 package com.openbank.libs.domain.money
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -139,10 +140,45 @@ class MoneyRoundingPolicyCallSiteTest {
     }
 
     @Test
+    fun `RATIO_PERCENT is treasury's counterparty-limit utilisation, single rounding`() {
+        val hundred = BigDecimal(100)
+        val limits = listOf("1000", "3", "7", "0.03", "-400", "8").map(::BigDecimal)
+        val exposures = listOf(
+            "0", "1000", "1500", "123.45", "0.00125", "-12.3456", "1", "2", "5000000", "-0.0001",
+        ).map(::BigDecimal)
+        for (limit in limits) {
+            for (exposure in exposures) {
+                // openbank-treasury-service TreasuryUseCases.kt:56 before ADR-0318 (inline form)
+                val site = exposure.multiply(hundred).divide(limit, 2, RoundingMode.HALF_UP)
+                val policy = RoundingPolicy.RATIO_PERCENT.divide(exposure.multiply(hundred), limit)
+                assertThat(policy).describedAs("$exposure / $limit").isEqualTo(site)
+            }
+        }
+        // Exact x.xx5 ties (both signs), 0 and 100+: HALF_UP rounds away from zero.
+        val tieLimit = BigDecimal("1000")
+        // exposure -> utilisation %, against a 1000 limit
+        mapOf("123.45" to "12.35", "-123.45" to "-12.35", "123.35" to "12.34", "0" to "0.00", "15000.5" to "1500.05")
+            .forEach { (exposure, expected) ->
+                assertThat(RoundingPolicy.RATIO_PERCENT.divide(BigDecimal(exposure).multiply(hundred), tieLimit))
+                    .describedAs(exposure)
+                    .isEqualTo(BigDecimal(expected))
+            }
+        check(RoundingPolicy.RATIO_PERCENT, eur, tiesAt(2)) { it.setScale(2, RoundingMode.HALF_UP) }
+        check(RoundingPolicy.RATIO_PERCENT, jpy, tiesAt(2)) { it.setScale(2, RoundingMode.HALF_UP) }
+    }
+
+    @Test
+    fun `divide refuses a currency-scaled policy`() {
+        assertThatThrownBy {
+            RoundingPolicy.FEE.divide(BigDecimal.ONE, BigDecimal.TEN)
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `every policy is pinned by a case above`() {
         assertThat(RoundingPolicy.entries.map { it.name }).containsExactlyInAnyOrder(
             "MONEY_SCALE", "LEDGER_POSTING", "INTEREST_DAILY_RATE", "INTEREST_ACCRUAL",
-            "FX_RATE", "FX_AMOUNT", "FEE", "TAX_WITHHOLDING", "DISPLAY",
+            "FX_RATE", "FX_AMOUNT", "FEE", "TAX_WITHHOLDING", "DISPLAY", "RATIO_PERCENT",
         )
     }
 }

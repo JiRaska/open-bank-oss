@@ -19,6 +19,9 @@ private const val FX_RATE_SCALE = 8
 /** interest-service WithholdingTaxPolicy.TAX_SCALE: whole currency units. */
 private const val TAX_SCALE = 0
 
+/** treasury CounterpartyExposure.utilisationPercent: two decimals of a percentage. */
+private const val RATIO_PERCENT_SCALE = 2
+
 /**
  * The closed, named set of rounding rules the fleet uses (ADR-0318). Each policy is a
  * (scale, mode) pair: [fixedScale] when the rule has its own scale, otherwise the currency's
@@ -108,7 +111,33 @@ enum class RoundingPolicy(val fixedScale: Int?, val mode: RoundingMode, val rati
         RoundingMode.HALF_UP,
         "Statement rendering at the currency's minor units, HALF_UP — statement Pdf/Camt053/Mt940 renderers.",
     ),
+
+    /**
+     * A DIMENSIONLESS ratio or percentage reported for risk and limit monitoring — never a monetary
+     * amount, so it has no currency and a fixed scale: treasury CounterpartyExposure
+     * .utilisationPercent (exposure x 100 / limit). HALF_UP because that is what the site does and
+     * because a utilisation figure is read against a threshold by a human: the conventional
+     * "round half away from zero" is what a risk officer expects, and HALF_EVEN's banker's bias
+     * exists to cancel out over sums of amounts, which a single reported ratio never is. Do not use
+     * it to round money; a percentage FEE amount is [FEE].
+     */
+    RATIO_PERCENT(
+        RATIO_PERCENT_SCALE,
+        RoundingMode.HALF_UP,
+        "Dimensionless ratio/percentage at scale 2, HALF_UP — treasury counterparty-limit utilisation; never money.",
+    ),
     ;
+
+    /**
+     * Divides [dividend] by [divisor] with a single rounding under this policy — exactly
+     * `dividend.divide(divisor, scale, mode)`, so a non-terminating quotient is never rounded twice.
+     * Only for a policy with a [fixedScale] (a currency-less ratio); a currency-scaled policy has no
+     * scale without a currency.
+     */
+    fun divide(dividend: BigDecimal, divisor: BigDecimal): BigDecimal {
+        val scale = requireNotNull(fixedScale) { "$this has no fixed scale; it needs a currency" }
+        return dividend.divide(divisor, scale, mode)
+    }
 
     /** The scale this policy rounds to for [currency]. */
     fun scaleFor(currency: CurrencyCode): Int = fixedScale ?: currency.defaultFractionDigits
