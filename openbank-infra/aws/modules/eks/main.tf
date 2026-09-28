@@ -171,6 +171,12 @@ resource "aws_eks_node_group" "bootstrap" {
   capacity_type   = "ON_DEMAND"
   instance_types  = var.node_instance_types
 
+  # Track the control plane. Without this the node group keeps whatever
+  # version it was created with, so a control-plane bump leaves nodes behind.
+  # Reading it off the cluster (not the variable) orders the node rolling
+  # update after the control-plane upgrade within one apply.
+  version = aws_eks_cluster.this.version
+
   scaling_config {
     desired_size = var.node_desired_size
     min_size     = var.node_min_size

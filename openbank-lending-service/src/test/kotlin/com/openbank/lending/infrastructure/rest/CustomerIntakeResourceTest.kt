@@ -12,12 +12,15 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.security.Principal
@@ -178,6 +181,29 @@ class CustomerIntakeResourceTest {
     }
 
     @Test
+    fun `the same key with a different amount is refused, never replayed as the first application (#10916)`() {
+        val (res, apply) = resource()
+        kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-r", null, request("250000")) }
+
+        assertThatThrownBy {
+            kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-r", null, request("900000")) }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        // The use case never saw the second request.
+        assertThat(apply.lastRequest?.requestedAmount?.amount).isEqualByComparingTo("250000")
+    }
+
+    @Test
+    fun `a cancelled submission propagates the cancellation instead of answering 422 (#10958)`() {
+        val (res, _) = resource(apply = RecordingApply(kotlinx.coroutines.CancellationException("client gone")))
+
+        assertThatThrownBy {
+            kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-c", null, request()) }
+        }.isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        // The claim was released, so the client's retry is not stuck IN_PROGRESS.
+        assertThat(store.markers).doesNotContainKey("lending:intake-apply:$partyId:idem-c")
+    }
+
+    @Test
     fun `different idempotency keys are two applications, not a replay`() {
         val (res, _) = resource()
         kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-a", null, request()) }
@@ -219,13 +245,14 @@ class CustomerIntakeResourceTest {
 
     /** Records what the resource actually handed the use case — the assertions that matter are about
      *  the request the DESK layer will see, not about the HTTP status alone. */
-    private class RecordingApply : ApplyForLoanUseCase {
+    private class RecordingApply(private val failure: Throwable? = null) : ApplyForLoanUseCase {
         var lastRequest: LoanApplicationRequest? = null
         var lastActor: String? = null
 
         override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
             lastRequest = request
             lastActor = proposedBy
+            failure?.let { return Uni.createFrom().failure(it) }
             return Uni.createFrom().nullItem()
         }
 
@@ -244,9 +271,13 @@ class CustomerIntakeResourceTest {
         private fun <T> unsupported(): Uni<T> = throw UnsupportedOperationException("not used by intake")
     }
 
-    /** In-memory IdempotencyStore for the replay tests — records saves, serves gets. */
+    /**
+     * In-memory IdempotencyStore with the #10922 contract: `reserve` places a marker, replays a
+     * completed record with the same fingerprint and reports Mismatch for a different one.
+     */
     private class RecordingIdempotencyStore : IdempotencyStore {
         val saved = mutableMapOf<String, IdempotencyRecord>()
+        val markers = mutableMapOf<String, String>()
         override suspend fun get(key: String): IdempotencyRecord? = saved[key]
         override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) {
             saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now())
@@ -258,11 +289,25 @@ class CustomerIntakeResourceTest {
             responseBody: String,
             ttlSeconds: Long,
         ) {
+            markers.remove(key)
             saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now(), requestHash)
         }
-        override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long) =
-            saved[key]?.let { com.openbank.libs.idempotency.ReserveResult.Replay(it) }
-                ?: com.openbank.libs.idempotency.ReserveResult.Reserved
-        override suspend fun release(key: String, requestHash: String) = Unit
+        override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long): ReserveResult {
+            saved[key]?.let {
+                return if (it.requestHash ==
+                    requestHash
+                ) {
+                    ReserveResult.Replay(it)
+                } else {
+                    ReserveResult.Mismatch
+                }
+            }
+            markers[key]?.let { return if (it == requestHash) ReserveResult.InFlight else ReserveResult.Mismatch }
+            markers[key] = requestHash
+            return ReserveResult.Reserved
+        }
+        override suspend fun release(key: String, requestHash: String) {
+            if (markers[key] == requestHash) markers.remove(key)
+        }
     }
 }

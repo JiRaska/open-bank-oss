@@ -164,6 +164,10 @@ class AccountIdempotencyEntity : PanacheEntityBase {
     @Column(name = "account_id", nullable = false)
     lateinit var accountId: UUID
 
+    /** #10916: request fingerprint the key was first used with; null for rows predating V30. */
+    @Column(name = "request_hash", length = 64)
+    var requestHash: String? = null
+
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.now()
 }

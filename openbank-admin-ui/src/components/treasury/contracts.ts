@@ -33,6 +33,11 @@ export const journalRefSchema = z.object({
   event: z.string(), idempotencyKey: z.string(), journalId: z.string(), postedAt: timestamp,
 })
 
+/** A senior approver's recorded override of a limit breach (ADR-0315 D4). */
+export const limitOverrideSchema = z.object({
+  by: z.string(), reason: z.string(), at: timestamp, coversExposureUpTo: decimal, limitAtOverride: decimal,
+})
+
 export const dealSchema = z.object({
   dealId: z.string(),
   product: productSchema,
@@ -53,6 +58,9 @@ export const dealSchema = z.object({
   approvedBy: z.string().nullable(),
   rationale: z.string().nullable(),
   limitCheck: limitCheckSchema.nullable(),
+  // Optional too, not just nullable: older fixtures/mocks in this test suite predate the field,
+  // and a response that omits it (rather than sending null) must not fail parsing (unavailable).
+  limitOverride: limitOverrideSchema.nullable().optional(),
   createdAt: timestamp,
   updatedAt: timestamp,
   history: z.array(transitionSchema),
@@ -66,6 +74,13 @@ export const counterpartySchema = z.object({
 })
 export const counterpartyListSchema = z.array(counterpartySchema)
 
+export const limitUtilisationEntrySchema = z.object({
+  counterpartyId: z.string(), name: z.string(), synthetic: z.boolean(), currency: z.string(),
+  limit: decimal, utilised: decimal, available: decimal, utilisationPercent: decimal,
+  breached: z.boolean(), activeOverrides: z.number().int(),
+})
+export const limitUtilisationSchema = z.object({ limits: z.array(limitUtilisationEntrySchema) })
+
 export const positionsSchema = z.object({
   asOf: z.iso.date(),
   positions: z.array(z.object({
@@ -77,6 +92,7 @@ export type Product = z.infer<typeof productSchema>
 export type DealState = z.infer<typeof dealStateSchema>
 export type Deal = z.infer<typeof dealSchema>
 export type Counterparty = z.infer<typeof counterpartySchema>
+export type LimitUtilisationEntry = z.infer<typeof limitUtilisationEntrySchema>
 export type Positions = z.infer<typeof positionsSchema>
 
 /** The service's own error codes (ExceptionMappers.kt). */
