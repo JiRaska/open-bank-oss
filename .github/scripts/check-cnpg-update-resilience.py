@@ -330,7 +330,6 @@ spec:
 
 
 def self_test() -> int:
-    global REPO
     ok = True
 
     def run(files: dict[str, str], extra_rules: str = _PLATFORM) -> list[str]:
