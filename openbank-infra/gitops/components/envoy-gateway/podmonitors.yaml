@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Metrics for the Envoy Gateway control plane and data plane (ADR-0324 Phase 0).
+#
+# PodMonitors rather than ServiceMonitors: the proxy's metrics port is a container port the
+# controller declares on the pod (`metrics`, 19001) and not on any Service, and the
+# cluster Prometheus has empty podMonitor selectors, so both are discovered automatically
+# (same path as observability/podmonitor-external-secrets.yaml).
+#
+# The data-plane scrape carries the intent of #2677 into the new edge: Envoy counts every
+# downstream response by class (envoy_http_downstream_rq_xx{envoy_response_code_class="5"})
+# and every upstream failure per cluster (envoy_cluster_upstream_rq_xx, _rq_timeout,
+# _cx_connect_fail), including the 502/503/504 that never reach a backend pod and so never
+# appear in any service's http_server_requests_seconds_count. The edge-5xx alerts still
+# read nginx_ingress_controller_requests; they are retargeted when hosts move, not here.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: envoy-gateway-controller
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/part-of: envoy-gateway
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      control-plane: envoy-gateway
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: envoy-gateway-proxy
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/part-of: envoy-gateway
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+      app.kubernetes.io/component: proxy
+      app.kubernetes.io/managed-by: envoy-gateway
+  podMetricsEndpoints:
+    - port: metrics
+      path: /stats/prometheus
+      interval: 30s
