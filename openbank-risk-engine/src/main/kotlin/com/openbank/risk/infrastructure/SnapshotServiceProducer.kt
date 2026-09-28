@@ -11,9 +11,11 @@ import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
+import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.usecase.CapitalService
 import com.openbank.risk.application.usecase.CashFlowService
 import com.openbank.risk.application.usecase.CurveSetService
@@ -58,11 +60,21 @@ class SnapshotServiceProducer {
     fun snapshotUseCase(
         ledger: LedgerPort,
         lending: LendingPort,
+        treasury: TreasuryDealBook,
         repository: SnapshotRepository,
         clock: Clock,
         @ConfigProperty(name = "openbank.risk.lending.enabled", defaultValue = "true") lendingEnabled: Boolean,
-    ): SnapshotUseCase =
-        SnapshotService(ledger, repository, clock, Provenance.parse(provenance), lending.takeIf { lendingEnabled })
+        // ADR-0315 D6: the bank's money-market deals from treasury's events. Off keeps the
+        // treasury principal accounts GL-level, as before deals were modelled.
+        @ConfigProperty(name = "openbank.risk.treasury.enabled", defaultValue = "true") treasuryEnabled: Boolean,
+    ): SnapshotUseCase = SnapshotService(
+        ledger,
+        repository,
+        clock,
+        Provenance.parse(provenance),
+        lending.takeIf { lendingEnabled },
+        treasury.takeIf { treasuryEnabled },
+    )
 
     @Produces
     @ApplicationScoped
@@ -132,8 +144,11 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun capitalUseCase(snapshots: SnapshotUseCase, config: CapitalConfig): CapitalUseCase =
-        CapitalService(snapshots, config.toParameters())
+    fun capitalUseCase(
+        snapshots: SnapshotUseCase,
+        config: CapitalConfig,
+        fixings: FxFixingRepository,
+    ): CapitalUseCase = CapitalService(snapshots, config.toParameters(), fixings)
 
     /** Same reason as [validateLiquidityParameters]: a bad risk weight must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call

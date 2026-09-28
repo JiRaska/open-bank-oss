@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.5...account-service-v0.32.0) (2026-09-28)
+
+
+### Features
+
+* **account:** bind Idempotency-Key to a request fingerprint ([#10953](https://github.com/JiRaska/open-bank-oss/issues/10953)) ([165384d](https://github.com/JiRaska/open-bank-oss/commit/165384de33b027af7312e35a3163a20e527d00bb))
+
+## [0.31.5](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.4...account-service-v0.31.5) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** remove duplicate UnauthorizedException mappers; add unused 404/409 bases ([#10923](https://github.com/JiRaska/open-bank-oss/issues/10923)) ([33ff330](https://github.com/JiRaska/open-bank-oss/commit/33ff330630515a4919ca6f15bfc9b8ce3cc6d1f9))
+
 ## [0.31.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.3...account-service-v0.31.4) (2026-09-26)
 
 

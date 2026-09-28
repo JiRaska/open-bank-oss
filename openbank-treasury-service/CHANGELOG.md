@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.4.0...treasury-service-v0.5.0) (2026-09-28)
+
+
+### Features
+
+* **treasury:** show counterparty limit utilisation ([#11036](https://github.com/JiRaska/open-bank-oss/issues/11036)) ([64c0aeb](https://github.com/JiRaska/open-bank-oss/commit/64c0aeb0c1749445075490f3f5758fb15427b492))
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.3.0...treasury-service-v0.4.0) (2026-09-27)
+
+
+### Features
+
+* **treasury:** borrow overnight from the ČNB lombard facility ([#11087](https://github.com/JiRaska/open-bank-oss/issues/11087)) ([7583657](https://github.com/JiRaska/open-bank-oss/commit/75836579e3f5589198dbf89eaac1065be24733de))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.2.0...treasury-service-v0.3.0) (2026-09-26)
 
 

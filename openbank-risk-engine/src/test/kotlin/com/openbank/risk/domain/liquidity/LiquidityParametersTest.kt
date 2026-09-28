@@ -54,7 +54,7 @@ class LiquidityParametersTest {
     @Test
     fun `the parameter set is identified and versioned`() {
         assertThat(p.id).isEqualTo("bcbs-d238-d295")
-        assertThat(p.version).isEqualTo("2")
+        assertThat(p.version).isEqualTo("3")
         assertThat(p.source).contains("d238").contains("d295").contains("2015/61 deviations not applied")
         assertThat(p.regime).isEqualTo(LiquidityRegime.BCBS)
         assertThat(LiquidityFactor.entries.map { p.citation(it) }).allMatch { it.startsWith("BCBS d2") }
@@ -108,6 +108,25 @@ class LiquidityParametersTest {
         NSFR_RSF_LOAN_1Y_OTHER to "0.85",
         NSFR_RSF_OTHER_ASSET to "1.00",
     )
+
+    @Test
+    fun `d238 114-115 - secured funding with the central bank runs off at 0 percent`() {
+        assertFactors(LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW to "0")
+        assertThat(p.citation(LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW)).contains("d238 ¶114-115")
+    }
+
+    @Test
+    fun `d295 25 - central-bank funding under 6 months gets 0 percent ASF, sub-paragraph unverified`() {
+        assertFactors(LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M to "0")
+        assertThat(
+            p.citation(LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M),
+        ).contains("d295 ¶25").contains("UNVERIFIED")
+    }
+
+    @Test
+    fun `2320 CNB lombard is central-bank secured funding`() {
+        assertThat(p.classification.glAccounts["2320"]).isEqualTo(GlClass.CENTRAL_BANK_SECURED_FUNDING)
+    }
 
     @Test
     fun `the shipped classification is the conservative one`() {

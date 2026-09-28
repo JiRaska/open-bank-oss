@@ -40,13 +40,13 @@ spec:
         injector:
           enabled: false
         server:
-          # Pin the OpenBao binary. NB: quay publishes `2.5.4` (no `v`); the chart
-          # default tag is the appVersion `v2.5.4`, which does NOT exist on quay ->
+          # Pin the OpenBao binary. NB: quay publishes `2.5.5` (no `v`); the chart
+          # default tag is the appVersion `v2.5.x`, which does NOT exist on quay ->
           # would ImagePullBackOff. Pin the real tag explicitly.
           image:
             registry: quay.io
             repository: openbao/openbao
-            tag: "2.5.4"
+            tag: "2.5.5"
           # OWN the `vault` ServiceAccount so it survives the Vault app being pruned
           # (runbook 0005 step 7). The (vault/vault) EKS Pod Identity association keys
           # on namespace+SA NAME, so keeping the name `vault` preserves OpenBao's KMS
