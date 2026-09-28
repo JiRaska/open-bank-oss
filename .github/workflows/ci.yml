@@ -45,6 +45,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       changed: ${{ steps.check.outputs.changed }}
+      rbac_tests: ${{ steps.check.outputs.rbac_tests }}
+      registry_test: ${{ steps.check.outputs.registry_test }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,6 +54,7 @@ jobs:
       - id: check
         run: |
           set -euo pipefail
+          python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
           if [ "${{ github.event_name }}" = "push" ]; then
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -69,7 +72,50 @@ jobs:
                   openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
             echo "Admin UI or governance files changed: $N"
+            # Derive cross-package guard inputs from literal backend paths.
+            # Backend-only RBAC changes get a focused test lane; UI changes run
+            # the full UI suite above. A missing/dynamic input fails detection.
+            python3 .github/scripts/select-admin-ui-rbac-tests.py --base "$BASE" >> "$GITHUB_OUTPUT"
           fi
+
+  ui-rbac-contract:
+    name: Admin UI cross-package guards
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'false' && (needs.changes-ui.outputs.rbac_tests != '' || needs.changes-ui.outputs.registry_test == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Verify affected cross-package guards
+        env:
+          RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
+          REGISTRY_TEST: ${{ needs.changes-ui.outputs.registry_test }}
+        run: |
+          set -euo pipefail
+          read -r -a selected <<< "$RBAC_TESTS"
+          tests=()
+          for test in "${selected[@]}"; do
+            [[ "$test" =~ ^[a-z0-9.-]+-rbac\.guard\.test\.ts$ ]] || { echo "Invalid RBAC test name" >&2; exit 1; }
+            tests+=("src/test/$test")
+          done
+          if [ "$REGISTRY_TEST" = 'true' ]; then
+            tests+=("src/test/service-registry.guard.test.ts")
+          elif [ "$REGISTRY_TEST" != 'false' ]; then
+            echo "Invalid registry guard selection" >&2
+            exit 1
+          fi
+          (( ${#tests[@]} > 0 )) || { echo "No cross-package guards selected" >&2; exit 1; }
+          npm run test -- "${tests[@]}"
 
   ui-build:
     name: Admin UI build
@@ -230,7 +276,7 @@ jobs:
   #                      vacuous green this repo works to avoid.
   ui:
     name: Admin UI
-    needs: [changes-ui, ui-build]
+    needs: [changes-ui, ui-build, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -238,10 +284,23 @@ jobs:
       - name: Check build result
         env:
           RESULT: ${{ needs.ui-build.result }}
+          DETECTION_RESULT: ${{ needs.changes-ui.result }}
+          UI_CHANGED: ${{ needs.changes-ui.outputs.changed }}
+          RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
+          REGISTRY_TEST: ${{ needs.changes-ui.outputs.registry_test }}
+          RBAC_RESULT: ${{ needs.ui-rbac-contract.result }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
+          if [ "$DETECTION_RESULT" != "success" ]; then
+            echo "Admin UI change detection did not succeed ($DETECTION_RESULT)."
+            exit 1
+          fi
+          if [ "$UI_CHANGED" = "false" ] && { [ -n "$RBAC_TESTS" ] || [ "$REGISTRY_TEST" = 'true' ]; } && [ "$RBAC_RESULT" != "success" ]; then
+            echo "Admin UI cross-package guards did not pass ($RBAC_RESULT)."
+            exit 1
+          fi
           if [ "$RESULT" = "failure" ]; then
             echo "Admin UI build FAILED — this is a real build failure, not a superseded run."
             exit 1
