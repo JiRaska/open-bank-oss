@@ -23,7 +23,7 @@
 #   kube_deployment_spec_replicas{deployment,namespace}
 #   kube_statefulset_status_replicas_ready{statefulset,namespace}
 #   kube_statefulset_replicas{statefulset,namespace}
-#     — kube-state-metrics (bundled in kube-prometheus-stack 87.0.0); the same metrics the
+#     — kube-state-metrics (bundled in kube-prometheus-stack 91.8.1); the same metrics the
 #       chart's own rules-1.14/kubernetes-apps.yaml default rules query.
 #   rollout_info_replicas_available{namespace,name}
 #   rollout_info_replicas_desired{namespace,name}
