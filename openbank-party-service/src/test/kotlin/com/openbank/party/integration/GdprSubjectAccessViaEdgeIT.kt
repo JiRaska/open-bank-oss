@@ -4,9 +4,10 @@
 
 package com.openbank.party.integration
 
+import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import com.openbank.party.infrastructure.rest.PartyResource
-import com.openbank.party.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -43,7 +44,10 @@ import java.util.UUID
  * is the only one that would notice. The last test is the untouched-behaviour control.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
+)
 class GdprSubjectAccessViaEdgeIT {
 
     private lateinit var subjectId: String

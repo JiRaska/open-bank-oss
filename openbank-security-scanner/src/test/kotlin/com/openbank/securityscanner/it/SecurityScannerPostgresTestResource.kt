@@ -28,7 +28,7 @@ class SecurityScannerPostgresTestResource : QuarkusTestResourceLifecycleManager 
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val pg = PostgreSQLContainer(
-            DockerImageName.parse("docker.io/library/postgres:16.3-alpine")
+            DockerImageName.parse("docker.io/library/postgres:18.6-alpine")
                 .asCompatibleSubstituteFor("postgres"),
         )
             .withUsername("openbank")
@@ -58,6 +58,6 @@ class SecurityScannerPostgresTestResource : QuarkusTestResourceLifecycleManager 
 
     private companion object {
         const val DB = "openbank_security_it"
-        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
     }
 }

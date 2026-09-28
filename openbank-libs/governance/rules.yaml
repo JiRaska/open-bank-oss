@@ -209,6 +209,25 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  money_rounding_inline_construction:
+    detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
+    require:
+      - "rounding goes through com.openbank.libs.domain.money.RoundingPolicy (ADR-0318: a named, registered policy instead of an inline mode)"
+      - "no new inline site; the per-service baseline only shrinks"
+    gate: money-rounding-inline-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
+    ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  resilience_profile_declaration:
+    detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
+    require:
+      - "the declaration also carries @ResilienceProfile(...) (com.openbank.libs.resilience, ADR-0321 D2) naming one of ResilienceProfiles.ALL"
+      - "ResilienceProfiles.CUSTOM carries a non-blank reason beside the call"
+      - "no new undeclared site; the per-file baseline only shrinks"
+    gate: resilience-profile
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0321: advisory until the fleet sweep
+    ci_producer: ".github/scripts/check-resilience-profile.py"
   openapi_request_schema_conformance:
     detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
     require:
@@ -313,6 +332,16 @@ change_requirements:
     # `referenceId`/`ttlSeconds` — confirmed against `BalanceResource.placeHold`, which reads
     # `body.referenceId` and `body.ttlSeconds` directly. A caller following the published spec
     # cannot construct a valid request.
+  jaxrs_path_prefix_leading_slash:
+    detect: ["uriInfo.path / requestUri.path prefix checks (direct or one-hop local alias) in any openbank-*/src/main whose literal has no leading slash"]
+    require:
+      - "RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash — a prefix
+         check must match against '/v1/...', never 'v1/...' (#10997)"
+      - "no new slash-less prefix site; the per-file baseline only shrinks"
+    gate: jaxrs-path-prefix-leading-slash
+    enforced: advisory
+    target_enforce_date: "2026-12-31"
+    ci_producer: ".github/scripts/check-jaxrs-path-prefix-leading-slash.py"
   db_backup_association:
     detect: ["openbank-infra/gitops/**/*.yaml (kind: Cluster, postgresql.cnpg.io)"]
     require:
@@ -1048,6 +1077,31 @@ money_path_services:
                                             # PENDING_APPROVAL state already is. Writes are human-only in
                                             # treasury_rest_ext.rego.
 
+# CNPG clusters that are not owned by a money-path service but sit on the money path one hop
+# away (ADR-0325). They get the money-path cluster shape -- instances >= 2, required hostname
+# anti-affinity, PDB on -- enforced by check-cnpg-update-resilience.py, which also fails an entry
+# whose cluster is gone, whose namespace no money-path workload calls, or that the per-service
+# derivation already covers. Explicit rather than derived: namespace-level one-hop derivation
+# measured 9 clusters on 2026-09-28, most of them not money-path (goalert-db, apicurio-db, ...).
+# Not here: OpenBao (namespace vault) stores on integrated Raft, not CNPG.
+# Every CNPG cluster runs a standby (instances >= 2), enforced by gate cnpg-update-resilience
+# rule 4. Five spot interruptions on 2026-09-28 each took down every single-instance primary
+# on the reclaimed node; every HA cluster failed over in seconds (ADR-0325, #11304).
+# A cluster may run ONE instance only if listed here with a reason (>= 20 chars) -- e.g. a
+# scratch database that is rebuilt from nothing on loss. An entry naming no cluster, or a
+# cluster that already runs >= 2, is itself a finding, so an exception cannot outlive its cause.
+cnpg_single_instance_exceptions: []
+
+money_path_platform_databases:
+  - cluster: temporal/temporal-db
+    reason: >-
+      Temporal persists every payment saga's workflow and visibility state here; while it is
+      down no transfer saga can start, advance or run its compensation.
+  - cluster: iam/keycloak-db
+    reason: >-
+      Keycloak cannot issue or refresh tokens without it, and every money-path API call and
+      service-to-service client_credentials grant depends on a Keycloak-issued JWT.
+
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
 # availability + latency target applied uniformly across every money_path_services entry
@@ -1755,12 +1809,21 @@ architecture:
   # ENFORCED by .github/scripts/check-domain-purity.py (Validate manifests job):
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
-  # the whole openbank-libs-domain module; openbank-libs-runtime is module-exempt
+  # the whole openbank-libs-domain module and its ADR-0317 context modules
+  # (openbank-libs-lending); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
   # in a libs-domain package the old `*/domain/*` scope never opened.
   ci_producer: ".github/scripts/check-domain-purity.py"
+  # ADR-0317: bounded-context packages (lending, decision, iso20022, ...) live in
+  # openbank-libs-<context> modules, never back in openbank-libs-domain; core never depends on
+  # a context module; every runtime libs module is listed in libs-change-dependents.sh
+  # LIBS_MODULES. Advisory through phases 1-3, enforced once phase 4 lands.
+  libs_core_purity:
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0317 phase 4
+    ci_producer: ".github/scripts/check-libs-core-purity.py"
 
 # ---------------------------------------------------------------------------------------
 # OPA bundle sync (issue #1184). Keep terse: this file is embedded verbatim into every
@@ -3530,6 +3593,24 @@ matrix_sa_excluded_action_grants:
 # Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
 # realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
 # third, unreviewed answer to "what does the shared client hold".
+field_protection:
+  # ADR-0320 P3. Reversible field encryption and deterministic tokenization go through
+  # com.openbank.libs.security.FieldProtector (libs-domain port; OpenBaoTransitFieldProtector
+  # in libs-runtime, a plain class, no CDI bean; the test-only LocalAesGcmFieldProtector lives in
+  # openbank-libs-testing so no src/main can produce it). tokenize
+  # delegates to the ADR-0189/ADR-0072 BlindIndex — no second HMAC scheme.
+  detect: ["<service>/src/main/**/*.kt", "<service>/src/main/**/*.java", "<service>/src/main/**/*.sql"]
+  require:
+    - "no javax.crypto Cipher/Mac/SecretKeySpec/KeyGenerator, BouncyCastle, Tink, X-Vault-Token or OpenBao Transit path, and no pgp_sym_encrypt in SQL, in a service's src/main outside the shrink-only baseline"
+    - "ciphertext keeps the Transit `vault:v<N>:` envelope; every failure throws FieldProtectionException (fail closed)"
+  gate: field-crypto-in-libs
+  baseline: ".github/scripts/field-crypto-in-libs-baseline.txt"
+  # ADVISORY until card-issuance (first consumer, ADR-0262) migrates, per ADR-0320's
+  # advisory-first convention for P1/P3 gates.
+  enforced: advisory
+  target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
+  ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
@@ -3682,3 +3763,576 @@ autonomous_agent_prs:
     # guard against those paths, and it tripped no clause at all (measured 2026-08-22 on #6512,
     # a PR touching only this directory, which the guard waved through).
     - .github/agent-prompts/*
+
+# ── security_sensitive_paths (#11301, ADR-0279 #26) ─────────────────────────────────────────
+# Per money-path service, the path globs (relative to the service directory; `**/` = any dirs,
+# `*` = within one segment) holding each judgement category of the PR Security checklist:
+#   auth_crypto_payment — authn/authz, four-eyes, crypto/TLS/signing, payment execution & posting
+#   pii                 — code/schema carrying personal data
+#   cardholder          — PAN/CVV/cardholder data
+# check-security-checklist.py auto-answers a category's box for a money-path PR iff no changed
+# production file of a DECLARED service matches that category's globs; a money-path service
+# absent here stays fail-closed (human tick). Changing this block is itself a governance change:
+# the gate then requires the human tick on all three items, so it cannot be narrowed silently.
+# `--coverage` (gate security-sensitive-paths-coverage) fails when a file carries a strong
+# signal (crypto/JWT/TLS import, shared approval library, PII- or card-named field/column) that
+# its category's globs do not cover. Payment execution has no such signal — review those globs.
+security_sensitive_paths:
+  openbank-sepa-payment:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/client/DocumentServiceClient.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/client/FraudScoreClient.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/client/ReversalAdapter.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/client/SanctionsServiceClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-sepa-instant:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/sepainstant/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/sepainstant/infrastructure/client/ClearingSimulatorClient.kt"
+      - "src/main/kotlin/com/openbank/sepainstant/infrastructure/client/FraudScoreClient.kt"
+      - "src/main/kotlin/com/openbank/sepainstant/infrastructure/client/SanctionsServiceClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-swift-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/swift/infrastructure/client/ClearingSimulatorClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-transaction-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/client/BalanceCoverClient.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/client/FxRateClient.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/client/LedgerRestClient.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/image/LogoImages.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-domestic-payment:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/domestic/domain/model/DelegatedSpendBinding.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/client/ClearingSimulatorClient.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/client/DocumentServiceClient.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/client/FraudScoreClient.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/client/SanctionsServiceClient.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/rest/DomesticPaymentResource.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-account-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/account/application/usecase/SavingsProposalService.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/BalanceServiceClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PartyDirectoryClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/ProductCatalogClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/SanctionsServiceClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/ScaChallengeClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/rest/AccountResource.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-balance-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/LedgerTrialBalanceClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-billing-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/billing/infrastructure/client/BillingRestClients.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-clearing-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/clearing/infrastructure/client/ClearingLedgerRestClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-consent-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/**/*Consent*Resource*.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-fx-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/fx/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/fx/infrastructure/client/FraudScoreClient.kt"
+      - "src/main/kotlin/com/openbank/fx/infrastructure/client/SanctionsServiceClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-ledger-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/ledger/application/usecase/FxRevaluationService.kt"
+      - "src/main/kotlin/com/openbank/ledger/domain/model/ClosedPeriod.kt"
+      - "src/main/kotlin/com/openbank/ledger/domain/model/YearClose.kt"
+      - "src/main/kotlin/com/openbank/ledger/infrastructure/client/FxServiceClient.kt"
+      - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/AccountingDayResource.kt"
+      - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/ClosedPeriodResource.kt"
+      - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/YearCloseResource.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-lending-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
+  openbank-sanctions-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/sanctions/application/port/in/SanctionsPorts.kt"
+      - "src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsImportService.kt"
+      - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsCheck.kt"
+      - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsEntry.kt"
+      - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/EuFsfSaxParser.kt"
+      - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt"
+      - "src/main/resources/db/migration/V1__create_sanctions.sql"
+      - "src/main/resources/db/migration/V5__create_sanctions_entries.sql"
+    cardholder: []
+  openbank-psd2-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/**/*Pis*.kt"
+      - "src/main/kotlin/**/*Consent*.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder:
+      - "src/main/kotlin/com/openbank/psd2/domain/model/ObModels.kt"
+  openbank-treasury-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/ApprovalResource.kt"
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/webauthn/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Qseal*.kt"
+      - "src/main/kotlin/**/*Fingerprint*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Posting*.kt"
+      - "src/main/kotlin/**/*Journal*.kt"
+      - "src/main/kotlin/**/*Settlement*.kt"
+      - "src/main/kotlin/**/*SchemeGateway*.kt"
+      - "src/main/kotlin/**/*SchemeAccepted*.kt"
+      - "src/main/kotlin/**/*TransactionServiceClient*.kt"
+      - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*PaymentService*.kt"
+      - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []

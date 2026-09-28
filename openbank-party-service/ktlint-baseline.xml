@@ -8,9 +8,7 @@
         <error line="8" column="1" source="standard:no-wildcard-imports" />
     </file>
     <file name="src/main/kotlin/com/openbank/party/application/usecase/PartyService.kt">
-        <error line="15" column="1" source="standard:no-wildcard-imports" />
-        <error line="16" column="1" source="standard:no-wildcard-imports" />
-        <error line="17" column="1" source="standard:no-wildcard-imports" />
+        <error line="47" column="1" source="standard:no-wildcard-imports" />
     </file>
     <file name="src/main/kotlin/com/openbank/party/domain/model/Party.kt">
         <error line="43" column="28" source="standard:trailing-comma-on-declaration-site" />

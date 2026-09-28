@@ -4,7 +4,9 @@
 
 package com.openbank.psd2.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -35,7 +37,10 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @TestProfile(Psd2MissingHeaderStatusIT.AuthzOffProfile::class)
-@QuarkusTestResource(com.openbank.psd2.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_psd2_it")],
+)
 class Psd2MissingHeaderStatusIT {
 
     /**
@@ -52,7 +57,12 @@ class Psd2MissingHeaderStatusIT {
 
     @Test
     fun `an absent Consent-ID on the AIS accounts read answers 400`() {
-        Given { this } When { get("/open-banking/v2/accounts") } Then { statusCode(400) }
+        // An authorised TPP identity is required since #10997: the eIDAS filter now actually gates
+        // `/open-banking/...`, so without one the request stops at the filter's 401 and never
+        // reaches the parameter binding this test is about.
+        Given {
+            header("X-TPP-ID", FakeTppRegistryRestClient.AUTHORIZED_TPP)
+        } When { get("/open-banking/v2/accounts") } Then { statusCode(400) }
     }
 
     @Test

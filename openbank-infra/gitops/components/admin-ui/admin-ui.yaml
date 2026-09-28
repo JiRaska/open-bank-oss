@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-59708d80b-run36263308646
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-0172e3bb0
           ports:
             - name: http
               containerPort: 3000
@@ -106,7 +106,7 @@ spec:
             #   3. Add a RoleBinding for admin-ui-discovery below.
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
-              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk,loyalty,incentive,treasury
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk,loyalty,incentive,treasury,pricing
             - name: REFERRAL_SERVICE_URL
               value: https://referral-service.referral.svc:8443
             - name: NODE_EXTRA_CA_CERTS
@@ -314,6 +314,22 @@ rules:
 # compromised admin-ui SA cannot enumerate workloads outside its domain. Adding a
 # domain namespace is therefore a reviewed two-line change: a new RoleBinding here
 # AND a bump to OPENBANK_NAMESPACES above.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: pricing
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -857,6 +873,28 @@ spec:
       port: 3000
       targetPort: http
 ---
+# Edge response headers for this host, served by ingress-nginx's `custom-headers` annotation
+# (ADR-0324 interim hardening) instead of a Critical-risk `configuration-snippet`. Keys must be
+# in the controller's `global-allowed-response-headers` (apps/ingress-nginx.yaml) or the
+# controller denies the location (503). HSTS and X-Content-Type-Options are NOT listed here:
+# the controller sets both on every response (hsts-*, add-headers).
+# IMMUTABLE, VERSIONED BY NAME, SYNC-WAVE -1 — all three are load-bearing. The controller
+# re-reads this ConfigMap only when the Ingress that names it changes (custom-headers is not
+# in its configmap-watch set and it runs with no resync period), so an in-place edit would
+# never reach nginx. Change a header by adding `-v2` and pointing the annotation at it. The
+# wave makes ArgoCD create the ConfigMap before the Ingress that references it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: admin-ui-edge-headers-v1
+  namespace: admin-ui
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+immutable: true
+data:
+  X-Frame-Options: "SAMEORIGIN"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -869,12 +907,9 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Security headers applied at the nginx edge (belt-and-suspenders on top of
-    # Next.js headers()). HSTS with preload readies the domain for the preload list.
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
-      more_set_headers "X-Frame-Options: SAMEORIGIN";
-      more_set_headers "X-Content-Type-Options: nosniff";
-      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    # Next.js headers()). HSTS (2y, preload) and nosniff come from the controller;
+    # the rest from the ConfigMap above — no snippet (ADR-0324 interim hardening).
+    nginx.ingress.kubernetes.io/custom-headers: admin-ui/admin-ui-edge-headers-v1
 spec:
   ingressClassName: nginx
   tls:
