@@ -27,7 +27,8 @@ ARG LITELLM_VERSION=v1.83.14-stable.patch.3
 
 FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2
 
-USER root
+# No `USER root` needed: the upstream image already builds and runs as root; the last line of
+# this file is what drops to uid 1000.
 
 # The Prisma home for every process in this image. Root-owned and read-only to the runtime uid
 # on purpose: the engines are code, and a writable engine directory in the one pod with
