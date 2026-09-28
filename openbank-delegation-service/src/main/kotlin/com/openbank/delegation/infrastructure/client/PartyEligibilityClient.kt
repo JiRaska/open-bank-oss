@@ -7,6 +7,8 @@ package com.openbank.delegation.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
+import com.openbank.libs.resilience.ResilienceProfile
+import com.openbank.libs.resilience.ResilienceProfiles
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -68,9 +70,20 @@ interface PidServiceRestClient {
 class ResilientPartyEligibilityClient @Inject constructor(@RestClient private val client: PidServiceRestClient) :
     PartyEligibilityClient {
 
-    @Timeout(2000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
+    @ResilienceProfile(ResilienceProfiles.READ)
+    @Timeout(ResilienceProfiles.Read.TIMEOUT_MS)
+    @Retry(
+        maxRetries = ResilienceProfiles.Read.MAX_RETRIES,
+        delay = ResilienceProfiles.Read.DELAY_MS,
+        jitter = ResilienceProfiles.Read.JITTER_MS,
+        retryOn = [Exception::class],
+    )
+    @CircuitBreaker(
+        requestVolumeThreshold = ResilienceProfiles.Read.CB_REQUEST_VOLUME_THRESHOLD,
+        failureRatio = ResilienceProfiles.Read.CB_FAILURE_RATIO,
+        delay = ResilienceProfiles.Read.CB_DELAY_MS,
+        successThreshold = ResilienceProfiles.Read.CB_SUCCESS_THRESHOLD,
+    )
     override suspend fun eligibilityOf(partyId: UUID): PartyEligibility {
         val party = client.getParty(partyId)
         return PartyEligibility(

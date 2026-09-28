@@ -32,9 +32,6 @@
     <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$404</ID>
     <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$409</ID>
     <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$500</ID>
-    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.5</ID>
-    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.95</ID>
-    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.99</ID>
     <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
     <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$200</ID>
     <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$299</ID>

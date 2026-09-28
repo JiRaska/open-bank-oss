@@ -83,7 +83,7 @@ caller for every production service's API and management ports within the cluste
 2. **Unauthenticated routes not tested**: The scanner checks a hardcoded set of actuator paths.
    A new unauthenticated route introduced in a money-path service that the scanner does not
    probe would not be detected. Mitigation: **partial, and narrower than this entry claimed.**
-   There is no fleet-wide `SecurityContractTest` — no class by that exact name exists, and the
+   No such fleet-wide `SecurityContractTest` exists — no class by that exact name is present, and the
    invariant is enforced per service by nine hand-written variants
    (`AccountSecurityContractTest`, `BalanceSecurityContractTest`, `ClearingSecurityContractTest`,
    `DocumentSecurityContractTest`, `LedgerSecurityContractTest`, `YearCloseSecurityContractTest`,

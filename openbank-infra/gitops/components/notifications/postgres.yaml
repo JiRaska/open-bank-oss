@@ -46,7 +46,7 @@ spec:
   # and the idle replacements Karpenter had already provisioned. The replica is
   # also the switchover target a single-instance cluster never had.
   instances: 2
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 2Gi

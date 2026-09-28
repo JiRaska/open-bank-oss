@@ -14,6 +14,7 @@ import com.openbank.devops.domain.model.DevOpsFinding
 import com.openbank.devops.domain.model.DevOpsRunReport
 import com.openbank.devops.domain.model.FindingStatus
 import com.openbank.devops.domain.model.RunTrigger
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
@@ -37,9 +38,7 @@ class DevOpsService(
 
     private val log = Logger.getLogger(DevOpsService::class.java)
 
-    // CodeQL java/log-injection: id is caller-supplied and flows straight into the log line
-    // below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     override suspend fun run(trigger: RunTrigger): DevOpsRunReport {
         log.infof("Starting DevOps analysis workflow (trigger=%s)", trigger)

@@ -57,7 +57,7 @@ spec:
         - name: langfuse
           # docker.io is proxied transparently by the in-cluster registry-cache via containerd
           # hosts.toml — no prefix needed and no NAT cost (see kyverno/ecr-pull-through-rewrite.yaml).
-          image: docker.io/langfuse/langfuse:2.95.4
+          image: docker.io/langfuse/langfuse:2.95.11
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
