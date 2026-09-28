@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.usecase
 
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.iso20022.Pacs004Reader
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
@@ -80,12 +81,23 @@ class SepaPaymentService(
     }
 
     override suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment {
-        paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+        // #10916: the durable half of the Idempotency-Key check. The Redis record can expire or be
+        // evicted while this UNIQUE row lives forever, so a key reused for a DIFFERENT payment must
+        // be refused here too, not answered with the first payment. A legacy row (no stored hash)
+        // or a caller without one keeps the plain replay.
+        paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
+            val stored = existing.requestHash
+            if (stored != null && command.requestHash != null && stored != command.requestHash) {
+                throw IdempotencyKeyReusedException()
+            }
+            return existing
+        }
 
         val now = Instant.now(clock)
         val payment = SepaPayment(
             id = UUID.randomUUID(),
             idempotencyKey = command.idempotencyKey,
+            requestHash = command.requestHash,
             type = command.type,
             status = SepaPaymentStatus.RECEIVED,
             debtorAccountId = command.debtorAccountId,
