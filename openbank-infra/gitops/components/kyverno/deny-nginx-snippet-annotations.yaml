@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Kyverno ClusterPolicy: no Ingress may carry an ingress-nginx annotation of
+# Critical risk — the five snippet annotations (ADR-0324 interim hardening).
+#
+# WHY, WHEN THE CONTROLLER ALREADY REFUSES THEM. apps/ingress-nginx.yaml runs
+# with `allow-snippet-annotations: "false"` and `annotations-risk-level: "High"`,
+# so the controller will not render a snippet. But its admission webhook is OFF,
+# which makes the refusal SILENT: the controller drops the whole Ingress from
+# nginx.conf, the object stays `Synced/Healthy` in ArgoCD, and the host serves the
+# fake default certificate until someone notices. This policy moves the refusal to
+# admission, where it is loud (ArgoCD SyncFailed, `kubectl apply` error) and names
+# the annotation. It is also the control on WHO can add one: RBAC in this repo
+# grants Ingress write to no workload identity (only ArgoCD and cluster admins can),
+# and this rule binds both of those as well — there is no exclude block on purpose.
+#
+# THE SET is every annotation the controller-v1.15.1 risk table
+# (docs/user-guide/nginx-configuration/annotations-risk.md) classes Critical. The
+# controller is archived upstream, so that table can no longer change underneath
+# this list.
+#
+# ENFORCE ON DAY ONE is safe only because of ordering, not by luck: this ships in
+# the PR AFTER the one that removed every snippet from gitops, and merges once that
+# PR is live. Re-check the precondition in the CLUSTER, not in git, before touching
+# this file (every row must print <none>):
+#
+#   kubectl get ingress -A -o json | jq -r '.items[] | [.metadata.namespace,
+#     .metadata.name, ([.metadata.annotations // {} | keys[]
+#     | select(test("nginx.ingress.kubernetes.io/(configuration|server|auth|stream|modsecurity)-snippet"))]
+#     | join(",") | if . == "" then "<none>" else . end)] | @tsv'
+#
+# Deleted with ingress-nginx in ADR-0324 Phase 5, when a repo gate rejects every
+# nginx.ingress.kubernetes.io/ annotation instead.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: deny-nginx-snippet-annotations
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: No ingress-nginx snippet annotations (ADR-0324)
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Rejects an Ingress carrying any ingress-nginx annotation the controller
+      classes Critical risk (configuration-, server-, auth-, stream- and
+      modsecurity-snippet). Snippets inject raw nginx or ModSecurity config into a
+      controller that can read every Secret in the cluster; the controller refuses
+      them, but with its admission webhook off that refusal silently drops the
+      whole Ingress.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: no-critical-risk-annotations
+      match:
+        any:
+          - resources:
+              kinds:
+                - Ingress
+              operations:
+                - CREATE
+                - UPDATE
+      validate:
+        message: >-
+          Ingress '{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}'
+          carries an ingress-nginx snippet annotation. Snippets are disabled on this
+          cluster (ADR-0324): use `custom-headers` for response headers,
+          `denylist-source-range` to block paths, and the controller's
+          modsecurity.conf for WAF policy.
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/configuration-snippet\" || '' }}"
+                operator: NotEquals
+                value: ""
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/server-snippet\" || '' }}"
+                operator: NotEquals
+                value: ""
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/auth-snippet\" || '' }}"
+                operator: NotEquals
+                value: ""
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/stream-snippet\" || '' }}"
+                operator: NotEquals
+                value: ""
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/modsecurity-snippet\" || '' }}"
+                operator: NotEquals
+                value: ""
