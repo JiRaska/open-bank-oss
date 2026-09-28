@@ -18,11 +18,14 @@ import java.util.UUID
  * - [MM_PLACEMENT]: the bank LENDS to another bank (an asset, consumes that bank's credit limit).
  * - [MM_BORROWING]: the bank BORROWS from another bank (a liability, consumes no credit limit).
  * - [CNB_DEPOSIT_FACILITY]: overnight deposit at the Czech National Bank (an asset, CZK only).
+ * - [CNB_LOMBARD]: overnight borrowing from the ČNB marginal lending (lombard) facility against
+ *   eligible collateral (a liability, CZK only, #10896). The collateral pledge is NOT modelled.
  */
-enum class ProductType(val isAsset: Boolean) {
+enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
     MM_PLACEMENT(isAsset = true),
     MM_BORROWING(isAsset = false),
-    CNB_DEPOSIT_FACILITY(isAsset = true),
+    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true),
+    CNB_LOMBARD(isAsset = false, isCnbFacility = true),
 }
 
 /**
@@ -108,6 +111,8 @@ data class Deal(
     val limitCheck: LimitCheck? = null,
     /** An AI agent's inputs and rationale for a draft it proposed (ADR-0315 D10); null for humans. */
     val rationale: String? = null,
+    /** A senior approver's recorded override of a counterparty-limit breach (ADR-0315 D4). */
+    val limitOverride: LimitOverride? = null,
     val history: List<DealTransition> = emptyList(),
 ) {
     init {
@@ -118,18 +123,42 @@ data class Deal(
         require(rate <= MAX_RATE) { "rate is an annual percentage and must not exceed $MAX_RATE" }
         require(!valueDate.isBefore(tradeDate)) { "valueDate must not precede tradeDate" }
         require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
-        if (product == ProductType.CNB_DEPOSIT_FACILITY) {
-            require(currency == CZK) { "the ČNB deposit facility is CZK only" }
+        if (product.isCnbFacility) {
+            val facility = if (product == ProductType.CNB_LOMBARD) "lombard facility" else "deposit facility"
+            require(currency == CZK) { "the ČNB $facility is CZK only" }
             require(counterpartyId == CNB_COUNTERPARTY_ID) {
-                "the ČNB deposit facility's counterparty is $CNB_COUNTERPARTY_ID"
+                "the ČNB $facility's counterparty is $CNB_COUNTERPARTY_ID"
             }
             require(maturityDate == DayCount.nextBusinessDay(valueDate)) {
-                "the ČNB deposit facility is overnight: maturityDate must be the next business day"
+                "the ČNB $facility is overnight: maturityDate must be the next business day"
+            }
+            if (product == ProductType.CNB_LOMBARD) {
+                require(rate.signum() > 0) { "the ČNB lombard rate must be positive" }
             }
         } else {
             require(counterpartyId != CNB_COUNTERPARTY_ID) { "interbank products cannot face the central bank" }
         }
     }
+
+    /**
+     * The currency whose counterparty limit this deal consumes (#10896). Today that is the deal's
+     * own currency for every product; a product that consumes a limit in another currency (FX spot:
+     * its CZK equivalent) overrides it HERE. The booking-time [LimitCheck], the exposure query and
+     * the utilisation view's active-override count all read this one property — never the raw
+     * `currency` — so a new product cannot be counted on one line and checked on another.
+     */
+    val limitCurrency: String get() = currency
+
+    /**
+     * True while this deal is PENDING_APPROVAL on [counterpartyId]'s [currency] limit with a senior
+     * override still in force (ADR-0315 D4, #10896). Keyed on [limitCurrency], not `currency`.
+     */
+    fun holdsActiveLimitOverride(counterpartyId: String, currency: String): Boolean =
+        state == DealState.PENDING_APPROVAL &&
+            limitOverride != null &&
+            consumesLimit &&
+            this.counterpartyId == counterpartyId &&
+            limitCurrency == currency
 
     /** ACT/360 day count between value and maturity date. */
     val days: Long get() = ChronoUnit.DAYS.between(valueDate, maturityDate)
@@ -153,16 +182,54 @@ data class Deal(
         requireHuman(actor, "approve")
         requireState(DealState.PENDING_APPROVAL, "approve")
         requireSecondPerson(actor)
-        // ADR-0315 D4: a breach blocks booking. The senior-approver override is not built yet.
-        if (check.breached) throw LimitBreachedException(check)
+        // ADR-0315 D4: a breach blocks booking unless a second, senior approver recorded an override
+        // with a reason that still covers it. The booking approver is yet another person.
+        if (check.breached) requireOverrideCovers(actor, check)
         return transition(DealState.BOOKED, actor, at, limitNote(check)).copy(approvedBy = actor, limitCheck = check)
+    }
+
+    /**
+     * ADR-0315 D4: a SENIOR approver records an override of a counterparty-limit breach, with a
+     * reason. Only for a PENDING_APPROVAL deal whose current check IS breached (an override of a
+     * deal within limit would be a blank cheque for a later, larger breach). Human only, and never
+     * the deal's creator or submitter. The override covers the exposure measured now; if exposure
+     * grows before booking, approval refuses again.
+     */
+    fun overrideLimit(actor: Actor, reason: String, check: LimitCheck, at: Instant): Deal {
+        requireHuman(actor, "override the limit of")
+        requireState(DealState.PENDING_APPROVAL, "override the limit of")
+        require(reason.isNotBlank()) { "a limit override needs a reason" }
+        check(check.breached) {
+            "the deal is within its limit (headroom ${check.headroomAfter}); there is nothing to override"
+        }
+        val role = when (actor.id) {
+            createdBy.id -> "creator"
+            submittedBy?.id -> "submitter"
+            else -> null
+        }
+        role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not override its limit") }
+        val override = LimitOverride(actor, reason, at, check.exposureAfter, check.limit)
+        return copy(
+            limitOverride = override,
+            limitCheck = check,
+            updatedAt = at,
+            history = history + DealTransition(
+                from = state,
+                to = state,
+                actor = actor,
+                at = at,
+                note = "limit override: exposure ${check.exposureAfter} > limit ${check.limit} " +
+                    "${check.currency}; reason: $reason",
+            ),
+        )
     }
 
     fun reject(actor: Actor, reason: String, at: Instant): Deal {
         requireHuman(actor, "reject")
         requireState(DealState.PENDING_APPROVAL, "reject")
         require(reason.isNotBlank()) { "a rejection needs a reason" }
-        return transition(DealState.DRAFT, actor, at, "rejected: $reason").copy(submittedBy = null, limitCheck = null)
+        return transition(DealState.DRAFT, actor, at, "rejected: $reason")
+            .copy(submittedBy = null, limitCheck = null, limitOverride = null)
     }
 
     fun cancel(actor: Actor, at: Instant): Deal {
@@ -206,13 +273,22 @@ data class Deal(
 
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
-        get() = product.isAsset && state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+        get() = product.isAsset && state in LIMIT_CONSUMING_STATES
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(
         state = to,
         updatedAt = at,
         history = history + DealTransition(from = state, to = to, actor = actor, at = at, note = note),
     )
+
+    /** A breach books only under a senior override that still covers it, and not by that senior. */
+    private fun requireOverrideCovers(actor: Actor, check: LimitCheck) {
+        val override = limitOverride
+        if (override == null || check.exposureAfter > override.coversExposureUpTo) throw LimitBreachedException(check)
+        if (actor.id == override.by.id) {
+            throw FourEyesViolationException("four-eyes: the senior who overrode the limit must not also book the deal")
+        }
+    }
 
     /** Four-eyes: the approver is neither the creator nor the submitter. */
     private fun requireSecondPerson(actor: Actor) {
@@ -250,6 +326,18 @@ data class Deal(
         private val MAX_RATE = BigDecimal("100")
 
         /**
+         * The single source of truth for "on book" (ADR-0315, treasury limit utilisation, #10896):
+         * a deal in one of these states still consumes its counterparty's credit limit. Both the
+         * booking-time [LimitCheck] (via [consumesLimit] / the repository's `exposure` query) and
+         * the read-only limit-utilisation view MUST derive from this one set — duplicating it as a
+         * second literal list anywhere else is exactly the divergence this constant exists to rule
+         * out (a limit-utilisation view unable to disagree with the check that actually blocks
+         * booking is worth nothing if it silently reads a different rule).
+         */
+        val LIMIT_CONSUMING_STATES: Set<DealState> =
+            setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+
+        /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or
          * the system may not. An agent's draft must carry its rationale (ADR-0315 D10).
          */
@@ -275,7 +363,7 @@ data class Deal(
                 require(!rationale.isNullOrBlank()) { "an agent-drafted deal must carry its rationale (ADR-0315 D10)" }
             }
             val maturity = when {
-                product == ProductType.CNB_DEPOSIT_FACILITY -> DayCount.nextBusinessDay(valueDate)
+                product.isCnbFacility -> DayCount.nextBusinessDay(valueDate)
                 maturityDate == null -> DayCount.nextBusinessDay(valueDate) // overnight
                 else -> maturityDate
             }
@@ -326,3 +414,12 @@ object DayCount {
             .setScale(MONEY_SCALE, RoundingMode.HALF_UP)
     }
 }
+
+/** A senior approver's override of a limit breach, bounded to the exposure it was granted for (ADR-0315 D4). */
+data class LimitOverride(
+    val by: Actor,
+    val reason: String,
+    val at: Instant,
+    val coversExposureUpTo: BigDecimal,
+    val limitAtOverride: BigDecimal,
+)

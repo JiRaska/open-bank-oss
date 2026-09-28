@@ -68,10 +68,13 @@ tasks.test {
 
 kover {
     reports {
+        // Measured 2026-09-26 over two independent koverXmlReport runs (both 87.46% LINE, no
+        // variance observed): floor = floor(min(run1, run2)) - 2, per the fleet's
+        // flaky-koverVerify ratchet convention. Ratchet-only: never lower this.
         verify {
             rule {
                 bound {
-                    minValue = 30
+                    minValue = 85
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

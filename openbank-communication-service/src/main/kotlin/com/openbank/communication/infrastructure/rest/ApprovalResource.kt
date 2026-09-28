@@ -58,5 +58,5 @@ class ApprovalResource(approvalStore: ApprovalStore) {
     suspend fun decide(@PathParam("id") id: String, request: DecideApprovalRequest?): Response =
         // Null body -> 400, unknown id -> 404, maker == checker -> SelfApprovalNotAllowedException
         // from ApprovalStore.decide: all in ApprovalEndpointSupport (libs-runtime).
-        support.decide(id, request, ApprovalEndpointSupport.checkerId(identity))
+        support.decide(id, request, identity)
 }

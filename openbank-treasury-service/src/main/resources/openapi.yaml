@@ -4,7 +4,14 @@ info:
   # 1.0.0: first contract (ADR-0315 MVP, issue #10618) — money-market deals (MM_PLACEMENT,
   #        MM_BORROWING, CNB_DEPOSIT_FACILITY) with four-eyes booking, counterparty limits and
   #        per-currency daily positions.
-  version: 1.0.0
+  # 1.1.0: additive — POST /deals/{id}/override-limit (ROLE_TREASURY_SENIOR_APPROVER) and
+  #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
+  # 1.5.0: additive — product CNB_LOMBARD (#10896): overnight borrowing from the ČNB marginal
+  #        lending (lombard) facility. The RESPONSE ProductType is now x-extensible-enum (the
+  #        product set grows); the request keeps a closed enum (DraftProductType), one value wider (ADR-0315 D2). Queue: #11036 1.2.0, #11041 1.3.0, #11052 1.4.0.
+  # 1.6.0: additive — GET /limits/utilisation (#10896): per-counterparty limit, utilised,
+  #        available, utilisation %, breached flag and active senior-override count.
+  version: 1.6.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -26,6 +33,13 @@ info:
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
     Monday-Friday — there is no holiday calendar yet. The ČNB deposit facility is always
     overnight and CZK only.
+
+    **ČNB lombard** (`CNB_LOMBARD`): overnight borrowing from the ČNB marginal lending facility.
+    CZK only, counterparty `CNB`, maturity always the next business day (`maturityDate` ignored),
+    `rate` is the ČNB lombard rate entered by the dealer and must be > 0. Same four-eyes lifecycle
+    and ACT/360 interest as a money-market borrowing; like any borrowing it consumes no limit.
+    Settlement credits the ledger's "Borrowings from CNB" liability (2320). The collateral pledge
+    that backs a lombard loan is NOT modelled.
 
     **Ledger postings** go through ledger-service's journal API only, keyed
     `treasury:<dealId>:<event>` and balanced per currency: settlement, maturity (principal plus
@@ -159,6 +173,31 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
 
+  /api/v1/treasury/deals/{id}/override-limit:
+    post:
+      tags: [Treasury]
+      operationId: overrideDealLimit
+      summary: Senior override of a counterparty-limit breach, with a reason (ROLE_TREASURY_SENIOR_APPROVER)
+      description: >
+        ADR-0315 D4. The deal must be PENDING_APPROVAL and its limit check breached. The overrider is
+        never the deal's creator or submitter, and booking still needs a different approver. The
+        override covers the exposure measured now; if exposure grows before booking, approval refuses
+        again.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '400': { description: Missing reason }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
   /api/v1/treasury/deals/{id}/cancel:
     post:
       tags: [Treasury]
@@ -238,6 +277,21 @@ paths:
                 items:
                   $ref: '#/components/schemas/CounterpartyLimit'
 
+  /api/v1/treasury/limits/utilisation:
+    get:
+      tags: [Treasury]
+      operationId: getLimitsUtilisation
+      summary: >-
+        Per-counterparty limit utilisation: limit, utilised (sum of principal of deals on book),
+        available, utilisation %, breached flag and count of active senior overrides (ADR-0315 D4)
+      responses:
+        '200':
+          description: Limit utilisation lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LimitUtilisation'
+
   /api/v1/treasury/positions:
     get:
       tags: [Treasury]
@@ -311,7 +365,15 @@ components:
   schemas:
     ProductType:
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY]
+      # x-extensible-enum, not enum (1.5.0, #10896): products GROW as ADR-0315 D2 lands them
+      # (CNB_LOMBARD now). A client must tolerate an unknown product; a closed set would make every
+      # new product a URL-major break. The same idiom as risk-engine's Position.kind.
+      x-extensible-enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
+    DraftProductType:
+      # What a client may SEND: closed, so the server's validation is what the document says. A new
+      # product widens it (additive for a request). Responses use the open ProductType above.
+      type: string
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
     DealState:
       type: string
       enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
@@ -328,17 +390,17 @@ components:
       type: object
       required: [product, counterpartyId, currency, principal, rate, valueDate]
       properties:
-        product: { $ref: '#/components/schemas/ProductType' }
+        product: { $ref: '#/components/schemas/DraftProductType' }
         counterpartyId: { type: string, examples: [SIMBK-A] }
         currency: { type: string, enum: [CZK, EUR] }
         principal: { type: number, exclusiveMinimum: 0 }
-        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360' }
+        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360. Must be > 0 for CNB_LOMBARD.' }
         tradeDate: { type: string, format: date, description: Defaults to today }
         valueDate: { type: string, format: date }
         maturityDate:
           type: string
           format: date
-          description: Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY.
+          description: Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY and CNB_LOMBARD (always overnight).
         rationale:
           type: string
           description: Required when an AI agent drafts (ADR-0315 D10).
@@ -372,6 +434,15 @@ components:
         idempotencyKey: { type: string, examples: ['treasury:0191c0de-0000-7000-8000-000000000001:settled'] }
         journalId: { type: string, format: uuid }
         postedAt: { type: string, format: date-time }
+    LimitOverride:
+      type: object
+      description: A senior approver's override of a counterparty-limit breach (ADR-0315 D4).
+      properties:
+        by: { type: string }
+        reason: { type: string }
+        at: { type: string, format: date-time }
+        coversExposureUpTo: { type: number }
+        limitAtOverride: { type: number }
     Deal:
       type: object
       properties:
@@ -397,6 +468,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/LimitCheck'
             - type: 'null'
+        limitOverride:
+          oneOf:
+            - $ref: '#/components/schemas/LimitOverride'
+            - type: 'null'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         history:
@@ -416,6 +491,24 @@ components:
         limit: { type: number }
         exposure: { type: number }
         headroom: { type: number }
+    LimitUtilisation:
+      type: object
+      properties:
+        limits:
+          type: array
+          items:
+            type: object
+            properties:
+              counterpartyId: { type: string }
+              name: { type: string }
+              synthetic: { type: boolean }
+              currency: { type: string }
+              limit: { type: number }
+              utilised: { type: number }
+              available: { type: number }
+              utilisationPercent: { type: number }
+              breached: { type: boolean }
+              activeOverrides: { type: integer }
     Positions:
       type: object
       properties:
