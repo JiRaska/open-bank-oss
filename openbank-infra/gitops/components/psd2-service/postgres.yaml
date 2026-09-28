@@ -6,6 +6,11 @@ kind: Cluster
 metadata:
   name: psd2-db
   namespace: psd2
+  annotations:
+    # ADR-0325 staged rollout: required anti-affinity + zone spread change the pod spec and
+    # ROLL the instances, so they land in a later wave, once this cluster's new standby is
+    # Ready -- never in the same sync that creates it. Removed by that wave's PR.
+    openbank.io/affinity-rollout-pending: "ADR-0325 wave -- add required anti-affinity after the standby is Ready"
 spec:
   monitoring:
     enablePodMonitor: true
@@ -33,19 +38,6 @@ spec:
   # operator has no standby and restarts either way, so this is free there.
   primaryUpdateMethod: switchover
   primaryUpdateStrategy: unsupervised
-  # ADR-0159 / ADR-0325: money-path => primary + hot standby on different nodes,
-  # soft spread across AZs. Enforced by check-cnpg-update-resilience.py.
-  affinity:
-    enablePodAntiAffinity: true
-    topologyKey: kubernetes.io/hostname
-    podAntiAffinityType: required
-  topologySpreadConstraints:
-    - maxSkew: 1
-      topologyKey: topology.kubernetes.io/zone
-      whenUnsatisfiable: ScheduleAnyway
-      labelSelector:
-        matchLabels:
-          cnpg.io/cluster: psd2-db
   imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3

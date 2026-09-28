@@ -59,6 +59,14 @@ WORKLOAD_KINDS = ("Deployment", "Rollout", "StatefulSet")
 SVC_RX = re.compile(r"\b([a-z0-9][a-z0-9-]*?)-(?:rw|ro|r)\.([a-z0-9-]+)\.svc\b")
 IMAGE_RX = re.compile(r'"image":\s*"([^"]+)"')
 
+# ADR-0325 staged rollout. Required anti-affinity changes the pod spec, so CNPG ROLLS the
+# instances; applying it in the same sync that raises instances 1 -> 2 rolls the only primary in
+# place before the new standby exists. A cluster whose standby is being added carries this
+# annotation (with a reason) and is excused the affinity checks ONLY -- never instances >= 2 or
+# switchover. It is stale the moment the affinity is present, and meaningless on a cluster that
+# is not money-path; both are findings, so the excuse cannot outlive the wave that removes it.
+PENDING_ANN = "openbank.io/affinity-rollout-pending"
+
 # Money-path services that genuinely own no database. Reason required; an entry for a service
 # that does resolve to a cluster, or that is no longer money-path, is a stale finding.
 NO_DATABASE: dict[str, str] = {}
@@ -104,7 +112,11 @@ def scan() -> tuple[dict[str, dict], dict[str, set], list[str]]:
                 if not meta.get("name") or not ns:
                     errors.append(f"{rel}: CNPG Cluster without a resolvable name/namespace")
                     continue
-                clusters[f"{ns}/{meta['name']}"] = {"spec": doc.get("spec") or {}, "path": str(rel)}
+                clusters[f"{ns}/{meta['name']}"] = {
+                    "spec": doc.get("spec") or {},
+                    "path": str(rel),
+                    "pending": str((meta.get("annotations") or {}).get(PENDING_ANN, "")).strip(),
+                }
             elif kind in WORKLOAD_KINDS:
                 text = json.dumps(doc)
                 ns = meta.get("namespace") or _ns_from_kustomization(path) or ""
@@ -154,6 +166,9 @@ def check() -> tuple[list[str], int]:
             )
         for k in owned:
             mp_clusters.setdefault(k, svc)
+    for key, c in sorted(clusters.items()):
+        if c["pending"] and key not in mp_clusters:
+            findings.append(f"{c['path']}: Cluster {key} carries {PENDING_ANN} but is not a money-path cluster -- stale")
     for svc in NO_DATABASE:
         if svc not in money:
             findings.append(f"NO_DATABASE[{svc}] is stale: not in money_path_services")
@@ -167,12 +182,20 @@ def check() -> tuple[list[str], int]:
         if not isinstance(inst, int) or inst < 2:
             findings.append(f"{where} has instances={inst}; ADR-0159 requires >= 2 (primary + standby)")
         aff = spec.get("affinity") or {}
+        aff_gaps = []
         if aff.get("enablePodAntiAffinity") is not True:
-            findings.append(f"{where} lacks affinity.enablePodAntiAffinity: true")
+            aff_gaps.append("lacks affinity.enablePodAntiAffinity: true")
         if aff.get("topologyKey") != "kubernetes.io/hostname":
-            findings.append(f"{where} affinity.topologyKey must be kubernetes.io/hostname")
+            aff_gaps.append("affinity.topologyKey must be kubernetes.io/hostname")
         if aff.get("podAntiAffinityType") != "required":
-            findings.append(f"{where} affinity.podAntiAffinityType must be `required`")
+            aff_gaps.append("affinity.podAntiAffinityType must be `required`")
+        if c["pending"]:
+            if not aff_gaps:
+                findings.append(f"{where} carries {PENDING_ANN} but already has the affinity -- remove the annotation")
+            else:
+                print(f"::notice::{where}: affinity deferred to a staged wave ({c['pending']})")
+        else:
+            findings += [f"{where} {g}" for g in aff_gaps]
         if spec.get("enablePDB") is False:
             findings.append(f"{where} disables its PodDisruptionBudget (enablePDB: false)")
 
@@ -267,10 +290,23 @@ def self_test() -> int:
             "enablePodAntiAffinity"),
         "money-path service whose workload vanished": (
             {"db.yaml": good["db.yaml"]}, "cannot be derived"),
+        "pending annotation on a cluster that already has the affinity": (
+            {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA).replace(
+                "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+            "already has the affinity"),
+        "pending annotation does not excuse a single instance": (
+            {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=1, extra="  primaryUpdateMethod: switchover\n").replace(
+                "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+            "instances=1"),
         "money-path cluster with PDB disabled": (
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA + "  enablePDB: false\n")},
             "enablePDB"),
     }
+    deferred = {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
+        "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)
+        + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="  primaryUpdateMethod: switchover\n")}
+    if run(deferred):
+        print(f"SELF-TEST FAIL: a deferred-affinity cluster was reported: {run(deferred)}"); ok = False
     for label, (files, needle) in cases.items():
         got = run(files)
         if not any(needle in f for f in got):

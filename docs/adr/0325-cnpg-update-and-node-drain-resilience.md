@@ -60,6 +60,17 @@ We will make both failure modes recover on their own instead of freezing:
   that runs that image and the `<cluster>-rw.<ns>.svc` endpoints that workload connects to. A
   money-path service it cannot resolve is reported as a finding, not skipped, so a new
   money-path service cannot slip past it the way eight slipped past ADR-0159.
+  **Staged:** required anti-affinity and the zone spread change the pod spec, and CNPG rolls
+  every instance whose stored PodSpec differs (`isPodNeedingRollout` → the PodSpec
+  comparison). Adding them in the same sync that raises `instances` from 1 to 2 would roll the
+  only primary in place before the new standby exists, which is the outage class this ADR
+  prevents. So a cluster gaining its standby first gets `instances: 2` alone (CNPG's default
+  *preferred* hostname anti-affinity already places the standby elsewhere where it can), plus
+  the annotation `openbank.io/affinity-rollout-pending`. The required affinity lands in a later
+  wave once the standby is Ready, and that wave removes the annotation. The gate excuses only
+  the affinity checks for an annotated cluster. It never excuses `instances >= 2` or
+  switchover, and it reports the annotation as stale once the affinity is present or on a
+  cluster that is not money-path.
 - **D3: node termination has a deadline.** The `default` NodePool sets
   `terminationGracePeriod: 1h`. After an hour, Karpenter stops waiting on PDBs and on volume
   detachment and terminates the instance, which is what releases the EBS volume. The worst
@@ -77,9 +88,14 @@ We will make both failure modes recover on their own instead of freezing:
   `VolumesDetached=Unknown / AwaitingVolumeDetachment` for 15 minutes. `NodeStuckTerminating`
   (1h) covers only the eviction half.
 
-**Rolling out image bumps.** With D1 and D2 in place, a fleet-wide minor bump costs each
-money-path cluster one switchover (seconds) instead of a restart, so the bump no longer has to
-be split into waves by hand. We do not adopt `ClusterImageCatalog` for this. A single catalog
+**Rolling out pod-spec changes (image bumps, affinity, resources).** With D1 and D2 in place,
+such a change costs each money-path cluster one switchover (a write pause of seconds) instead
+of a restart. A single-instance cluster still restarts in place, and ~70 clusters rolling in
+one sync is still ~70 simultaneous write pauses, on the same nodes a drift roll may be
+draining. So a fleet-wide pod-spec change is applied in waves of at most about ten clusters.
+The order is non-money-path first, then the money-path service databases, then the platform
+databases every money-path call depends on (keycloak, temporal). The next wave starts only
+when `PostgresClusterDegraded` is silent for the previous one. We do not adopt `ClusterImageCatalog` for this. A single catalog
 moves every cluster together on one edit, which widens a bump's blast radius instead of
 staging it. A catalog may still be worth using later to remove the duplicated image reference,
 with one catalog per wave; that is a separate decision.
@@ -130,9 +146,11 @@ with one catalog per wave; that is a separate decision.
 - A drift roll of N nodes now takes at least N node replacements in sequence.
 
 **Neutral**
-- Setting `primaryUpdateMethod` does not change the pod template, so D1 restarts nothing when
-  it lands. Adding a standby to the seven clusters clones it from the primary without
-  restarting the primary.
+- `primaryUpdateMethod`, `primaryUpdateStrategy`, `instances` and Cluster annotations are
+  not part of the PodSpec CNPG compares. The PR that introduces D1, and the `instances: 2`
+  step of D2, therefore roll no existing pod. A new standby is cloned from the primary without
+  restarting it. The required-affinity waves DO roll pods (standby first, then one switchover
+  per cluster), which is why they are staged.
 - The NodePool change is Terraform in `openbank-infra/aws/envs/sandbox-platform` and applies
   only when `platform-tofu` is dispatched.
 
