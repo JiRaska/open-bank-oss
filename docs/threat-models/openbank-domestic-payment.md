@@ -548,3 +548,35 @@ not change any existing request's outcome until explicitly flipped.
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
   implementation this PR replaces.
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** DomesticPaymentNotFoundMapper/InvalidDomesticPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `ExceptionMappers.kt`'s detekt baseline entry, which document the deletion rather than contradict
+  it). `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
+  extend `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`,
+  handled by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper`
+  (added, unused, by #10923). Both already used the base's default codes
+  (`NOT_FOUND`/`CONFLICT`), so status, `code` and `message` are byte-identical to the deleted
+  mappers' output — verified by `DomesticPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s
+  source changes (`Ids.randomId()` → the correlation MDC), which #10911 phase 1 established is not
+  part of the wire contract. `DomesticPaymentIdempotencyConflictMapper` (a distinct
+  `application/problem+json` body shape) and `PaymentNotSettledMapper`/
+  `PaymentConfirmationRenderMapper` are untouched. **Risk class:** none — response-plumbing
+  de-duplication only; the payment workflow, delegated-spend binding and Temporal orchestration
+  are untouched. Rollback: restore the deleted mapper classes and revert the exception base
+  classes.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site is migrated to
+  `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

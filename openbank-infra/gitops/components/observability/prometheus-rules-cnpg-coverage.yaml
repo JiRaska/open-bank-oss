@@ -367,6 +367,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: pricing
+            cluster: pricing-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: psd2
             cluster: psd2-db
             origin: manifest
@@ -451,7 +457,7 @@ spec:
             namespace: accounts
             cluster: accounts-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: accounts
             cluster: product-catalog-db
@@ -631,17 +637,17 @@ spec:
             namespace: observability
             cluster: goalert-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: onboarding
             cluster: onboarding-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: pact-broker
             cluster: pact-broker-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: party
             cluster: party-db
@@ -723,20 +729,25 @@ spec:
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
+            namespace: pricing
+            cluster: pricing-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
             namespace: psd2
             cluster: psd2-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: referral
             cluster: referral-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: release-steward
             cluster: releasesteward-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: risk
             cluster: risk-db
@@ -756,12 +767,12 @@ spec:
             namespace: sdd
             cluster: sdd-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: security-scanner
             cluster: security-scanner-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: statements
             cluster: statements-db
@@ -771,7 +782,7 @@ spec:
             namespace: temporal
             cluster: temporal-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: tpp-registry
             cluster: tpp-registry-db
@@ -781,7 +792,7 @@ spec:
             namespace: treasury
             cluster: treasury-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: wealth
             cluster: wealth-db

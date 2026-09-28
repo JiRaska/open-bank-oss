@@ -6,12 +6,13 @@ package com.openbank.tppregistry.integration
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.tppregistry.application.port.`in`.TppRegistryUseCase
 import com.openbank.tppregistry.application.usecase.TppRegistryService
-import com.openbank.tppregistry.it.PostgresRedisTestResource
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -34,7 +35,10 @@ import javax.sql.DataSource
  * actually happened).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
+)
 class TppRegistryIdempotencyFingerprintIT {
 
     @Inject

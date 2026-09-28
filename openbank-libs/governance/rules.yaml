@@ -1075,6 +1075,14 @@ money_path_services:
 # derivation already covers. Explicit rather than derived: namespace-level one-hop derivation
 # measured 9 clusters on 2026-09-28, most of them not money-path (goalert-db, apicurio-db, ...).
 # Not here: OpenBao (namespace vault) stores on integrated Raft, not CNPG.
+# Every CNPG cluster runs a standby (instances >= 2), enforced by gate cnpg-update-resilience
+# rule 4. Five spot interruptions on 2026-09-28 each took down every single-instance primary
+# on the reclaimed node; every HA cluster failed over in seconds (ADR-0325, #11304).
+# A cluster may run ONE instance only if listed here with a reason (>= 20 chars) -- e.g. a
+# scratch database that is rebuilt from nothing on loss. An entry naming no cluster, or a
+# cluster that already runs >= 2, is itself a finding, so an exception cannot outlive its cause.
+cnpg_single_instance_exceptions: []
+
 money_path_platform_databases:
   - cluster: temporal/temporal-db
     reason: >-

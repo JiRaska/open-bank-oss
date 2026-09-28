@@ -7,6 +7,9 @@ package com.openbank.transaction.infrastructure.rest
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.approval.web.ApprovalResponse
+import com.openbank.libs.approval.web.DecideApprovalRequest
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
@@ -111,5 +114,16 @@ class ApprovalResourceTest {
             runBlocking { resourceWith(store, "checker").decide("missing", DecideApprovalRequest(approve = true)) }
         }.isInstanceOf(NotFoundException::class.java)
             .hasMessageContaining("missing")
+    }
+
+    @Test
+    fun `the maker cannot approve their own request through this endpoint`() {
+        val maker = "maker"
+        val guarding = mockk<ApprovalStore>()
+        coEvery { guarding.decide("appr-1", maker, any()) } throws SelfApprovalNotAllowedException(maker)
+
+        assertThatThrownBy {
+            runBlocking { resourceWith(guarding, maker).decide("appr-1", DecideApprovalRequest(approve = true)) }
+        }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
     }
 }

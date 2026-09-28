@@ -10,7 +10,7 @@ metadata:
 spec:
   monitoring:
     enablePodMonitor: true
-  instances: 1
+  instances: 2
   # ADR-0325: an update (image bump, config change) promotes the already-updated
   # standby first and only then restarts the old primary. CNPG's default,
   # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
