@@ -6,25 +6,40 @@ package com.openbank.psd2.infrastructure.rest.filter
 
 import com.openbank.libs.security.sanitizeForLog
 import com.openbank.psd2.infrastructure.client.TppAuthorizationGuard
-import jakarta.annotation.Priority
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.infrastructure.Infrastructure
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Priorities
 import jakarta.ws.rs.container.ContainerRequestContext
-import jakarta.ws.rs.container.ContainerRequestFilter
 import jakarta.ws.rs.core.Response
-import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException
 import org.jboss.logging.Logger
+import org.jboss.resteasy.reactive.server.ServerRequestFilter
 
-@Provider
-@Priority(Priorities.AUTHENTICATION)
-class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) : ContainerRequestFilter {
+/**
+ * eIDAS QWAC transport-auth + TPP role gate (ADR-0090 P1).
+ *
+ * Registered as a RESTEasy Reactive [ServerRequestFilter] returning a [Uni], NOT as a plain
+ * `ContainerRequestFilter`: the tpp-registry check is a synchronous MP-RestClient call, and a
+ * plain filter runs on the Vert.x IO thread ahead of the Kotlin `suspend` resource methods (which
+ * reject `@Blocking`), so a real `/v1` POST failed with "Attempting a blocking read on io thread".
+ * [filter] stays synchronous and is offloaded to the worker pool by [gate]; the request resumes
+ * once the Uni completes, aborted with the returned response if non-null.
+ */
+@ApplicationScoped
+class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) {
 
     private val log = Logger.getLogger(EidasMtlsFilter::class.java)
 
     // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
+    @ServerRequestFilter(priority = Priorities.AUTHENTICATION)
+    fun gate(ctx: ContainerRequestContext): Uni<Response?> =
+        Uni.createFrom().item { filter(ctx) }.runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
+
+    /** Blocking gate decision: `null` lets the request through, otherwise the response to abort with. */
     @Suppress("LongMethod")
-    override fun filter(ctx: ContainerRequestContext) {
+    fun filter(ctx: ContainerRequestContext): Response? {
         // RESTEasy Reactive's UriInfo.path carries a leading slash ("/v1/..."); normalise once so the
         // prefix checks below match either form (#10997 — without this the gate never ran).
         val path = ctx.uriInfo.path.removePrefix("/")
@@ -32,28 +47,25 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
         // surface (`v1/`, ADR-0090) with the same eIDAS QWAC + TPP role check; the sandbox is open.
         val gated = (path.startsWith("open-banking/") && !path.startsWith("open-banking/sandbox/")) ||
             path.startsWith("v1/")
-        if (!gated) return
+        if (!gated) return null
 
         val tppId = ctx.getHeaderString("X-TPP-ID")
             ?: ctx.getHeaderString("SSL-CLIENT-S-DN")
 
         if (tppId.isNullOrBlank()) {
             log.warnf("Missing TPP identification on path: %s", path.sanitizeForLog())
-            ctx.abortWith(
-                Response.status(401)
-                    .entity(
-                        mapOf(
-                            "tppMessages" to listOf(
-                                mapOf(
-                                    "category" to "ERROR",
-                                    "code" to "CERTIFICATE_MISSING",
-                                    "text" to "eIDAS QWAC certificate or X-TPP-ID header required",
-                                ),
+            return Response.status(401)
+                .entity(
+                    mapOf(
+                        "tppMessages" to listOf(
+                            mapOf(
+                                "category" to "ERROR",
+                                "code" to "CERTIFICATE_MISSING",
+                                "text" to "eIDAS QWAC certificate or X-TPP-ID header required",
                             ),
                         ),
-                    ).build(),
-            )
-            return
+                    ),
+                ).build()
         }
 
         val requiredRole = when {
@@ -65,8 +77,7 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
             tppAuthorizationGuard.requireAuthorized(tppId, requiredRole)
         } catch (e: CircuitBreakerOpenException) {
             log.errorf("TPP registry circuit open for tppId=%s path=%s", tppId.sanitizeForLog(), path.sanitizeForLog())
-            ctx.abortWith(serviceUnavailable())
-            return
+            return serviceUnavailable()
         } catch (e: Exception) {
             log.errorf(
                 e,
@@ -74,8 +85,7 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
                 tppId.sanitizeForLog(),
                 path.sanitizeForLog(),
             )
-            ctx.abortWith(serviceUnavailable())
-            return
+            return serviceUnavailable()
         }
 
         if (!authorization.authorized) {
@@ -85,24 +95,22 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
                 requiredRole,
                 path.sanitizeForLog(),
             )
-            ctx.abortWith(
-                Response.status(401)
-                    .entity(
-                        mapOf(
-                            "tppMessages" to listOf(
-                                mapOf(
-                                    "category" to "ERROR",
-                                    "code" to "CERTIFICATE_INVALID",
-                                    "text" to (authorization.reason ?: "TPP not authorized"),
-                                ),
+            return Response.status(401)
+                .entity(
+                    mapOf(
+                        "tppMessages" to listOf(
+                            mapOf(
+                                "category" to "ERROR",
+                                "code" to "CERTIFICATE_INVALID",
+                                "text" to (authorization.reason ?: "TPP not authorized"),
                             ),
                         ),
-                    ).build(),
-            )
-            return
+                    ),
+                ).build()
         }
 
         ctx.setProperty("tppId", tppId)
+        return null
     }
 
     private fun serviceUnavailable(): Response = Response.status(503)

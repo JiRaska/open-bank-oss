@@ -75,7 +75,7 @@ class QsealSignatureFilterTest {
         val filter = QsealSignatureFilter(enforce = true)
         val ctx = ctxFor("GET", "v1/accounts", null, null, null, ByteArray(0))
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 0) { ctx.abortWith(any()) }
     }
@@ -85,7 +85,7 @@ class QsealSignatureFilterTest {
         val filter = QsealSignatureFilter(enforce = true)
         val ctx = ctxFor("GET", "v1/payments/sepa-credit-transfers/p-1/status", null, null, null, ByteArray(0))
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 0) { ctx.abortWith(any()) }
     }
@@ -95,7 +95,7 @@ class QsealSignatureFilterTest {
         val filter = QsealSignatureFilter(enforce = false)
         val ctx = ctxFor("POST", "v1/payments/sepa-credit-transfers", null, null, null, "{}".toByteArray())
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 0) { ctx.abortWith(any()) }
     }
@@ -107,7 +107,7 @@ class QsealSignatureFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
     }
@@ -121,7 +121,7 @@ class QsealSignatureFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
     }
@@ -145,7 +145,7 @@ class QsealSignatureFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
     }
@@ -158,7 +158,7 @@ class QsealSignatureFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
     }

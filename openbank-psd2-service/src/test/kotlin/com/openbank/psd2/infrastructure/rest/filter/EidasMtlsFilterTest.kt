@@ -41,7 +41,7 @@ class EidasMtlsFilterTest {
     fun `ungated paths (sandbox) are not intercepted`() {
         val ctx = ctxFor("open-banking/sandbox/ping", tppIdHeader = null)
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 0) { ctx.abortWith(any()) }
         verify(exactly = 0) { ctx.setProperty(any(), any()) }
@@ -53,7 +53,7 @@ class EidasMtlsFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
     }
@@ -64,7 +64,7 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("cn=tpp-cert", true, setOf("AISP"), null)
         val ctx = ctxFor("v1/accounts", tppIdHeader = null, sslDn = "cn=tpp-cert")
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 1) { ctx.setProperty("tppId", "cn=tpp-cert") }
     }
@@ -75,7 +75,7 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("tpp-1", true, setOf("PISP"), null)
         val ctx = ctxFor("v1/payments/sepa-credit-transfers")
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 1) { guard.requireAuthorized("tpp-1", "PISP") }
         verify(exactly = 1) { ctx.setProperty("tppId", "tpp-1") }
@@ -87,7 +87,7 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("tpp-1", true, setOf("AISP"), null)
         val ctx = ctxFor("v1/accounts")
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 1) { guard.requireAuthorized("tpp-1", "AISP") }
     }
@@ -100,7 +100,7 @@ class EidasMtlsFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
         verify(exactly = 0) { ctx.setProperty("tppId", any()) }
@@ -113,7 +113,7 @@ class EidasMtlsFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(503)
     }
@@ -125,7 +125,7 @@ class EidasMtlsFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(503)
     }
@@ -137,7 +137,7 @@ class EidasMtlsFilterTest {
         val captured = slot<Response>()
         every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         assertThat(captured.captured.status).isEqualTo(401)
     }
@@ -148,7 +148,7 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("tpp-1", true, setOf("PISP"), null)
         val ctx = ctxFor("/v1/payments/sepa-credit-transfers")
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 1) { ctx.setProperty("tppId", "tpp-1") }
     }
@@ -157,7 +157,7 @@ class EidasMtlsFilterTest {
     fun `slash-prefixed sandbox path is not intercepted`() {
         val ctx = ctxFor("/open-banking/sandbox/ping", tppIdHeader = null)
 
-        filter.filter(ctx)
+        filter.filter(ctx)?.let(ctx::abortWith)
 
         verify(exactly = 0) { ctx.abortWith(any()) }
     }
