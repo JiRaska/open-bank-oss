@@ -116,6 +116,10 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
+    // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
+    // class is absent at runtime is silently dropped, so the test needs arc itself.
+    testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
     // MultipartParser.MalformedMessageException lives in the reactive-server artifact; the
     // classification test instantiates the real class so the by-name map key can never drift
@@ -137,6 +141,10 @@ dependencies {
     testImplementation("io.quarkus:quarkus-jackson:3.33.2")
     testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
+    // HashLinkedOutboxAuditEventPublisherTest asserts the @IfBuildProperty opt-in gate by reflection
+    // (ADR-0323), so the annotation class must be on the test classpath; compileOnly above.
+    testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
     testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // Test-only: WorkflowLivenessMetricNamingTest checks the dotted meter name against Micrometer's
@@ -149,7 +157,16 @@ dependencies {
     // 2.0.5 (the line the Quarkus BOM resolves for every service), not the catalog's 1.20.4: 1.20.x
     // negotiates Docker API 1.32, which Docker Engine 29 (min API 1.40) rejects, so the container
     // never starts and a local run can only SKIP. Measured 2026-09-27 on this module.
+    // RedisIdempotencyStoreIT runs the store's three Lua scripts against a REAL Valkey: the unit
+    // test only exercises a Kotlin twin of them, which cannot catch a Lua defect.
+    // 2.0.5 is what the Quarkus BOM resolves for every service; the catalog's 1.20.4 bundles a
+    // docker-java that current Docker Engines reject (API < 1.40), which would silently skip it.
     testImplementation("org.testcontainers:testcontainers:2.0.5")
+    // KeyedCallFilterClientTest drives the REAL Quarkus REST client engine (the JAX-RS client under
+    // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
+    // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
+    // Test-only; already in gradle/verification-metadata.xml because every service resolves it.
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client:3.38.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

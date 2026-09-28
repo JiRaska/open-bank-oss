@@ -15,7 +15,15 @@ info:
   #        standard factors from a versioned parameter set. Additive.
   # 1.6.0: Pillar 1 credit-risk capital GET /snapshots/{id}/capital (ADR-0313 phase 2) — BCBS d424
   #        standardised-approach RWA, 8% own-funds requirement and capital ratios. Additive.
-  version: 1.6.0
+  # 1.6.0 -> 1.7.0: additive — position kind TREASURY_DEAL: the bank's money-market deals from
+  # treasury's events as contract-level MONEY_MARKET_DEAL instruments (ADR-0315 D6).
+  # 1.7.0 -> 1.11.0: additive — the capital total is stated in CZK at the ČNB fixing in effect on
+  #        asOf (Capital.fxRates lists every rate used; Capital.totalNotStated says why a total is
+  #        absent). 1.8.0-1.10.0 are claimed by open PRs #11015, #11016, #11040.
+  # 1.11.0 -> 1.11.1: correction — LiquiditySnapshot.notes documents the stable machine-readable
+  #        code prefix (e.g. "PLEDGED_COLLATERAL_NOT_MODELLED: ...") a note may carry; no shape
+  #        change, description only.
+  version: 1.11.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -283,9 +291,11 @@ paths:
       description: |
         Liquidity Coverage Ratio (BCBS d238) and Net Stable Funding Ratio (BCBS d295) per currency,
         with a total only for a single-currency book. Every component line carries its factor, the
-        configuration key it came from and the BCBS paragraph. Factors and classification choices
-        come from the versioned parameter set `openbank.risk.liquidity.*`, named on the result.
-        BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.
+        configuration key it came from and the article / paragraph it cites. Factors and
+        classification choices come from the versioned parameter set `openbank.risk.liquidity.*`,
+        named on the result. The default set is `eu-2015-61-crr2` (Delegated Regulation (EU) 2015/61
+        for the LCR, Regulation (EU) 575/2013 Part Six Title IV for the NSFR); the BCBS d238 / d295
+        set `bcbs-d238-d295` stays selectable.
         A GL balance the configured classification does not name is listed in `unclassified` and
         counted nowhere. Derived on request, never stored.
       parameters:
@@ -321,8 +331,12 @@ paths:
         paragraph; the own-funds requirement (8% × RWA, bcbs189 ¶50); and CET1 / Tier 1 / Total
         capital ratios when own funds are in the snapshot (`ratiosNotComputable` says why not).
         BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. The ratios use
-        CREDIT-RISK RWA only, so they are an upper bound. Per currency; total, requirement and
-        ratios only for a single-currency book. A GL balance the classification does not name is
+        CREDIT-RISK RWA only, so they are an upper bound. Per currency, plus a CZK `total` and
+        requirement: every other currency's EAD and RWA converted at the ČNB fixing in effect at
+        00:00 Prague on asOf (the ledger FX revaluation's rule; a weekend takes the prior business
+        day's still-valid fixing), each rate listed in `fxRates`. A missing fixing leaves `total`
+        null with `totalNotStated` — never a partial total. Ratios only for a single-currency book
+        (own funds are not converted). A GL balance the classification does not name is
         listed in `unclassified` and counted nowhere. Derived on request, never stored.
       parameters:
         - $ref: '#/components/parameters/RunId'
@@ -542,7 +556,7 @@ components:
           # x-extensible-enum, not enum: the position kinds GROW as ADR-0314 D4 brings contract
           # sources in (LOAN now, treasury kinds with ADR-0315). A client must tolerate an unknown
           # kind; declaring the set closed would make every new source a URL-major break.
-          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN]
+          x-extensible-enum: [SUB_LEDGER, GL_ACCOUNT, LOAN, TREASURY_DEAL]
           description: >-
             SUB_LEDGER (a customer balance on deposit control), GL_ACCOUNT (a GL account with no finer
             breakdown) or LOAN (a loan from lending's loan book, ADR-0314 D4). The set grows.
@@ -1174,6 +1188,11 @@ components:
         notes:
           type: array
           items: {type: string}
+          description: >-
+            Free-text caveats about this run. A note may start with a stable machine-readable code
+            followed by ": " (e.g. "PLEDGED_COLLATERAL_NOT_MODELLED: ...") so a downstream consumer
+            can detect it by code instead of matching free text; the remainder is human-readable and
+            may change wording between releases.
         assumptions: {$ref: '#/components/schemas/LiquidityAssumptions'}
 
     ExposureLine:
@@ -1306,7 +1325,24 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/CurrencyCapital'}
             - {type: 'null'}
-          description: Present only for a single-currency book
+          description: >-
+            The book in CZK (currency "CZK") at the ČNB fixing for asOf. Null, with totalNotStated,
+            when a currency with exposures has no fixing in effect. ownFunds is present only when no
+            currency other than CZK books own funds (own funds are not converted).
+        fxRates:
+          type: array
+          description: Every rate the CZK total was converted with; empty for an all-CZK book or when no total is stated
+          items:
+            type: object
+            required: [currency, rate, fixingDate, source]
+            properties:
+              currency: {type: string}
+              rate: {type: number, description: CZK per ONE unit of currency (per-100 quotes normalised by fx-service)}
+              fixingDate: {type: string, format: date}
+              source: {type: string}
+        totalNotStated:
+          type: [string, 'null']
+          description: Why total is null (the missing currency and date); null when it is stated
         ownFundsRequirement:
           type: [number, 'null']
           description: min-total-capital-ratio (8%, bcbs189 ¶50) × total credit-risk RWA
