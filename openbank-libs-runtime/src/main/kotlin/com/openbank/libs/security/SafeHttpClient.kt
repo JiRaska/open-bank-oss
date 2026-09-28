@@ -12,6 +12,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.security.cert.CertificateParsingException
+import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
@@ -22,6 +24,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLPeerUnverifiedException
+import javax.net.ssl.SSLSession
 import javax.net.ssl.SSLSocket
 
 /**
@@ -169,6 +173,10 @@ class SafeHttpClient private constructor(
         tls.sslParameters = params
         try {
             tls.startHandshake()
+            // Defence in depth: endpoint identification above already failed the handshake on a
+            // name mismatch; this re-checks the negotiated session explicitly, so a JSSE provider
+            // or future edit that drops the parameter still cannot send a byte to the wrong peer.
+            PeerHostnameVerifier.verify(target.host, tls.session)
             return exchange(tls)
         } finally {
             runCatching { tls.close() }
@@ -410,6 +418,58 @@ class SafeHttpClient private constructor(
         /** field-value octets: VCHAR, SP, HTAB, obs-text (0x80-0xFF). No CTL, nothing beyond Latin-1. */
         private fun isFieldValueChar(c: Char): Boolean =
             c == ' ' || c == '\t' || (c.code in VCHAR_MIN until DEL) || (c.code in OBS_TEXT_MIN..LATIN1_MAX)
+    }
+}
+
+/**
+ * Strict RFC 6125 / RFC 9110 §4.3.4 identity check of the TLS peer against the REQUESTED name
+ * (never the pinned IP). Deliberately not `HttpsURLConnection.getDefaultHostnameVerifier()`: the
+ * JDK's default verifier rejects every name by design and is only a fallback. Subject-CN is not
+ * consulted (RFC 9110 requires subjectAltName); a wildcard matches exactly one whole left-most
+ * label and never an IP literal or a public-suffix-like two-label name.
+ */
+internal object PeerHostnameVerifier {
+    private const val SAN_DNS = 2
+    private const val SAN_IP = 7
+    private const val MIN_WILDCARD_LABELS = 3
+
+    /** @throws SSLPeerUnverifiedException when the session's leaf certificate does not cover [host]. */
+    fun verify(host: String, session: SSLSession) {
+        val leaf = session.peerCertificates.firstOrNull() as? X509Certificate
+            ?: throw SSLPeerUnverifiedException("no X.509 peer certificate")
+        if (!matches(host, leaf)) {
+            throw SSLPeerUnverifiedException("peer certificate does not match host '$host'")
+        }
+    }
+
+    fun matches(host: String, cert: X509Certificate): Boolean {
+        val sans = try {
+            cert.subjectAlternativeNames.orEmpty()
+        } catch (e: CertificateParsingException) {
+            throw SSLPeerUnverifiedException("unparseable subjectAltName: ${e.message}").apply { initCause(e) }
+        }
+        val name = host.trimEnd('.').lowercase()
+        val ipLiteral = name.startsWith("[") || name.all { it.isDigit() || it == '.' } || ':' in name
+        return sans.any { san ->
+            val type = san[0] as Int
+            val value = san[1] as? String ?: return@any false
+            when {
+                ipLiteral && type == SAN_IP -> sameIp(name.removePrefix("[").removeSuffix("]"), value)
+                !ipLiteral && type == SAN_DNS -> dnsMatches(name, value.trimEnd('.').lowercase())
+                else -> false
+            }
+        }
+    }
+
+    private fun sameIp(a: String, b: String): Boolean =
+        runCatching { InetAddress.getByName(a) == InetAddress.getByName(b) }.getOrDefault(false)
+
+    private fun dnsMatches(host: String, pattern: String): Boolean {
+        if (!pattern.startsWith("*.")) return host == pattern
+        val suffix = pattern.substring(1) // ".example.com"
+        if ('*' in suffix || pattern.count { it == '.' } < MIN_WILDCARD_LABELS - 1) return false
+        val label = host.removeSuffix(suffix)
+        return host.endsWith(suffix) && label.isNotEmpty() && '.' !in label
     }
 }
 

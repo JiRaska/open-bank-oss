@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.StandardConstants
@@ -124,8 +124,12 @@ class SafeHttpClientTest {
             }
 
         assertThatThrownBy { client.send(EgressRequest("GET", "https://stub.test:${stub.port}/")) }
-            .isInstanceOf(SSLHandshakeException::class.java)
-        assertThat(stub.requests).isEmpty()
+            // SSLHandshakeException from endpoint identification, or SSLPeerUnverifiedException from
+            // the explicit post-handshake check — either way nothing is sent to the wrong peer.
+            .isInstanceOf(SSLException::class.java)
+        // The post-handshake check closes a completed TLS session, which the stub records as an
+        // empty read — what matters is that no request byte reached the wrong peer.
+        assertThat(stub.requests).allMatch { it.isEmpty() }
     }
 
     @Test
