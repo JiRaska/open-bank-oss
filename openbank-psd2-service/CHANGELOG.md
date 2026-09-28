@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.4...psd2-service-v0.11.5) (2026-09-28)
+
+
+### Bug Fixes
+
+* **psd2:** normalise the leading slash so the eIDAS, QSEAL and deprecation filters run ([#11008](https://github.com/JiRaska/open-bank-oss/issues/11008)) ([4190c2c](https://github.com/JiRaska/open-bank-oss/commit/4190c2c252f082e316fe62a300709dbb28b8209d))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.3...psd2-service-v0.11.4) (2026-09-26)
 
 

@@ -127,7 +127,19 @@ variable "karpenter_version" {
   # the chart — a new version needs that directory vendored alongside this bump,
   # or the plan fails (a precondition on helm_release.karpenter) rather than
   # silently skipping the CRDs.
-  default = "1.13.1"
+  #
+  # 1.13.1 -> 1.14.1: 1.14 is the LTS line (upstream release notes: "Supported
+  # until Jul 2027"), and its compatibility matrix lists K8s 1.36 as ">= 1.13",
+  # so the running control plane stays in range. Upgrade guide for 1.14.0: "No
+  # breaking changes" — DRA support, the opt-in Balanced consolidation policy and
+  # opt-in preview instance types are all additive. The one CRD-level change is
+  # a NEW CRD, autoscaling.x-k8s.io_capacitybuffers (Capacity Buffers graduate to
+  # v1beta1), plus an added "Balanced" enum value on NodePool; both are vendored
+  # in karpenter-crds/1.14.1/ and applied by kubectl_manifest.karpenter_crd
+  # before the chart. The upstream getting-started IAM policy is unchanged
+  # between v1.13.1 and v1.14.1 (whitespace-only diff), so karpenter-iam needs
+  # no edit.
+  default = "1.14.1"
 }
 
 variable "argocd_version" {
