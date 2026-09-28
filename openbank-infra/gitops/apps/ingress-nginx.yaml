@@ -1,7 +1,6 @@
 # Cluster edge. ingress-nginx (not the AWS ALB controller) keeps the edge
 # cloud-agnostic per ADR-0027 — the only AWS coupling is the Service annotation
-# that asks the in-tree cloud provider for an NLB. Single replica for sandbox
-# FinOps; prod should raise replicaCount and add PodDisruptionBudget.
+# that asks the in-tree cloud provider for an NLB. Two replicas + PDB (below).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -84,7 +83,34 @@ spec:
               mountPath: /etc/nginx/modsecurity/modsecurity.conf
               subPath: modsecurity.conf
               readOnly: true
-          replicaCount: 1
+          # Two replicas on different nodes, preferably different AZs: the edge is
+          # the one component every request crosses, and a single replica made each
+          # node drain or controller roll an outage for every host (2026-09-28,
+          # ADR-0325). The PDB keeps one serving through voluntary disruption
+          # (Karpenter drift/consolidation, node drains). Hostname spread is
+          # required; zone spread is best effort, so a single-AZ capacity shortage
+          # degrades to same-AZ rather than a Pending replica. Prerequisite for
+          # externalTrafficPolicy: Local (client IP for per-host allow-lists),
+          # which would otherwise route the whole NLB to one node.
+          replicaCount: 2
+          minAvailable: 1
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+                  app.kubernetes.io/instance: ingress-nginx
+                  app.kubernetes.io/component: controller
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+                  app.kubernetes.io/instance: ingress-nginx
+                  app.kubernetes.io/component: controller
           # Scrape the controller so edge-level 5xx are observable. ingress-nginx
           # records every request it proxies (nginx_ingress_controller_requests,
           # labelled by status) — including the failures that never reach a backend
