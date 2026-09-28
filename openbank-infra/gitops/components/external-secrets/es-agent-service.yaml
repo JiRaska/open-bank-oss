@@ -9,7 +9,7 @@
 # `account-service`. It used to read `agent-service`; there is exactly one such realm client, so
 # that entry was a hand-seeded copy of this same value — see #3485 and
 # rules.yaml: oidc_secret_convention for why the copy is cost without isolation.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: agent-service-secrets

@@ -127,8 +127,8 @@ private const val NSFR_HORIZON_YEARS = 1L
 private const val STAGE_3 = "STAGE_3"
 
 /**
- * LCR (BCBS d238) and NSFR (BCBS d295) of a tied-out snapshot — BCBS standard factors, no EU CRR /
- * Delegated Regulation (EU) 2015/61 deviations. Per currency; a total only for a single-currency
+ * LCR and NSFR of a tied-out snapshot under the configured parameter set — BCBS d238 / d295, or the
+ * EU Delegated Regulation (EU) 2015/61 / CRR2 set ([LiquidityRegime]). Per currency; a total only for a single-currency
  * book (the engine has no reporting-currency conversion yet — the same rule as IRRBB).
  */
 object Liquidity {
@@ -136,6 +136,25 @@ object Liquidity {
     const val AGGREGATION_NOTE =
         "Computed per currency. A total across currencies needs conversion to one reporting currency, which " +
             "the engine does not do yet, so the total is reported only for a single-currency book."
+
+    /**
+     * Stable machine-readable prefix for [PLEDGED_COLLATERAL_NOTE], so a downstream consumer (e.g. the
+     * finrep COREP mappers) can detect this note by code instead of matching free text.
+     */
+    const val PLEDGED_COLLATERAL_NOTE_CODE = "PLEDGED_COLLATERAL_NOT_MODELLED"
+
+    /**
+     * Present only while a central-bank secured funding balance (ČNB lombard, GL 2320) is non-zero.
+     * The lombard is secured on collateral pledged at the ČNB; encumbered assets are not HQLA
+     * (EU 2015/61 Art. 7(2); BCBS d238 ¶31 — paragraph UNVERIFIED) and carry a higher RSF. The snapshot has no collateral
+     * data, so nothing is removed from the stock — this note says so instead of faking the pledge.
+     * Starts with [PLEDGED_COLLATERAL_NOTE_CODE] followed by ": " so it can be matched by code.
+     */
+    const val PLEDGED_COLLATERAL_NOTE =
+        "$PLEDGED_COLLATERAL_NOTE_CODE: " +
+            "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it is not " +
+            "modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock and the LCR " +
+            "may be overstated, and the RSF of the pledged assets understated."
 
     fun compute(
         positions: List<Position>,
@@ -145,13 +164,16 @@ object Liquidity {
     ): LiquidityResult {
         val byId = instruments.associateBy { it.id }
         val unclassified = mutableListOf<UnclassifiedBalance>()
+        var centralBankSecuredFunding = false
         val currencies = positions.map { it.currency }.distinct().sorted().map { ccy ->
             val acc = Accumulator(params)
             positions.filter { it.currency == ccy }.forEach { p ->
                 when (p.kind) {
                     PositionKind.SUB_LEDGER -> acc.customerAccount(p)
                     PositionKind.LOAN -> acc.loan(p, p.instrumentId?.let(byId::get), asOf)
-                    PositionKind.GL_ACCOUNT -> {
+                    // A money-market deal is classified by its principal account (1510 = HQLA L1),
+                    // exactly as its GL-level balance was before deals were modelled (ADR-0315 D6).
+                    PositionKind.GL_ACCOUNT, PositionKind.TREASURY_DEAL -> {
                         val cls = params.classification.classOf(p.glAccountCode, p.glAccountType)
                         if (cls == null) {
                             if (p.amount.signum() != 0) {
@@ -164,6 +186,9 @@ object Liquidity {
                                 )
                             }
                         } else {
+                            if (cls == GlClass.CENTRAL_BANK_SECURED_FUNDING && p.amount.signum() != 0) {
+                                centralBankSecuredFunding = true
+                            }
                             acc.glAccount(p, cls)
                         }
                     }
@@ -176,7 +201,10 @@ object Liquidity {
             currencies = currencies,
             totalCurrency = currencies.singleOrNull()?.currency,
             unclassified = unclassified,
-            notes = listOfNotNull(AGGREGATION_NOTE.takeIf { currencies.size > 1 }),
+            notes = listOfNotNull(
+                AGGREGATION_NOTE.takeIf { currencies.size > 1 },
+                PLEDGED_COLLATERAL_NOTE.takeIf { centralBankSecuredFunding },
+            ),
         )
     }
 
@@ -213,7 +241,7 @@ object Liquidity {
         private val cls get() = params.classification
 
         private fun line(label: String, code: String?, amount: BigDecimal, f: LiquidityFactor) =
-            LiquidityLine(label, code, amount, params[f], f.key, f.citation)
+            LiquidityLine(label, code, amount, params[f], f.key, params.citation(f))
 
         /** A customer balance in the trial-balance convention: credit (negative) is a deposit, debit an overdraft. */
         fun customerAccount(p: Position) {
@@ -363,7 +391,10 @@ object Liquidity {
                             liability,
                             null,
                             null,
-                            "BCBS d295 ¶17, ¶21(a): ASF counts capital before deductions",
+                            when (params.regime) {
+                                LiquidityRegime.BCBS -> "BCBS d295 ¶17, ¶21(a): ASF counts capital before deductions"
+                                LiquidityRegime.EU -> "CRR Art. 428o: ASF counts capital items before deductions"
+                            },
                         )
                 GlClass.CAPITAL_TIER2 -> {
                     val longPart = liability.multiply(cls.tier2OverOneYearShare, BigMath.MC)
@@ -379,6 +410,10 @@ object Liquidity {
                 GlClass.OTHER_LIABILITY -> {
                     outflows += line(label, code, liability, LiquidityFactor.LCR_OTHER_CONTRACTUAL_OUTFLOW)
                     asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
+                }
+                GlClass.CENTRAL_BANK_SECURED_FUNDING -> {
+                    outflows += line(label, code, liability, LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW)
+                    asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M)
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
             }
