@@ -87,8 +87,8 @@
       "id": "kafka-ui",
       "eolProduct": null,
       "versionSource": "gitops",
-      "imageGrep": "provectuslabs/kafka-ui",
-      "releaseNotes": "https://github.com/provectus/kafka-ui/releases"
+      "imageGrep": "kafbat/kafka-ui",
+      "releaseNotes": "https://github.com/kafbat/kafka-ui/releases"
     }
   ]
 }

@@ -57,4 +57,57 @@ class AuditEventTest {
 
         assertThat(event(explicit).timestamp).isEqualTo(explicit)
     }
+
+    // Every getter below was NO_COVERAGE under pitest's EmptyObjectReturnValsMutator (replacing
+    // a String getter's return with "", a List getter's with emptyList(), a Map getter's with
+    // emptyMap()) — nothing in this file ever read the field back, only the four fields required
+    // to construct an event at all. Non-blank/non-default literals + exact-equality assertions on
+    // every field are what actually kills that mutant class; a `describedAs`-only or non-null
+    // check would pass against the emptied value just as readily as against the real one.
+    @Test
+    fun `a fully populated event round-trips every field exactly`() {
+        val event = AuditEvent(
+            actorId = "party-42",
+            actorType = "CUSTOMER",
+            operation = "payment.sepa.created",
+            resourceType = "payment",
+            resourceId = "pay-99",
+            ipAddress = "203.0.113.7",
+            userAgent = "openbank-app/1.0",
+            result = AuditResult.DENIED,
+            traceId = "trace-abc",
+            channel = AuditChannel.MCP,
+            actChain = listOf("agent:copilot", "operator:jdoe"),
+            sessionId = "session-xyz",
+            payload = mapOf("field" to "value"),
+        )
+
+        assertThat(event.actorId).isEqualTo("party-42")
+        assertThat(event.actorType).isEqualTo("CUSTOMER")
+        assertThat(event.operation).isEqualTo("payment.sepa.created")
+        assertThat(event.resourceType).isEqualTo("payment")
+        assertThat(event.resourceId).isEqualTo("pay-99")
+        assertThat(event.ipAddress).isEqualTo("203.0.113.7")
+        assertThat(event.userAgent).isEqualTo("openbank-app/1.0")
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.traceId).isEqualTo("trace-abc")
+        assertThat(event.channel).isEqualTo(AuditChannel.MCP)
+        assertThat(event.actChain).containsExactly("agent:copilot", "operator:jdoe")
+        assertThat(event.sessionId).isEqualTo("session-xyz")
+        assertThat(event.payload).containsExactlyEntriesOf(mapOf("field" to "value"))
+    }
+
+    @Test
+    fun `optional fields default to absent, not to a value that could be mistaken for real data`() {
+        val minimal = event()
+
+        assertThat(minimal.ipAddress).isNull()
+        assertThat(minimal.userAgent).isNull()
+        assertThat(minimal.traceId).isNull()
+        assertThat(minimal.channel).isNull()
+        assertThat(minimal.sessionId).isNull()
+        assertThat(minimal.actChain).isEmpty()
+        assertThat(minimal.payload).isEmpty()
+        assertThat(minimal.result).isEqualTo(AuditResult.SUCCESS)
+    }
 }

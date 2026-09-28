@@ -1,6 +1,107 @@
 variable "cert_manager_version" {
-  type    = string
-  default = "v1.16.2"
+  type = string
+  # One minor at a time, latest patch each (cert-manager upgrade guide), toward
+  # 1.21 — the first line supporting EKS 1.36 (#10893):
+  # v1.16.2 -> v1.17.4 -> v1.18.6 -> v1.19.6 -> v1.20.4 -> v1.21.2, each step
+  # merged AND applied (Platform OpenTofu workflow_dispatch) before the next.
+  # crds.enabled=true, so the chart upgrades the CRDs with each step.
+  #
+  # v1.18: default privateKey.rotationPolicy flips Never -> Always. Reviewed
+  # every Certificate/ClusterIssuer in this tree (#11146): the root CA
+  # (openbank-sandbox-ca, gitops/components/platform/clusterissuer.yaml) is
+  # already pinned rotationPolicy: Never explicitly (#11124); the three
+  # ingress-shim Certificates with mobile SPKI pinning (customer.open-bank.tech
+  # /customer-edge, kc.open-bank.tech/keycloak, rum.open-bank.tech/rum-gateway,
+  # the last fixed in #11152) already carry the
+  # cert-manager.io/private-key-rotation-policy: "Never" annotation. The other
+  # Certificates are internal mTLS leaves trusted via the openbank-ca chain,
+  # not pinned to a leaf public key, so picking up the new Always default on
+  # renewal is harmless for them.
+  #
+  # v1.19 (#11157): install v1.19.1+ only (v1.19.0 has a known unexpected-
+  # renewal bug, github.com/cert-manager/cert-manager/issues/8158, fixed in
+  # 1.19.1) — v1.19.6 is the latest 1.19.x patch. ACME client metrics dropped
+  # the high-cardinality `path` label for a bounded `action` label (n/a: this
+  # tree has no dashboard/alert referencing `acme_client_request_*{path=...}`,
+  # grepped fleet-wide). The `cert-manager-edit` ClusterRole loses create on
+  # challenges.acme.cert-manager.io and create/patch/update on
+  # orders.acme.cert-manager.io as of 1.19.6 (security hardening) — n/a: no
+  # RBAC binding in this tree references cert-manager-edit or creates those
+  # resources directly; only the controller itself does, via its own
+  # ClusterRole. No Certificate/ClusterIssuer API field removals/renames, no
+  # Helm values shape change for our `helm_release.cert_manager` block.
+  #
+  # v1.20 (#11158): v1.20.4 is the latest 1.20.x patch (checked GitHub
+  # releases 2026-09-27: v1.20.0..v1.20.4, no later tag). Supported Kubernetes
+  # range is 1.32-1.35 (cert-manager.io/docs/releases) — our sandbox control
+  # plane is 1.35, in range. v1.20.3 restates the same cert-manager-edit
+  # ClusterRole restriction noted above (GHSA-8rvj-mm4h-c258) — still n/a,
+  # same grep as v1.19. Default container UID/GID moves 1000/0 -> 65532/65532
+  # (chart default, not pinned by any `set` here) — the cert-manager namespace
+  # carries no pod-security-admission label (create_namespace=true, no PSA
+  # annotation applied), so nothing enforces the old UID; n/a. The
+  # DefaultPrivateKeyRotationPolicyAlways feature gate reaching GA (no longer
+  # disable-able) only changes the *default* for a Certificate with no
+  # explicit policy — it does not override the three annotation pins above,
+  # which set the field directly. No CRD field removals/renames, no Helm
+  # values shape change for our `helm_release.cert_manager` block, no new
+  # required flags.
+  #
+  # v1.21 (#10893 step 5/5): v1.21.2 is the latest 1.21.x patch (checked
+  # GitHub releases 2026-09-27: v1.21.0-alpha.0/.1, v1.21.0-beta.0, v1.21.0,
+  # v1.21.1, v1.21.2, no later tag). Supported Kubernetes range is 1.33-1.36
+  # (cert-manager.io/docs/releases) — the first line covering BOTH our
+  # current sandbox control plane (1.35) and the #10893 target (1.36), so no
+  # further minor bump is required once the cluster moves.
+  #
+  # Reviewed the v1.21.0 release notes, the v1.21.1/v1.21.2 patch notes and
+  # the upgrade guide against this tree:
+  # - Helm chart drops the default tokenrequest Role/RoleBinding
+  #   ("serviceaccounts/token: create") — n/a, no `serviceAccountRef` in this
+  #   tree points at the cert-manager controller ServiceAccount; every
+  #   Issuer/ClusterIssuer here authenticates via CA secret, ACME account
+  #   secret, or EKS Pod Identity (Route53), never a projected token bound to
+  #   this SA.
+  # - `cert-manager-edit` ClusterRole Challenge/Order restriction — same
+  #   change already reviewed for v1.19.6/v1.20.4; still n/a (no binding
+  #   references it, nothing here creates ACME challenges/orders directly).
+  # - Helm values removed: `prometheus.servicemonitor.targetPort`,
+  #   `prometheus.servicemonitor.path`, `prometheus.podmonitor.path`; metrics
+  #   Service port renamed `tcp-prometheus-servicemonitor` -> `http-metrics`
+  #   — n/a, `helm_release.cert_manager`'s `set` block here only configures
+  #   `crds.enabled` and the three DNS-01 `extraArgs`; no `prometheus.*` key
+  #   set, and no ServiceMonitor/PodMonitor manifest in `gitops/` selects the
+  #   old port name (grepped fleet-wide).
+  # - `enableGatewayAPI`/`enableGatewayAPIListenerSet` deprecated in favor of
+  #   `gatewayAPI.enabled`/`gatewayAPI.enableListenerSet` (backward
+  #   compatible) — n/a, no Gateway API resources in this tree (all 4
+  #   ClusterIssuers are DNS-01/CA only) and neither old nor new key is set.
+  # - `ServerSideApply` feature gate deprecated for cainjector (now
+  #   unconditional) and `CAInjectorMerging` promoted GA — n/a, neither
+  #   feature gate is referenced in `extraArgs` here.
+  # - v1.21.2 (security patch): Go 1.26.8 + crypto/TLS/XML dependency bumps,
+  #   ACME response bodies capped at 16 MiB and no longer reflected into
+  #   Issuer status/Events, restricted ambient AWS credentials for
+  #   *namespaced* Vault Issuers — n/a to the last one, this tree has no
+  #   Vault issuer; the response-body and DoS fixes are strict hardening, no
+  #   manifest change needed. Also fixes a DNS-name de-dup bug for Gateway
+  #   listeners sharing a Secret (n/a, no Gateway API here) and an HTTP-01
+  #   cleanup failure when the solver pod is already gone (n/a, DNS-01 only).
+  # - Known v1.21.0 issues (controller crash-loop with
+  #   `renewal.policy: Disabled`, stuck Issuer/ClusterIssuer reconciliation,
+  #   ACME event log spam) are all fixed by v1.21.2, which is why this pins
+  #   .2 rather than .0/.1 — checked no Certificate in this tree sets
+  #   `renewal.policy: Disabled` (grepped fleet-wide; none do).
+  # - No Certificate/ClusterIssuer/CertificateRequest CRD field
+  #   removals/renames that this tree uses; the three SPKI-pinned mobile
+  #   hosts (customer.open-bank.tech/customer-edge,
+  #   kc.open-bank.tech/keycloak, rum.open-bank.tech/rum-gateway) keep their
+  #   explicit `cert-manager.io/private-key-rotation-policy: "Never"`
+  #   annotation, which no default-flip in any version can override (verified
+  #   still present on `origin/main`). No Helm values shape change for our
+  #   `helm_release.cert_manager` block beyond the removed `prometheus.*`
+  #   keys (unused here), no new required flags.
+  default = "v1.21.2"
 }
 
 variable "karpenter_version" {
@@ -16,19 +117,46 @@ variable "karpenter_version" {
   # within range; the v1 CRDs are unchanged so the controller-only upgrade clears
   # the panic without CRD surgery. Bump this in lockstep whenever
   # envs/sandbox-substrate raises the cluster version.
-  default = "1.12.1"
+  #
+  # 1.12.1 -> 1.13.1 (#10893): EKS 1.36 needs Karpenter >= 1.13, and 1.13.1
+  # still supports 1.35, so this lands BEFORE the control-plane bump — the order
+  # that avoids a repeat of the crashloop above (controller never behind the
+  # control plane). Upgrade guide: no breaking changes in 1.13. The CRDs DID
+  # change (additive EC2NodeClass fields, list/map-type markers), and Helm never
+  # upgrades crds/, so they are applied from karpenter-crds/<version>/ ahead of
+  # the chart — a new version needs that directory vendored alongside this bump,
+  # or the plan fails (a precondition on helm_release.karpenter) rather than
+  # silently skipping the CRDs.
+  #
+  # 1.13.1 -> 1.14.1: 1.14 is the LTS line (upstream release notes: "Supported
+  # until Jul 2027"), and its compatibility matrix lists K8s 1.36 as ">= 1.13",
+  # so the running control plane stays in range. Upgrade guide for 1.14.0: "No
+  # breaking changes" — DRA support, the opt-in Balanced consolidation policy and
+  # opt-in preview instance types are all additive. The one CRD-level change is
+  # a NEW CRD, autoscaling.x-k8s.io_capacitybuffers (Capacity Buffers graduate to
+  # v1beta1), plus an added "Balanced" enum value on NodePool; both are vendored
+  # in karpenter-crds/1.14.1/ and applied by kubectl_manifest.karpenter_crd
+  # before the chart. The upstream getting-started IAM policy is unchanged
+  # between v1.13.1 and v1.14.1 (whitespace-only diff), so karpenter-iam needs
+  # no edit.
+  default = "1.14.1"
 }
 
 variable "argocd_version" {
   description = "argo-cd Helm chart version."
   type        = string
-  default     = "9.5.21"
+  # 10.9.2 = Argo CD v3.5.3 (tested on K8s 1.33-1.36). Chart 10.x defaults
+  # global.networkPolicy.create=true; main.tf pins it false (see there).
+  default = "10.9.2"
 }
 
 variable "cnpg_version" {
-  description = "CloudNativePG operator Helm chart version (cnpg/cloudnative-pg; chart 0.28.2 = operator 1.29.1)."
+  description = "CloudNativePG operator Helm chart version (cnpg/cloudnative-pg; chart 0.29.1 = operator 1.30.1)."
   type        = string
-  default     = "0.28.2"
+  # 1.30.x supports Kubernetes 1.34-1.36; 1.29.x (1.33-1.35) is EOL 2026-09-29.
+  # 1.30 is the LAST minor with in-tree `barmanObjectStore` backups (removed in
+  # 1.31): moving past 1.30 requires the Barman Cloud plugin migration first.
+  default = "0.29.1"
 }
 
 variable "arc_controller_version" {
@@ -53,9 +181,10 @@ variable "keda_version" {
   # Scale-to-zero controller for the FinOps workload tiers (ADR-0057). Unlike
   # Karpenter, KEDA does NOT panic on a K8s version skew: it drives the stable
   # autoscaling/v2 HPA API and its own CRDs, so it tolerates a control plane
-  # ahead of its tested matrix. 2.19 is the latest stable and runs cleanly on
-  # the cluster's K8s 1.34. Still worth tracking the EKS version on upgrades.
-  default = "2.19.0"
+  # ahead of its tested matrix. Still track the EKS version on upgrades:
+  # support matrix 2.19 = K8s 1.32-1.34, 2.20 = 1.33-1.35, 2.21 = 1.34-1.36.
+  # 2.21 is the only release covering both the current 1.35 and the 1.36 target.
+  default = "2.21.0"
 }
 
 # ---------------------------------------------------------------------------

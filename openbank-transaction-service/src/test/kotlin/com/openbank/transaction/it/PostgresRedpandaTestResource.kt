@@ -107,7 +107,7 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     private companion object {
-        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
         const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
         const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
         private val LOG: Logger = Logger.getLogger(PostgresRedpandaTestResource::class.java)

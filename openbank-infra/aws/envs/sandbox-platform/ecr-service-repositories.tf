@@ -70,7 +70,9 @@ locals {
   # reference it. A bounded bootstrap entry creates only an empty registry namespace;
   # remove it in the same change that pins the first signed image. The precondition
   # below prevents an exception from silently becoming permanent after that pin exists.
-  bootstrap_service_ecr_repositories = toset([])
+  #   openbank-litellm — the ai-platform gateway image built by platform-images.yml (#11265);
+  #   remove in the PR that pins it in gitops/components/ai-platform/litellm.yaml.
+  bootstrap_service_ecr_repositories = toset(["openbank-litellm"])
 
   service_ecr_repositories = setunion(
     local.gitops_image_repositories,

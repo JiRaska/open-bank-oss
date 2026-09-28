@@ -44,7 +44,7 @@ spec:
 # ExternalSecret: dispute-service keystore projected from messaging → dispute.
 # Source secret is minted by Strimzi User Operator under name 'dispute-service'
 # in the messaging namespace; read via kafka-messaging-certs ClusterSecretStore.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -67,7 +67,7 @@ spec:
 ---
 # ExternalSecret: shared cluster-CA truststore projected from messaging → dispute.
 # Same source secret used by all namespaces; one projection per namespace.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

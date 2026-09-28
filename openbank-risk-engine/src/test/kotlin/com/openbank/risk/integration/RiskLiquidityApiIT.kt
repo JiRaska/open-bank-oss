@@ -40,10 +40,34 @@ class RiskLiquidityApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @Inject
+    lateinit var treasury: com.openbank.risk.application.port.out.TreasuryDealBook
+
+    /** With the treasury read on, 1510 and 2320 are contract-level: each balance needs its deal. */
+    private val cnbDeposit = java.util.UUID.randomUUID()
+    private val cnbLombard = java.util.UUID.randomUUID()
+
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
         ledger.inputs = Fixtures.tiedOut()
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$cnbDeposit', '$cnbLombard')")
+    }
+
+    private fun seedDeal(id: java.util.UUID, product: String, principal: String) = kotlinx.coroutines.runBlocking {
+        treasury.apply(
+            com.openbank.risk.application.port.out.TreasuryDealEvent(
+                state = "SETTLED",
+                dealId = id,
+                product = product,
+                counterpartyId = "CNB",
+                currency = "CZK",
+                principal = java.math.BigDecimal(principal),
+                rate = java.math.BigDecimal("2.50"),
+                valueDate = java.time.LocalDate.parse("2026-09-30"),
+                maturityDate = java.time.LocalDate.parse("2026-10-01"),
+            ),
+        )
     }
 
     private fun snapshot(asOf: String, status: String): String = given().contentType("application/json")
@@ -76,7 +100,7 @@ class RiskLiquidityApiIT {
 
         // EU rules are the default for this bank (#10860): Delegated Regulation (EU) 2015/61 + CRR2.
         assertThat(body["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")
@@ -97,11 +121,13 @@ class RiskLiquidityApiIT {
         // 1000 "Cash and Cash Equivalents" is NOT mapped: listed, never counted.
         assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).containsExactly("1000")
         assertThat(lcr["hqla"]["lines"].isEmpty).isTrue()
+        // No ČNB lombard balance: no pledged-collateral note.
+        assertThat(body["notes"].map { it.asText() }).noneMatch { it.contains("lombard") }
 
         val a = body["assumptions"]
         assertThat(a["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
         assertThat(a["scope"].asText()).contains("2015/61").contains("575/2013")
-        assertThat(a["factors"].size()).isEqualTo(29)
+        assertThat(a["factors"].size()).isEqualTo(31)
         assertThat(
             a["factors"].all {
                 it["citation"].asText().let { c -> c.startsWith("EU 2015/61") || c.startsWith("CRR ") }
@@ -110,6 +136,29 @@ class RiskLiquidityApiIT {
         assertThat(a["factors"].single { it["key"].asText() == "nsfr-rsf-l1-securities" }["value"].decimalValue())
             .isEqualByComparingTo("0")
         assertThat(a["classification"]["retailStableShare"].decimalValue()).isEqualByComparingTo("0")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a CNB lombard balance on 2320 is classified, not unclassified, and flags the unmodelled collateral`() {
+        seedDeal(cnbDeposit, "CNB_DEPOSIT_FACILITY", "2000.00")
+        seedDeal(cnbLombard, "CNB_LOMBARD", "2000.00")
+        val base = Fixtures.tiedOut()
+        ledger.inputs = base.copy(
+            trialBalance = base.trialBalance +
+                tb("1510", "ASSET", "CZK", "2000.00", "0") +
+                tb("2320", "LIABILITY", "CZK", "0", "2000.00"),
+        )
+        val body = liquidity(snapshot("2026-09-30", "TIED_OUT"))
+
+        assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).doesNotContain("2320")
+        val lcr = body["total"]["lcr"]
+        val out = lcr["outflows"].single { it["glAccountCode"].asText() == "2320" }
+        assertThat(out["factorKey"].asText()).isEqualTo("lcr-central-bank-secured-outflow")
+        assertThat(out["weighted"].decimalValue()).isEqualByComparingTo("0")
+        val asf = body["total"]["nsfr"]["asf"].single { it["glAccountCode"].asText() == "2320" }
+        assertThat(asf["factorKey"].asText()).isEqualTo("nsfr-asf-central-bank-under-6m")
+        assertThat(body["notes"].map { it.asText() }).anyMatch { it.contains("lombard") && it.contains("HQLA") }
     }
 
     @Test

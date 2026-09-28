@@ -21,11 +21,9 @@ private fun errorResponse(code: ErrorCode, message: String) = ApiError(
     timestamp = Instant.now(),
 )
 
-@Provider
-class ConsentNotFoundMapper : ExceptionMapper<ConsentNotFoundException> {
-    override fun toResponse(e: ConsentNotFoundException): Response =
-        Response.status(404).entity(errorResponse(ErrorCode.NOT_FOUND, e.message ?: "Consent not found")).build()
-}
+// ConsentNotFoundException / ConsentAlreadyActiveException: mapped by libs-runtime's
+// Resource{NotFound,Conflict}ExceptionMapper since #10911 phase 2 -- see
+// ConsentExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 @Provider
 class ConsentNotOwnedMapper : ExceptionMapper<ConsentNotOwnedByPartyException> {
@@ -38,12 +36,6 @@ class ConsentGranteeMismatchMapper : ExceptionMapper<ConsentGranteeMismatchExcep
     override fun toResponse(e: ConsentGranteeMismatchException): Response =
         Response.status(ErrorCode.FORBIDDEN.httpStatus)
             .entity(errorResponse(ErrorCode.FORBIDDEN, e.message ?: "Forbidden")).build()
-}
-
-@Provider
-class ConsentAlreadyActiveMapper : ExceptionMapper<ConsentAlreadyActiveException> {
-    override fun toResponse(e: ConsentAlreadyActiveException): Response =
-        Response.status(409).entity(errorResponse(ErrorCode.CONFLICT, e.message ?: "Already active")).build()
 }
 
 @Provider

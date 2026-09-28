@@ -22,6 +22,7 @@ import TreasuryApprovalsPage from '@/app/treasury/approvals/page'
 import NewTreasuryDealPage from '@/app/treasury/deals/new/page'
 import TreasuryDealsPage from '@/app/treasury/deals/page'
 import TreasuryCounterpartiesPage from '@/app/treasury/counterparties/page'
+import TreasuryLimitUtilisationPage from '@/app/treasury/limits/page'
 import TreasuryPositionsPage from '@/app/treasury/positions/page'
 
 const json = (body: unknown, status = 200) =>
@@ -36,6 +37,12 @@ const deal = (dealId: string, createdBy: string, submittedBy: string | null = cr
   history: [{ from: null, to: 'DRAFT', actor: createdBy, actorType: 'HUMAN', at: '2026-09-25T08:00:00Z', note: null }],
   journals: [],
 })
+const LIMIT_UTILISATION = [
+  { counterpartyId: 'CNB', name: 'Česká národní banka', synthetic: false, currency: 'CZK', limit: 1e12, utilised: 0, available: 1e12, utilisationPercent: 0, breached: false, activeOverrides: 0 },
+  { counterpartyId: 'SIM-A', name: 'Sim Bank A', synthetic: true, currency: 'CZK', limit: 5000000, utilised: 1000000, available: 4000000, utilisationPercent: 20, breached: false, activeOverrides: 0 },
+  { counterpartyId: 'SIM-C', name: 'Sim Bank C', synthetic: true, currency: 'CZK', limit: 500000, utilised: 600000, available: -100000, utilisationPercent: 120, breached: true, activeOverrides: 1 },
+]
+
 const COUNTERPARTIES = [
   { counterpartyId: 'CNB', name: 'Česká národní banka', kind: 'CENTRAL_BANK', synthetic: false, currency: 'CZK', limit: 1e12, exposure: 0, headroom: 1e12 },
   { counterpartyId: 'SIM-A', name: 'Sim Bank A', kind: 'BANK', synthetic: true, currency: 'CZK', limit: 5000000, exposure: 1000000, headroom: 4000000 },
@@ -197,6 +204,23 @@ describe('read pages', () => {
     await screen.findAllByText(/Sim Bank A/)
     expect(screen.getAllByText(/Synthetic counterparty|Simulovaná protistrana/)).toHaveLength(2)
     expect(screen.getAllByRole('meter')).toHaveLength(3)
+  })
+
+  it('limit utilisation shows breached counterparties with their active overrides, server flags reused verbatim', async () => {
+    router = url => (url.includes('/limits/utilisation') ? json({ limits: LIMIT_UTILISATION }) : json({}, 404))
+    await renderPage(<TreasuryLimitUtilisationPage />)
+    await screen.findAllByText(/Sim Bank C/)
+    expect(screen.getAllByText(/Synthetic counterparty|Simulovaná protistrana/)).toHaveLength(2)
+    expect(screen.getAllByRole('meter')).toHaveLength(3)
+    expect(screen.getAllByText(/Breached|Překročeno/)).toHaveLength(1)
+    expect(screen.getAllByText(/Within limit|V limitu/)).toHaveLength(2)
+  })
+
+  it('limit utilisation degrades to the shared panel when treasury-service is not deployed', async () => {
+    router = () => json({ error: 'Unknown service: treasury-service' }, 404)
+    await renderPage(<TreasuryLimitUtilisationPage />)
+    expect((await screen.findAllByText(/treasury-service/)).length).toBeGreaterThan(0)
+    expect(calls[0].url).toBe('/api/svc/treasury-service/api/v1/treasury/limits/utilisation')
   })
 
   it('positions degrade to the shared panel when treasury-service is not deployed', async () => {
