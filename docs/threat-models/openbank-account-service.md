@@ -48,6 +48,7 @@ that is balance-service).
 | **S**poofing | Caller impersonates operator | OIDC bearer + mTLS; no anonymous mutation |
 | **T**ampering | Forced freeze/close, IBAN reassignment | RBAC on all mutations; state-machine guards; DB constraints; audit trail |
 | **T**ampering | Open an account in a currency incompatible with its selected product | Confirmed catalog product responses are checked server-side for product identity and currency. A missing product rejects the request; an unavailable catalog stays explicitly fail-open as reference-data unavailability, with skipped validation logged. |
+| **T**ampering | Reuse an `Idempotency-Key` with a different opening request so the first account is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing opened. Durable second check: `account_idempotency.request_hash` (V30) refuses a reused key after the Redis record expired. Keys stored before this change (and onboarding opens, which carry no HTTP fingerprint) still replay by key alone |
 | **R**epudiation | Operator denies freezing an account | AuditEvent per lifecycle transition (immutable, ADR audit) |
 | **I**nfo disclosure | IBAN / account enumeration via `/iban/{iban}` | AuthZ on lookup; rate limiting at gateway; no PII in IBAN response beyond need |
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
@@ -98,8 +99,29 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
-- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+- **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
+  `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
+  which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**
+  pricing-console already called `http://product-catalog.accounts.svc:8104` live (it was hand-applied and
+  unscanned); the edge is now declared and reviewed. **Spoofing / elevation:** unchanged — product-catalog
+  still authenticates every caller with a Keycloak JWT and authorises through its OPA sidecar, so network
+  reachability grants no data. **Residual:** the edge is plaintext HTTP inside the cluster (baselined in
+  `.github/asvs-l3-baseline.txt`); TLS for pricing's edges is a follow-up.
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/accounts` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different account opening was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed open releases the claim so a retry can run. Because the Redis record expires (24 h) while the `account_idempotency` row (V14) does not, migration V30 adds nullable `account_idempotency.request_hash`, written in the same transaction as the account; `AccountService` refuses a key whose stored hash differs (409) — on the sequential replay path and on the concurrent-loser recovery path — so the check survives Redis expiry or eviction. **Residual window:** Redis records and `account_idempotency` rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely); onboarding-driven opens carry no fingerprint either. No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE account_idempotency DROP COLUMN request_hash` (see V30 header).
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
 
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
 - **2026-09-06** — **New INBOUND reader on the fleet sweep**, no new route and no new privilege.
   `openbank-analytics-sink` now calls the existing `GET /api/v1/accounts/active` (ADR-0143's
   staff/service sweep, already used by billing-service's cycle scheduler) with an OIDC
@@ -785,3 +807,24 @@ decision use first; the additive projection table may remain until its consumer 
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+
+- **2026-09-26** — **Exception-mapper collision removal (#10923 / #10911), 401 message text
+  changes.** Only the local QuarkusUnauthorizedExceptionMapper mapper for `UnauthorizedException`
+  (deleted by this PR — no longer present in tracked source) is removed here; it duplicated
+  libs-runtime's own
+  `UnauthorizedExceptionMapper` (#8993), which is the #526 non-deterministic-dispatch collision
+  this closes. The `AuthenticationFailedException`
+  (401) and `ForbiddenException` (403) mappers stay service-local — libs-runtime has no mapper for
+  those two types, so removing them would fall back to Quarkus's plain-text body (#8803/#8875);
+  they are unchanged by this PR. New 404/409 base classes
+  (`com.openbank.libs.domain.error.ResourceExceptions`,
+  `com.openbank.libs.api.error.CommonExceptionMappers`) are added to `openbank-libs` in this PR but
+  no service, including this one, has migrated to them yet — `ExceptionMappers.kt` here still
+  declares all of its own 404/409 mappers. **Wire contract: status code, `code` and envelope shape
+  are unchanged on every path; the fixed `message` string for the `UnauthorizedException` case
+  changes from `"Unauthorized"` to libs-runtime's `"Authentication required"`** — verified by
+  `SecurityAbortExceptionMapperTest` and the shared-library `ResourceExceptionMappersTest`. No
+  openapi/pact impact: the message is not part of any schema or pact matcher. **Risk class:**
+  none — response-plumbing de-duplication only; `AuthorizeInterceptor`, OPA policy evaluation and
+  the Keycloak token validation path are untouched. Rollback: restore the deleted
+  QuarkusUnauthorizedExceptionMapper class; no data or config migration involved.

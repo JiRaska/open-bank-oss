@@ -56,6 +56,9 @@ main-red-watch.yml|job:watch|issues
 merged-past-red-check-watch.yml|job:watch|issues
 pact-verification-reconcile.yml|top|actions
 perf-gate.yml|job:raise-issue|issues
+platform-images.yml|job:build|id-token
+platform-images.yml|job:gitops-pr|contents
+platform-images.yml|job:gitops-pr|pull-requests
 platform-tofu.yml|top|id-token
 platform-tofu.yml|top|pull-requests
 release-please.yml|job:provenance|contents

@@ -81,7 +81,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-8b93bf77
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-f6316599
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -503,11 +503,11 @@ metadata:
     # annotations as Critical risk; with the cluster's `annotations-risk-level`
     # below Critical the controller REJECTS the whole Ingress (no server block,
     # empty status, so external-dns never publishes the A record → the host does
-    # not resolve). HSTS is already enforced cluster-wide via the controller
-    # ConfigMap default (hsts: true), so it is not lost. X-Robots-Tag is dropped:
-    # this is an auth-gated JSON API, not crawlable content. Re-adding arbitrary
-    # response headers must go through an allowed mechanism (global add-headers
-    # ConfigMap), never a per-Ingress snippet.
+    # not resolve). HSTS and nosniff are set by the controller on every response,
+    # so they are not lost. X-Robots-Tag is dropped: this is an auth-gated JSON
+    # API, not crawlable content. A per-host response header goes through the
+    # `custom-headers` annotation (a ConfigMap in this namespace, keys bounded by
+    # the controller's global-allowed-response-headers), never a snippet.
 spec:
   ingressClassName: nginx
   tls:
@@ -530,7 +530,7 @@ spec:
 # (set party_id user attribute after registration — issue #1270 PR3).
 # client: customer-edge-admin in openbank-customers realm, serviceAccountsEnabled=true,
 # manage-users role assigned. Vault path: openbank/customer-edge-admin.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: customer-edge-admin-oidc

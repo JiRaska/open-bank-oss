@@ -238,7 +238,7 @@ jobs:
 
           docker run -d --name fuzz-pg -p 5432:5432 \
             -e POSTGRES_USER="${DBUSER}" -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
-            -e POSTGRES_DB="${DB}" postgres:16.3-alpine >/dev/null
+            -e POSTGRES_DB="${DB}" postgres:18.6-alpine >/dev/null
           # consent-service uses Redis for idempotency — in the request path, so it
           # must be up (unlike Kafka, which is lazy behind the outbox).
           docker run -d --name fuzz-redis -p 6379:6379 redis:7.2-alpine >/dev/null

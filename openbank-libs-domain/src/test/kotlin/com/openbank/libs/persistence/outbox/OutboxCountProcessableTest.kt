@@ -69,4 +69,15 @@ class OutboxCountProcessableTest {
         // A capped limit would silently under-count a large backlog; the default must request all.
         assertThat(repo.lastLimit).isEqualTo(Int.MAX_VALUE)
     }
+
+    @Test
+    fun `claimProcessable default delegates to listProcessable with the same limit, an unclaimed peek`() {
+        val rows = List(4) { entry() }
+        val repo = FakeRepo(rows)
+
+        val claimed = runBlocking { repo.claimProcessable(limit = 2) }
+
+        assertThat(claimed).hasSize(2)
+        assertThat(repo.lastLimit).isEqualTo(2)
+    }
 }

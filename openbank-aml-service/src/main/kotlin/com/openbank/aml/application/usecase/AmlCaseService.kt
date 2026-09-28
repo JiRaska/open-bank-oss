@@ -14,6 +14,7 @@ import com.openbank.aml.domain.event.AmlCaseStatusChangedEvent
 import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -31,12 +32,23 @@ class AmlCaseService(
 ) : AmlCaseUseCase {
 
     override suspend fun createCase(command: CreateAmlCaseCommand): AmlCase {
-        amlCaseRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+        // #10916: the durable half of the Idempotency-Key check. The Redis record can expire or be
+        // evicted while this UNIQUE row lives forever, so a key reused for a DIFFERENT case must be
+        // refused here too, not answered with the first case. A legacy row (no stored hash) or a
+        // caller without one keeps the plain replay.
+        amlCaseRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
+            val stored = existing.requestHash
+            if (stored != null && command.requestHash != null && stored != command.requestHash) {
+                throw IdempotencyKeyReusedException()
+            }
+            return existing
+        }
 
         val now = Instant.now(clock)
         val amlCase = AmlCase(
             id = UUID.randomUUID(),
             idempotencyKey = command.idempotencyKey,
+            requestHash = command.requestHash,
             partyId = command.partyId,
             accountId = command.accountId,
             transactionId = command.transactionId,

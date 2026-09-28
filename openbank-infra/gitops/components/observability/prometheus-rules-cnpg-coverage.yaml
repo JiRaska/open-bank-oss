@@ -367,6 +367,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: pricing
+            cluster: pricing-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: psd2
             cluster: psd2-db
             origin: manifest
@@ -443,6 +449,354 @@ spec:
             cluster: wealth-db
             origin: manifest
 
+        # ADR-0325: how many instances each manifest DECLARES. A chart-created cluster
+        # has no manifest here to read, so it has no declared count and is not judged.
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: accounts
+            cluster: accounts-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: accounts
+            cluster: product-catalog-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: ai-platform
+            cluster: langfuse-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: ai-platform
+            cluster: litellm-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: aml
+            cluster: aml-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: anacredit
+            cluster: anacredit-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: audit
+            cluster: audit-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: authz-policy-auditor
+            cluster: authzaudit-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: balances
+            cluster: balances-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: billing
+            cluster: billing-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: campaign
+            cluster: campaign-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: communication
+            cluster: communication-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: consent
+            cluster: consent-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: context
+            cluster: context-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: control-liveness-sentinel
+            cluster: liveness-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: delegation
+            cluster: delegation-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: devops-agent
+            cluster: devops-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: dispute
+            cluster: dispute-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: docs-truth-agent
+            cluster: docstruth-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: documents
+            cluster: document-service-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: engagement
+            cluster: engagement-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: finops-agent
+            cluster: finops-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: flaky-test-hunter
+            cluster: flakytest-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: fraud
+            cluster: fraud-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: fx
+            cluster: fx-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: governance-auditor
+            cluster: govaudit-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: iam
+            cluster: keycloak-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: incentive
+            cluster: incentive-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: interest
+            cluster: interest-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: kyb
+            cluster: kyb-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: kyc
+            cluster: kyc-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: ledger
+            cluster: ledger-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: lending
+            cluster: lending-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: loyalty
+            cluster: loyalty-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: messaging
+            cluster: apicurio-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: notifications
+            cluster: notifications-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: observability
+            cluster: goalert-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: onboarding
+            cluster: onboarding-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: pact-broker
+            cluster: pact-broker-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: party
+            cluster: party-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: card-issuance-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: clearing-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: domestic-payment-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: sepa-instant-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: sepa-payment-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: settlement-service-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: standing-order-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: swift-service-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: transaction-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
+            cluster: vop-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: pid
+            cluster: pid-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: platform
+            cluster: agent-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: platform
+            cluster: case-coordinator-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: platform
+            cluster: copilot-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: platform
+            cluster: mcp-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: pricing
+            cluster: pricing-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: psd2
+            cluster: psd2-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: referral
+            cluster: referral-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: release-steward
+            cluster: releasesteward-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: risk
+            cluster: risk-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: sanctions
+            cluster: sanctions-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: sca
+            cluster: sca-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: sdd
+            cluster: sdd-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: security-scanner
+            cluster: security-scanner-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: statements
+            cluster: statements-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: temporal
+            cluster: temporal-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: tpp-registry
+            cluster: tpp-registry-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: treasury
+            cluster: treasury-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: wealth
+            cluster: wealth-db
+
         # The NUMERATOR, from a series Prometheus writes itself. `up` exists for every
         # target, 0 when the scrape fails -- so a cluster that is down still appears here
         # and is NOT reported as unscraped. Only a cluster with no target at all vanishes.
@@ -499,3 +853,32 @@ spec:
           annotations:
             summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is declared in gitops but its namespace does not exist"
             description: "This cluster is declared in gitops and its NAMESPACE does not exist in the cluster, so nothing was ever deployed for it to scrape. Do NOT enable a PodMonitor -- there is no Cluster object to set it on. The subject is the Argo Application that should have created the namespace: check `kubectl get application -A` for one OutOfSync/Missing, or with no Application at all. Either deploy it, or delete the declaration so the expected set describes the fleet that exists rather than one that was planned."
+
+        # Instances actually serving: a target that answers. A pod that cannot attach its
+        # volume never gets an IP, so it is not a target at all and simply is not counted.
+        - record: openbank:cnpg_cluster_instances_up
+          expr: |
+            count by (namespace, cluster) (
+              label_replace(up{container="postgres"} == 1, "cluster", "$1", "pod", "(.+)-[0-9]+")
+            )
+
+        - alert: PostgresClusterDegraded
+          # ADR-0325. On 2026-09-28 ~22 clusters sat with instances unable to attach their
+          # EBS volumes and nothing named it: a Pending/ContainerCreating pod has no scrape
+          # target, so PostgresInstanceDown (up == 0) cannot see it, and an HA cluster that
+          # lost its standby still answers on the primary. Compare what the manifest DECLARES
+          # with what answers. The `or ... * 0` arm makes a cluster with NO answering
+          # instance read as 0 rather than vanish -- absent is not healthy.
+          expr: |
+            openbank:cnpg_cluster_instances_declared
+              > on (namespace, cluster)
+            (
+              openbank:cnpg_cluster_instances_up
+                or on (namespace, cluster) (openbank:cnpg_cluster_instances_declared * 0)
+            )
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} has fewer instances serving than it declares"
+            description: "For 15 minutes fewer Postgres instances have answered a scrape than the Cluster declares. An HA cluster in this state has no failover target; a single-instance one is down. Check `kubectl get cluster,pods -n <namespace>` for a Pending or ContainerCreating instance, then the pod events for a volume that cannot attach (FailedAttachVolume / VolumeInUse) -- that is a node that has not released its EBS volume, see NodeClaimAwaitingVolumeDetachment (ADR-0325)."

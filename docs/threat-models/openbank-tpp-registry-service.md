@@ -40,6 +40,7 @@ PSD2 service returns 503 rather than fail-open.
 |---|---|---|
 | **S**poofing | Impersonate a revoked or unlicensed TPP | `X-TPP-ID` validated against registry record per request; EBA register sync keeps revocations current; fail-closed on circuit-open |
 | **T**ampering | Alter TPP role (AISP→PISP) in the registry without authorisation | `@RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN)` on write paths; AuditEvent per change; immutable audit trail via outbox |
+| **T**ampering | Reuse of an `Idempotency-Key` across a DIFFERENT request (register/blacklist), which would otherwise replay the first response for a second, unrelated request | `IdempotencyStore.reserve` atomically binds the key to a SHA-256 fingerprint of (method, path, canonicalised body) before the use case runs; a different fingerprint under the same key answers 409 IDEMPOTENCY_KEY_REUSED instead of executing or replaying. `POST /sync/eba` fingerprints method+path only (no request-specific content), so this control there is reserve/in-flight serialisation only — a mismatch can never occur and is not claimed for that endpoint (only 409 IDEMPOTENCY_REQUEST_IN_PROGRESS is possible/documented) |
 | **R**epudiation | Deny authorising a TPP for PISP role | AuditEvent per role grant/revocation with operator identity; change log in the entity |
 | **I**nfo disclosure | Expose list of authorised TPPs to unauthenticated callers | No Ingress resource (internal only); `@RolesAllowed(ROLE_SERVICE, ROLE_OPERATOR, ROLE_ADMIN)` on all endpoints |
 | **D**oS | Flood authorisation lookup to starve PSD2 service | PSD2 service uses circuit breaker (Fault Tolerance, ADR-0035); registry endpoints are read-heavy — no response cache exists today (§5, #4011), so a future one is the natural mitigation; NetworkPolicy restricts callers |
@@ -52,15 +53,40 @@ PSD2 service returns 503 rather than fail-open.
   service caching registry responses for a short, configurable TTL
   (`openbank.tpp.cache-ttl-seconds`, default 60) and named the resulting window as a residual risk.
   Neither half is real: the property occurs nowhere in the repository except this document, and
-  psd2-service has no registry-response cache at all — `TppRegistryClient` is a plain REST client
-  with no `@CacheResult` (#4011), no TTL and no store, so every authorisation check is a live call. The
+  psd2-service has no registry-response cache at all — `TppRegistryRestClient` (the interface) and
+  `TppAuthorizationGuard` (the caller, `openbank-psd2-service/.../infrastructure/client/TppRegistryClient.kt`)
+  are a plain REST client with no `@CacheResult` (#4011), no TTL and no store, so every authorisation
+  check is a live call. The
   only TTL in psd2's configuration is `idempotency-ttl-seconds`, which belongs to the idempotency
   store and is unrelated. Kept rather than deleted because the correction runs the *safe* way — the
   documented risk window is narrower than stated, not wider — and because a future cache would
-  reintroduce exactly this residual, so the reasoning is worth preserving. See the 2026-09-03
-  change-log entry.
+  reintroduce exactly this residual, so the reasoning is worth preserving. See the 2026-09-03 and
+  2026-09-27 change-log entries.
 
 ## 6. Change log
+
+- **2026-09-26** — Idempotency-Key binding reworked onto the fleet-wide fingerprinted
+  `reserve`/`save`/`release` API (#10922): `register`, `blacklist` and `sync/eba` now reserve the
+  key atomically before running the use case, so a concurrent duplicate never races the
+  lookup-then-save window. `sync/eba`'s fingerprint has no request-specific content (method+path
+  only) — the §4 Tampering row above states plainly that IDEMPOTENCY_KEY_REUSED cannot occur for
+  it, only IDEMPOTENCY_REQUEST_IN_PROGRESS.
+
+- **2026-09-27** — Doc correction, no behavior change (#11088): §5 cited `TppRegistryClient`, a
+  name that exists in no tracked Kotlin source, as the "plain REST client" backing the no-cache
+  claim. `git grep -n '\bTppRegistryClient\b'`
+  outside this document matches only the *filename* `TppRegistryClient.kt` (in
+  `openbank-psd2-service/detekt-baseline.xml`, `ktlint-baseline.xml`, and the architecture doc's
+  package-tree listing), never a declared symbol. The file has, for its whole recorded history,
+  declared two symbols instead: the interface `TppRegistryRestClient` (the `@RegisterRestClient`
+  REST client the doc meant) and `TppAuthorizationGuard` (the `@ApplicationScoped` caller carrying
+  `@Timeout`/`@Retry`/`@CircuitBreaker`). This surfaced via
+  `.github/scripts/check-threat-model-claims.py`'s clause-scoped disclaimer fix (#11089), which
+  stopped the neighbouring "does not exist" disclaimer in this same cell from also silencing this
+  citation. **Not a new security gap and not a behaviour change**: the underlying claim — no
+  `@CacheResult`, no TTL, no store, every authorisation check a live call — remains true of both
+  real symbols; only the cited name was wrong (an informal shorthand for the file, not a real
+  class). Citation corrected to `TppRegistryRestClient` / `TppAuthorizationGuard` above.
 
 - **2026-09-03** — Doc correction, no behavior change: §5 listed an "In-memory role cache TTL"
   residual risk, asserting that PSD2 service caches registry responses and that the window is tuned

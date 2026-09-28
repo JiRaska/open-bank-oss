@@ -51,6 +51,7 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
 | **S**poofing | Forged initiation | OIDC + role; mTLS for service callers |
 | **S**poofing | Forged `pacs.002` ACSC from clearing-simulator (ADR-0104 D3) | clearing-simulator is cluster-internal only; OIDC CC verifies identity; `Pacs002Reader` validates XML schema before parsing; scheme accept moves payment to PROCESSING (money does not leave until settlement) |
 | **T**ampering | Alter amount/IBAN in flight | Server-validated, immutable once accepted; audit |
+| **T**ampering | Reuse an `Idempotency-Key` with a different payment body so the first payment's response is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing created. Durable second check: `sepa_payments.request_hash` (V12) refuses a reused key after the Redis record expired. Rows/records written before this change carry no fingerprint and still replay by key alone |
 | **R**epudiation | Deny initiating a transfer | AuditEvent + SCA evidence + correlation id |
 | **I**nfo disclosure | Payment history harvesting | AuthZ scoping; `ROLE_VIEWER` owner-scoped read |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-payment inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the `openbank.outbox.backlog` gauge is tagged only by `service` (`"sepa-payment"`) — never a payment id, debtor/creditor IBAN, amount, or any PII. The gauge exposes only a read-only **count** of processable (PENDING + FAILED) outbox rows, cached and refreshed off the scrape thread (no DB query on the Prometheus worker thread). `/q/metrics` is cluster-internal |
@@ -141,6 +142,29 @@ unreachable document-service fails only the download, never a payment transition
 simply stops existing).
 
 ## 6. Change log
+
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, status codes, JSON field names and `openapi.yaml` are unchanged,
+  and the intentionally asymmetric role sets stay exactly as before — `listPending` stays
+  `ROLE_OPERATOR`/`ROLE_ADMIN` only, `decide` additionally admits `ROLE_PAYMENTS` — only the
+  `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag` annotations remain per-service, and
+  `checkerId(identity)` is resolved AFTER the null-body check (same ordering `decide` documents in
+  libs-runtime, fixed in #11033/#11047).
+
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
 
 - **2026-09-14** — Return-evidence source revision (ADR-0306): SEPA lifecycle transitions increment
   persisted `aggregate_revision` under a row lock, and created, status and return outbox bodies
@@ -405,3 +429,4 @@ simply stops existing).
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 5 restamps the transaction-service policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding a transaction read rule for party-service. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 6 restamps the card-issuance policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding two card read rules. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `SepaPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only) instead of the shared client. sepa-payment deliberately grants it nothing and its RBAC is unchanged: the MCP tool behind it (`get_payment_confirmation`, `query.payment_confirmation.readonly`) is held by no charter, so the call was already refused at the MCP gate. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. sepa-payment's own Rollout, identity and OPA grants are unchanged. Nothing to roll back here.
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/sepa-payments` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different payment was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed create releases the claim so a retry can run. Because the Redis record expires (24 h) while the UNIQUE `idempotency_key` row does not, migration V12 adds nullable `sepa_payments.request_hash`, written on create; `SepaPaymentService` refuses a key whose stored hash differs (409), so the check survives Redis expiry or eviction. **Residual window:** Redis records and payment rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely). No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE sepa_payments DROP COLUMN request_hash` (see V12 header).
