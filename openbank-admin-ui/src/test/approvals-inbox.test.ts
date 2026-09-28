@@ -35,6 +35,9 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
   it('merges every configured domain queue into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/v1/lending/ledger-backfill/requests')) {
+        return Promise.resolve(new Response(JSON.stringify({ requests: [] }), { status: 200 }))
+      }
       if (url.includes('lending')) {
         return Promise.resolve(new Response(JSON.stringify([
           { id: 'L-2', action: 'lending.disburse', resourceId: 'loan-2', makerId: 'officer.b', createdAt: '2026-07-30T10:00:00Z' },
@@ -133,6 +136,9 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
           { id: 'DG-1', delegationId: 'grant-7', operation: 'REINSTATE', proposedBy: 'operator.k', proposedAt: '2026-07-29T11:58:00Z' },
         ]), { status: 200 }))
       }
+      if (url.includes('/api/v1/treasury/deals')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      }
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
       ]), { status: 200 }))
@@ -170,6 +176,42 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.billing).toBe('ok')
     expect(body.sources.delegation).toBe('ok')
     expect(body.sources.communication).toBe('ok')
+    expect(body.sources.treasury).toBe('ok')
+    expect(body.sources['ledger-backfill']).toBe('ok')
+  })
+
+  it('preserves human makers and submission times for treasury and ledger backfill', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      seen.push({ url: String(url), authorization: new Headers(init?.headers).get('authorization') })
+      if (String(url).includes('/api/v1/treasury/deals')) return new Response(JSON.stringify([{
+        dealId: 'deal-7', state: 'PENDING_APPROVAL', product: 'MM_PLACEMENT', createdBy: 'dealer.one',
+        submittedBy: 'dealer.two', history: [{ to: 'DRAFT', at: '2026-09-20T09:00:00Z' }, { to: 'PENDING_APPROVAL', at: '2026-09-20T10:00:00Z' }],
+      }]))
+      if (String(url).includes('/api/v1/lending/ledger-backfill/requests')) return new Response(JSON.stringify({ requests: [
+        { id: 'request-7', state: 'PROPOSED', proposedBy: 'finance.one', proposedAt: '2026-09-20T11:00:00Z' },
+        { id: 'request-6', state: 'APPROVED', proposedBy: 'finance.two', proposedAt: '2026-09-19T11:00:00Z' },
+      ] }))
+      return new Response(JSON.stringify([]))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+    expect(seen.find(call => call.url.includes('/api/v1/treasury/deals'))).toMatchObject({ authorization: 'Bearer operator-token' })
+    expect(seen.find(call => call.url.includes('/api/v1/lending/ledger-backfill/requests'))).toMatchObject({ authorization: 'Bearer operator-token' })
+    expect(body.sources.treasury).toBe('ok')
+    expect(body.sources['ledger-backfill']).toBe('ok')
+    expect(body.items).toEqual([
+      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', proposedAt: '2026-09-20T11:00:00Z' },
+    ])
+  })
+
+  it('does not certify a ledger backfill queue truncated at the history cap', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('/api/v1/lending/ledger-backfill/requests')
+      ? new Response(JSON.stringify({ requests: Array.from({ length: 100 }, (_, i) => ({ id: `request-${i}`, state: 'APPROVED', proposedBy: 'finance', proposedAt: null })) }))
+      : new Response(JSON.stringify([]))))
+    const body = await (await (await route()).GET()).json()
+    expect(body.sources['ledger-backfill']).toBe('unavailable')
   })
 
   it('reads the durable delegation lifecycle queue instead of claiming it is empty', async () => {

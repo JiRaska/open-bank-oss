@@ -237,8 +237,8 @@ export default function ApprovalsPage() {
           color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
-            `Fronta není úplná — nepodařilo se načíst: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
-            `This queue is incomplete — could not read: ${unavailableSources.join(', ')}. An empty list does not mean nothing is pending.`,
+            `Fronta není úplná — nepodařilo se ověřit úplnost zdrojů: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
+            `This queue is incomplete — could not verify completeness of: ${unavailableSources.join(', ')}. An empty list does not mean nothing is pending.`,
           )}
         </div>
       )}

@@ -20,6 +20,8 @@ export type ApprovalDomain =
   | 'billing'
   | 'delegation'
   | 'communication'
+  | 'treasury'
+  | 'ledger-backfill'
 
 export type DomainApprovalItem = {
   id: string
@@ -70,6 +72,12 @@ export function approvalWorkbenchHref(item: DomainApprovalItem): string | null {
   }
   if (item.domain === 'communication') {
     return '/approvals/communication'
+  }
+  if (item.domain === 'treasury') {
+    return `/treasury/deals/${encodeURIComponent(item.id)}`
+  }
+  if (item.domain === 'ledger-backfill') {
+    return '/balance-sheet/ledger-backfill'
   }
   return null
 }

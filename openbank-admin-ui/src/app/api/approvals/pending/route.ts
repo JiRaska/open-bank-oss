@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'treasury' | 'ledger-backfill'
   action: string
   resourceId: string | null
   maker: string | null
@@ -113,6 +113,20 @@ type AgentProposal = {
   suggestedAction: string
   proposedBy: string
   proposedAt: string
+}
+type TreasuryDeal = {
+  dealId: string
+  state: string
+  product: string
+  createdBy: string
+  submittedBy: string | null
+  history: { to: string; at: string }[]
+}
+type BackfillRequest = {
+  id: string
+  state: string
+  proposedBy: string
+  proposedAt: string | null
 }
 
 type SourceResult = { items: InboxItem[]; state: SourceState }
@@ -423,6 +437,45 @@ async function communicationPending(headers: HeadersInit): Promise<SourceResult>
   }
 }
 
+async function treasuryPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('treasury-service', 'treasury', 8160, '/api/v1/treasury/deals', { state: 'PENDING_APPROVAL' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as TreasuryDeal[]
+  if (!Array.isArray(rows) || rows.some(r => !r.dealId || r.state !== 'PENDING_APPROVAL' || !r.createdBy || !r.submittedBy ||
+    !Array.isArray(r.history) || !r.history.some(h => h.to === 'PENDING_APPROVAL' && h.at))) {
+    return { items: [], state: 'unavailable' }
+  }
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.dealId, domain: 'treasury' as const, action: `treasury.${r.product}`,
+      resourceId: r.dealId, maker: r.submittedBy, proposedAt: r.history.filter(h => h.to === 'PENDING_APPROVAL').pop()!.at,
+    })),
+  }
+}
+
+async function ledgerBackfillPending(headers: HeadersInit): Promise<SourceResult> {
+  // The service exposes bounded history, not a pending-only list. At the cap, older
+  // proposals might be hidden, so never report this source as a complete empty queue.
+  const res = await fetch(serverSvcUrl('lending-service', 'lending', 8126, '/api/v1/lending/ledger-backfill/requests', { limit: '100' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const body = (await res.json()) as { requests?: BackfillRequest[] }
+  if (!Array.isArray(body?.requests) || body.requests.some(r => !r.id || !r.state || !r.proposedBy)) {
+    return { items: [], state: 'unavailable' }
+  }
+  return {
+    state: body.requests.length === 100 ? 'unavailable' : 'ok',
+    items: body.requests.filter(r => r.state === 'PROPOSED').map(r => ({
+      id: r.id, domain: 'ledger-backfill' as const, action: 'lending.ledgerBackfill.decide',
+      resourceId: r.id, maker: r.proposedBy, proposedAt: r.proposedAt,
+    })),
+  }
+}
+
 async function agentPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(`${agentBase()}/api/v1/proposals?state=proposed`, {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
@@ -445,7 +498,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication, treasury, ledgerBackfill] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -465,8 +518,10 @@ export async function GET() {
     delegationPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
     communicationPending(headers).catch(() => unavailable),
+    treasuryPending(headers).catch(() => unavailable),
+    ledgerBackfillPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...treasury.items, ...ledgerBackfill.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -490,6 +545,8 @@ export async function GET() {
       delegation: delegation.state,
       agent: agent.state,
       communication: communication.state,
+      treasury: treasury.state,
+      'ledger-backfill': ledgerBackfill.state,
     },
   })
 }
