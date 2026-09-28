@@ -160,6 +160,42 @@ data class CounterpartyResponse(
     }
 }
 
+/**
+ * Read-only per counterparty/currency limit-utilisation line (ADR-0315 D4, #10896). `utilised`
+ * and `breached` are computed the exact same way as the booking-time limit check — both derive
+ * from [com.openbank.treasury.domain.model.Deal.LIMIT_CONSUMING_STATES] via the same repository
+ * query — so this view cannot disagree with what actually blocks booking.
+ */
+data class LimitUtilisationEntryResponse(
+    val counterpartyId: String,
+    val name: String,
+    val synthetic: Boolean,
+    val currency: String,
+    val limit: BigDecimal,
+    val utilised: BigDecimal,
+    val available: BigDecimal,
+    val utilisationPercent: BigDecimal,
+    val breached: Boolean,
+    val activeOverrides: Int,
+) {
+    companion object {
+        fun from(e: CounterpartyExposure) = LimitUtilisationEntryResponse(
+            counterpartyId = e.counterparty.id,
+            name = e.counterparty.name,
+            synthetic = e.counterparty.synthetic,
+            currency = e.currency,
+            limit = e.limit,
+            utilised = e.exposure,
+            available = e.headroom,
+            utilisationPercent = e.utilisationPercent,
+            breached = e.breached,
+            activeOverrides = e.activeOverrides,
+        )
+    }
+}
+
+data class LimitUtilisationResponse(val limits: List<LimitUtilisationEntryResponse>)
+
 data class CurrencyPositionResponse(
     val currency: String,
     val placed: BigDecimal,
