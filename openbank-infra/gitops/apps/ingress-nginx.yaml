@@ -1,7 +1,6 @@
 # Cluster edge. ingress-nginx (not the AWS ALB controller) keeps the edge
 # cloud-agnostic per ADR-0027 — the only AWS coupling is the Service annotation
-# that asks the in-tree cloud provider for an NLB. Single replica for sandbox
-# FinOps; prod should raise replicaCount and add PodDisruptionBudget.
+# that asks the in-tree cloud provider for an NLB. Two replicas + PDB (below).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -24,6 +23,27 @@ spec:
             # proxy buffer and 502s the admin-ui login. Set globally — per-Ingress
             # annotation is not honoured by this controller.
             proxy-buffer-size: "32k"
+            # ── Edge response headers WITHOUT snippets (ADR-0324 interim hardening) ──
+            # HSTS is owned by the controller, not by any Ingress: its Lua header
+            # filter sets Strict-Transport-Security on every TLS-served response.
+            # These two values reproduce what every per-Ingress snippet sent
+            # (2-year max-age + preload), so the header is identical on every host
+            # and no Ingress needs to (or may) set it itself.
+            hsts: "true"
+            hsts-include-subdomains: "true"
+            hsts-max-age: "63072000"
+            hsts-preload: "true"
+            # The ONLY response headers an Ingress may set through the
+            # `custom-headers` annotation (risk Medium, per-location, ConfigMap in the
+            # Ingress's own namespace). The controller denies the location if its
+            # ConfigMap names a header outside this list, so the list is the
+            # platform-owned boundary that replaces free-form `more_set_headers`
+            # snippets. Deliberately absent: Strict-Transport-Security (controller
+            # owned, above), Set-Cookie, Location, Access-Control-* (CORS), Server.
+            global-allowed-response-headers: "X-Frame-Options,Referrer-Policy,X-Robots-Tag,Permissions-Policy,Content-Security-Policy,Cross-Origin-Opener-Policy,Cross-Origin-Embedder-Policy,Cross-Origin-Resource-Policy"
+            # Strip the framework fingerprint (Next.js, Express) from every upstream
+            # response — what k8s/base's `more_clear_headers` snippet did per host.
+            hide-headers: "X-Powered-By"
             allow-snippet-annotations: "true"
             # Since ingress-nginx v1.12 (post CVE-2023-5043/5044), snippet
             # annotations are classified "Critical" risk and are REJECTED unless
@@ -35,7 +55,63 @@ spec:
             # Certificate"). Critical is acceptable on this single-tenant cluster;
             # re-evaluate for multi-tenant prod (prefer dropping snippets there).
             annotations-risk-level: "Critical"
-          replicaCount: 1
+          # Headers that are correct on EVERY response of every host, API or UI:
+          # rendered once at http{} level (more_set_headers, inherited by every
+          # location and appended to a location's own custom-headers).
+          addHeaders:
+            X-Content-Type-Options: nosniff
+          # ModSecurity engine config for the Ingresses that opt in with
+          # `enable-modsecurity` (today only developer-portal, ADR-0093). The WAF
+          # policy was a `modsecurity-snippet` annotation — Critical risk, i.e.
+          # anyone able to write an Ingress could rewrite the WAF. It now lives in
+          # the controller's own pod spec: the file replaces the image's
+          # /etc/nginx/modsecurity/modsecurity.conf, which the controller loads for
+          # every modsecurity-enabled location that carries no snippet.
+          # The ConfigMap is IMMUTABLE and versioned by name (components/ingress-nginx,
+          # app ingress-nginx-config): changing the WAF policy means a new name here,
+          # which changes the pod template and rolls the controller. A subPath mount
+          # never sees an in-place edit, and nginx reads the file only on reload, so
+          # an editable ConfigMap would be a policy change that silently never lands.
+          # Until the ConfigMap exists a new controller pod waits in
+          # ContainerCreating while the old one keeps serving (maxUnavailable 0).
+          extraVolumes:
+            - name: modsecurity-conf
+              configMap:
+                name: ingress-nginx-modsecurity-v1
+          extraVolumeMounts:
+            - name: modsecurity-conf
+              mountPath: /etc/nginx/modsecurity/modsecurity.conf
+              subPath: modsecurity.conf
+              readOnly: true
+          # One replica in EVERY AZ the NLB has an address in. With
+          # externalTrafficPolicy: Local and cross-zone off, an NLB address whose AZ
+          # has no controller has no healthy target: connections to it fail until the
+          # NLB and the Route53 alias drop that AZ from DNS, which took minutes on
+          # 2026-09-28 when two replicas sat in 1a/1b and the 1c address kept being
+          # answered (about a third of new connections failed). Three replicas with
+          # REQUIRED zone spread keep every address backed, so a single pod or node
+          # loss only removes one AZ instead of opening a hole. Karpenter provisions
+          # into the AZ the constraint asks for. The PDB keeps two serving through
+          # voluntary disruption (drift, consolidation, drains).
+          replicaCount: 3
+          minAvailable: 2
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+                  app.kubernetes.io/instance: ingress-nginx
+                  app.kubernetes.io/component: controller
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+                  app.kubernetes.io/instance: ingress-nginx
+                  app.kubernetes.io/component: controller
           # Scrape the controller so edge-level 5xx are observable. ingress-nginx
           # records every request it proxies (nginx_ingress_controller_requests,
           # labelled by status) — including the failures that never reach a backend
@@ -66,11 +142,16 @@ spec:
           allowSnippetAnnotations: true
           service:
             type: LoadBalancer
-            # Cluster (not Local) so any NLB AZ-IP reaches the single controller
-            # replica via kube-proxy — lets us point sslip.io at any NLB IP
-            # without AZ-pinning. Loses real client IP, fine for the sandbox
-            # (the IP allow-list is enforced at the NLB SG, below).
-            externalTrafficPolicy: Cluster
+            # Local: the NLB delivers only to nodes running a controller replica
+            # (health-checked on healthCheckNodePort) and there is no kube-proxy SNAT,
+            # so nginx sees the real client IP. Required by the per-host source
+            # allow-list on internal Ingresses (ADR-0324 mixed edge,
+            # edge-internal-host-allowlist); with Cluster every request arrived from a
+            # node IP. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
+            # stays off (inter-AZ data cost): the NLB drops an AZ with no healthy
+            # target from its DNS answers. Hostnames come from external-dns, so nothing
+            # pins a single NLB IP any more (the old sslip.io reason for Cluster).
+            externalTrafficPolicy: Local
             annotations:
               service.beta.kubernetes.io/aws-load-balancer-type: nlb
               service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing

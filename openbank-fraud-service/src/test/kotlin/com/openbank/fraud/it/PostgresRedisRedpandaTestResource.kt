@@ -36,7 +36,7 @@ class PostgresRedisRedpandaTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:18.6-alpine"))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_fraud_it")
