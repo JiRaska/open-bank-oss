@@ -67,7 +67,7 @@ describe('agent proposal identity enrichment', () => {
     const { POST } = await import('@/app/api/agent/proposals/route')
     const response = await POST(new NextRequest('http://localhost/api/agent/proposals', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ proposalId: 'proposal-1', approve: true, decidedBy: 'forged-reviewer', reason: 'verified' }),
+      body: JSON.stringify({ proposalId: '47fd98d8-a0bb-4a8a-9b16-ea9b18b60447', approve: true, decidedBy: 'forged-reviewer', reason: 'verified' }),
     }))
 
     expect(response.status).toBe(200)
@@ -81,10 +81,38 @@ describe('agent proposal identity enrichment', () => {
     const { POST } = await import('@/app/api/agent/proposals/route')
     const response = await POST(new NextRequest('http://localhost/api/agent/proposals', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ proposalId: 'proposal-1', approve: true, decidedBy: 'forged-reviewer' }),
+      body: JSON.stringify({ proposalId: '47fd98d8-a0bb-4a8a-9b16-ea9b18b60447', approve: true, decidedBy: 'forged-reviewer' }),
     }))
 
     expect(response.status).toBe(401)
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('checks authentication before interpreting an invalid browser request', async () => {
+    vi.mocked(auth).mockResolvedValueOnce(null as never)
+    const upstream = vi.fn()
+    vi.stubGlobal('fetch', upstream)
+    const { POST } = await import('@/app/api/agent/proposals/route')
+    const response = await POST(new NextRequest('http://localhost/api/agent/proposals', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proposalId: 'not-a-uuid', approve: 'true' }),
+    }))
+
+    expect(response.status).toBe(401)
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed decision data before forwarding to the agent', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { id: 'operator-subject', accessToken: 'operator-token' } } as never)
+    const upstream = vi.fn()
+    vi.stubGlobal('fetch', upstream)
+    const { POST } = await import('@/app/api/agent/proposals/route')
+    const response = await POST(new NextRequest('http://localhost/api/agent/proposals', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proposalId: 'not-a-uuid', approve: true }),
+    }))
+
+    expect(response.status).toBe(400)
     expect(upstream).not.toHaveBeenCalled()
   })
 })

@@ -8,11 +8,18 @@
 // A legacy decidedBy field may be sent by older clients, but never supplies audit identity.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { auth } from '@/auth'
 import { loadAgentCharters } from '@/lib/governance/agentCharters'
 import { resolveAgentIdentity } from '@/lib/governance/agentIdentity'
 
 export const dynamic = 'force-dynamic'
+
+const decisionSchema = z.object({
+  proposalId: z.uuid(),
+  approve: z.boolean(),
+  reason: z.string().nullable().optional(),
+})
 
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
@@ -66,17 +73,17 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { proposalId, approve, reason } = body ?? {}
-    if (!proposalId || typeof approve !== 'boolean') {
-      return NextResponse.json({ error: 'proposalId and approve (bool) are required' }, { status: 400 })
-    }
     const session = await auth()
     const accessToken = session?.user?.accessToken
     // Retain the legacy field for a mixed-version agent-service rollout, but source it
     // from the authenticated session, never the browser's decidedBy body property.
     const decidedBy = session?.user?.id?.trim()
     if (!accessToken || !decidedBy) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    const parsed = decisionSchema.safeParse(await req.json())
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'valid proposalId (UUID) and approve (bool) are required' }, { status: 400 })
+    }
+    const { proposalId, approve, reason } = parsed.data
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10000)
     const res = await fetch(`${agentBase()}/api/v1/proposals/${encodeURIComponent(proposalId)}/decision`, {

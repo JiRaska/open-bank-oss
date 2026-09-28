@@ -110,23 +110,19 @@ function browser() {
   })
 }
 
-let seedAttempted = false
 let failure = null
 try {
-  seedAttempted = true
   await job('seed')
   await browser()
 } catch (error) {
   failure = error
 } finally {
-  if (seedAttempted) {
-    try {
-      await job('cleanup')
-      console.log(`synthetic approval ${id}: explicit cleanup verified`)
-    } catch {
-      console.error(`synthetic approval ${id}: cleanup not proven`)
-      process.exitCode = 1
-    }
+  try {
+    await job('cleanup')
+    console.log(`synthetic approval ${id}: explicit cleanup verified`)
+  } catch {
+    console.error(`synthetic approval ${id}: cleanup not proven`)
+    process.exitCode = 1
   }
 }
 if (failure) {
