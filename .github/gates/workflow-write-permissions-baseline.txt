@@ -38,6 +38,7 @@ dependency-review.yml|top|pull-requests
 dependency-submission.yml|job:raise-issue|issues
 dependency-submission.yml|job:submit|contents
 deploy-drift-watch.yml|job:watch|issues
+deploy-pr-closure-audit.yml|job:audit|issues
 deps-freshness.yml|job:freshness|issues
 external-feed-watch.yml|job:watch|issues
 finops-lifecycle.yml|job:audit|issues

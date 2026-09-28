@@ -1,0 +1,110 @@
+name: Deploy PR closure coverage
+
+# Closing an unmerged bot PR can silently drop a unique image pin (#9785).
+# Read only the trusted main checkout and the closed PR's diff. The audit reports
+# uncovered pins; it never deploys, rewrites a branch, or relaxes can-i-deploy.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pr-closure-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: >-
+      github.event.pull_request.merged == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      CLOSED_PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Audit image-pin coverage against main and open successors
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          audit_failed() {
+            gh issue comment 9785 --repo "$REPO" --body \
+              "Closed deploy PR #$CLOSED_PR could not be audited. See https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID. No image-pin coverage is claimed." || true
+          }
+          trap 'audit_failed' ERR
+
+          if ! gh pr diff "$CLOSED_PR" --repo "$REPO" --patch \
+              | python3 .github/scripts/deploy-pr-image-keys.py --json > "$work/closed.json"; then
+            audit_failed
+            exit 1
+          fi
+
+          # gh pr list defaults to 30. If the bounded result reaches 200, do not
+          # claim completeness; a missing older successor could change the verdict.
+          gh pr list --repo "$REPO" --state open --limit 200 \
+            --json number,headRefName,headRepository,baseRefName > "$work/open.json"
+          if [ "$(jq length "$work/open.json")" -ge 200 ]; then
+            echo "::error::open PR listing reached its 200-PR audit limit"
+            audit_failed
+            exit 1
+          fi
+          jq -r --arg repo "$REPO" \
+            '.[] | select(.headRefName | startswith("chore/gitops-auto-deploy-")) |
+             select(.headRepository.nameWithOwner == $repo and .baseRefName == "main") |
+             .number' \
+            "$work/open.json" > "$work/successor-numbers"
+          : > "$work/successors.ndjson"
+          while IFS= read -r number; do
+            [ -n "$number" ] || continue
+            if ! gh pr diff "$number" --repo "$REPO" --patch \
+                | python3 .github/scripts/deploy-pr-image-keys.py --json > "$work/pins.json"; then
+              echo "::warning::open PR #$number has an unreadable image diff; it cannot prove coverage"
+              continue
+            fi
+            mergeable="$(gh pr view "$number" --repo "$REPO" --json mergeable --jq .mergeable)"
+            jq -cn --argjson pr "$number" --arg mergeable "$mergeable" \
+              --slurpfile pins "$work/pins.json" \
+              '{pr: $pr, mergeable: $mergeable, pins: $pins[0]}' \
+              >> "$work/successors.ndjson"
+          done < "$work/successor-numbers"
+          jq -s . "$work/successors.ndjson" > "$work/successors.json"
+
+          python3 .github/scripts/audit-closed-deploy-pr.py "$work/closed.json" \
+            --successors "$work/successors.json" > "$work/result.json"
+          jq -r '.[] | "\(.status): \(.path) / \(.repository | split("/")[-1])"' \
+            "$work/result.json"
+
+          # A pending successor remains a PR, not deployed proof; the immediate
+          # alert is for a pin with neither main coverage nor a proved successor.
+          if jq -e 'any(.[]; .status == "gap" or .status == "unknown")' \
+              "$work/result.json" >/dev/null; then
+            {
+              echo "Closed bot deploy PR #$CLOSED_PR left image pins without proven coverage:"
+              echo
+              jq -r '.[] | select(.status == "gap" or .status == "unknown") |
+                "- `\(.path)` / `\(.repository | split("/")[-1])`: \(.status)"' \
+                "$work/result.json"
+              echo
+              echo "Source: https://github.com/$REPO/pull/$CLOSED_PR"
+              echo "Audit: https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID"
+              echo "Keep can-i-deploy and normal PR review; this is a coverage finding, not deployment approval."
+            } > "$work/comment.txt"
+            gh issue comment 9785 --repo "$REPO" --body-file "$work/comment.txt"
+            echo "::error::closed deploy PR has unaccounted image pins; see #9785"
+            trap - ERR
+            exit 1
+          fi
