@@ -3575,6 +3575,24 @@ matrix_sa_excluded_action_grants:
 # Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
 # realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
 # third, unreviewed answer to "what does the shared client hold".
+field_protection:
+  # ADR-0320 P3. Reversible field encryption and deterministic tokenization go through
+  # com.openbank.libs.security.FieldProtector (libs-domain port; OpenBaoTransitFieldProtector
+  # in libs-runtime, a plain class, no CDI bean; the test-only LocalAesGcmFieldProtector lives in
+  # openbank-libs-testing so no src/main can produce it). tokenize
+  # delegates to the ADR-0189/ADR-0072 BlindIndex — no second HMAC scheme.
+  detect: ["<service>/src/main/**/*.kt", "<service>/src/main/**/*.java", "<service>/src/main/**/*.sql"]
+  require:
+    - "no javax.crypto Cipher/Mac/SecretKeySpec/KeyGenerator, BouncyCastle, Tink, X-Vault-Token or OpenBao Transit path, and no pgp_sym_encrypt in SQL, in a service's src/main outside the shrink-only baseline"
+    - "ciphertext keeps the Transit `vault:v<N>:` envelope; every failure throws FieldProtectionException (fail closed)"
+  gate: field-crypto-in-libs
+  baseline: ".github/scripts/field-crypto-in-libs-baseline.txt"
+  # ADVISORY until card-issuance (first consumer, ADR-0262) migrates, per ADR-0320's
+  # advisory-first convention for P1/P3 gates.
+  enforced: advisory
+  target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
+  ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
