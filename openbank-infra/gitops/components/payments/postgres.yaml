@@ -1,7 +1,8 @@
 # Single-owner Postgres clusters for each payment-pipeline service, all in the
 # `payments` namespace. Each is a separate CNPG cluster so schemas stay isolated
-# and Flyway migrations run independently. One instance per cluster for sandbox
-# FinOps; prod should raise to 3 for HA (transaction + sepa-payment are money-path).
+# and Flyway migrations run independently. Every cluster here backs a money-path
+# service, so each runs primary + standby (ADR-0159, enforced by ADR-0325's
+# cnpg-update-resilience gate); prod should raise to 3.
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -43,6 +44,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -126,6 +133,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -209,6 +222,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -292,6 +311,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -375,6 +400,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -423,6 +454,11 @@ kind: Cluster
 metadata:
   name: standing-order-db
   namespace: payments
+  annotations:
+    # ADR-0325 staged rollout: required anti-affinity + zone spread change the pod spec and
+    # ROLL the instances, so they land in a later wave, once this cluster's new standby is
+    # Ready -- never in the same sync that creates it. Removed by that wave's PR.
+    openbank.io/affinity-rollout-pending: "ADR-0325 wave -- add required anti-affinity after the standby is Ready"
 spec:
   # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
   # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
@@ -448,7 +484,13 @@ spec:
         action: drop
       - regex: __tmp_cnpg_keep
         action: labeldrop
-  instances: 1
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
@@ -486,6 +528,11 @@ kind: Cluster
 metadata:
   name: card-issuance-db
   namespace: payments
+  annotations:
+    # ADR-0325 staged rollout: required anti-affinity + zone spread change the pod spec and
+    # ROLL the instances, so they land in a later wave, once this cluster's new standby is
+    # Ready -- never in the same sync that creates it. Removed by that wave's PR.
+    openbank.io/affinity-rollout-pending: "ADR-0325 wave -- add required anti-affinity after the standby is Ready"
 spec:
   # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
   # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
@@ -511,7 +558,13 @@ spec:
         action: drop
       - regex: __tmp_cnpg_keep
         action: labeldrop
-  instances: 1
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
@@ -595,6 +648,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -671,6 +730,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
