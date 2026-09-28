@@ -6,15 +6,12 @@ package com.openbank.kyc.infrastructure.rest
 
 import com.openbank.kyc.application.InvalidApprovalReasonException
 import com.openbank.kyc.application.InvalidStateTransitionException
-import com.openbank.kyc.application.KycCaseConflictException
-import com.openbank.kyc.application.KycCaseNotFoundException
 import com.openbank.kyc.application.KycService
 import com.openbank.kyc.application.PepScreeningService
 import com.openbank.kyc.domain.model.CheckStatus
 import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.libs.api.error.ApiError
-import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.Roles
@@ -264,33 +261,9 @@ data class PepRescreenRequest(val partyName: String)
  */
 data class KycCaseApprovalRequest(val reason: String)
 
-@Provider
-class KycNotFoundMapper : ExceptionMapper<KycCaseNotFoundException> {
-    override fun toResponse(e: KycCaseNotFoundException) = Response.status(404)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                404,
-                ErrorCode.NOT_FOUND.code,
-                e.message ?: "Not found",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
-
-@Provider
-class KycConflictMapper : ExceptionMapper<KycCaseConflictException> {
-    override fun toResponse(e: KycCaseConflictException) = Response.status(ErrorCode.CONFLICT.httpStatus)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                ErrorCode.CONFLICT.httpStatus,
-                ErrorCode.CONFLICT.code,
-                e.message ?: "Conflict",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
+// KycCaseNotFoundException / KycCaseConflictException: mapped by libs-runtime's
+// Resource{NotFound,Conflict}ExceptionMapper since #10911 phase 2 (the exceptions now extend the
+// libs-domain bases) -- see KycExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 @Provider
 class KycInvalidStateTransitionMapper : ExceptionMapper<InvalidStateTransitionException> {

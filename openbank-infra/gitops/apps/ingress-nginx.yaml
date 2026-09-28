@@ -99,6 +99,12 @@ spec:
             - maxSkew: 1
               topologyKey: kubernetes.io/hostname
               whenUnsatisfiable: DoNotSchedule
+              # Count only pods of the CURRENT ReplicaSet. Without this, a
+              # terminating old-RS pod still counts during a roll: on 2026-09-28 it
+              # made 1a look occupied, the third replica landed in 1b, the old pod
+              # then left and 1a stayed empty (NLB 1a address with no target). The
+              # scheduler never rebalances afterwards.
+              matchLabelKeys: [pod-template-hash]
               labelSelector:
                 matchLabels:
                   app.kubernetes.io/name: ingress-nginx
@@ -107,6 +113,11 @@ spec:
             - maxSkew: 1
               topologyKey: topology.kubernetes.io/zone
               whenUnsatisfiable: DoNotSchedule
+              matchLabelKeys: [pod-template-hash]
+              # Treat all three NLB AZs as required domains even while one has no
+              # eligible node yet, so Karpenter provisions there instead of the
+              # scheduler doubling up elsewhere.
+              minDomains: 3
               labelSelector:
                 matchLabels:
                   app.kubernetes.io/name: ingress-nginx
