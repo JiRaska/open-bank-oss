@@ -4,8 +4,9 @@
 
 package com.openbank.clearing.integration
 
-import com.openbank.clearing.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -48,7 +49,10 @@ import javax.sql.DataSource
  * the reactive repositories, and only a real request exercises the production wiring.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_clearing_it")],
+)
 @TestProfile(OutboxRepositoryIsolationProfile::class)
 class ClearingSettleOutboxAtomicityIT {
 

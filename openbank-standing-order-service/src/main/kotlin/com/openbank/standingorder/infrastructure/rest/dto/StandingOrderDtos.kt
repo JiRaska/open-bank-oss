@@ -25,6 +25,12 @@ data class CreateStandingOrderRequest(
     val remittanceInfo: String?,
     val startDate: LocalDate,
     val endDate: LocalDate?,
+    /**
+     * An EDIT (#10281): the order this one replaces. The replacement is created and the old order
+     * cancelled in ONE transaction, so there is never a moment where both run (double debit) or
+     * neither does. Must be the same party's ACTIVE or PAUSED order.
+     */
+    val replacesStandingOrderId: UUID? = null,
 ) {
     init {
         // Jackson fills a MISSING primitive with 0 (no MissingKotlinParameterException —
