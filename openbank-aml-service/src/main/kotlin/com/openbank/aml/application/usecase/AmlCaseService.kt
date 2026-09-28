@@ -14,6 +14,8 @@ import com.openbank.aml.domain.event.AmlCaseStatusChangedEvent
 import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
@@ -21,8 +23,13 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
-class AmlCaseNotFoundException(caseId: UUID) : RuntimeException("AML case not found: $caseId")
-class InvalidAmlCaseStateTransitionException(message: String) : RuntimeException(message)
+// #10911 phase 2: extends the libs-domain base so libs-runtime's ResourceNotFoundExceptionMapper
+// handles the 404 (default code "NOT_FOUND", matching the deleted local mapper's
+// ErrorCode.NOT_FOUND.code byte for byte). See AmlCaseNotFoundMapperEquivalenceTest.
+class AmlCaseNotFoundException(caseId: UUID) : ResourceNotFoundException("AML case not found: $caseId")
+
+// Same as above, mapped 409 by ResourceConflictExceptionMapper (default code "CONFLICT").
+class InvalidAmlCaseStateTransitionException(message: String) : ResourceConflictException(message)
 
 @ApplicationScoped
 class AmlCaseService(
