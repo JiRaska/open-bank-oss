@@ -190,10 +190,16 @@ jobs:
           REF: ${{ steps.push.outputs.ref }}
         run: |
           set -uo pipefail
+          # Per-image, EXPIRING exceptions: <context>/.trivyignore.yaml lists triaged CVEs with a
+          # statement and `expired_at`. Trivy stops honouring an entry the day it expires, so the
+          # gate fails again on its own; an exception cannot quietly outlive its reason. The
+          # report step shows every finding regardless, ignored ones included.
+          ignore=()
+          [ -f "$CONTEXT/.trivyignore.yaml" ] && ignore=(--ignorefile "$CONTEXT/.trivyignore.yaml")
           trivy image --platform "$PLATFORM" --scanners vuln --severity CRITICAL,HIGH \
             --ignore-unfixed --format table --exit-code 0 "$REF" || true
           trivy image --platform "$PLATFORM" --scanners vuln --severity CRITICAL \
-            --ignore-unfixed --quiet --exit-code 1 "$REF"
+            --ignore-unfixed --quiet --exit-code 1 "${ignore[@]}" "$REF"
 
       # Sign + CycloneDX SBOM + SLSA provenance, each verified after the fact, by the shared
       # helper (root CLAUDE.md: never hand-roll trivy + cosign). Kyverno Enforce admits nothing
