@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.19.0...delegation-service-v0.20.0) (2026-09-28)
+
+
+### Features
+
+* **delegation:** bind Idempotency-Key to a request fingerprint ([#10959](https://github.com/JiRaska/open-bank-oss/issues/10959)) ([c03b46b](https://github.com/JiRaska/open-bank-oss/commit/c03b46ba873025ad360f3bda6a724370cd022223))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.18.0...delegation-service-v0.19.0) (2026-09-27)
 
 
