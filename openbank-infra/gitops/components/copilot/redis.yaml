@@ -78,7 +78,7 @@ spec:
         # Valkey/Redis protocol and exposes redis_* metrics on :9121. Non-alpine tag:
         # multi-arch (incl. arm64/Graviton) — the -alpine variant is amd64-only.
         - name: exporter
-          image: docker.io/oliver006/redis_exporter:v1.62.0
+          image: docker.io/oliver006/redis_exporter:v1.92.1
           args: ["--redis.addr=redis://localhost:6379"]
           ports:
             - name: redis-metrics

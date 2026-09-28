@@ -1237,6 +1237,36 @@ gates:
       # was latent rather than actively hiding one, which is exactly when it is cheap to fix.
       python3 openbank-infra/scripts/check-cnpg-backup-declared.py --enforce
 
+  # ADR-0325 (incident 2026-09-28): a fleet-wide CNPG minor bump restarted every primary IN
+  # PLACE -- no Cluster set primaryUpdateMethod, and CNPG's default is `restart` -- while a
+  # drifted node wedged 22 EBS volumes. card-issuance-db, money-path, was `instances: 1`
+  # although ADR-0159 says two: ADR-0159 listed the money-path services of its day, and seven
+  # of the eight added since shipped single-instance with nothing to notice. So the money-path
+  # cluster set here is DERIVED (service image -> workload -> `<cluster>-rw.<ns>.svc`), and a
+  # money-path service that resolves to nothing is itself a finding.
+  - id: cnpg-update-resilience
+    name: "CNPG clusters update by switchover; money-path clusters are HA (ADR-0325, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      A Cluster without `primaryUpdateMethod: switchover` restarts its primary in place on
+      every image or config update, and a money-path cluster with one instance, or two on the
+      same node, has no failover target when that node wedges. Both were live on 2026-09-28.
+    review_after: "2027-03-31"
+    verified: >-
+      2026-09-28 -- run against origin/main before the fix: FAIL with 96 findings, 68 clusters
+      without switchover and 7 single-instance money-path clusters (card-issuance-db among
+      them), 25 money-path clusters derived for 25 money-path services. Self-test falsifies a
+      single-instance money-path cluster, a restart-method cluster, missing anti-affinity, a
+      disabled PDB and a money-path service whose workload vanished, against a compliant control.
+    min_subjects: 50   # 68 CNPG Clusters declared in gitops today (2026-09-28)
+    selftest_inputs: [".github/scripts/check-cnpg-update-resilience.py"]
+    selftest: python3 .github/scripts/check-cnpg-update-resilience.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-cnpg-update-resilience.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
@@ -4700,7 +4730,7 @@ gates:
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
-  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml runs), the
+  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml ran then), the
   # customers template had FOUR independent import-blocking defects and could never have
   # rebuilt its realm: five `"comment"` keys (Jackson fails the whole import on an unrecognized
   # field), a 490-char client description over the 255 column cap, a 37-char authenticator in a
