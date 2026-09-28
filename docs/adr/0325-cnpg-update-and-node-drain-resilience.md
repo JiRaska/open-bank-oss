@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [database, resilience, kubernetes, capacity]
 summary: "CNPG clusters update by switchover, every money-path cluster is HA against a derived set (gate), Karpenter bounds node termination with a grace period and rolls drift one node at a time, and stuck states page."
-followup: "The Karpenter NodePool change applies only on a manual platform-tofu dispatch; a live minor bump under switchover is not yet observed."
+followup: "#11304 — the Karpenter NodePool change applies only on a manual platform-tofu dispatch, and a live minor bump under switchover is not yet observed."
 ---
 
 # ADR-0325 — CNPG update and node-drain resilience

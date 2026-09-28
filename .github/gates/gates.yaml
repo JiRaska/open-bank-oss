@@ -1248,6 +1248,7 @@ gates:
     name: "CNPG clusters update by switchover; money-path clusters are HA (ADR-0325, enforced)"
     group: gitops
     mode: enforced
+    budget_seconds: 20
     rationale: >-
       A Cluster without `primaryUpdateMethod: switchover` restarts its primary in place on
       every image or config update, and a money-path cluster with one instance, or two on the
