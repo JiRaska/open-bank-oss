@@ -175,6 +175,11 @@ billing:
       fee-income: ${BILLING_GL_FEE_INCOME_ACCOUNT_ID:a0000000-0000-0000-0000-000000004003}
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   outbox:
     # Bare literal `true` (not an env-var-with-default) — matches every other dispatch-gated
     # service in the fleet (interest/sepa-payment/standing-order) and satisfies

@@ -22,6 +22,7 @@ import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
 import com.openbank.treasury.domain.model.DealMatured
@@ -212,12 +213,22 @@ class TreasuryDealService(
 
     override suspend fun list(state: DealState?): List<Deal> = deals.list(state)
 
-    override suspend fun counterparties(): List<CounterpartyExposure> = counterparties.list().flatMap { cp ->
+    override suspend fun counterparties(): List<CounterpartyExposure> {
+        val overrides = deals.pendingLimitOverrides()
+        return counterparties.list().flatMap { cp -> exposures(cp, overrides) }
+    }
+
+    private suspend fun exposures(cp: Counterparty, overrides: List<Deal>): List<CounterpartyExposure> =
         Deal.SUPPORTED_CURRENCIES.sorted().mapNotNull { ccy ->
             if (!cp.limits.containsKey(ccy)) return@mapNotNull null
-            CounterpartyExposure(cp, ccy, cp.limitFor(ccy), deals.exposure(cp.id, ccy, null))
+            CounterpartyExposure(
+                counterparty = cp,
+                currency = ccy,
+                limit = cp.limitFor(ccy),
+                exposure = deals.exposure(cp.id, ccy, null),
+                activeOverrides = overrides.count { it.holdsActiveLimitOverride(cp.id, ccy) },
+            )
         }
-    }
 
     /**
      * Outstanding principal on [asOf]: a deal that has SETTLED (or since MATURED) and whose
@@ -233,7 +244,8 @@ class TreasuryDealService(
             CurrencyPosition(
                 currency = ccy,
                 placed = sum(ProductType.MM_PLACEMENT),
-                borrowed = sum(ProductType.MM_BORROWING),
+                // Lombard borrowing from ČNB is a borrowing: it reduces the net like an interbank one.
+                borrowed = sum(ProductType.MM_BORROWING) + sum(ProductType.CNB_LOMBARD),
                 atCnb = sum(ProductType.CNB_DEPOSIT_FACILITY),
             )
         }
@@ -298,7 +310,7 @@ class TreasuryDealService(
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
-        val exposure = if (deal.product.isAsset) deals.exposure(cp.id, deal.currency, deal.id) else BigDecimal.ZERO
+        val exposure = if (deal.product.isAsset) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
         return LimitCheck.of(cp, deal, exposure)
     }
 
