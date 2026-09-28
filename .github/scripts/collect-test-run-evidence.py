@@ -562,14 +562,31 @@ def coverage(service: Path) -> dict | None:
 
 
 def declared_infrastructure(service: Path) -> list[str]:
-    text = "\n".join(path.read_text(errors="ignore") for path in service.glob("src/test/**/*.kt"))
+    sources = [path.read_text(errors="ignore") for path in service.glob("src/test/**/*.kt")]
+    text = "\n".join(sources)
     build_file = service / "build.gradle.kts"
     build = build_file.read_text(errors="ignore") if build_file.exists() else ""
-    values = []
-    if "PostgreSQLContainer" in text or "testcontainers.postgresql" in build: values.append("postgres")
-    if "RedpandaContainer" in text or "testcontainers.redpanda" in build: values.append("redpanda")
-    if re.search(r"valkey|redis", text, re.I) and "GenericContainer" in text: values.append("valkey")
-    return values
+    values = set()
+    if "PostgreSQLContainer" in text or "testcontainers.postgresql" in build: values.add("postgres")
+    if "RedpandaContainer" in text or "testcontainers.redpanda" in build: values.add("redpanda")
+    if re.search(r"valkey|redis", text, re.I) and "GenericContainer" in text: values.add("valkey")
+
+    # Services using the shared test resources no longer declare the container
+    # classes or dependencies locally. Count only resources actually attached to
+    # a test, not an unused import or a mention in a comment.
+    shared_resources = {
+        "PostgresTestResource": {"postgres"},
+        "PostgresRedisTestResource": {"postgres", "valkey"},
+        "PostgresRedpandaTestResource": {"postgres", "redpanda"},
+        "PostgresRedpandaRedisTestResource": {"postgres", "redpanda", "valkey"},
+    }
+    for source in sources:
+        for name, infrastructure in shared_resources.items():
+            imported = re.search(rf"(?m)^import com\.openbank\.libs\.testing\.containers\.{name}\s*$", source)
+            attached = re.search(rf"(?m)^\s*@QuarkusTestResource\s*\(\s*(?:value\s*=\s*)?{name}::class\b", source)
+            if imported and attached:
+                values.update(infrastructure)
+    return [name for name in ("postgres", "redpanda", "valkey") if name in values]
 
 
 def runtime_image_identity(image: str) -> str:
@@ -898,6 +915,24 @@ def main() -> None:
             source = service / "src/test/kotlin/com/openbank/GuardTest.kt"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("package com.openbank\nclass GuardTest\n")
+            topology_service = service / "topology-service"
+            topology_test = topology_service / "src/test/kotlin/TopologyIT.kt"
+            topology_test.parent.mkdir(parents=True)
+            topology_test.write_text(
+                "import com.openbank.libs.testing.containers.PostgresRedpandaTestResource\n"
+                "@QuarkusTestResource(\n    value = PostgresRedpandaTestResource::class,\n)\n"
+            )
+            assert declared_infrastructure(topology_service) == ["postgres", "redpanda"]
+            topology_test.write_text(
+                "import com.openbank.libs.testing.containers.PostgresRedisTestResource\n"
+                "@QuarkusTestResource(PostgresRedisTestResource::class)\n"
+            )
+            assert declared_infrastructure(topology_service) == ["postgres", "valkey"]
+            topology_test.write_text(
+                "import com.openbank.libs.testing.containers.PostgresRedisTestResource\n"
+                "// @QuarkusTestResource(PostgresRedisTestResource::class)\n"
+            )
+            assert declared_infrastructure(topology_service) == []
             quarkus_source = service / "src/test/kotlin/com/openbank/CatalogPlatformResourceTest.kt"
             quarkus_source.write_text("package com.openbank\n@QuarkusTest\nclass CatalogPlatformResourceTest\n")
             discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
