@@ -9,6 +9,7 @@ import com.openbank.account.application.usecase.AccountService
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.arc.ClientProxy
@@ -34,7 +35,7 @@ import java.util.UUID
  * record is gone.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
 class AccountIdempotencyFingerprintIT {
 
     private val productId = UUID.fromString("00000000-2222-0000-0000-000000000001")
