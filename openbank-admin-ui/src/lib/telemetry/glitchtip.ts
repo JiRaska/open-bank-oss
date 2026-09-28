@@ -108,6 +108,8 @@ export function buildSentryOptions(runtime: 'browser' | 'server'): BrowserOption
       databaseQueryData: false,
       queues: false,
       graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+      frameContextLines: 0,
     },
     // The screenshot/replay integrations would capture a banking screen — never enable.
     attachStacktrace: true,

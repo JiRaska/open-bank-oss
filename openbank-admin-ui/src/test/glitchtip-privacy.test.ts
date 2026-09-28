@@ -18,6 +18,8 @@ describe('Sentry 11 operator data collection', () => {
       databaseQueryData: false,
       queues: false,
       graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+      frameContextLines: 0,
     })
   })
 })
