@@ -1307,13 +1307,12 @@ jobs:
             chore
             gitops
 
-      # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
-      # to the newest build, so two are never additive and both edit the same manifest line — left
-      # open, whichever merges first leaves the rest conflicting while still reading as healthy
-      # (green checks, auto-merge armed). branch-cleanup.yml already assumed this close happened
-      # ("a superseded deploy PR is CLOSED-unmerged"); nothing ever performed it, and the backlog
-      # reached 7 of the repo's 23 open PRs. Runs BEFORE the signature guard so a run that later
-      # fails the guard still leaves exactly one current deploy PR behind, not a growing pile.
+      # Close only older deploy PRs whose actual image pins are fully covered by this PR at a
+      # forward source commit. Disjoint or partially overlapping PRs carry unique deploys and
+      # must stay open; source-commit ancestry alone does not prove coverage (#7621, #9785).
+      # Runs before the signature guard so proven duplicates do not accumulate even if the
+      # later signature or auto-merge step fails. A merge after this check needs separate
+      # reconciliation; this opening-time check cannot repair a PR stranded by that merge.
       - name: Close superseded deploy PRs
         if: steps.gitops_pr.outputs.pull-request-number != ''
         env:

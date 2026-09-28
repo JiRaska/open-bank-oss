@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Close every OLDER open bot deploy PR when a newer one opens.
+# Close older bot deploy PRs only when the new PR covers all of their image pins.
 #
-# Why this exists: a deploy PR rewrites an image tag to the newest build. Two of them are therefore
-# never additive — the newer one already contains everything the older one would have done, and the
-# older one is worthless the moment it exists. But both edit the SAME manifest line, so whichever
-# merges first leaves the rest DIRTY, and a DIRTY PR with green checks and auto-merge armed reads as
-# healthy from every angle except mergeability. Measured 2026-07-26: SEVEN open admin-ui deploy PRs
+# Why this exists: two deploy PRs can edit the same image pin, so whichever merges first leaves the
+# other DIRTY, while green checks and armed auto-merge make it look healthy. They can also be
+# disjoint or only partially overlapping: source-commit ancestry never proves image-pin coverage.
+# Close an older PR only when the new one is a proven forward-only superset of its actual image
+# pins; preserve every unique pin. Measured 2026-07-26: SEVEN open admin-ui deploy PRs
 # out of 23 open PRs in the whole repo — 30% of the review queue was superseded deploy noise, all of
 # it accumulated within three hours, and it grew by two while this script was being written. One of
 # them (#2594) would have REVERTED 851 lines of main had it been merged to clear the backlog, which
@@ -15,9 +15,9 @@
 #
 # branch-cleanup.yml already assumes this: its comment reads "a superseded deploy PR is CLOSED-
 # unmerged (a newer deploy won the race)" and it deletes the branch on close. Nothing ever performed
-# that close. This script is the missing half, not a new mechanism — with it, exactly one deploy PR
-# per prefix is open at a time, it is always the newest, and it is always based on current main, so
-# the conflict class cannot arise.
+# that close. Multiple PRs may correctly remain open under one prefix when they carry different
+# image pins. A later merge can still strand an open PR; this opening-time check cannot repair
+# that case (issue #9785).
 #
 # ANCESTRY, NOT RECENCY (issue #6231)
 # "Newer" was originally read off PR creation time — the PR that opened last kept, every other one
