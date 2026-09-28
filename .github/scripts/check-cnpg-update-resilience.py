@@ -249,7 +249,7 @@ def check() -> tuple[list[str], int]:
             findings.append(f"{where} needs `cluster: <ns>/<name>` and a reason of >= 20 chars")
             continue
         exc[key] = reason
-    for key, reason in sorted(exc.items()):
+    for key in sorted(exc):
         if key not in clusters:
             findings.append(f"{RULES}: cnpg_single_instance_exceptions names {key}, which is no CNPG Cluster -- stale")
         elif isinstance(clusters[key]["spec"].get("instances", 1), int) and clusters[key]["spec"].get("instances", 1) >= 2:
