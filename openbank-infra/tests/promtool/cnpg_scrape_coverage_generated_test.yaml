@@ -236,6 +236,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
@@ -355,6 +359,8 @@ tests:
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
@@ -632,6 +638,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
@@ -751,6 +761,8 @@ tests:
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
@@ -1005,6 +1017,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
@@ -1126,6 +1142,8 @@ tests:
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
@@ -1384,6 +1402,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
@@ -1503,6 +1525,8 @@ tests:
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
@@ -1766,6 +1790,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
@@ -1883,6 +1911,8 @@ tests:
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
@@ -2139,6 +2169,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
@@ -2256,6 +2290,8 @@ tests:
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"

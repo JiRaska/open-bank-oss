@@ -367,6 +367,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: pricing
+            cluster: pricing-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: psd2
             cluster: psd2-db
             origin: manifest
@@ -720,6 +726,11 @@ spec:
           labels:
             namespace: platform
             cluster: mcp-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: pricing
+            cluster: pricing-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
