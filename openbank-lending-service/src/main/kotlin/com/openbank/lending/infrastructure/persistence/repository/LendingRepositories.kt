@@ -655,18 +655,36 @@ class ProvisioningCoverageRepositoryImpl @Inject constructor(private val sf: Mut
 class ProvisioningCycleRunRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
     ProvisioningCycleRunRepository {
     override fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<Unit> = sf.withTransaction { session ->
+        // The first observed day is the baseline. Thereafter every calendar day must have
+        // evidence, even if no pod was alive to start the scheduler on that day.
         session.createNativeQuery<Any>(
             """
-            INSERT INTO provisioning_cycle_run (period, status, started_at, checked_at, missing_loans)
-            VALUES (:period, 'RUNNING', :at, NULL, NULL)
-            ON CONFLICT (period) DO UPDATE SET status = 'RUNNING', started_at = EXCLUDED.started_at,
-                checked_at = NULL, missing_loans = NULL
+            INSERT INTO provisioning_cycle_run (period, status)
+            SELECT CAST(day AS date), 'MISSED'
+            FROM generate_series(
+                (SELECT max(period) + 1 FROM provisioning_cycle_run WHERE period < :period),
+                CAST(:period AS date) - 1,
+                interval '1 day'
+            ) AS day
+            ON CONFLICT (period) DO NOTHING
             """.trimIndent(),
         )
             .setParameter("period", period)
-            .setParameter("at", at)
             .executeUpdate()
-            .map { Unit }
+            .flatMap {
+                session.createNativeQuery<Any>(
+                    """
+                    INSERT INTO provisioning_cycle_run (period, status, started_at, checked_at, missing_loans)
+                    VALUES (:period, 'RUNNING', :at, NULL, NULL)
+                    ON CONFLICT (period) DO UPDATE SET status = 'RUNNING', started_at = EXCLUDED.started_at,
+                        checked_at = NULL, missing_loans = NULL
+                    """.trimIndent(),
+                )
+                    .setParameter("period", period)
+                    .setParameter("at", at)
+                    .executeUpdate()
+                    .map { Unit }
+            }
     }
 
     override fun markResult(period: LocalDate, missingLoans: Long?, at: OffsetDateTime): Uni<Unit> =

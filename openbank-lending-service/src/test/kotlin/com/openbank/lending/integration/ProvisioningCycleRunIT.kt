@@ -56,6 +56,29 @@ class ProvisioningCycleRunIT {
     }
 
     @Test
+    fun `whole days without a scheduler run remain visible after restart`() {
+        val first = LocalDate.of(2097, 2, 27)
+        val resumed = LocalDate.of(2097, 3, 2)
+        sql("DELETE FROM provisioning_cycle_run WHERE period BETWEEN '2097-02-27' AND '2097-03-02'")
+        try {
+            VertxContextSupport.subscribeAndAwait { runs.markStarted(first, at.minusYears(1)) }
+            VertxContextSupport.subscribeAndAwait { runs.markResult(first, 0, at.minusYears(1)) }
+            // No scheduler invocation on February 28 or March 1, including a date rollover.
+            VertxContextSupport.subscribeAndAwait { runs.markStarted(resumed, at.minusYears(1).plusDays(3)) }
+            VertxContextSupport.subscribeAndAwait { runs.markResult(resumed, 0, at.minusYears(1).plusDays(3)) }
+
+            assertThat(state(first)).isEqualTo("COMPLETE" to 0L)
+            assertThat(state(first.plusDays(1))).isEqualTo("MISSED" to null)
+            assertThat(state(first.plusDays(2))).isEqualTo("MISSED" to null)
+            assertThat(state(resumed)).isEqualTo("COMPLETE" to 0L)
+            assertThat(VertxContextSupport.subscribeAndAwait { runs.countUnresolvedBefore(resumed.plusDays(1)) })
+                .isEqualTo(2)
+        } finally {
+            sql("DELETE FROM provisioning_cycle_run WHERE period BETWEEN '2097-02-27' AND '2097-03-02'")
+        }
+    }
+
+    @Test
     fun `interrupted or incomplete prior day survives a successful later day`() {
         sql("DELETE FROM provisioning_cycle_run WHERE period IN ('2098-01-01', '2098-01-02')")
         try {

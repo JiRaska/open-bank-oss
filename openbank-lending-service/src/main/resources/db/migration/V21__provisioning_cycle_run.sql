@@ -8,11 +8,12 @@
 
 CREATE TABLE provisioning_cycle_run (
     period          DATE PRIMARY KEY,
-    status          VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING', 'COMPLETE', 'INCOMPLETE')),
-    started_at      TIMESTAMPTZ NOT NULL,
+    status          VARCHAR(16) NOT NULL CHECK (status IN ('MISSED', 'RUNNING', 'COMPLETE', 'INCOMPLETE')),
+    started_at      TIMESTAMPTZ,
     checked_at      TIMESTAMPTZ,
     missing_loans   BIGINT CHECK (missing_loans >= 0),
-    CHECK (status <> 'COMPLETE' OR (checked_at IS NOT NULL AND missing_loans = 0))
+    CHECK (status <> 'COMPLETE' OR (checked_at IS NOT NULL AND missing_loans = 0)),
+    CHECK (status = 'MISSED' OR started_at IS NOT NULL)
 );
 
 CREATE INDEX idx_provisioning_cycle_run_open_period

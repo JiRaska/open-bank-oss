@@ -866,7 +866,8 @@ Replaying the older key from current installments, collateral, loan status and r
 misstate historical facts and could post a false delta to the ledger.
 
 **Control:** `provisioning_cycle_run` is committed before any loan-level posting. A crash retains
-`RUNNING`; a failed or unreadable coverage check retains `INCOMPLETE`. Only a zero-missing check may
+`RUNNING`; a failed or unreadable coverage check retains `INCOMPLETE`. Days with no scheduler run
+since the last recorded date become `MISSED` on the next start. Only a zero-missing check may
 write `COMPLETE`. The scheduler queries all earlier non-complete dates before recording workflow
 success, exposes their count as a gauge, and the lending alert pages when it is nonzero. The row
 contains a date and counts, not borrower identifiers. An old gap is retained for independently
