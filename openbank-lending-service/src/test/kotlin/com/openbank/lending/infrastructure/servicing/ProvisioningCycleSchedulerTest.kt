@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
+import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import io.mockk.every
 import io.mockk.mockk
@@ -32,6 +33,11 @@ class ProvisioningCycleSchedulerTest {
 
     private val cycle = mockk<RunProvisioningCycleUseCase>()
     private val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
+    private val runs = mockk<ProvisioningCycleRunRepository> {
+        every { markStarted(any(), any()) } returns Uni.createFrom().item(Unit)
+        every { markResult(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+        every { countUnresolvedBefore(any()) } returns Uni.createFrom().item(0L)
+    }
     private val scheduler =
         ProvisioningCycleScheduler(
             cycle,
@@ -46,6 +52,7 @@ class ProvisioningCycleSchedulerTest {
                 every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
                 every { countForPeriod(any()) } returns Uni.createFrom().item(0L)
             },
+            runs = runs,
             registry = null,
         )
 
@@ -96,6 +103,30 @@ class ProvisioningCycleSchedulerTest {
     }
 
     @Test
+    fun `an earlier gap remains observable when the current cycle also fails`() {
+        every { runs.countUnresolvedBefore(any()) } returns Uni.createFrom().item(1L)
+        every { cycle.runProvisioningCycle(any(), any(), any()) } returns
+            Uni.createFrom().failure(IllegalStateException("current pass failed"))
+        val registry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+        val observed = ProvisioningCycleScheduler(
+            cycle,
+            500,
+            clock,
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            runs,
+            registry,
+        )
+        observed.onStart(io.quarkus.runtime.StartupEvent())
+
+        assertThatThrownBy { observed.runProvisioningPass().await().indefinitely() }
+            .hasMessageContaining("current pass failed")
+        assertThat(registry.get("openbank.lending.provisioning.unresolved.prior.days").gauge().value())
+            .isEqualTo(1.0)
+        registry.close()
+    }
+
+    @Test
     fun `a closed loan provision cannot hide an active loan missing provision`() {
         // Two different loans: one closed with a period row, one active without one.
         // The two totals are both 1, but the uncovered ACTIVE population is also 1.
@@ -111,6 +142,7 @@ class ProvisioningCycleSchedulerTest {
             clock = clock,
             domainMetrics = mockk(relaxed = true),
             coverage = coverageLoans,
+            runs = runs,
             registry = registry,
         )
         observed.onStart(io.quarkus.runtime.StartupEvent())

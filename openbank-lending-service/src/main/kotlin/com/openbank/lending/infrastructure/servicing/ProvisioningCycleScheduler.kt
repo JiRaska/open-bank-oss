@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
+import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
@@ -23,6 +24,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.atomic.AtomicLong
 
@@ -49,6 +51,7 @@ class ProvisioningCycleScheduler(
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
     private val coverage: ProvisioningCoverageRepository,
+    private val runs: ProvisioningCycleRunRepository,
     private val registry: MeterRegistry?,
 ) {
     // Explicit @Inject constructor: MeterRegistry is optional (absent in slim test slices), and with
@@ -62,6 +65,7 @@ class ProvisioningCycleScheduler(
         clock: Clock,
         domainMetrics: DomainMetrics,
         coverage: ProvisioningCoverageRepository,
+        runs: ProvisioningCycleRunRepository,
         registryInstance: Instance<MeterRegistry>,
     ) : this(
         cycle,
@@ -69,6 +73,7 @@ class ProvisioningCycleScheduler(
         clock,
         domainMetrics,
         coverage,
+        runs,
         if (registryInstance.isResolvable) registryInstance.get() else null,
     )
 
@@ -91,6 +96,7 @@ class ProvisioningCycleScheduler(
     private val eligibleLoans = AtomicLong(0)
     private val provisionedThisPeriod = AtomicLong(0)
     private val unprovisioned = AtomicLong(0)
+    private val unresolvedPriorDays = AtomicLong(0)
 
     // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run.
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -99,6 +105,7 @@ class ProvisioningCycleScheduler(
         gauge(r, "openbank.lending.provisioning.eligible.loans", eligibleLoans)
         gauge(r, "openbank.lending.provisioning.rows.period", provisionedThisPeriod)
         gauge(r, "openbank.lending.provisioning.unprovisioned", unprovisioned)
+        gauge(r, "openbank.lending.provisioning.unresolved.prior.days", unresolvedPriorDays)
     }
 
     private fun gauge(r: MeterRegistry, name: String, holder: AtomicLong) {
@@ -119,7 +126,7 @@ class ProvisioningCycleScheduler(
      * Failure to count cannot undo already-committed provisioning. It preserves the previous gauge
      * values, but cannot certify the period as complete, so workflow liveness records no success.
      */
-    private fun publishCoverage(period: String): Uni<Boolean> =
+    private fun publishCoverage(period: String): Uni<Long?> =
         coverage.countEligibleForProvisioning().flatMap { active ->
             coverage.countForPeriod(period).flatMap { covered ->
                 coverage.countUnprovisioned(period).map { missing ->
@@ -135,12 +142,13 @@ class ProvisioningCycleScheduler(
                             active,
                         )
                     }
-                    missing == 0L
+                    val result: Long? = missing
+                    result
                 }
             }
         }.onFailure().recoverWithItem { e ->
             log.warnf(e, "IFRS 9 provisioning coverage could not be counted; leaving the previous gauge values")
-            false
+            null
         }
 
     @Scheduled(
@@ -151,16 +159,32 @@ class ProvisioningCycleScheduler(
     fun runProvisioningPass(): Uni<Void> = Panache.withSession {
         val asOf = LocalDate.now(clock)
         val period = asOf.format(periodFormat)
-        cycle.runProvisioningCycle(period, asOf, batchSize)
-            .invoke { outcome ->
-                log.infof(
-                    "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
-                    outcome.period,
-                    outcome.loansAssessed,
-                    outcome.journalsQueued,
-                )
+        // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
+        // evidence; a later date cannot certify that earlier reporting date as complete.
+        runs.markStarted(asOf, OffsetDateTime.now(clock))
+            .flatMap { runs.countUnresolvedBefore(asOf) }
+            .invoke { unresolved ->
+                unresolvedPriorDays.set(unresolved)
+                if (unresolved > 0) {
+                    log.errorf("IFRS 9 provisioning has %d unresolved prior reporting day(s)", unresolved)
+                }
             }
-            .flatMap { publishCoverage(period) }
+            .flatMap { unresolved ->
+                cycle.runProvisioningCycle(period, asOf, batchSize)
+                    .invoke { outcome ->
+                        log.infof(
+                            "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
+                            outcome.period,
+                            outcome.loansAssessed,
+                            outcome.journalsQueued,
+                        )
+                    }
+                    .flatMap { publishCoverage(period) }
+                    .flatMap { missing ->
+                        runs.markResult(asOf, missing, OffsetDateTime.now(clock)).replaceWith(missing)
+                    }
+                    .map { missing -> missing == 0L && unresolved == 0L }
+            }
             .invoke { complete -> if (complete) liveness?.recordSuccess() }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }
             .replaceWithVoid()

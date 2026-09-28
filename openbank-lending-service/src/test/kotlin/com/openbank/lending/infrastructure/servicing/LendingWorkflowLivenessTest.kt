@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.AccrueInterestUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
+import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.libs.observability.DomainMetrics
@@ -38,6 +39,12 @@ import java.util.function.Supplier
  * not DomainMetrics directly, so both the registration AND the recordSuccess() call are pinned.
  */
 class LendingWorkflowLivenessTest {
+
+    private fun cycleRuns(unresolvedPriorDays: Long = 0): ProvisioningCycleRunRepository = mockk {
+        every { markStarted(any(), any()) } returns Uni.createFrom().item(Unit)
+        every { markResult(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+        every { countUnresolvedBefore(any()) } returns Uni.createFrom().item(unresolvedPriorDays)
+    }
 
     private fun metricsOver(registry: MeterRegistry): DomainMetrics {
         val instance = mockk<Instance<MeterRegistry>>()
@@ -164,6 +171,7 @@ class LendingWorkflowLivenessTest {
                     every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
                     every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
                 },
+                runs = cycleRuns(),
                 registry = null,
             )
 
@@ -203,7 +211,15 @@ class LendingWorkflowLivenessTest {
             every { countForPeriod(any()) } returns Uni.createFrom().item(500L)
             every { countUnprovisioned(any()) } returns Uni.createFrom().item(1L)
         }
-        val scheduler = ProvisioningCycleScheduler(cycleUseCase, 500, clock, metricsOver(registry), coverage, null)
+        val scheduler = ProvisioningCycleScheduler(
+            cycleUseCase,
+            500,
+            clock,
+            metricsOver(registry),
+            coverage,
+            cycleRuns(),
+            null,
+        )
         scheduler.onStart(StartupEvent())
 
         scheduler.runProvisioningPass().await().indefinitely()
@@ -227,7 +243,15 @@ class LendingWorkflowLivenessTest {
             every { countUnprovisioned(any()) } returns
                 Uni.createFrom().failure(IllegalStateException("read unavailable"))
         }
-        val scheduler = ProvisioningCycleScheduler(cycleUseCase, 500, clock, metricsOver(registry), coverage, null)
+        val scheduler = ProvisioningCycleScheduler(
+            cycleUseCase,
+            500,
+            clock,
+            metricsOver(registry),
+            coverage,
+            cycleRuns(),
+            null,
+        )
         scheduler.onStart(StartupEvent())
 
         scheduler.runProvisioningPass().await().indefinitely()
@@ -235,6 +259,37 @@ class LendingWorkflowLivenessTest {
         assertThat(successRecordedOf(registry, "lending-provisioning-cycle"))
             .describedAs("an unknown coverage result must not count as a successful workflow")
             .isEqualTo(NOT_YET_SUCCEEDED)
+    }
+
+    @Test
+    fun `a completed current day cannot hide an interrupted earlier day`() {
+        val registry = SimpleMeterRegistry()
+        val clock = Clock.fixed(Instant.parse("2026-06-16T04:00:00Z"), ZoneOffset.UTC)
+        val cycle = mockk<RunProvisioningCycleUseCase> {
+            every { runProvisioningCycle(any(), any(), any()) } returns
+                Uni.createFrom().item(ProvisioningRunOutcome("2026-06-16", 2, 1))
+        }
+        val coverage = mockk<com.openbank.lending.application.port.out.ProvisioningCoverageRepository> {
+            every { countEligibleForProvisioning() } returns Uni.createFrom().item(2L)
+            every { countForPeriod(any()) } returns Uni.createFrom().item(2L)
+            every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
+        }
+        val scheduler = ProvisioningCycleScheduler(
+            cycle,
+            500,
+            clock,
+            metricsOver(registry),
+            coverage,
+            cycleRuns(unresolvedPriorDays = 1),
+            registry,
+        )
+        scheduler.onStart(StartupEvent())
+
+        scheduler.runProvisioningPass().await().indefinitely()
+
+        assertThat(successRecordedOf(registry, "lending-provisioning-cycle")).isEqualTo(NOT_YET_SUCCEEDED)
+        assertThat(registry.get("openbank.lending.provisioning.unresolved.prior.days").gauge().value())
+            .isEqualTo(1.0)
     }
 
     @Test
@@ -263,6 +318,7 @@ class LendingWorkflowLivenessTest {
                     every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
                     every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
                 },
+                runs = cycleRuns(),
                 registry = null,
             )
         scheduler.onStart(StartupEvent())

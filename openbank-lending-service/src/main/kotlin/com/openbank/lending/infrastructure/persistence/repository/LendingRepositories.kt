@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.out.CreditDecisionQueryRepository
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
+import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
@@ -37,6 +38,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -627,4 +629,52 @@ class ProvisioningCoverageRepositoryImpl @Inject constructor(private val sf: Mut
             .setParameter("period", period)
             .singleResult
     }.map { it.toLong() }
+}
+
+@ApplicationScoped
+class ProvisioningCycleRunRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
+    ProvisioningCycleRunRepository {
+    override fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<Unit> = sf.withTransaction { session ->
+        session.createNativeQuery<Any>(
+            """
+            INSERT INTO provisioning_cycle_run (period, status, started_at, checked_at, missing_loans)
+            VALUES (:period, 'RUNNING', :at, NULL, NULL)
+            ON CONFLICT (period) DO UPDATE SET status = 'RUNNING', started_at = EXCLUDED.started_at,
+                checked_at = NULL, missing_loans = NULL
+            """.trimIndent(),
+        )
+            .setParameter("period", period)
+            .setParameter("at", at)
+            .executeUpdate()
+            .map { Unit }
+    }
+
+    override fun markResult(period: LocalDate, missingLoans: Long?, at: OffsetDateTime): Uni<Unit> =
+        sf.withTransaction { session ->
+            session.createNativeQuery<Any>(
+                """
+                UPDATE provisioning_cycle_run
+                SET status = :status,
+                    checked_at = :at, missing_loans = :missing
+                WHERE period = :period AND status = 'RUNNING'
+                """.trimIndent(),
+            )
+                .setParameter("period", period)
+                .setParameter("status", if (missingLoans == 0L) "COMPLETE" else "INCOMPLETE")
+                .setParameter("missing", missingLoans)
+                .setParameter("at", at)
+                .executeUpdate()
+                .map { updated ->
+                    check(updated == 1) { "No running provisioning cycle for $period" }
+                }
+        }
+
+    override fun countUnresolvedBefore(period: LocalDate): Uni<Long> = sf.withSession { session ->
+        session.createNativeQuery<Number>(
+            "SELECT count(*) FROM provisioning_cycle_run WHERE period < :period AND status <> 'COMPLETE'",
+        )
+            .setParameter("period", period)
+            .singleResult
+            .map { it.toLong() }
+    }
 }

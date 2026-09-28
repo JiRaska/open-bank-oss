@@ -746,3 +746,23 @@ in the admin UI. The capped detail endpoint is diagnostic only. API errors and i
 contracts render an error rather than a zero exposure. Override rates require a recorded human
 actor and decision time. Stage 3 uses conditional default probability one; this correction does
 not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).
+
+## 11. Provisioning date rollover evidence (issue #10275)
+
+**Threat:** A process stops after a subset of loan allowances commits. On the next day the scheduler
+uses a new reporting key and can mark that newer day healthy while yesterday has no complete book.
+Replaying the older key from current installments, collateral, loan status and risk parameters would
+misstate historical facts and could post a false delta to the ledger.
+
+**Control:** `provisioning_cycle_run` is committed before any loan-level posting. A crash retains
+`RUNNING`; a failed or unreadable coverage check retains `INCOMPLETE`. Only a zero-missing check may
+write `COMPLETE`. The scheduler queries all earlier non-complete dates before recording workflow
+success, exposes their count as a gauge, and the lending alert pages when it is nonzero. The row
+contains a date and counts, not borrower identifiers. An old gap is retained for independently
+reviewed reconciliation on the actual correction date; the scheduler never backdates current facts.
+
+**Residual risk:** This change detects and preserves a prior-date gap but does not reconstruct the
+historical eligible population or implement a reviewed closure operation. Direct mutation of the
+run row would defeat the control; operational access to the database remains privileged and the
+reconciliation case must retain the approval and adjustment references. The existing `(loan_id,
+period)` uniqueness, per-loan lock and allowance outbox references are not weakened.
