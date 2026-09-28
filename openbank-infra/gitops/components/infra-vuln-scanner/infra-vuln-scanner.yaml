@@ -311,7 +311,7 @@ spec:
                 # Postgres image tag: resolved from CNPG GitOps; updated here when
                 # the cluster is upgraded (ADR-0106 / runbook 0003).
                 - name: POSTGRES_IMAGE
-                  value: "ghcr.io/cloudnative-pg/postgresql:18.1"
+                  value: "ghcr.io/cloudnative-pg/postgresql:18.6"
                 # Valkey fallback (accounts-service namespace valkey statefulset)
                 - name: VALKEY_IMAGE
                   value: "valkey/valkey:8-alpine"
