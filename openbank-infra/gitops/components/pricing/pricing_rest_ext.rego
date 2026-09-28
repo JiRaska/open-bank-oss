@@ -9,12 +9,29 @@ import rego.v1
 # and OAuth scopes. The policy repeats the endpoint scope contract as an independently evaluated
 # OPA fact. No blanket service-account or role grant exists: a future machine caller must receive
 # a separately reviewed, action-scoped rule.
+#
+# Resource-tenant match mirrors the shared "operator-on-own-tenant" rule in rest.rego: a
+# resource-scoped action must target the caller's OWN tenant, or a tenant-A principal holding
+# the right scope could act on a tenant-B resource (IDOR) purely on scope possession. Where the
+# PDP query carries no resource at all (a resourceless/control-plane action) the check does not
+# apply, same as the shared rule.
 allowed_reasons contains "pricing-oauth-scope" if {
 	input.principal.type == "HUMAN"
 	not startswith(input.principal.id, "service-account-")
 	object.get(input.principal.attributes, "tenant", "") != ""
 	some scope in object.get(required_scopes, input.action, set())
 	scope in object.get(input.principal.attributes, "scopes", [])
+	not input.resource
+}
+
+allowed_reasons contains "pricing-oauth-scope" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	object.get(input.principal.attributes, "tenant", "") != ""
+	some scope in object.get(required_scopes, input.action, set())
+	scope in object.get(input.principal.attributes, "scopes", [])
+	input.resource
+	input.principal.attributes.tenant == object.get(object.get(input.resource, "attributes", {}), "tenant", "")
 }
 
 required_scopes := {
