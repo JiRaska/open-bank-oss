@@ -91,7 +91,9 @@ if __name__ == "__main__":
     if args.self_test:
         self_test()
     else:
-        errors = findings(json.loads(REALM.read_text())["clients"])
+        clients = json.loads(REALM.read_text())["clients"]
+        print(f"SUBJECTS={sum(c.get('clientId') == CLIENT_ID for c in clients)}")
+        errors = findings(clients)
         for error in errors:
             print(f"ops-cli-client: {error}")
         if errors:
