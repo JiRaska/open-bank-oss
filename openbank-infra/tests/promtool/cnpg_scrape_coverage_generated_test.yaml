@@ -34,13 +34,19 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
@@ -56,11 +62,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
@@ -74,6 +84,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
@@ -84,7 +96,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
@@ -186,9 +202,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
@@ -386,13 +408,19 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
@@ -408,11 +436,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
@@ -426,6 +458,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
@@ -436,7 +470,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
@@ -538,9 +576,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
@@ -715,13 +759,19 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
@@ -737,11 +787,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
@@ -755,6 +809,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
@@ -765,7 +821,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
@@ -867,9 +927,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
@@ -1050,13 +1116,19 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
@@ -1072,11 +1144,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
@@ -1090,6 +1166,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
@@ -1100,7 +1178,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
@@ -1202,9 +1284,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
@@ -1388,13 +1476,19 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
@@ -1410,11 +1504,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
@@ -1428,6 +1526,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
@@ -1438,7 +1538,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
@@ -1540,9 +1644,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
@@ -1719,13 +1829,19 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
@@ -1741,11 +1857,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
@@ -1759,6 +1879,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
@@ -1769,7 +1891,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
@@ -1871,9 +1997,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
