@@ -576,7 +576,7 @@ spec:
             namespace: governance-auditor
             cluster: govaudit-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: iam
             cluster: keycloak-db
@@ -766,7 +766,7 @@ spec:
             namespace: statements
             cluster: statements-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: temporal
             cluster: temporal-db
