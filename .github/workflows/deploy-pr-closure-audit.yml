@@ -43,8 +43,11 @@ jobs:
           work="$(mktemp -d)"
           trap 'rm -rf "$work"' EXIT
           audit_failed() {
-            gh issue comment 9785 --repo "$REPO" --body \
-              "Closed deploy PR #$CLOSED_PR could not be audited. See https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID. No image-pin coverage is claimed." || true
+            local message="Closed deploy PR #$CLOSED_PR could not be audited. See https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID. No image-pin coverage is claimed."
+            printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$message"
+            gh issue comment 9785 --repo "$REPO" --body "$message" \
+              || echo "::warning::issue comment failed; the run summary retains the finding"
           }
           trap 'audit_failed' ERR
 
@@ -106,8 +109,11 @@ jobs:
               echo "Audit: https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID"
               echo "Keep can-i-deploy and normal PR review; this is a coverage finding, not deployment approval."
             } > "$work/comment.txt"
-            gh issue comment 9785 --repo "$REPO" --body-file "$work/comment.txt"
-            echo "::error::closed deploy PR has unaccounted image pins; see #9785"
+            cat "$work/comment.txt" >> "$GITHUB_STEP_SUMMARY"
             trap - ERR
+            if ! gh issue comment 9785 --repo "$REPO" --body-file "$work/comment.txt"; then
+              echo "::warning::issue comment failed; the run summary retains the finding"
+            fi
+            echo "::error::closed deploy PR has unaccounted image pins; see #9785"
             exit 1
           fi
