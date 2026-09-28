@@ -14,6 +14,7 @@ import com.openbank.agent.domain.policy.PolicyQuery
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.security.sanitizeForLog
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -46,10 +47,7 @@ class AgentPolicyGate {
 
     private val log = Logger.getLogger(AgentPolicyGate::class.java)
 
-    // CodeQL java/log-injection: tool/agent/reason ultimately trace back to the MCP caller
-    // (tool name) or the OPA policy response (reason text, which can echo caller input back).
-    // Strip CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     /**
      * Authorize a tool call. Always emits an audit event; never throws on a DENY (the caller

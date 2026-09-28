@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.5](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.4...statement-service-v0.12.5) (2026-09-27)
+
+
+### Bug Fixes
+
+* **statement:** round statement amounts at the currency's own scale ([#11081](https://github.com/JiRaska/open-bank-oss/issues/11081)) ([1c7db96](https://github.com/JiRaska/open-bank-oss/commit/1c7db96914338072e3bc0815c7b1ebae9dd94173))
+
 ## [0.12.4](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.3...statement-service-v0.12.4) (2026-09-23)
 
 

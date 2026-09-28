@@ -10,8 +10,10 @@ import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.InterestRateConfig
 import com.openbank.interest.infrastructure.client.CapitalizationJournalFactory
 import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import jakarta.inject.Inject
@@ -46,7 +48,10 @@ import java.util.UUID
  * refused — after the claim had committed.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.interest.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_interest_it")],
+)
 class CapitalizationStaleClaimRecoveryIT {
 
     @Inject

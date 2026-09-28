@@ -2,7 +2,7 @@
 # path analytics-sink, field CLICKHOUSE_PASSWORD — the SAME secret analytics-sink and ClickHouse
 # use) into the admin-ui namespace. Lets the onboarding-funnel-analytics BFF authenticate to the
 # warehouse over the ClickHouse HTTP interface. Never committed in plaintext.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: clickhouse-auth
