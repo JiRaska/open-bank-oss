@@ -51,8 +51,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   redis:
     hosts: redis://localhost:6379
@@ -123,6 +121,8 @@ mp:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
@@ -141,6 +141,11 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

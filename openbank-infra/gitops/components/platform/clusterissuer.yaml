@@ -27,6 +27,12 @@ spec:
   privateKey:
     algorithm: ECDSA
     size: 256
+    # Pinned, not defaulted: cert-manager 1.18 flips the default to Always
+    # (GA in 1.20). Rotating this ROOT's key at renewal would split the fleet's
+    # internal mTLS between leaves signed by the old and the new key until every
+    # openbank-ca leaf re-issued. Never keeps today's behaviour (renewal
+    # re-signs the same key, so existing leaves still verify).
+    rotationPolicy: Never
   issuerRef:
     name: selfsigned-bootstrap
     kind: ClusterIssuer

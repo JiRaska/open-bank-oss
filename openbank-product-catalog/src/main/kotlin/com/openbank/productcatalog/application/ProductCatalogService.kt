@@ -7,6 +7,7 @@ package com.openbank.productcatalog.application
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.product.WaiveConditionParser
 import com.openbank.libs.product.WaivePredicate
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.productcatalog.application.port.out.ProductRepository
 import com.openbank.productcatalog.domain.CardConfig
 import com.openbank.productcatalog.domain.EligibilitySegment
@@ -335,10 +336,7 @@ class ProductNotFoundException(message: String) : RuntimeException(message)
  * "free text vs. executable rule" gap is visible on real data rather than silent.
  * No money is moved here — runtime fee posting is a deferred money-path phase.
  */
-// CodeQL java/log-injection: product.code/fee.name/fee.waiveCondition are admin-supplied
-// catalog config, logged verbatim below. Strip CR/LF so they can't forge additional log lines
-// (log forging, CWE-117).
-private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+// Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
 internal fun validateFeeWaivers(product: Product, log: Logger) {
     product.fees.filter { it.waivable }.forEach { fee ->

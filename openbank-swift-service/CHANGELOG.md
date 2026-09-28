@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.4...swift-service-v0.11.5) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.3...swift-service-v0.11.4) (2026-09-22)
 
 
