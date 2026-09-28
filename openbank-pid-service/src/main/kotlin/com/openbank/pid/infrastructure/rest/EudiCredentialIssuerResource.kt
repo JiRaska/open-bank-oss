@@ -157,7 +157,10 @@ class EudiCredentialIssuerResource(
         // Single-use: mint exactly once. A concurrent/duplicate request loses the CAS.
         if (!offerStore.markIssued(accessToken, now)) return badRequest("invalid_token")
         val vc = issuer.issuePidCredential(offer.claims, holderJwk)
-        Log.infof("EUDI OpenID4VCI: issued PID credential for subject %s", maskSubject(offer.claims.subjectId))
+        Log.infof(
+            "EUDI OpenID4VCI: issued PID credential for subject %s",
+            maskPidSubject(offer.claims.subjectId),
+        )
         val resp = objectMapper.createObjectNode().put("credential", vc)
         return Response.ok(objectMapper.writeValueAsString(resp)).build()
     }
@@ -214,19 +217,6 @@ class EudiCredentialIssuerResource(
         return org.jose4j.base64url.Base64Url.encode(bytes)
     }
 
-    // Audited against com.openbank.libs.security.PiiMask (#11027, fleet PII-masking adoption
-    // sweep) and kept, not migrated: same shape as EudiDtos.kt's maskSubjectId (last-4 + fixed
-    // "***" prefix, no length-proportional masking), which is itself not a PiiMask match — see
-    // that function's KDoc. Left as a same-service near-duplicate rather than unified here, to
-    // keep this PR a pure audit with no behavior change (tracked as a follow-up in #11027).
-    private fun maskSubject(s: String): String = if (s.length <=
-        MASK_TAIL
-    ) {
-        "***"
-    } else {
-        s.takeLast(MASK_TAIL).let { "***$it" }
-    }
-
     private fun badRequest(msg: String) =
         Response.status(Response.Status.BAD_REQUEST).entity("""{"error":"$msg"}""").build()
 
@@ -238,6 +228,5 @@ class EudiCredentialIssuerResource(
         const val PRE_AUTH_GRANT = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
         const val TOKEN_EXPIRES_IN = 600
         const val TOKEN_BYTES = 32
-        const val MASK_TAIL = 4
     }
 }

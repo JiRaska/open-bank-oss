@@ -63,7 +63,7 @@ spec:
   # image against spec.imageName, so a mutating webhook would make the pod permanently drift and be
   # recreated every ~10s. Setting the ref here avoids that. Same tag as the rest of the fleet's
   # single-owner clusters, so it resolves through a cache path that is already warm.
-  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     # Raised 2Gi -> 10Gi (#3975). At 2Gi this cluster filled and CNPG parked it in

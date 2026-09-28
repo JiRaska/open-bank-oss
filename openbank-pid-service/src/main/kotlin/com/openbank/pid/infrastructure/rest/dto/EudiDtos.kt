@@ -7,6 +7,7 @@ package com.openbank.pid.infrastructure.rest.dto
 import com.openbank.pid.application.port.`in`.EudiResolutionResult
 import com.openbank.pid.application.port.`in`.ResolutionResult
 import com.openbank.pid.domain.model.PidClaims
+import com.openbank.pid.infrastructure.rest.maskPidSubject
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -96,7 +97,7 @@ data class PresentationExchangeStatusResponse(
 )
 
 fun PidClaims.toResponse(): PidClaimsResponse = PidClaimsResponse(
-    subjectIdMasked = maskSubjectId(subjectId),
+    subjectIdMasked = maskPidSubject(subjectId),
     givenName = givenName,
     familyName = familyName,
     birthDate = birthDate,
@@ -106,21 +107,3 @@ fun PidClaims.toResponse(): PidClaimsResponse = PidClaimsResponse(
     issuer = issuer,
     levelOfAssurance = levelOfAssurance,
 )
-
-/**
- * Mask the government PID subject identifier: keep the source prefix + last 4 chars only.
- *
- * Audited against `com.openbank.libs.security.PiiMask` (#11027, fleet PII-masking adoption sweep)
- * and kept, not migrated: the closest strategy, `PiiMask.nationalId`, keeps the first 6 characters
- * (the date-of-birth portion of a Czech rodné číslo) and masks the suffix — the opposite of what's
- * needed here, which is to preserve the issuer namespace *prefix* (before `:`) and the last 4
- * characters of an opaque, non-Czech-shaped government subject id. Different information kept,
- * different format.
- */
-private fun maskSubjectId(subjectId: String): String {
-    val tail = subjectId.takeLast(MASK_TAIL)
-    val prefix = subjectId.substringBefore(":", missingDelimiterValue = "")
-    return if (prefix.isNotEmpty()) "$prefix:***$tail" else "***$tail"
-}
-
-private const val MASK_TAIL = 4
