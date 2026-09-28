@@ -32,7 +32,7 @@ class ApprovalEndpointSupportTest {
 
         assertThatThrownBy {
             runBlocking {
-                support.decide(approval.id, DecideApprovalRequest(approve = true), identityOf("maker-1"))
+                support.decide(approval.id, DecideApprovalRequest(approve = true)) { identityOf("maker-1") }
             }
         }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
 
@@ -45,7 +45,7 @@ class ApprovalEndpointSupportTest {
 
         assertThatThrownBy {
             runBlocking {
-                support.decide(approval.id, DecideApprovalRequest(approve = false), identityOf("maker-1"))
+                support.decide(approval.id, DecideApprovalRequest(approve = false)) { identityOf("maker-1") }
             }
         }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
     }
@@ -54,7 +54,7 @@ class ApprovalEndpointSupportTest {
     fun `a different checker approves, and the response carries the wire shape`(): Unit = runBlocking {
         val approval = store.create("opsmessage.compose", "res-1", "maker-1")
 
-        val response = support.decide(approval.id, DecideApprovalRequest(approve = true), identityOf("checker-1"))
+        val response = support.decide(approval.id, DecideApprovalRequest(approve = true)) { identityOf("checker-1") }
 
         assertThat(response.status).isEqualTo(200)
         val body = response.entity as ApprovalResponse
@@ -68,14 +68,14 @@ class ApprovalEndpointSupportTest {
     @Test
     fun `an unknown id is a 404`() {
         assertThatThrownBy {
-            runBlocking { support.decide("nope", DecideApprovalRequest(approve = true), identityOf("checker-1")) }
+            runBlocking { support.decide("nope", DecideApprovalRequest(approve = true)) { identityOf("checker-1") } }
         }.isInstanceOf(NotFoundException::class.java)
     }
 
     @Test
     fun `a null body is an IllegalArgumentException (400), not an NPE (500)`() {
         assertThatThrownBy {
-            runBlocking { support.decide("any", null, identityOf("checker-1")) }
+            runBlocking { support.decide("any", null) { identityOf("checker-1") } }
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
@@ -92,7 +92,7 @@ class ApprovalEndpointSupportTest {
         val untouched = mockk<SecurityIdentity>()
 
         assertThatThrownBy {
-            runBlocking { support.decide("any", null, untouched) }
+            runBlocking { support.decide("any", null) { untouched } }
         }.isInstanceOf(IllegalArgumentException::class.java)
 
         verify(exactly = 0) { untouched.principal }
