@@ -23,6 +23,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitBreachedException
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -98,8 +99,12 @@ class TreasuryDealServiceTest {
         clock = Clock.offset(clock, java.time.Duration.ofDays(7))
         assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
         assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.MATURED)
-        assertThat(ledger.posted.map { it.idempotencyKey })
-            .containsExactly("treasury:${b.id}:settled", "treasury:${b.id}:matured")
+        // Maturity first catches the daily accrual up (ADR-0315 D5): seven days, then the maturity.
+        assertThat(ledger.posted.map { it.idempotencyKey }).containsExactly(
+            "treasury:${b.id}:settled",
+            *(1L..7L).map { "treasury:${b.id}:accrued:${monday.plusDays(it)}" }.toTypedArray(),
+            "treasury:${b.id}:matured",
+        )
         assertThat(deals.findById(b.id)!!.history.last().actor.id).isEqualTo("system:simulated-market")
     }
 
@@ -137,6 +142,52 @@ class TreasuryDealServiceTest {
         val a = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
         assertThat(a.exposure).isEqualByComparingTo("250000.00")
         assertThat(a.headroom).isEqualByComparingTo("750000.00")
+        assertThat(a.utilisationPercent).isEqualByComparingTo("25.00")
+        assertThat(a.breached).isFalse()
+        assertThat(a.activeOverrides).isEqualTo(0)
+    }
+
+    /**
+     * #10896: the limit-utilisation view (`counterparties()`) and the booking-time [LimitCheck] both
+     * read [DealRepository.exposure] — proving they cannot disagree means proving the view's
+     * `exposure` for a counterparty/currency equals what a fresh [com.openbank.treasury.domain.model.LimitCheck]
+     * computes for the NEXT deal against the same book. Both numbers come from the identical
+     * on-book deals (`Deal.LIMIT_CONSUMING_STATES`), so they must match exactly.
+     */
+    @Test
+    fun `the limit-utilisation view and the booking-time limit check agree on exposure`(): Unit = runBlocking {
+        book(cmd(principal = "250000.00"))
+        val pendingOnly = service.draft(cmd(principal = "50000.00"), DealFixtures.dealer)
+        val pending = service.submit(pendingOnly.id, DealFixtures.dealer)
+
+        val view = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
+        // the view's exposure already counts BOOKED + PENDING_APPROVAL, exactly like the check.
+        assertThat(view.exposure).isEqualByComparingTo("300000.00")
+        assertThat(pending.limitCheck!!.exposureBefore).isEqualByComparingTo("250000.00")
+        assertThat(pending.limitCheck!!.exposureAfter).isEqualByComparingTo(view.exposure)
+    }
+
+    @Test
+    fun `an active override counts while PENDING_APPROVAL, and not after booking`(): Unit = runBlocking {
+        book(cmd(principal = "700000.00"))
+        val second = service.draft(cmd(principal = "400000.00"), DealFixtures.dealer)
+        val pending = service.submit(second.id, DealFixtures.dealer)
+        assertThat(pending.limitCheck!!.breached).isTrue()
+
+        service.overrideLimit(second.id, "desk head approved, temporary excess", DealFixtures.seniorApprover)
+        val afterOverride = service.counterparties().first {
+            it.counterparty.id == "SIMBK-A" && it.currency == "CZK"
+        }
+        assertThat(afterOverride.activeOverrides).isEqualTo(1)
+        assertThat(afterOverride.breached).isTrue()
+
+        service.approve(second.id, DealFixtures.approver)
+        val afterBooking = service.counterparties().first {
+            it.counterparty.id == "SIMBK-A" && it.currency == "CZK"
+        }
+        assertThat(afterBooking.activeOverrides)
+            .describedAs("booking moves the deal off PENDING_APPROVAL; the override is no longer 'active'")
+            .isEqualTo(0)
     }
 
     @Test
@@ -150,6 +201,63 @@ class TreasuryDealServiceTest {
         assertThatThrownBy { runBlocking { service.cancel(d.id, DealFixtures.dealer, "k-submit") } }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThat(deals.rows).hasSize(1)
+    }
+
+    // --- ADR-0315 D5: daily accrual --------------------------------------------------------------
+
+    @Test
+    fun `accrual posts each missing day once, and a second pass the same day posts nothing`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket() // settles on the value date
+        clock = Clock.offset(clock, java.time.Duration.ofDays(3))
+        assertThat(service.accrueInterest(LocalDate.now(clock)).journals).isEqualTo(3)
+        assertThat(service.accrueInterest(LocalDate.now(clock)).journals).isEqualTo(0)
+        val accruals = ledger.posted.filter { it.event == PostingEvent.ACCRUED }
+        assertThat(accruals.map { it.idempotencyKey }).containsExactly(
+            "treasury:${b.id}:accrued:${monday.plusDays(1)}",
+            "treasury:${b.id}:accrued:${monday.plusDays(2)}",
+            "treasury:${b.id}:accrued:${monday.plusDays(3)}",
+        )
+    }
+
+    @Test
+    fun `after a full accrual run the maturity books nothing more to income`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket()
+        clock = Clock.offset(clock, java.time.Duration.ofDays(7))
+        service.accrueInterest(LocalDate.now(clock))
+        service.runSimulatedMarket() // matures
+        val deal = deals.findById(b.id)!!
+        val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
+        assertThat(accrued).isEqualByComparingTo(deal.interest)
+        val maturity = ledger.posted.single { it.event == PostingEvent.MATURED }
+        assertThat(maturity.lines.map { it.glCode }).doesNotContain("4200").contains("1520")
+    }
+
+    @Test
+    fun `reversing a settled deal unwinds what had accrued`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket()
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        service.accrueInterest(LocalDate.now(clock))
+        service.reverse(b.id, "test", DealFixtures.approver)
+        val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
+        val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+        val unwound = reversal.lines.single { it.glCode == "4200" }
+        assertThat(unwound.amount).isEqualByComparingTo(accrued)
+    }
+
+    @Test
+    fun `a failing deal does not stop the accrual pass, and is reported`(): Unit = runBlocking {
+        val a = book()
+        val b = book(cmd(principal = "50000.00"))
+        service.runSimulatedMarket()
+        clock = Clock.offset(clock, java.time.Duration.ofDays(1))
+        ledger.failFor = a.id
+        val run = service.accrueInterest(LocalDate.now(clock))
+        assertThat(run.failures).hasSize(1)
+        assertThat(run.journals).isEqualTo(1)
+        assertThat(ledger.posted.filter { it.event == PostingEvent.ACCRUED }.map { it.dealId }).containsExactly(b.id)
     }
 
     private class RecordingLedger : LedgerPostingPort {
@@ -197,6 +305,11 @@ class TreasuryDealServiceTest {
                     it.consumesLimit &&
                     it.id != excludeDealId
             }.sumOf { it.principal }
+        override suspend fun pendingLimitOverrides() =
+            rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
         override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
+        override suspend fun recordJournal(journal: LedgerJournalRef) {
+            if (journals.none { it.idempotencyKey == journal.idempotencyKey }) journals += journal
+        }
     }
 }

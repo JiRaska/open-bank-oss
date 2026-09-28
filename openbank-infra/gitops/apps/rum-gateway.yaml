@@ -75,6 +75,11 @@ spec:
           ingressClassName: nginx
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
+            # Mobile TLS pinning (ADR-0066 S3): the app pins rum.open-bank.tech's SPKI
+            # hash, so the private key MUST survive renewals. cert-manager >=1.18
+            # defaults rotationPolicy to Always; rotating the key needs a coordinated
+            # app-pin update first.
+            cert-manager.io/private-key-rotation-policy: "Never"
             # ADR-0234: declared exemption from the identity-aware edge gate.
             # This is an OTLP receiver for mobile SDKs in the field — there is no
             # browser and no session to gate on. The paths are already narrowed to

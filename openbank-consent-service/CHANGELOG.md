@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.4...consent-service-v0.25.0) (2026-09-28)
+
+
+### Features
+
+* **consent:** bind create idempotency key to a request fingerprint ([#10954](https://github.com/JiRaska/open-bank-oss/issues/10954)) ([d0e024f](https://github.com/JiRaska/open-bank-oss/commit/d0e024f422ecbf78a1b6eb4c0ddb00c39a30cdb9))
+
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.3...consent-service-v0.24.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.2...consent-service-v0.24.3) (2026-09-21)
 
 

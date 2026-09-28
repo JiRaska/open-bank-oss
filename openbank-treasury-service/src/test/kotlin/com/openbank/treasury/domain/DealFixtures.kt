@@ -25,6 +25,7 @@ object DealFixtures {
 
     val dealer = Actor("dana.dealer", ActorType.HUMAN)
     val approver = Actor("adam.approver", ActorType.HUMAN)
+    val seniorApprover = Actor("sam.senior", ActorType.HUMAN)
     val agent = Actor("agent:treasury-drafter", ActorType.AI_AGENT)
     val serviceAccount = Actor("service-account-openbank-services", ActorType.SERVICE)
 
@@ -44,6 +45,7 @@ object DealFixtures {
         product: ProductType = ProductType.MM_PLACEMENT,
         counterparty: String = "SIMBK-A",
         by: Actor = dealer,
+        valueDate: LocalDate = MONDAY,
     ): Deal = Deal.draft(
         id = UUID.fromString("0191c0de-0000-7000-8000-000000000001"),
         product = product,
@@ -51,8 +53,8 @@ object DealFixtures {
         currency = currency,
         principal = BigDecimal(principal),
         rate = BigDecimal(rate),
-        tradeDate = MONDAY,
-        valueDate = MONDAY,
+        tradeDate = valueDate,
+        valueDate = valueDate,
         maturityDate = maturity,
         actor = by,
         at = NOW,

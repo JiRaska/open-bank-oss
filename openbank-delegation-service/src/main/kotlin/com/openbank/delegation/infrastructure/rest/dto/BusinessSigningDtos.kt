@@ -32,7 +32,14 @@ data class MoneyBody(val amount: BigDecimal?, val currency: String?) {
     }
 }
 
-data class EvaluateRequest(val amount: BigDecimal?, val currency: String?, val creditorIban: String?, val rail: String?)
+data class EvaluateRequest(
+    val amount: BigDecimal?,
+    val currency: String?,
+    val creditorIban: String?,
+    val rail: String?,
+    /** PAYMENT (default), STANDING_ORDER or SDD_MANDATE (#10281). */
+    val kind: String? = null,
+)
 
 data class EvaluationResponse(
     val required: Int,
