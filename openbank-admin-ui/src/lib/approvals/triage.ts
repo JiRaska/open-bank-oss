@@ -22,6 +22,10 @@ export type ApprovalDomain =
   | 'communication'
   | 'treasury'
   | 'ledger-backfill'
+  | 'compliance-pack'
+  | 'campaign'
+  | 'audience'
+  | 'identity-case'
 
 export type DomainApprovalItem = {
   id: string
@@ -78,6 +82,18 @@ export function approvalWorkbenchHref(item: DomainApprovalItem): string | null {
   }
   if (item.domain === 'ledger-backfill') {
     return '/balance-sheet/ledger-backfill'
+  }
+  if (item.domain === 'compliance-pack') {
+    return '/lending/compliance-packs'
+  }
+  if (item.domain === 'campaign') {
+    return `/campaigns/${encodeURIComponent(item.id)}`
+  }
+  if (item.domain === 'audience') {
+    return '/segments'
+  }
+  if (item.domain === 'identity-case') {
+    return '/identity-cases'
   }
   return null
 }

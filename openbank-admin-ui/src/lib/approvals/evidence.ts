@@ -34,6 +34,7 @@ export const APPROVAL_DOMAINS = [
   'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
   'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
   'delegation', 'agent', 'communication', 'treasury', 'ledger-backfill',
+  'compliance-pack', 'campaign', 'audience', 'identity-case',
 ] as const
 const DOMAIN_SET = new Set<string>(APPROVAL_DOMAINS)
 const SOURCE_STATES = new Set<ApprovalSourceState>(['ok', 'forbidden', 'unavailable', 'not-configured'])

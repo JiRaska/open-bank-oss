@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'treasury' | 'ledger-backfill'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'treasury' | 'ledger-backfill' | 'compliance-pack' | 'campaign' | 'audience' | 'identity-case'
   action: string
   resourceId: string | null
   maker: string | null
@@ -128,6 +128,10 @@ type BackfillRequest = {
   proposedBy: string
   proposedAt: string | null
 }
+type CompliancePackProposal = { id: string; state: string; proposedBy: string; proposedAt: string | null }
+type Campaign = { id: string; state: string; createdBy: string; updatedAt: string }
+type Audience = { name: string; version: number; state: string; createdBy: string }
+type IdentityCase = { id: string; status: string; firstApprover: string | null; firstAt: string | null }
 
 type SourceResult = { items: InboxItem[]; state: SourceState }
 
@@ -476,6 +480,70 @@ async function ledgerBackfillPending(headers: HeadersInit): Promise<SourceResult
   }
 }
 
+async function compliancePackPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('lending-service', 'lending', 8126, '/api/v1/lending/compliance-packs/proposals/pending'), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as CompliancePackProposal[]
+  if (!Array.isArray(rows) || rows.some(r => !r.id || r.state !== 'PROPOSED' || !r.proposedBy)) {
+    return { items: [], state: 'unavailable' }
+  }
+  return { state: 'ok', items: rows.map(r => ({
+    id: r.id, domain: 'compliance-pack' as const, action: 'lending.compliancePack.activate',
+    resourceId: r.id, maker: r.proposedBy, proposedAt: r.proposedAt,
+  })) }
+}
+
+async function campaignPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, '/api/v1/campaigns'), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as Campaign[]
+  if (!Array.isArray(rows) || rows.some(r => !r.id || !r.state || !r.createdBy || !r.updatedAt)) {
+    return { items: [], state: 'unavailable' }
+  }
+  return { state: 'ok', items: rows.filter(r => r.state === 'PENDING_APPROVAL').map(r => ({
+    id: r.id, domain: 'campaign' as const, action: 'campaign.activate',
+    resourceId: r.id, maker: r.createdBy, proposedAt: r.updatedAt,
+  })) }
+}
+
+async function audiencePending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, '/api/v1/audiences'), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as Audience[]
+  if (!Array.isArray(rows) || rows.some(r => !r.name || !Number.isInteger(r.version) || !r.state || !r.createdBy)) {
+    return { items: [], state: 'unavailable' }
+  }
+  // AudienceSummary omits lifecycle timestamps. Never substitute creation time for submission.
+  return { state: 'ok', items: rows.filter(r => r.state === 'PENDING_APPROVAL').map(r => ({
+    id: `${r.name}@${r.version}`, domain: 'audience' as const, action: 'campaign.audience.approve',
+    resourceId: `${r.name}@${r.version}`, maker: r.createdBy, proposedAt: null,
+  })) }
+}
+
+async function identityCasePending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('pid-service', 'pid', 8105, '/api/v1/parties/cases'), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as IdentityCase[]
+  if (!Array.isArray(rows) || rows.some(r => !r.id || !r.status ||
+    (r.status === 'AWAITING_SECOND_APPROVAL' && (!r.firstApprover || !r.firstAt)))) {
+    return { items: [], state: 'unavailable' }
+  }
+  // The provider also returns OPEN cases. Only the first recorded vote is awaiting a checker;
+  // never copy applicant personal data into this cross-domain inbox.
+  return { state: 'ok', items: rows.filter(r => r.status === 'AWAITING_SECOND_APPROVAL').map(r => ({
+    id: r.id, domain: 'identity-case' as const, action: 'identity.case.secondApproval',
+    resourceId: r.id, maker: r.firstApprover, proposedAt: r.firstAt,
+  })) }
+}
+
 async function agentPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(`${agentBase()}/api/v1/proposals?state=proposed`, {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
@@ -498,7 +566,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication, treasury, ledgerBackfill] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication, treasury, ledgerBackfill, compliancePack, campaign, audience, identityCase] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -520,8 +588,12 @@ export async function GET() {
     communicationPending(headers).catch(() => unavailable),
     treasuryPending(headers).catch(() => unavailable),
     ledgerBackfillPending(headers).catch(() => unavailable),
+    compliancePackPending(headers).catch(() => unavailable),
+    campaignPending(headers).catch(() => unavailable),
+    audiencePending(headers).catch(() => unavailable),
+    identityCasePending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...treasury.items, ...ledgerBackfill.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...treasury.items, ...ledgerBackfill.items, ...compliancePack.items, ...campaign.items, ...audience.items, ...identityCase.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -547,6 +619,10 @@ export async function GET() {
       communication: communication.state,
       treasury: treasury.state,
       'ledger-backfill': ledgerBackfill.state,
+      'compliance-pack': compliancePack.state,
+      campaign: campaign.state,
+      audience: audience.state,
+      'identity-case': identityCase.state,
     },
   })
 }
