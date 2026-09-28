@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.2...tpp-registry-service-v0.10.0) (2026-09-28)
+
+
+### Features
+
+* **tpp-registry:** bind Idempotency-Key to a request fingerprint ([#10956](https://github.com/JiRaska/open-bank-oss/issues/10956)) ([b4eb25e](https://github.com/JiRaska/open-bank-oss/commit/b4eb25ef112b1c01491e7c91e7f7ac7689debe6b))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.1...tpp-registry-service-v0.9.2) (2026-09-13)
 
 
