@@ -63,6 +63,22 @@ test_resource_with_no_tenant_attribute_denied if {
 	}
 }
 
+# A caller must not turn an existing-resource action into a scope-only grant by
+# leaving resource out of the PDP query altogether.
+test_missing_deal_resource_denied if {
+	not rest.allow with input as {
+		"principal": tenant_a_deal_reader,
+		"action": "deal.read",
+	}
+}
+
+test_missing_quote_resource_denied if {
+	not rest.allow with input as {
+		"principal": tenant_a_quoter,
+		"action": "pricingDecision.read",
+	}
+}
+
 # ── must-ALLOW controls ─────────────────────────────────────────────────────────────────────
 
 test_same_tenant_deal_read_allowed if {
