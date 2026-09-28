@@ -44,43 +44,17 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
-      # LiteLLM runs `prisma generate` on every start, which COPIES schema.prisma into its own
-      # site-packages directory. That directory is root-owned and this pod runs as uid 1000 under
-      # PodSecurity `restricted`, so the generator dies with
-      #   PermissionError: [Errno 13] Permission denied:
-      #     '/usr/lib/python3.13/site-packages/prisma/schema.prisma'
-      # and the query engine never comes up ("Not connected to the query engine") — which is what
-      # crashlooped the gateway for 12h after #3065 and got the database backed out in #3185.
-      #
-      # Isolated to the uid, not guessed: the SAME image, memory and database starts in ~20s as
-      # root and fails as uid 1000. Running as root is not the fix — this is the one pod in the
-      # fleet with 0.0.0.0/0:443 egress (ADR-0175 §4), so it is the last place to relax the
-      # security baseline. Instead the package directory gets a writable copy: this initContainer
-      # copies it into an emptyDir (reading it as 1000 is fine; only writing was denied) and the
-      # main container mounts that over the same path. Verified end to end locally at uid 1000:
-      # proxy READY, /key/generate returns a budgeted key, and the key survives a restart.
-      initContainers:
-        - name: seed-prisma-writable
-          image: ghcr.io/berriai/litellm:v1.74.3-stable
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c", "cp -a /usr/lib/python3.13/site-packages/prisma/. /seed/"]
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests: {cpu: 50m, memory: 64Mi}
-            limits: {cpu: 500m, memory: 256Mi}
-          volumeMounts:
-            - name: prisma-writable
-              mountPath: /seed
+      # No initContainer: the old one copied the Prisma package into a writable emptyDir because
+      # upstream LiteLLM ran `prisma generate` into root-owned site-packages. The image below is
+      # our own build (openbank-infra/docker/litellm, #11265) with the client generated and the
+      # arm64 engines placed at build time under a read-only, world-readable HOME, so uid 1000
+      # needs no writable path except /tmp and the root filesystem is read-only.
       containers:
         - name: litellm
-          # ghcr.io prefix kept so the Kyverno ecr-pull-through-rewrite mutates it to the ECR cache
-          # (VPC endpoint, not NAT). Third-party image → not under the openbank-* signature Enforce
-          # gate. Pin a stable tag; verify it resolves through the pull-through cache before merge.
-          image: ghcr.io/berriai/litellm:v1.74.3-stable
+          # Built, CVE-gated, signed and attested by .github/workflows/platform-images.yml, which
+          # also opens the PR that repins this line to <tag>@<digest>. Being openbank-*, it is
+          # under the Kyverno signature + SBOM Enforce policies, unlike the upstream ghcr image.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.83.14-stable.patch.3
           imagePullPolicy: IfNotPresent
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           ports:
@@ -111,8 +85,8 @@ spec:
                   optional: true
             # Postgres (CNPG litellm-db). Required for virtual keys — the only mechanism that
             # bounds spend per CALLER rather than per model — and for spend counters that survive a
-            # restart. Re-enabled after #3185 backed it out; see the initContainer above for the
-            # three things that had to be true first. NOT optional: a missing DATABASE_URL leaves
+            # restart. Re-enabled after #3185 backed it out; see openbank-infra/docker/litellm for why
+            # the image, not the pod spec, now makes the database path work at uid 1000. NOT optional: a missing DATABASE_URL leaves
             # the proxy serving and enforcing nothing, which is worse than not claiming a ceiling.
             - name: DATABASE_URL
               valueFrom:
@@ -151,22 +125,15 @@ spec:
                   optional: true
             - name: LANGFUSE_HOST
               value: http://langfuse.ai-platform.svc:3000
-            # prisma-python caches its downloaded query engine under $HOME. Without this it
-            # resolves to "/" and the pod dies on
-            # FileNotFoundError: '/.cache/prisma-python/binaries/...'.
-            - name: HOME
-              value: /tmp
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           volumeMounts:
             - name: config
               mountPath: /etc/litellm
               readOnly: true
-            - name: prisma-writable
-              mountPath: /usr/lib/python3.13/site-packages/prisma
             - name: tmp
               mountPath: /tmp
           resources:
@@ -175,9 +142,10 @@ spec:
               memory: 256Mi
             limits:
               cpu: "1"
-              # 512Mi OOMKilled (exit 137) once DATABASE_URL was set: the DB path installs the
-              # Prisma CLI and a node runtime at start. 1Gi measured to start cleanly at uid 1000.
-              memory: 1Gi
+              # 512Mi OOMKilled (exit 137) once DATABASE_URL was set. v1.83.14 measured 978 MiB
+              # resident after migrations with the real config (local, arm64) -- at the old 1Gi
+              # limit, so 1536Mi.
+              memory: 1536Mi
           readinessProbe:
             httpGet:
               path: /health/liveliness
@@ -194,9 +162,7 @@ spec:
         - name: config
           configMap:
             name: litellm-config
-        - name: prisma-writable
-          emptyDir: {}
-        # $HOME for the prisma engine cache (~90 MB downloaded on first start).
+        # Scratch for Python/uvicorn; the image writes nothing else.
         - name: tmp
           emptyDir: {}
 ---
