@@ -154,7 +154,15 @@ jobs:
               files.push(...next.nodes);
               pageInfo = next.pageInfo;
             }
-            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$/;
+            // OPA policy tests live beside their policies as *_test.rego, not under src/test.
+            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$|_test\.rego$/;
+            for (const [path, expected] of [
+              ["openbank-infra/gitops/components/pricing/pricing_rest_ext_test.rego", true],
+              ["openbank-infra/gitops/components/pricing/pricing_rest_ext.rego", false],
+              ["openbank-infra/gitops/components/pricing/pricing_rest_ext_test.rego.bak", false],
+            ]) {
+              if (TEST_SURFACE.test(path) !== expected) throw new Error(`TEST_SURFACE misclassified ${path}`);
+            }
             const touchedTests = files.map(file => file.path).filter(path => TEST_SURFACE.test(path));
             if (touchedTests.length > 0) {
               core.info(`Test surface touched (${touchedTests.length} file(s)); security issue(s) ${securityIssues.join(", ")} close with a regression test.`);
