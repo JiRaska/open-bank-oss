@@ -235,6 +235,35 @@ def check() -> tuple[list[str], int]:
         if spec.get("enablePDB") is False:
             findings.append(f"{where} disables its PodDisruptionBudget (enablePDB: false)")
 
+    # 4. EVERY cluster has a standby, money-path or not (2026-09-28: five spot interruptions in
+    #    one day took down each single-instance primary on the reclaimed node, while every HA
+    #    cluster failed over in seconds). A cluster may run one instance only if it is listed in
+    #    rules.yaml: cnpg_single_instance_exceptions with a reason; a listing that no longer names
+    #    a single-instance cluster is stale, so an exception cannot outlive its cause.
+    exc: dict[str, str] = {}
+    for i, entry in enumerate(rules.get("cnpg_single_instance_exceptions") or []):
+        key = str((entry or {}).get("cluster", "")).strip()
+        reason = str((entry or {}).get("reason", "")).strip()
+        where = f"{RULES}: cnpg_single_instance_exceptions[{i}]"
+        if not key or len(reason) < 20:
+            findings.append(f"{where} needs `cluster: <ns>/<name>` and a reason of >= 20 chars")
+            continue
+        exc[key] = reason
+    for key in sorted(exc):
+        if key not in clusters:
+            findings.append(f"{RULES}: cnpg_single_instance_exceptions names {key}, which is no CNPG Cluster -- stale")
+        elif isinstance(clusters[key]["spec"].get("instances", 1), int) and clusters[key]["spec"].get("instances", 1) >= 2:
+            findings.append(f"{RULES}: cnpg_single_instance_exceptions names {key}, which already runs >= 2 instances -- stale")
+    for key, c in sorted(clusters.items()):
+        if key in mp_clusters or key in exc:
+            continue
+        inst = c["spec"].get("instances", 1)
+        if not isinstance(inst, int) or inst < 2:
+            findings.append(
+                f"{c['path']}: Cluster {key} has instances={inst}; every CNPG cluster needs >= 2 "
+                f"(a standby survives node loss) or a reasoned entry in cnpg_single_instance_exceptions"
+            )
+
     gatelib.subjects(len(clusters), f"CNPG clusters; {len(mp_clusters)} money-path")
     return findings, len(mp_clusters)
 
@@ -301,7 +330,6 @@ spec:
 
 
 def self_test() -> int:
-    global REPO
     ok = True
 
     def run(files: dict[str, str], extra_rules: str = _PLATFORM) -> list[str]:
@@ -323,7 +351,7 @@ def self_test() -> int:
 
     good = {
         "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA)
-        + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="  primaryUpdateMethod: switchover\n"),
+        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n"),
         "deploy.yaml": _DEPLOY,
         "wf.yaml": _WF.format(inst=2, extra=_HA),
     }
@@ -335,7 +363,7 @@ def self_test() -> int:
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=1, extra=_HA)}, "instances=1"),
         "restart update method on a non-money-path cluster": (
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA)
-             + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="")}, "other-db primaryUpdateMethod=unset"),
+             + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="")}, "other-db primaryUpdateMethod=unset"),
         "money-path cluster without hostname anti-affinity": (
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra="  primaryUpdateMethod: switchover\n")},
             "enablePodAntiAffinity"),
@@ -355,7 +383,7 @@ def self_test() -> int:
     }
     deferred = {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
         "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)
-        + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="  primaryUpdateMethod: switchover\n")}
+        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n")}
     if run(deferred):
         print(f"SELF-TEST FAIL: a deferred-affinity cluster was reported: {run(deferred)}"); ok = False
     cases["single-instance platform database (the temporal-db shape)"] = (
@@ -365,6 +393,24 @@ def self_test() -> int:
         "no money-path workload calls any Service in namespace wf")
     cases["platform entry naming a cluster that does not exist"] = (
         {k: v for k, v in good.items() if k != "wf.yaml"}, "no CNPG Cluster wf/wf-db")
+    single_other = {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA)
+                    + "---\n" + _CLUSTER.format(name="other-db", inst=1, extra="  primaryUpdateMethod: switchover\n")}
+    cases["single-instance non-money-path cluster (the audit-db shape)"] = (single_other, "st/other-db has instances=1")
+    exc_ok = _PLATFORM + "cnpg_single_instance_exceptions:\n  - cluster: st/other-db\n    reason: scratch database, rebuilt from scratch on loss\n"
+    if run(single_other, exc_ok):
+        print(f"SELF-TEST FAIL: an excepted single-instance cluster was reported: {run(single_other, exc_ok)}"); ok = False
+    exc_stale = _PLATFORM + "cnpg_single_instance_exceptions:\n  - cluster: st/other-db\n    reason: scratch database, rebuilt from scratch on loss\n"
+    got = run(good, exc_stale)
+    if not any("already runs >= 2 instances -- stale" in f for f in got):
+        print(f"SELF-TEST FAIL: a stale exception (cluster now HA) was not reported: {got}"); ok = False
+    exc_gone = _PLATFORM + "cnpg_single_instance_exceptions:\n  - cluster: st/ghost-db\n    reason: scratch database, rebuilt from scratch on loss\n"
+    got = run(good, exc_gone)
+    if not any("which is no CNPG Cluster -- stale" in f for f in got):
+        print(f"SELF-TEST FAIL: an exception naming no cluster was not reported: {got}"); ok = False
+    exc_short = _PLATFORM + "cnpg_single_instance_exceptions:\n  - cluster: st/other-db\n    reason: meh\n"
+    got = run(single_other, exc_short)
+    if not any("reason of >= 20 chars" in f for f in got):
+        print(f"SELF-TEST FAIL: an exception without a real reason was accepted: {got}"); ok = False
     for label, (files, needle) in cases.items():
         got = run(files)
         if not any(needle in f for f in got):
