@@ -2,7 +2,7 @@
 #
 # WHY THIS RESOURCE EXISTS AT ALL — the migration cannot do it. `vector` is not a TRUSTED extension,
 # so the role Flyway connects as (the database owner, `openbank`) is refused. Measured against the
-# exact image this cluster runs, ghcr.io/cloudnative-pg/postgresql:18.1:
+# exact image this cluster then ran, ghcr.io/cloudnative-pg/postgresql:18.1 (vector.control re-verified present in 18.6):
 #
 #   as owner:      ERROR:  permission denied to create extension "vector"
 #                  HINT:   Must be superuser to create this extension.

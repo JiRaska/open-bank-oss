@@ -1,5 +1,5 @@
 # Tempo's chart has no native podDisruptionBudget toggle (checked: `helm show
-# values grafana/tempo --version 1.24.4` — no disruption/unavailable keys at
+# values grafana-community/tempo --version 2.4.0` — no disruption/unavailable keys at
 # all). Hand-authored to close the same gap alertmanager/prometheus/loki had:
 # single replica -> minAvailable:1 blocks ANY voluntary eviction, which is
 # what makes it safe to tighten the observability NodePool's
