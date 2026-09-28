@@ -4820,6 +4820,19 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # Importability alone does not reject an operator client with a password grant,
+  # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
+  - id: ops-cli-client-contract
+    name: "Operator CLI client stays loopback-only and PKCE-gated (issue #10905)"
+    group: security
+    mode: enforced
+    budget_seconds: 5
+    selftest_inputs: ["openbank-infra/e2e/ops_cli_client.test.py"]
+    selftest: python3 openbank-infra/e2e/ops_cli_client.test.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/e2e/ops_cli_client.test.py
+
   # Keycloak docker-dev / CI realm JSONs vs the deployed gitops template (issue #2540 gate-scope
   # follow-up). The four checks above — this one included until now — all glob only
   # `*realm-template*.json`. Two other tracked realm JSONs grant roles to the shared M2M service
