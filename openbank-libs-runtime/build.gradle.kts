@@ -97,7 +97,7 @@ dependencies {
     // consuming service. Only the ObjectMapperCustomizer interface is compiled against, and it is
     // identical across both versions. Correcting the whole block to the real BOM versions is the
     // separate change the header calls for (#5482), and needs those checksums added with it.
-    compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.3")
     compileOnly("io.quarkus:quarkus-jackson:3.33.2")
 
     // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
@@ -136,7 +136,7 @@ dependencies {
     testImplementation("io.quarkus:quarkus-redis-client:3.33.2")
     // NulByteGuardsTest drives the REAL ObjectMapper through the REAL customizer, so the module
     // registration and the deserializer are both exercised rather than asserted about.
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.3")
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
     testImplementation("io.quarkus:quarkus-jackson:3.33.2")
     testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
