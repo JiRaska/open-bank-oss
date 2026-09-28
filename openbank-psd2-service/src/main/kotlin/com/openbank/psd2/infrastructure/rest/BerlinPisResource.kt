@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
@@ -64,24 +65,36 @@ class BerlinPisResource(
         if (xRequestId.isNullOrBlank()) return missingRequestId()
         val payment = runCatching { deserialize(product, body) }.getOrElse { return malformedBody() }
 
+        // X-Request-ID is the NextGenPSD2 request identifier and has always been this surface's
+        // idempotency key; it is now bound to the fingerprint of the payment that executes (#10916).
         val cacheKey = "psd2:v1:payment:$tppId:${product.name}:$xRequestId"
-        idempotencyStore.get(cacheKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Request-ID", xRequestId)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/v1/payments/${BerlinXs2aMappers.productSegment(product)}",
+            mapOf("consentId" to consentId, "payment" to payment),
+        )
+        return Psd2Idempotency.execute(
+            idempotencyStore,
+            cacheKey,
+            requestHash,
+            replay = { cached -> Response.status(cached.statusCode).header("X-Request-ID", xRequestId) },
+            conflict = { code, text ->
+                Psd2Idempotency.conflictResponse(code, text).header("X-Request-ID", xRequestId)
+            },
+        ) {
+            val result = pis.initiatePayment(InitiatePaymentCommand(tppId, consentId, product, payment, xRequestId))
+            val body = BerlinXs2aMappers.paymentInitiated(product, result)
+            Psd2Idempotency.Completed(
+                Response.status(Response.Status.CREATED)
+                    .header("X-Request-ID", xRequestId)
+                    .header("Location", "/v1/payments/${BerlinXs2aMappers.productSegment(product)}/${result.paymentId}")
+                    .entity(body)
+                    .build(),
+                Response.Status.CREATED.statusCode,
+                objectMapper.writeValueAsString(body),
+            )
         }
-
-        val result = pis.initiatePayment(InitiatePaymentCommand(tppId, consentId, product, payment, xRequestId))
-        val body = BerlinXs2aMappers.paymentInitiated(product, result)
-        idempotencyStore.save(cacheKey, Response.Status.CREATED.statusCode, objectMapper.writeValueAsString(body))
-        return Response.status(Response.Status.CREATED)
-            .header("X-Request-ID", xRequestId)
-            .header("Location", "/v1/payments/${BerlinXs2aMappers.productSegment(product)}/${result.paymentId}")
-            .entity(body)
-            .build()
     }
 
     @GET

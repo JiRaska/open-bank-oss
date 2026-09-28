@@ -8,6 +8,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
 import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
@@ -82,7 +83,8 @@ class ConsentResourceTest {
     @Test
     fun `createConsent replays a cached response on idempotency hit`(): Unit = runBlocking {
         val cached = IdempotencyRecord("psd2:consent:tpp-1:req-1", 201, """{"consentId":"c-1"}""", OffsetDateTime.now())
-        coEvery { idempotencyStore.get("psd2:consent:tpp-1:req-1") } returns cached
+        coEvery { idempotencyStore.reserve("psd2:consent:tpp-1:req-1", any(), any()) } returns
+            ReserveResult.Replay(cached)
 
         val response = resource.createConsent(sampleRequest(), null, "req-1", ctxWithTpp("tpp-1"))
 
@@ -94,7 +96,7 @@ class ConsentResourceTest {
 
     @Test
     fun `createConsent delegates, caches and returns 201 with Location`(): Unit = runBlocking {
-        coEvery { idempotencyStore.get("psd2:consent:tpp-1:req-2") } returns null
+        coEvery { idempotencyStore.reserve("psd2:consent:tpp-1:req-2", any(), any()) } returns ReserveResult.Reserved
         coEvery {
             consentMgmt.createConsent(
                 CreateConsentCommand(
@@ -107,7 +109,7 @@ class ConsentResourceTest {
                 ),
             )
         } returns sampleConsentResponse("c-1")
-        coEvery { idempotencyStore.save("psd2:consent:tpp-1:req-2", 201, any()) } returns Unit
+        coEvery { idempotencyStore.save("psd2:consent:tpp-1:req-2", any<String>(), 201, any(), any()) } returns Unit
 
         val response = resource.createConsent(
             sampleRequest(),
@@ -118,18 +120,18 @@ class ConsentResourceTest {
 
         assertThat(response.status).isEqualTo(201)
         assertThat(response.headers.getFirst("Location")).isEqualTo("/open-banking/v2/consents/c-1")
-        coVerify(exactly = 1) { idempotencyStore.save("psd2:consent:tpp-1:req-2", 201, any()) }
+        coVerify(exactly = 1) { idempotencyStore.save("psd2:consent:tpp-1:req-2", any<String>(), 201, any(), any()) }
     }
 
     @Test
     fun `createConsent defaults tppName to tppId when TPP-Name header absent`(): Unit = runBlocking {
-        coEvery { idempotencyStore.get("psd2:consent:tpp-2:req-3") } returns null
+        coEvery { idempotencyStore.reserve("psd2:consent:tpp-2:req-3", any(), any()) } returns ReserveResult.Reserved
         coEvery {
             consentMgmt.createConsent(
                 match { it.tppName == "tpp-2" },
             )
         } returns sampleConsentResponse("c-2")
-        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        coEvery { idempotencyStore.save(any(), any<String>(), any(), any(), any()) } returns Unit
 
         resource.createConsent(sampleRequest(), null, "req-3", ctxWithTpp("tpp-2", null))
 

@@ -35,7 +35,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "13"
+        openbank.tech/litellm-config-revision: "15"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -44,43 +44,14 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
-      # LiteLLM runs `prisma generate` on every start, which COPIES schema.prisma into its own
-      # site-packages directory. That directory is root-owned and this pod runs as uid 1000 under
-      # PodSecurity `restricted`, so the generator dies with
-      #   PermissionError: [Errno 13] Permission denied:
-      #     '/usr/lib/python3.13/site-packages/prisma/schema.prisma'
-      # and the query engine never comes up ("Not connected to the query engine") — which is what
-      # crashlooped the gateway for 12h after #3065 and got the database backed out in #3185.
-      #
-      # Isolated to the uid, not guessed: the SAME image, memory and database starts in ~20s as
-      # root and fails as uid 1000. Running as root is not the fix — this is the one pod in the
-      # fleet with 0.0.0.0/0:443 egress (ADR-0175 §4), so it is the last place to relax the
-      # security baseline. Instead the package directory gets a writable copy: this initContainer
-      # copies it into an emptyDir (reading it as 1000 is fine; only writing was denied) and the
-      # main container mounts that over the same path. Verified end to end locally at uid 1000:
-      # proxy READY, /key/generate returns a budgeted key, and the key survives a restart.
-      initContainers:
-        - name: seed-prisma-writable
-          image: ghcr.io/berriai/litellm:v1.74.3-stable
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c", "cp -a /usr/lib/python3.13/site-packages/prisma/. /seed/"]
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests: {cpu: 50m, memory: 64Mi}
-            limits: {cpu: 500m, memory: 256Mi}
-          volumeMounts:
-            - name: prisma-writable
-              mountPath: /seed
       containers:
         - name: litellm
-          # ghcr.io prefix kept so the Kyverno ecr-pull-through-rewrite mutates it to the ECR cache
-          # (VPC endpoint, not NAT). Third-party image → not under the openbank-* signature Enforce
-          # gate. Pin a stable tag; verify it resolves through the pull-through cache before merge.
-          image: ghcr.io/berriai/litellm:v1.74.3-stable
+          # Our own build of upstream v1.99.4 (openbank-infra/docker/litellm), pinned by digest,
+          # scanned and signed by platform-images.yml. v1.99 keeps the Prisma engines in
+          # /opt/prisma, readable at uid 1000, so the writable site-packages copy that v1.74
+          # needed is gone. Verified locally at uid 1000 against Postgres: /health/liveliness 200,
+          # /key/generate persists a budgeted key.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.99.4@sha256:06f2f9ec0d2ffb412beca44ec4338e6793d0bee7b88ac8293fa6d1804cdaaa53
           imagePullPolicy: IfNotPresent
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           ports:
@@ -156,6 +127,13 @@ spec:
             # FileNotFoundError: '/.cache/prisma-python/binaries/...'.
             - name: HOME
               value: /tmp
+            # An existing database created before Prisma migrations (no _prisma_migrations table)
+            # makes LiteLLM baseline it: `migrate deploy` answers P3005 and LiteLLM writes
+            # migrations/0_init into its own package directory, which is root-owned, so at uid 1000
+            # the pod crashloops with PermissionError. Upstream's supported switch points the
+            # migrations at a writable copy instead (litellm_proxy_extras/utils.py _get_prisma_dir).
+            - name: LITELLM_MIGRATION_DIR
+              value: /tmp/litellm-migrations
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -165,8 +143,6 @@ spec:
             - name: config
               mountPath: /etc/litellm
               readOnly: true
-            - name: prisma-writable
-              mountPath: /usr/lib/python3.13/site-packages/prisma
             - name: tmp
               mountPath: /tmp
           resources:
@@ -175,9 +151,10 @@ spec:
               memory: 256Mi
             limits:
               cpu: "1"
-              # 512Mi OOMKilled (exit 137) once DATABASE_URL was set: the DB path installs the
-              # Prisma CLI and a node runtime at start. 1Gi measured to start cleanly at uid 1000.
-              memory: 1Gi
+              # 512Mi OOMKilled (exit 137) once DATABASE_URL was set: the DB path runs the
+              # Prisma CLI and a node runtime at start. v1.99.4 measured ~790Mi idle after
+              # migrations at uid 1000, so 1Gi left no headroom.
+              memory: 1536Mi
           readinessProbe:
             httpGet:
               path: /health/liveliness
@@ -194,8 +171,6 @@ spec:
         - name: config
           configMap:
             name: litellm-config
-        - name: prisma-writable
-          emptyDir: {}
         # $HOME for the prisma engine cache (~90 MB downloaded on first start).
         - name: tmp
           emptyDir: {}
