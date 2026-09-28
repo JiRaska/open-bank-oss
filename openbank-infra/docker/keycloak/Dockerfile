@@ -25,9 +25,9 @@
 # gitops. Baking them here re-declares them as code — this Dockerfile is now the
 # source of truth for the feature set.
 
-ARG KEYCLOAK_VERSION=26.6.4
+ARG KEYCLOAK_VERSION=26.7.3
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:0aae0de7fca85525f727d3354df17896092de8bb26ae4c12d89c77e5df8cbce4 AS builder
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4 AS builder
 ENV KC_DB=postgres
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
@@ -35,7 +35,7 @@ ENV KC_CACHE=local
 ENV KC_FEATURES=token-exchange,admin-fine-grained-authz:v1
 RUN /opt/keycloak/bin/kc.sh build
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:0aae0de7fca85525f727d3354df17896092de8bb26ae4c12d89c77e5df8cbce4
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4
 # The augmented server (and its baked persisted-config) is the whole /opt/keycloak
 # tree — copy it wholesale, the approach Keycloak's own optimized-image docs use.
 COPY --from=builder /opt/keycloak/ /opt/keycloak/

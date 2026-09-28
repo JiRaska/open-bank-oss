@@ -132,5 +132,10 @@ class VerificationCaseService(
     }
 }
 
-/** Raised when a verification case id does not exist (mapped to HTTP 404). */
-class VerificationCaseNotFoundException(message: String) : RuntimeException(message)
+/**
+ * Raised when a verification case id does not exist (mapped to HTTP 404 by libs-runtime's
+ * ResourceNotFoundExceptionMapper since #10911 phase 2 -- see
+ * PidResourceExceptionMapperEquivalenceTest for the byte-for-byte proof).
+ */
+class VerificationCaseNotFoundException(message: String) :
+    com.openbank.libs.domain.error.ResourceNotFoundException(message)

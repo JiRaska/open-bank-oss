@@ -430,3 +430,18 @@ simply stops existing).
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 6 restamps the card-issuance policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding two card read rules. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `SepaPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only) instead of the shared client. sepa-payment deliberately grants it nothing and its RBAC is unchanged: the MCP tool behind it (`get_payment_confirmation`, `query.payment_confirmation.readonly`) is held by no charter, so the call was already refused at the MCP gate. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. sepa-payment's own Rollout, identity and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/sepa-payments` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different payment was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed create releases the claim so a retry can run. Because the Redis record expires (24 h) while the UNIQUE `idempotency_key` row does not, migration V12 adds nullable `sepa_payments.request_hash`, written on create; `SepaPaymentService` refuses a key whose stored hash differs (409), so the check survives Redis expiry or eviction. **Residual window:** Redis records and payment rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely). No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE sepa_payments DROP COLUMN request_hash` (see V12 header).
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** SepaPaymentNotFoundMapper/InvalidSepaPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `SepaPaymentService.kt`, which document the deletion rather than contradict it).
+  `SepaPaymentNotFoundException`/`InvalidSepaPaymentStateTransitionException` now extend
+  `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
+  by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,
+  unused, by #10923). Both already used the base's default codes (`NOT_FOUND`/`CONFLICT`), so
+  status, `code` and `message` are byte-identical to the deleted mappers' output — verified by
+  `SepaPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s source changes (`Ids.randomId()` →
+  the correlation MDC), which #10911 phase 1 established is not part of the wire contract. No
+  other mapper in this file (`PaymentNotCompletedMapper`, `DocumentTemplateUnavailableMapper`)
+  is touched. **Risk class:** none — response-plumbing de-duplication only; the payment workflow,
+  reversal port and Temporal orchestration are untouched. Rollback: restore the deleted mapper
+  classes and revert the exception base classes.

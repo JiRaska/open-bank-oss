@@ -10,9 +10,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.flags.FeatureDisabledException
 import com.openbank.party.application.port.`in`.PartyMandateRejectedException
 import com.openbank.party.application.port.out.GdprAggregationAuthException
-import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
-import com.openbank.party.application.usecase.PartyNotFoundException
 import com.openbank.party.domain.model.AmlProfileNotApplicableException
 import io.quarkus.security.AuthenticationFailedException
 import io.quarkus.security.ForbiddenException
@@ -23,33 +21,9 @@ import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import java.time.Instant
 
-@Provider
-class PartyNotFoundMapper : ExceptionMapper<PartyNotFoundException> {
-    override fun toResponse(e: PartyNotFoundException) = Response.status(404)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                404,
-                ErrorCode.NOT_FOUND.code,
-                e.message ?: "Not found",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
-
-@Provider
-class PartyAlreadyExistsMapper : ExceptionMapper<PartyAlreadyExistsException> {
-    override fun toResponse(e: PartyAlreadyExistsException) = Response.status(409)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                409,
-                ErrorCode.CONFLICT.code,
-                e.message ?: "Conflict",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
+// PartyNotFoundException / PartyAlreadyExistsException: mapped by libs-runtime's
+// Resource{NotFound,Conflict}ExceptionMapper since #10911 phase 2 (the exceptions now extend the
+// libs-domain bases) -- see PartyExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 /**
  * ADR-0179: a merge precondition failed (already merged, chain, or the duplicate still owns an
