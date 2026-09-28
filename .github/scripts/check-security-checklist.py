@@ -37,6 +37,29 @@ release PR that also carried real code still trips the gate, because the strip i
 per-file and the code file survives it. That case is the self-test's must-FAIL control —
 without it this exclusion would be indistinguishable from switching the gate off.
 
+MECHANICALLY DECIDABLE ITEMS ARE ANSWERED BY THE GATE (#11299, ADR-0279 #26).
+Six boxes, and on a test-only or docs-only money-path PR every one of them has an answer
+the diff already determines — yet the gate made a human tick all six, and 11+ PRs sat red
+on it at once. So each box is now classified, and only the boxes a human must judge FOR
+THIS DIFF are required:
+
+  item            decided by                                             auto-pass when
+  secrets/PII     gitleaks gate (secrets) + file classification          every money-path file is INERT
+  suppressions    `+` lines of the diff: @Suppress/@SuppressWarnings/as Any  none added anywhere
+  dependency      build/dependency manifests in the diff                 none changed anywhere
+  auth/crypto/pay path classification                                    money-path files all INERT and no
+                                                                         auth/crypto path changed anywhere
+  PII path        path classification                                    same, PII patterns
+  cardholder      path classification                                    same, cardholder patterns
+
+INERT is a closed, positive list: `src/test/`, `src/testFixtures/`, `src/integrationTest/`,
+`e2e/`, `docs/`, and `*.md` files. Everything else under a money-path service — src/main,
+application.yaml, a migration, openapi.yaml, a Dockerfile, build.gradle.kts, and any path
+this list does not name — is UNKNOWN, and every judgement item stays human (fail closed):
+in a money-path service, production code IS payment code. A box the classifier does not
+recognise stays required too. The gate writes its evidence for each auto-answered item to
+the job log and $GITHUB_STEP_SUMMARY, so the answer is reviewable, not silent.
+
 Usage:  check-security-checklist.py --body-file <file> [--base origin/main]
         check-security-checklist.py --self-test
 """
@@ -72,6 +95,85 @@ def is_release_derived(path: str) -> bool:
     """True for a file release-please generates, which carries no code and no attack surface."""
     return path.rsplit("/", 1)[-1] in RELEASE_DERIVED
 
+
+# ── mechanical classification ────────────────────────────────────────────────────────────────
+# Positive list of paths that carry no runtime behaviour. Anything not matched is UNKNOWN.
+INERT_SEGMENTS = ("/src/test/", "/src/testFixtures/", "/src/integrationTest/", "/e2e/", "/docs/")
+DEP_MANIFEST = re.compile(
+    r"(^|/)(build\.gradle(\.kts)?|settings\.gradle(\.kts)?|libs\.versions\.toml|"
+    r"verification-metadata\.xml|package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|"
+    r"requirements[^/]*\.txt|pyproject\.toml|go\.(mod|sum)|Dockerfile[^/]*)$")
+SUPPRESSION = re.compile(r"@Suppress\b|@SuppressWarnings\b|@file:Suppress\b|\bas\s+Any\b")
+AUTH_CRYPTO = re.compile(
+    r"(/(security|crypto|auth|authz|authn|oidc|keycloak|sca|signing|kms|hsm|tls)/)|"
+    r"(auth|crypt|cipher|jwt|token|signer|signature|keystore|password|secret|hsm|kms|tls|mtls)"
+    r"[^/]*$|\.rego$|realm[^/]*\.json$", re.I)
+PII = re.compile(
+    r"(pii|gdpr|personal|kyc|customer|party|consent|identity|onboarding|contact|address|"
+    r"email|phone|birth|/pid)", re.I)
+CARDHOLDER = re.compile(r"(card|pci|cardholder|\bpan\b|cvv|emv|tokeni[sz])", re.I)
+
+# The six template boxes, recognised by stable phrases. A box matching none is UNKNOWN → human.
+ITEMS = (
+    ("secrets", re.compile(r"secrets", re.I)),
+    ("suppressions", re.compile(r"Suppress|as Any", re.I)),
+    ("dependency", re.compile(r"third-party dependency", re.I)),
+    ("auth", re.compile(r"Auth\s*/\s*crypto", re.I)),
+    ("pii", re.compile(r"PII path", re.I)),
+    ("cardholder", re.compile(r"Cardholder", re.I)),
+)
+
+
+def is_inert(path: str) -> bool:
+    p = "/" + path
+    return path.endswith(".md") or any(seg in p for seg in INERT_SEGMENTS)
+
+
+def item_of(text: str) -> str | None:
+    for key, rx in ITEMS:
+        if rx.search(text):
+            return key
+    return None
+
+
+def added_lines(base: str) -> list[tuple[str, str]]:
+    out = subprocess.run(["git", "diff", "-U0", f"{base}...HEAD"],
+                         capture_output=True, text=True, check=True).stdout
+    cur, res = "", []
+    for ln in out.splitlines():
+        if ln.startswith("+++ "):
+            cur = ln[6:] if ln.startswith("+++ b/") else ""
+        elif ln.startswith("+") and not ln.startswith("+++"):
+            res.append((cur, ln[1:]))
+    return res
+
+
+def decide(files: list[str], touched: list[str], added: list[tuple[str, str]]) -> dict[str, str | None]:
+    """item -> evidence string when the diff answers it (auto-pass), or None when a human must.
+    The None branches are the default; an item is auto-answered only by positive evidence."""
+    unknown = [f for f in touched if not is_inert(f)]
+    code = [f for f in files if not is_inert(f)]
+    ans: dict[str, str | None] = {k: None for k, _ in ITEMS}
+    inert_note = (f"all {len(touched)} money-path file(s) are tests/docs "
+                  f"(src/test, e2e, docs, *.md): " + ", ".join(sorted(touched)[:8])
+                  + (" …" if len(touched) > 8 else ""))
+    if not unknown:
+        ans["secrets"] = (inert_note + "; no production code/config/log statement changed on the "
+                          "money path, and secrets across the whole diff are scanned by the gitleaks gate")
+    sup = [f"{f}: {t.strip()[:80]}" for f, t in added if SUPPRESSION.search(t)]
+    if not sup:
+        ans["suppressions"] = (f"no added line in the diff ({len(added)} added) contains "
+                               "@Suppress, @SuppressWarnings or `as Any`")
+    deps = [f for f in files if DEP_MANIFEST.search(f)]
+    if not deps:
+        ans["dependency"] = ("no dependency manifest changed (build.gradle*, libs.versions.toml, "
+                             "verification-metadata.xml, package*.json, lockfiles, Dockerfile)")
+    for key, rx, what in (("auth", AUTH_CRYPTO, "auth/crypto"), ("pii", PII, "PII"),
+                          ("cardholder", CARDHOLDER, "cardholder-data")):
+        hits = [f for f in code if rx.search(f)]
+        if not unknown and not hits:
+            ans[key] = (inert_note + f"; no non-test file anywhere in the diff matches a {what} path pattern")
+    return ans
 
 
 def money_path_dirs(root: Path) -> list[str]:
@@ -137,37 +239,80 @@ def run(root: Path, body: str, base: str, enforce: bool,
     print(f"security-checklist: {len(touched)} money-path file(s) touched "
           f"({', '.join(sorted({t.split('/')[0] for t in touched}))})")
 
+    answers = decide(files, touched, added_lines(base))
+    auto = {k: v for k, v in answers.items() if v is not None}
+    human = [k for k, v in answers.items() if v is None]
+    summary = ["### security-checklist-money-path", ""]
+    for k, ev in auto.items():
+        print(f"security-checklist: [auto] {k}: {ev}")
+        summary.append(f"- **{k}** answered by the diff: {ev}")
+    if not human:
+        print("security-checklist: every checklist item is mechanically answered by the diff "
+              "— no human tick required")
+        summary.append("\nNo item needs a human for this diff.")
+        _write_summary(summary)
+        return 0
+
     if live_body is not None:
         current = live_body()
         if current is not None:
             body = current
     res = unticked(body)
+    why = {
+        "secrets": "money-path production code/config changed — only a human can say no PII reaches logs/config",
+        "suppressions": "the diff ADDS a suppression or `as Any` — state the justification in the PR",
+        "dependency": "a dependency/build manifest changed — attach the dependency review",
+        "auth": "non-test money-path code or an auth/crypto path changed — decide on `security-review-required`",
+        "pii": "non-test money-path code or a PII-pattern path changed — decide on `gdpr-review-required`",
+        "cardholder": "non-test money-path code or a cardholder-pattern path changed — decide on `pci-review-required`",
+    }
+    need_lines = [f"  - {k}: {why[k]}" for k in human]
+    summary += ["", "Items that need a human for this diff:"] + [ln.strip() for ln in need_lines]
     if res is None:
-        print("::error::PR touches money-path code but the body has no '## Security checklist' "
-              "section — restore it from the template and tick every box (or state why in the PR).")
-        # Name the remediation, including the part that used to make it fail silently. A PR opened
-        # with `gh pr create --body-file` NEVER carries the template (GitHub applies it only when no
-        # body is supplied), and CLAUDE.md mandates that flag — so for an agent-opened PR this error
-        # is the normal path, not an oversight, and the fix is two steps whose ORDER used to matter.
-        # Since #8940 the gate reads the LIVE body, so editing the description and re-running is
-        # enough; before that the gate saw `github.event.pull_request.body`, frozen at the last
-        # synchronize, and an edit-then-rerun reproduced the identical failure with no signal why
-        # (#8757). Saying it here is the difference between a 30-second fix and a hunt.
+        print("::error::PR touches money-path code and these Security checklist items need a human "
+              "(the others were answered from the diff), but the body has no '## Security checklist' section:")
+        print("\n".join(need_lines))
         print("::notice::How to fix: copy the '## Security checklist' block from "
-              ".github/PULL_REQUEST_TEMPLATE.md into the PR body, answer each line, then RE-RUN "
+              ".github/PULL_REQUEST_TEMPLATE.md into the PR body (or run "
+              ".github/scripts/append-security-checklist.py), tick the items listed above, then RE-RUN "
               "this check — this gate reads the live PR body (#8940), so no empty commit is needed. "
               "A PR created with `gh pr create --body-file` never gets the template automatically.")
+        _write_summary(summary)
         return 1 if enforce else 0
     _, missing = res
-    if missing:
-        print(f"::error::PR touches money-path code and the Security checklist has "
-              f"{len(missing)} unticked box(es):")
-        for t in missing:
-            print(f"  - [ ] {t}")
-        print("Tick each box once true, or state the exception in the PR body.")
+    required = [t for t in missing if item_of(t) is None or item_of(t) in human]
+    waived = [t for t in missing if t not in required]
+    for t in waived:
+        print(f"security-checklist: unticked but answered by the diff: [{item_of(t)}] {t}")
+    if required:
+        print(f"::error::PR touches money-path code and {len(required)} Security checklist box(es) "
+              f"need a human answer for THIS diff and are unticked:")
+        for t in required:
+            k = item_of(t)
+            print(f"  - [ ] {t}\n        why a human: {why.get(k, 'unrecognised checklist line — fail closed')}")
+        print("Tick each once true (and apply the review label it names), or state the exception in the PR body.")
+        _write_summary(summary)
         return 1 if enforce else 0
-    print("security-checklist: every Security checklist box ticked")
+    print("security-checklist: every human-judgement box ticked")
+    _write_summary(summary)
     return 0
+
+
+def unknown_box_required(section: str) -> bool:
+    """An unticked box the classifier cannot map is always required (used by the self-test)."""
+    r = unticked(section)
+    return bool(r and any(item_of(t) is None for t in r[1]))
+
+
+def _write_summary(lines: list[str]) -> None:
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 def self_test() -> int:
@@ -203,7 +348,7 @@ def self_test() -> int:
         money = ["openbank-ledger-service"]
     svc = sorted(money)[0]
 
-    def fixture(paths: list[str], body: str,
+    def fixture(paths: list[str] | dict[str, str], body: str,
                 live_body: Callable[[], str | None] | None = None) -> int:
         with _tf.TemporaryDirectory() as td:
             root = Path(td)
@@ -216,10 +361,11 @@ def self_test() -> int:
                 _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env)
             git("init", "-q", "-b", "base")
             git("add", "-A"); git("commit", "-q", "-m", "base")
-            for rel in paths:
+            items = paths.items() if isinstance(paths, dict) else ((p, "x\n") for p in paths)
+            for rel, content in items:
                 f = root / rel
                 f.parent.mkdir(parents=True, exist_ok=True)
-                f.write_text("x\n", encoding="utf-8")
+                f.write_text(content, encoding="utf-8")
             git("checkout", "-q", "-b", "head")
             git("add", "-A"); git("commit", "-q", "-m", "head")
             cwd = __import__("os").getcwd()
@@ -258,6 +404,51 @@ def self_test() -> int:
     rc = fixture([f"{svc}/docs/CHANGELOG.md.bak", f"{svc}/src/main/kotlin/Money.kt"], no_checklist)
     if rc == 0:
         print("self-test FAIL: a near-miss filename was treated as release-derived"); bad += 1
+
+
+    # ── mechanically decidable items (auto-answer) — required cases (a)–(d) ────────────────────
+    test_only = [f"{svc}/src/test/kotlin/MoneyTest.kt", f"{svc}/docs/notes.md", f"{svc}/CLAUDE.md"]
+    no_api = lambda: (_ for _ in ()).throw(AssertionError("unneeded API read"))
+    # (a) test/docs-only money-path PR, no checklist at all → passes, and never reads the live body.
+    if fixture(test_only, no_checklist, live_body=no_api) != 0:
+        print("self-test FAIL (a): a test/docs-only money-path PR still demanded ticks"); bad += 1
+    # (b) auth/crypto: a money-path signer, and — the case the path pattern alone decides — a
+    #     non-money-path security file alongside money-path tests. Both must fail without ticks.
+    if fixture(test_only + [f"{svc}/src/main/kotlin/security/TokenSigner.kt"], no_checklist) == 0:
+        print("self-test FAIL (b): money-path auth/crypto file passed without a tick"); bad += 1
+    auth_elsewhere = test_only + ["openbank-libs-runtime/src/main/kotlin/com/openbank/libs/security/CryptoBox.kt"]
+    if fixture(auth_elsewhere, no_checklist) == 0:
+        print("self-test FAIL (b2): an auth/crypto path outside the money path was not classified"); bad += 1
+    # …and ticking every box EXCEPT auth must still fail: the item is required, not the section.
+    only_auth_unticked = "\n".join(
+        ln if "Auth / crypto" in ln else ln.replace("- [ ]", "- [x]") for ln in tpl.splitlines())
+    if fixture(auth_elsewhere, only_auth_unticked) == 0:
+        print("self-test FAIL (b3): auth item unticked yet the gate passed"); bad += 1
+    if fixture(auth_elsewhere, ticked) != 0:
+        print("self-test FAIL (b4): fully ticked auth PR did not pass"); bad += 1
+    # (c) a dependency manifest outside the money path still makes the dependency item human.
+    if fixture(test_only + ["gradle/libs.versions.toml"], no_checklist) == 0:
+        print("self-test FAIL (c): a dependency change passed without a tick"); bad += 1
+    # (d) PII path.
+    if fixture(test_only + ["openbank-kyc-service/src/main/kotlin/CustomerAddress.kt"], no_checklist) == 0:
+        print("self-test FAIL (d): a PII path passed without a tick"); bad += 1
+    # (e) a test that ADDS a suppression makes that item human; ticking just it suffices.
+    sup = {f"{svc}/src/test/kotlin/MoneyTest.kt": '@Suppress("UNCHECKED_CAST")\nval x = y as Any\n'}
+    if fixture(sup, no_checklist) == 0:
+        print("self-test FAIL (e): an added @Suppress passed without a tick"); bad += 1
+    sup_ticked = "## Security checklist\n- [x] No new `@SuppressWarnings`, `as Any`, `@Suppress(\"...\")`\n"
+    if fixture(sup, sup_ticked) != 0:
+        print("self-test FAIL (e2): ticking the one human item did not pass"); bad += 1
+    # (f) an unrecognised checklist line stays required (fail closed on template drift).
+    odd = "## Security checklist\n- [ ] something new nobody classified\n"
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"], odd.replace("[ ]", "[x]") + "- [ ] Auth / crypto x\n") == 0:
+        print("self-test FAIL (f): unticked human item inside a partial section passed"); bad += 1
+    if unknown_box_required(odd) is False:
+        print("self-test FAIL (f2): an unrecognised box was treated as answerable"); bad += 1
+    # every real template box must map to a known item, or the waiver silently stops applying.
+    r_tpl = unticked(tpl)
+    if r_tpl is None or any(item_of(t) is None for t in r_tpl[1]):
+        print("self-test FAIL: a template checklist line maps to no classified item"); bad += 1
 
     print("security-checklist self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0

@@ -4348,6 +4348,10 @@ gates:
   # '## Security checklist' section with every box ticked — deleting the section is a
   # finding, same as leaving it blank, or the fix would be "delete the question".
   # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  # Items the DIFF decides (suppressions added, dependency manifests changed, and — when every
+  # money-path file is test/docs and no auth/crypto/PII/cardholder path changed — the judgement
+  # items) are answered by the gate with evidence in the step summary; only the rest need a tick.
+  # Anything unclassified (src/main, config, migrations, unknown paths) stays human: fail closed.
   - id: security-checklist-money-path
     name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
     group: security
