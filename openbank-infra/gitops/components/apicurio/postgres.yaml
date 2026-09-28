@@ -50,7 +50,7 @@ spec:
   # from. Same tag (18.1) as before, only the registry changes; verified this ref resolves
   # via the pull-through cache before this PR (previously only 16.14 had ever been pulled
   # through). Non-money-path, single-instance, low-traffic DB — safe rollout candidate.
-  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 1Gi
