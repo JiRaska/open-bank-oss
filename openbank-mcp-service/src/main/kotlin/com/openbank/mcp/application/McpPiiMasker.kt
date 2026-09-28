@@ -33,6 +33,15 @@ import jakarta.enterprise.context.ApplicationScoped
  * Masking is unconditional: there is no config toggle, because the only charter this service acts
  * under says `masked` and a switch that can turn a declared control off is how the declaration
  * became fiction in the first place.
+ *
+ * **Audited against `com.openbank.libs.security.PiiMask` (#11027, fleet PII-masking adoption
+ * sweep) and kept, not migrated.** This is a JSON-tree masker keyed by field name and value shape
+ * (IBAN pattern, UUID pass-through, a free-text/name/contact `REDACTED_FIELDS` set), not a
+ * string-in/string-out masker for one PII type — there is no single `PiiMask` strategy it could
+ * delegate a whole method to. Its IBAN tail format (`****`-prefixed, fixed regardless of input
+ * length) also differs from `PiiMask.iban`'s length-proportional `*` run, and its full-redact
+ * constant (`***`) differs from `PiiMask.full`'s length-preserving one. Adopting either would
+ * change what an LLM tool response looks like for no compliance benefit.
  */
 @ApplicationScoped
 class McpPiiMasker(private val mapper: ObjectMapper) {

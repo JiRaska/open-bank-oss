@@ -81,6 +81,14 @@ resource "kubectl_manifest" "karpenter_crd" {
   }
 }
 
+# Authenticated pull of the Karpenter chart from ECR Public. Anonymous pulls are rate
+# limited per source IP and shared GitHub-hosted runners hit it: plan and apply both failed
+# with "Error locating chart ... 429: toomanyrequests: Data limit exceeded" on 2026-09-28.
+# The token is minted in us-east-1 only (ECR Public's control plane), whatever region we run.
+data "aws_ecrpublic_authorization_token" "karpenter_chart" {
+  provider = aws.us_east_1
+}
+
 resource "helm_release" "karpenter" {
   depends_on = [kubectl_manifest.karpenter_crd]
 
@@ -91,11 +99,13 @@ resource "helm_release" "karpenter" {
     }
   }
 
-  name       = "karpenter"
-  namespace  = "kube-system"
-  repository = "oci://public.ecr.aws/karpenter"
-  chart      = "karpenter"
-  version    = var.karpenter_version
+  name                = "karpenter"
+  namespace           = "kube-system"
+  repository          = "oci://public.ecr.aws/karpenter"
+  repository_username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
+  repository_password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
+  chart               = "karpenter"
+  version             = var.karpenter_version
 
   set = [
     # Single replica for sandbox FinOps; prod should run 2 for HA.
