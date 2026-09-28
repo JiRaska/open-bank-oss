@@ -32,7 +32,7 @@ spec:
         host: "*"
 ---
 # ExternalSecret: tpp-registry-service keystore projected from messaging → tpp-registry.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -53,7 +53,7 @@ spec:
         key: tpp-registry-service
 ---
 # ExternalSecret: shared cluster-CA truststore projected from messaging → tpp-registry.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

@@ -60,6 +60,8 @@ data class CurrencyCapitalDto(
     val ownFunds: OwnFundsDto?,
 )
 
+data class FxRateDto(val currency: String, val rate: BigDecimal, val fixingDate: String, val source: String)
+
 data class CapitalRatioDto(
     val ratio: BigDecimal,
     val minimum: BigDecimal,
@@ -101,9 +103,13 @@ data class CapitalResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyCapitalDto>,
-    /** Present only for a single-currency book. */
+    /** The book in CZK at the ČNB fixing for asOf; null (with [totalNotStated]) when a needed fixing is missing. */
     val total: CurrencyCapitalDto?,
-    /** min-total-capital-ratio × total RWA; present only with [total]. */
+    /** Every rate [total] was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateDto>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
+    /** min-total-capital-ratio × total RWA (CZK); present only with [total]. */
     val ownFundsRequirement: BigDecimal?,
     val ratios: CapitalRatiosDto?,
     val ratiosNotComputable: String?,
@@ -164,7 +170,9 @@ fun CapitalAnalysis.toResponse(): CapitalResponse {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         currencies = perCurrency,
-        total = result.totalCurrency?.let { t -> perCurrency.single { it.currency == t } },
+        total = result.total?.toDto(),
+        fxRates = result.fxRates.map { FxRateDto(it.currency, it.rate, it.fixingDate.toString(), it.source) },
+        totalNotStated = result.totalNotStated,
         ownFundsRequirement = result.ownFundsRequirement?.cash(),
         ratios = result.ratios?.let { CapitalRatiosDto(it.cet1.toDto(), it.tier1.toDto(), it.total.toDto()) },
         ratiosNotComputable = result.ratiosNotComputable,

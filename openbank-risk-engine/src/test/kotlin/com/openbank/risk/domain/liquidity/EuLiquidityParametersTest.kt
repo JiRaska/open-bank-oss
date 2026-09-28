@@ -59,7 +59,7 @@ class EuLiquidityParametersTest {
     fun `the EU set is the default, identified, versioned and cites EU law`() {
         val default = LiquidityTestParameters.shipped()
         assertThat(default.id).isEqualTo("eu-2015-61-crr2")
-        assertThat(default.version).isEqualTo("1")
+        assertThat(default.version).isEqualTo("2")
         assertThat(default.regime).isEqualTo(LiquidityRegime.EU)
         assertThat(default.source).contains("2015/61").contains("575/2013")
         assertThat(LiquidityFactor.entries.map { default.citation(it) })
@@ -109,6 +109,21 @@ class EuLiquidityParametersTest {
     fun `2015-61 Art 22 - other liabilities 100 percent, paragraph unverified`() {
         assertFactor(LCR_OTHER_CONTRACTUAL_OUTFLOW, "1.00", "Art. 22(1)")
         assertThat(eu.citation(LCR_OTHER_CONTRACTUAL_OUTFLOW)).contains("UNVERIFIED")
+    }
+
+    @Test
+    fun `2015-61 Art 28(3)(a) - secured funding with a central bank 0 percent outflow`() =
+        assertFactor(LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW, "0", "Art. 28(3)(a)")
+
+    @Test
+    fun `CRR Art 428k - central-bank liabilities under 6 months 0 percent ASF, paragraph unverified`() {
+        assertFactor(LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M, "0", "Art. 428k")
+        assertThat(eu.citation(LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M)).contains("UNVERIFIED")
+    }
+
+    @Test
+    fun `2320 CNB lombard is central-bank secured funding in the EU set`() {
+        assertThat(eu.classification.glAccounts["2320"]).isEqualTo(GlClass.CENTRAL_BANK_SECURED_FUNDING)
     }
 
     @Test

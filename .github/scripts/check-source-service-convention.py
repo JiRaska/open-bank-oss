@@ -188,6 +188,16 @@ UNRESOLVED_ALLOWED = {
         "Not whitelisted by shape: `<val>.first` is far too generic to be a safe pass-through "
         "pattern, so it is pinned to this module and this expression instead."
     ),
+    ("openbank-libs-domain", "producer"): (
+        "AuditChain.link(event, producer, head) (ADR-0323) is a framework-free shared-library "
+        "function, not a service — it has no module identity of its own to stamp. `producer` is "
+        "the caller's own module name, supplied as a parameter by each service's audit publisher "
+        "(e.g. HashLinkedOutboxAuditEventPublisher in openbank-libs-runtime); the value this gate "
+        "cares about is decided at THAT call site, which this module cannot see. Not whitelisted "
+        "by shape: a bare `producer` parameter name is too generic a pattern to admit fleet-wide "
+        "without also admitting a genuine same-named write-site defect elsewhere, so it is pinned "
+        "to this module and this expression instead."
+    ),
 }
 
 

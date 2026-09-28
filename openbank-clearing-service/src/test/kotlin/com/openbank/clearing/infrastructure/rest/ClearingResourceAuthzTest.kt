@@ -4,8 +4,9 @@
 
 package com.openbank.clearing.infrastructure.rest
 
-import com.openbank.clearing.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -25,7 +26,10 @@ import java.util.UUID
  * uses) — the endpoints under test are DB-backed, not pure in-memory.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_clearing_it")],
+)
 class ClearingResourceAuthzTest {
 
     @Test

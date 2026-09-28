@@ -49,6 +49,8 @@ data class AmlCase(
     val decidedAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Request fingerprint the case was created under (#10916); `null` for legacy rows and non-HTTP creates. */
+    val requestHash: String? = null,
 ) {
     fun transitionTo(
         targetStatus: AmlCaseStatus,
