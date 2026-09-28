@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pricing-service
     app.kubernetes.io/part-of: pricing
   annotations:
-    openbank.tech/policy-checksum: "04588733afe5ad6d"
+    openbank.tech/policy-checksum: "9ce787359b3b5bc3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -580,7 +580,7 @@ data:
     	}
     }
   pricing_rest_ext.rego: |
-    # SPDX-License-Identifier: AGPL-3.0-only
+    # SPDX-License-Identifier: Apache-2.0
     # Pricing REST authorization extension. It is mounted with OpenBank's shared rest.rego, which owns
     # the final deny-by-default decision object at data.openbank.rest.allow.
     package openbank.rest

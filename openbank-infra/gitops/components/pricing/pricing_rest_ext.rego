@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: Apache-2.0
 # Pricing REST authorization extension. It is mounted with OpenBank's shared rest.rego, which owns
 # the final deny-by-default decision object at data.openbank.rest.allow.
 package openbank.rest
