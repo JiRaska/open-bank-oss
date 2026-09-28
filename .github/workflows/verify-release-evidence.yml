@@ -104,7 +104,7 @@ jobs:
                   -o "$aname" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
               done
           echo "Downloaded:"; ls -la
-          ls *.sig >/dev/null 2>&1 || { echo "::error::no assets found on release ${TAG}"; exit 1; }
+          compgen -G '*.sig' >/dev/null || { echo "::error::no assets found on release ${TAG}"; exit 1; }
 
       - name: Verify signatures (cosign + KMS) and manifest digests
         run: |
@@ -147,27 +147,11 @@ jobs:
             fi
           done
 
-          # Cross-check the manifest's recorded digests against the actual files.
-          for ev in *.evidence.json; do
-            [ -f "$ev" ] || continue
-            python3 - "$ev" <<'PY' || rc=1
-          import json, sys, hashlib, os
-          m = json.load(open(sys.argv[1]))
-          def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
-          ok = True
-          for key in ("sbom", "slsa_provenance", "vex"):
-              ref = m.get(key) or {}
-              f, want = ref.get("file"), ref.get("sha256")
-              if not f or not want:
-                  continue
-              if not os.path.exists(f):
-                  print(f"::error::{key} file {f} referenced by manifest is missing"); ok = False; continue
-              got = sha(f)
-              if got != want:
-                  print(f"::error::{key} digest mismatch for {f}: manifest {want} != actual {got}"); ok = False
-              else:
-                  print(f"OK digest: {f}")
-          sys.exit(0 if ok else 1)
-          PY
-          done
-          [ "$rc" -eq 0 ] && echo "✅ evidence bundle for $TAG verified" || { echo "❌ verification failed"; exit 1; }
+          # A missing manifest or omitted digest is a failed audit, not a clean no-op.
+          python3 ../.github/scripts/verify-release-evidence-manifest.py "$TAG" || rc=1
+          if [ "$rc" -eq 0 ]; then
+            echo "✅ evidence bundle for $TAG verified"
+          else
+            echo "❌ verification failed"
+            exit 1
+          fi

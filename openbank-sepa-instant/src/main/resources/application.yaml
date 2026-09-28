@@ -155,6 +155,11 @@ mp:
     devservices:
       enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   bank:
     # OpenBank's own BIC — used as the debtor agent (DbtrAgt) in the pacs.008 (ADR-0104 D4).
     bic: ${OPENBANK_BIC:OPBKCZ22}

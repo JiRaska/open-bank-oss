@@ -4,9 +4,10 @@
 
 package com.openbank.domestic.integration
 
-import com.openbank.domestic.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
@@ -27,7 +28,10 @@ import javax.sql.DataSource
 /** Real Postgres/HTTP proof that the DB row—not Redis—is create-payment replay authority. */
 @QuarkusTest
 @QuarkusTestResource(DomesticPaymentBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_domestic_payment_it")],
+)
 class DomesticPaymentIdempotencyIT {
     @Inject
     lateinit var dataSource: DataSource

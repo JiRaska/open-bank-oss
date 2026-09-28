@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/communication-service-v0.2.0...communication-service-v0.2.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** resolve checker identity after the approval null-body check ([#11047](https://github.com/JiRaska/open-bank-oss/issues/11047)) ([a2840ad](https://github.com/JiRaska/open-bank-oss/commit/a2840ad8c1f5e7c6083e66468f8e3b365240a38f))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/communication-service-v0.1.0...communication-service-v0.2.0) (2026-09-13)
 
 

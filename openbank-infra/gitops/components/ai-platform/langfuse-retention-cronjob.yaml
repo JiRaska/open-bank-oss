@@ -2,7 +2,7 @@
 #
 # WHY THIS EXISTS AS A HAND-ROLLED CRONJOB. Langfuse's UI-configurable "Data Retention" feature
 # requires the Self-Hosted Enterprise Edition — verified against upstream docs before building
-# this: the OSS self-host this cluster runs (docker.io/langfuse/langfuse:2.95.4, see langfuse.yaml)
+# this: the OSS self-host this cluster runs (docker.io/langfuse/langfuse:2.95.11, see langfuse.yaml)
 # stores data indefinitely with no retention control of its own. Buying a licence for one knob
 # would break ADR-0027's in-cluster-OSS posture; the alternative upstream itself documents for
 # self-hosters without EE is exactly this — periodic DELETE statements against the Postgres tables.
