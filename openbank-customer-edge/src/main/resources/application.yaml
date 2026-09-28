@@ -123,6 +123,11 @@ kafka:
   # The edge strips the /customer prefix and forwards to the matching service.
 # Customer edge upstream service endpoints + UpstreamClient singleton timeouts.
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   edge:
     account-service-url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
     balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}

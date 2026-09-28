@@ -40,8 +40,21 @@ import java.time.Clock
  * A service that DOES inject [IdempotencyStore] but has not configured Redis
  * (`quarkus.redis.hosts` / `quarkus-redis-client`) now fails at PRODUCER-CALL
  * time with a clear [IllegalStateException] instead of a build-time CDI error —
- * still a hard failure, just one that surfaces at boot instead of compile, which
- * is an acceptable trade for not breaking every Redis-less service's build.
+ * still a hard failure, but NOT at boot. This class, [IdempotencyStore] and every
+ * bean that injects it are `@ApplicationScoped`, which Quarkus/ArC instantiates
+ * lazily via a client proxy (same trap as the fleet's `@ApplicationScoped` +
+ * `init {}` footgun) — so [idempotencyStore] runs on the FIRST call that reaches
+ * a consuming bean, not at application startup. For a JAX-RS resource that
+ * consuming bean is itself proxied per-request, so in practice this surfaces on
+ * the first HTTP request that exercises the idempotency path, which can be long
+ * after the pod reports Ready. There is no consumer-agnostic way to force eager
+ * validation from this shared producer: an `@Observes StartupEvent` here would
+ * have to call [idempotencyStore] unconditionally, which reintroduces exactly
+ * the eager-Redis-dependency failure on every Redis-less service that the
+ * `Instance<>` parameter above exists to avoid. A service that wants a boot-time
+ * check must add its own eager `@Observes StartupEvent` (or `@Startup`) bean
+ * that injects [IdempotencyStore], deliberately, alongside the injection that
+ * needs it.
  *
  * Verified 2026-09-26 with this `Instance<>` form:
  * `:openbank-audit-service:quarkusBuild` and `:openbank-kyc-service:quarkusBuild`
