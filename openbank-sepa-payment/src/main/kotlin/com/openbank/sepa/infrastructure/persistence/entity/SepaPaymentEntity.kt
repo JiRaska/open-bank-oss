@@ -72,6 +72,10 @@ class SepaPaymentEntity : PanacheEntity() {
     @Column(name = "transaction_id")
     var transactionId: java.util.UUID? = null
 
+    /** #10916: request fingerprint the payment was created under; null for rows predating V12. */
+    @Column(name = "request_hash", length = 64)
+    var requestHash: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

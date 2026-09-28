@@ -6,7 +6,12 @@ variable "name" {
 variable "kubernetes_version" {
   description = "EKS control-plane Kubernetes version."
   type        = string
-  default     = "1.31"
+  # Deliberately no default. The version is governed in ONE place — the caller's
+  # envs/sandbox-substrate/variables.tf, which eks-version-lifecycle.json and
+  # check-version-lifecycle.py police (ADR-0054). A module default is a second,
+  # unpoliced copy: this one read "1.31" (past end of standard support) while the
+  # cluster ran 1.36, and any new caller that omitted the argument would have
+  # silently created a cluster on extended-support pricing. Required = explicit.
 }
 
 variable "private_subnet_ids" {
