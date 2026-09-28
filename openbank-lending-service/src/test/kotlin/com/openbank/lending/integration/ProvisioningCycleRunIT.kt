@@ -6,11 +6,12 @@ import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
 import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.infrastructure.servicing.ProvisioningCycleScheduler
-import com.openbank.lending.it.PostgresRedisTestResource
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
@@ -25,7 +26,10 @@ import java.time.ZoneOffset
 import javax.sql.DataSource
 
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class ProvisioningCycleRunIT {
     @Inject lateinit var runs: ProvisioningCycleRunRepository
 

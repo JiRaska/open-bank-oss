@@ -2,8 +2,9 @@
 package com.openbank.lending.integration
 
 import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import jakarta.inject.Inject
@@ -13,7 +14,10 @@ import java.util.UUID
 import javax.sql.DataSource
 
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class ProvisioningCoverageQueryIT {
     @Inject
     lateinit var loans: ProvisioningCoverageRepository
