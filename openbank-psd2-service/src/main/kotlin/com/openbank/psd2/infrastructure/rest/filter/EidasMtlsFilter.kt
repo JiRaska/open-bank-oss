@@ -9,6 +9,7 @@ import com.openbank.psd2.infrastructure.client.TppAuthorizationGuard
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.infrastructure.Infrastructure
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.Priorities
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException
@@ -41,7 +42,9 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
 
     private val log = Logger.getLogger(EidasMtlsFilter::class.java)
 
-    @ServerRequestFilter
+    // Must run before QsealSignatureFilter (AUTHORIZATION): restores the @Priority the
+    // ContainerRequestFilter carried before the conversion — a bare @ServerRequestFilter is USER.
+    @ServerRequestFilter(priority = Priorities.AUTHENTICATION)
     fun filter(ctx: ContainerRequestContext): Uni<Response?> {
         // RESTEasy Reactive's UriInfo.path carries a leading slash ("/v1/..."); normalise once so the
         // prefix checks below match either form (#10997 — without this the gate never ran).
