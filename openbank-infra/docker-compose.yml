@@ -229,7 +229,7 @@ services:
   # Kafka UI (development convenience)
   # ─────────────────────────────────────────────
   kafka-ui:
-    image: provectuslabs/kafka-ui:v0.7.2
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
     container_name: openbank-kafka-ui
     restart: unless-stopped
     environment:
