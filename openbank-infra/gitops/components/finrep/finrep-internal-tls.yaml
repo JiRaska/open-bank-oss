@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for finrep-service's east-west mTLS call to risk-engine's 8443
+# listener (client auth REQUIRED). ASVS V9.1 forbids a new plaintext inter-service edge, so the
+# COREP C 02.00 read never uses the legacy HTTP/8159 port. Same shape as risk-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: finrep-internal-tls
+  namespace: finrep
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: finrep-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: finrep-service.finrep.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.client
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
@@ -34,7 +35,10 @@ import java.util.concurrent.Executors
  * stub produced deterministic 'product does not exist' failures in AccountApiIT.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @QuarkusTestResource(ProductCatalogHostHeaderIT.CatalogStub::class)
 class ProductCatalogHostHeaderIT {
 

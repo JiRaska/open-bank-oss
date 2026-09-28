@@ -90,3 +90,16 @@ derived per request and never stored (ADR-0314 D6).
   `GET /api/v1/risk/snapshots/{id}/cash-flows` (base `operator-read-any`). Flyway V2 adds
   `curve_set`, `curve_set_quote`, `curve_set_pillar`. Added the curve-tampering and
   unnamed-assumption rows and invariants 4–5.
+
+- **2026-09-26** — **New inbound listener: east-west mTLS on 8443 (ADR-0313 D6).** risk-engine gains
+  a parallel private-CA TLS listener on 8443 (server certificate `risk-engine-internal-server-tls`,
+  issued by the `openbank-ca` ClusterIssuer for `risk-engine.risk.svc[.cluster.local]`; TLSv1.3),
+  exposed on the `risk-engine` Service. **Who may connect:** `quarkus.http.ssl.client-auth: required`
+  is baked into the image under `%prod` (build-time property), so a handshake completes only for a
+  caller presenting a client certificate chaining to the same private CA; the derived NetworkPolicy
+  admits 8443 only from namespaces already admitted to 8159 (same namespace, finrep, admin-ui). A
+  client certificate authenticates the transport only — every request still needs a bearer token and
+  passes the unchanged OPA/REST authorization. First caller: finrep-service (COREP C 02.00, read-only,
+  client certificate `finrep-internal-tls`). Plain HTTP 8159 stays open (`insecure-requests: enabled`)
+  for existing callers and probes. **STRIDE-S/I:** additive — a strictly stronger path to the same
+  surface. Rollback: revert the commit; 8159 is untouched.

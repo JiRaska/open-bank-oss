@@ -40,7 +40,7 @@ spec:
 # Project the ledger-service keystore from `messaging` into `ledger` namespace.
 # The cluster-CA truststore is shared; a separate ExternalSecret in the same namespace
 # (kafka-cluster-ca-truststore) is created once per namespace — see below.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -61,7 +61,7 @@ spec:
         key: ledger-service
 ---
 # Shared cluster-CA truststore for all Kafka clients in `ledger`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

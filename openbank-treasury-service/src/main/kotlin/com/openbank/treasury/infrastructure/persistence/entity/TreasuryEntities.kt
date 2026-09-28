@@ -105,6 +105,21 @@ class DealEntity : PanacheEntity() {
     @Column(name = "rationale", columnDefinition = "TEXT")
     var rationale: String? = null
 
+    @Column(name = "limit_override_by")
+    var limitOverrideBy: String? = null
+
+    @Column(name = "limit_override_reason", columnDefinition = "TEXT")
+    var limitOverrideReason: String? = null
+
+    @Column(name = "limit_override_at")
+    var limitOverrideAt: Instant? = null
+
+    @Column(name = "limit_override_exposure")
+    var limitOverrideExposure: BigDecimal? = null
+
+    @Column(name = "limit_override_limit")
+    var limitOverrideLimit: BigDecimal? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 
