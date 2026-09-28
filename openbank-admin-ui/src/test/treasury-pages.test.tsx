@@ -194,6 +194,8 @@ describe('read pages', () => {
     router = url => (url.includes('/counterparties') ? json(COUNTERPARTIES) : json([deal('d-1', 'dana.dealer')]))
     await renderPage(<TreasuryDealsPage />)
     await screen.findByText('dana.dealer')
+    expect(screen.getByRole('complementary', { name: /Nejdřív stav|Check the state/ })).toBeTruthy()
+    expect(screen.getByLabelText(/Přehled obchodů|Deals overview/).textContent).toMatch(/1/)
     await act(async () => { fireEvent.change(screen.getByLabelText(/Filter by state|Filtr podle stavu/), { target: { value: 'BOOKED' } }) })
     expect(calls.map(c => c.url)).toContain('/api/svc/treasury-service/api/v1/treasury/deals?state=BOOKED')
   })

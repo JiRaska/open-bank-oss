@@ -17,6 +17,8 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { RefreshCw, TrendingUp as CurveIcon } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import workspace from '@/components/brand/FinancialWorkspace.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
@@ -111,6 +113,9 @@ function CurveSets() {
           </button>
         }
       />
+      <ExplorerGuide compact mascot="lioness" title={t('Křivka má vždy známý původ', 'Every curve needs a known source')}>
+        {t('Před nahráním zkontrolujte datum, zdroj kotací a označení syntetických či produkčních dat. Risk-engine z těchto vstupů počítá další projekce.', 'Before upload, check the date, quote source and synthetic or production label. Risk-engine uses these inputs for later projections.')}
+      </ExplorerGuide>
 
       {canUpload && (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -175,8 +180,8 @@ function CurveSets() {
       ) : sets === null ? null : sets.length === 0 ? (
         <DataUnavailable kind="no_data" service="risk-engine" feature={t('sady výnosových křivek', 'curve sets')} lang={language} dense />
       ) : (
-        <div className="card" style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <div className={`card ${workspace.tableRegion}`}>
+          <table className={`table ${workspace.table}`}>
             <thead>
               <tr>
                 <th scope="col" style={{ textAlign: 'left' }}>{t('K datu', 'As of')}</th>

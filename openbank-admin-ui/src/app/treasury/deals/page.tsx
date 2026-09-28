@@ -13,6 +13,8 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { FilePlus, Landmark, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import workspace from '@/components/brand/FinancialWorkspace.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { getJson, treasuryUrl } from '@/components/treasury/api'
@@ -64,6 +66,7 @@ function DealBlotter() {
   useEffect(() => { void load() }, [load])
 
   const byId = useMemo(() => new Map(counterparties.map(c => [c.counterpartyId, c])), [counterparties])
+  const awaitingApproval = deals?.filter(d => d.state === 'PENDING_APPROVAL').length ?? 0
 
   return (
     <div>
@@ -85,7 +88,17 @@ function DealBlotter() {
         }
       />
 
-      <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
+      <ExplorerGuide compact mascot="lion" title={t('Nejdřív stav, potom obchod', 'Check the state before the deal')}>
+        {t('Návrh obchodu ještě není zaúčtování. Po kontrole protistrany a limitu jej musí potvrdit druhý oprávněný člověk.', 'A draft is not a booking. After checking the counterparty and limit, a second authorised person must approve it.')}
+      </ExplorerGuide>
+
+      <div className={workspace.summary} aria-label={t('Přehled obchodů', 'Deals overview')}>
+        <div className={workspace.tile}><span className={workspace.label}>{t('Zobrazené obchody', 'Visible deals')}</span><span className={workspace.value}>{deals === null ? '—' : deals.length.toLocaleString(locale)}</span></div>
+        <div className={workspace.tile}><span className={workspace.label}>{t('Čeká na schválení', 'Awaiting approval')}</span><span className={workspace.value}>{deals === null ? '—' : awaitingApproval.toLocaleString(locale)}</span></div>
+        <div className={workspace.tile}><span className={workspace.label}>{t('Schvalovací pravidlo', 'Approval rule')}</span><span className={workspace.value}>{t('Dva lidé', 'Two people')}</span></div>
+      </div>
+
+      <div className={`card ${workspace.filter}`}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
           {t('Stav', 'State')}
           <select className="input" value={stateFilter} onChange={e => setStateFilter(e.target.value as DealState | '')} aria-label={t('Filtr podle stavu', 'Filter by state')}>
@@ -95,14 +108,14 @@ function DealBlotter() {
         </label>
       </div>
 
-      <div className="card" style={{ overflowX: 'auto' }}>
+      <div className={`card ${workspace.tableRegion}`}>
         {unavailable ? (
           <DataUnavailable kind={unavailable.kind} service="treasury-service" feature={t('obchody treasury', 'treasury deals')} lang={language} dense />
         ) : deals === null ? null : deals.length === 0 ? (
           <DataUnavailable kind="no_data" service="treasury-service" feature={t('obchody treasury', 'treasury deals')} lang={language} dense />
         ) : (
           <>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table className={`table ${workspace.table}`}>
               <thead>
                 <tr>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Produkt', 'Product')}</th>

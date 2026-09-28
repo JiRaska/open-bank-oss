@@ -117,6 +117,8 @@ describe('snapshots', () => {
     router = () => json({ runs: [{ id: 'run-1', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'UNTIED', positionCount: 3, mismatchCount: 1 }] })
     await renderPage(<SnapshotsPage />)
     await screen.findByText('2026-09-30')
+    expect(screen.getByRole('complementary', { name: /Rozvaha začíná|A balance sheet starts/ })).toBeTruthy()
+    expect(screen.getByLabelText(/Přehled snímků|Snapshot overview/).textContent).toMatch(/1/)
     expect(screen.getByText(/Synthetic data|Syntetická data/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Build snapshot|Sestavit snímek/ })).toBeNull()
     expect(calls[0].url).toBe('/api/svc/risk-engine/api/v1/risk/snapshots?limit=25')

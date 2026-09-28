@@ -18,6 +18,7 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { Inbox, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import workspace from '@/components/brand/FinancialWorkspace.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { dealActionUrl, getJson, postJson, treasuryUrl } from '@/components/treasury/api'
@@ -108,14 +109,14 @@ function ApprovalInbox() {
         </div>
       )}
 
-      <div className="card" style={{ overflowX: 'auto' }}>
+      <div className={`card ${workspace.tableRegion}`}>
         {unavailable ? (
           <DataUnavailable kind={unavailable.kind} service="treasury-service" feature={t('obchody ke schválení', 'deals awaiting approval')} lang={language} dense />
         ) : deals === null ? null : deals.length === 0 ? (
           <DataUnavailable kind="no_data" service="treasury-service" feature={t('obchody ke schválení', 'deals awaiting approval')} lang={language} dense />
         ) : (
           <>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table className={`table ${workspace.table}`}>
               <thead>
                 <tr>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Produkt', 'Product')}</th>

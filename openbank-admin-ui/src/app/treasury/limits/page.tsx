@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Gauge, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import workspace from '@/components/brand/FinancialWorkspace.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { getJson, treasuryUrl } from '@/components/treasury/api'
@@ -60,13 +61,13 @@ function LimitUtilisation() {
           </button>
         }
       />
-      <div className="card" style={{ overflowX: 'auto' }}>
+      <div className={`card ${workspace.tableRegion}`}>
         {unavailable ? (
           <DataUnavailable kind={unavailable.kind} service="treasury-service" feature={t('čerpání limitů', 'limit utilisation')} lang={language} dense />
         ) : rows === null ? null : rows.length === 0 ? (
           <DataUnavailable kind="no_data" service="treasury-service" feature={t('čerpání limitů', 'limit utilisation')} lang={language} dense />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table className={`table ${workspace.table}`}>
             <thead>
               <tr>
                 <th scope="col" style={{ textAlign: 'left' }}>{t('Protistrana', 'Counterparty')}</th>

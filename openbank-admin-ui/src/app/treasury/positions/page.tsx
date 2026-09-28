@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Wallet } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import workspace from '@/components/brand/FinancialWorkspace.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { getJson, treasuryUrl } from '@/components/treasury/api'
@@ -55,19 +57,22 @@ function DailyPosition() {
           </button>
         }
       />
+      <ExplorerGuide compact mascot="lion" title={t('Jedno datum, všechny měny', 'One date, every currency')}>
+        {t('Netto pozice ukazuje umístění, přijaté prostředky a depozita u ČNB společně. Záporné číslo si zaslouží bližší kontrolu, samo o sobě ale neznamená incident.', 'Net position combines placements, borrowings and ČNB deposits. A negative figure deserves a closer look, but is not itself an incident.')}
+      </ExplorerGuide>
       <div className="card" style={{ marginBottom: 16 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, maxWidth: 220 }}>
           {t('Ke dni', 'As of')}
           <input type="date" className="input" value={asOf} onChange={e => setAsOf(e.target.value)} aria-label={t('Ke dni', 'As of date')} />
         </label>
       </div>
-      <div className="card" style={{ overflowX: 'auto' }}>
+      <div className={`card ${workspace.tableRegion}`}>
         {unavailable ? (
           <DataUnavailable kind={unavailable.kind} service="treasury-service" feature={t('denní pozice', 'daily position')} lang={language} dense />
         ) : data === null ? null : data.positions.length === 0 ? (
           <DataUnavailable kind="no_data" service="treasury-service" feature={t('denní pozice', 'daily position')} lang={language} dense />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table className={`table ${workspace.table}`}>
             <caption style={{ textAlign: 'left', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
               {t(`Stav ke dni ${data.asOf}`, `Position as of ${data.asOf}`)}
             </caption>

@@ -16,6 +16,8 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { RefreshCw, Scale } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import workspace from '@/components/brand/FinancialWorkspace.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
@@ -85,6 +87,9 @@ function Snapshots() {
     })
   }
 
+  const tiedOut = runs?.filter(run => run.status === 'TIED_OUT').length ?? 0
+  const mismatches = runs?.reduce((sum, run) => sum + run.mismatchCount, 0) ?? 0
+
   return (
     <div>
       <PageHeader
@@ -97,6 +102,16 @@ function Snapshots() {
           </button>
         }
       />
+
+      <ExplorerGuide compact mascot="lioness" title={t('Rozvaha začíná důvěryhodnými daty', 'A balance sheet starts with trusted data')}>
+        {t('Nejdřív odsouhlaste pozice s hlavní knihou. Neodsouhlasený snímek nepoužívejte jako podklad pro další výpočty.', 'Tie positions out to the ledger first. Do not use an untied snapshot as input to further calculations.')}
+      </ExplorerGuide>
+
+      <div className={workspace.summary} aria-label={t('Přehled snímků', 'Snapshot overview')}>
+        <div className={workspace.tile}><span className={workspace.label}>{t('Poslední běhy', 'Recent runs')}</span><span className={workspace.value}>{runs === null ? '—' : runs.length.toLocaleString(locale)}</span></div>
+        <div className={workspace.tile}><span className={workspace.label}>{t('Odsouhlaseno', 'Tied out')}</span><span className={workspace.value}>{runs === null ? '—' : tiedOut.toLocaleString(locale)}</span></div>
+        <div className={workspace.tile}><span className={workspace.label}>{t('Zjištěné rozdíly', 'Mismatches found')}</span><span className={`${workspace.value} ${mismatches > 0 ? workspace.danger : ''}`}>{runs === null ? '—' : mismatches.toLocaleString(locale)}</span></div>
+      </div>
 
       {canCreate && (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -128,8 +143,8 @@ function Snapshots() {
       ) : runs === null ? null : runs.length === 0 ? (
         <DataUnavailable kind="no_data" service="risk-engine" feature={t('snímky rozvahy', 'balance-sheet snapshots')} lang={language} dense />
       ) : (
-        <div className="card" style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <div className={`card ${workspace.tableRegion}`}>
+          <table className={`table ${workspace.table}`}>
             <thead>
               <tr>
                 <th scope="col" style={{ textAlign: 'left' }}>{t('K datu', 'As of')}</th>
