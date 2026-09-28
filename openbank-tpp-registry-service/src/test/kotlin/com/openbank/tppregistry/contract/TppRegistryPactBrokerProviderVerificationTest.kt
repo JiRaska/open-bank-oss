@@ -87,6 +87,9 @@ class TppRegistryPactBrokerProviderVerificationTest {
         // No setup: nothing registers CZ-CNB-PACT-UNREGISTERED. Declared so the state is an
         // explicit part of the contract rather than a name pact-jvm passes over silently — an
         // unhandled state is not an error, which is how #468's missing states stayed invisible.
+        // This is the negative case the pact carries for this endpoint: the committed interaction
+        // "GET check an unregistered TPP — the fail-closed refusal" asserts a 403 (FORBIDDEN)
+        // response, replayed by this same @TestTemplate — not a second happy path.
     }
 
     @State("the TPP registry has an ACTIVE AISP with an unexpired QWAC")
