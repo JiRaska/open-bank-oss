@@ -15,6 +15,7 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import com.openbank.party.application.port.`in`.GrantMandateCommand
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
@@ -31,6 +32,7 @@ import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
@@ -90,7 +92,10 @@ import java.util.concurrent.TimeUnit
  * ClassGraph scan throws on the JDK 25 toolchain.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.party.it.PostgresRedpandaTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_KYC"])
 @Provider("openbank-party-service")
 @PactFolder("../pacts")

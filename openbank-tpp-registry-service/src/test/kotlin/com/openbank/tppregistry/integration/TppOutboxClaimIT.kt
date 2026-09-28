@@ -6,10 +6,11 @@ package com.openbank.tppregistry.integration
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.tpp.infrastructure.persistence.repository.TppOutboxRepositoryImpl
-import com.openbank.tppregistry.it.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -32,7 +33,10 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
+)
 class TppOutboxClaimIT {
 
     @Inject

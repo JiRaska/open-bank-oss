@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.6](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.5...psd2-service-v0.11.6) (2026-09-28)
+
+
+### Bug Fixes
+
+* **psd2:** offload eIDAS/QSEAL filter blocking work off the IO thread ([#11346](https://github.com/JiRaska/open-bank-oss/issues/11346)) ([dcbb251](https://github.com/JiRaska/open-bank-oss/commit/dcbb251f96b6007a592f5c1cd3c4fccfef3b12d6))
+
 ## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.4...psd2-service-v0.11.5) (2026-09-28)
 
 

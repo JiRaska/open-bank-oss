@@ -46,7 +46,7 @@ set -euo pipefail
 
 # Runtime-affecting shared modules → their declaration token in a consumer's build file.
 # openbank-client-product-catalog: the ADR-0319 generated client, compiled into its consumers.
-LIBS_MODULES=(openbank-libs-domain openbank-libs-runtime openbank-libs-temporal openbank-client-product-catalog openbank-libs-iso20022)
+LIBS_MODULES=(openbank-libs-domain openbank-libs-runtime openbank-libs-temporal openbank-client-product-catalog openbank-libs-lending openbank-libs-iso20022)
 # Paths that change how EVERYTHING is built; no declaration can express these.
 GLOBAL_RE='^(build-logic/|gradle/|gradlew|settings\.gradle\.kts|build\.gradle\.kts|openbank-libs/(src/main|build\.gradle\.kts|gradle/))'
 # A libs module matters when its compiled sources or its own build file move. Its docs do not

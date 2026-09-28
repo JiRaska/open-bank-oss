@@ -153,6 +153,9 @@ component_management:
     - component_id: libs-domain
       name: libs-domain
       flag_regexes: ["^openbank-libs-domain$"]
+    - component_id: libs-lending
+      name: libs-lending
+      flag_regexes: ["^openbank-libs-lending$"]
     - component_id: libs-iso20022
       name: libs-iso20022
       flag_regexes: ["^openbank-libs-iso20022$"]

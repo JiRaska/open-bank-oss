@@ -2953,6 +2953,32 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # #10997: RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash, so a
+  # prefix check written without one (`path.startsWith("v1/")`) is always false and the gate it
+  # guards never runs — fail-closed (every call the filter should have let through is instead
+  # rejected downstream), not a bypass, which is why nothing 5xx's and nothing alerts.
+  # `openbank-psd2-service`'s EidasMtlsFilter, QsealSignatureFilter and BespokeDeprecationFilter
+  # all shipped this way; a mock-based unit test cannot see it because the mock supplies the
+  # exact slash-less string the code expects. Ratchet, not a flat fail: the 3 files measured
+  # 2026-09-26 are baselined per file (count, so a second slash-less site in a baselined file
+  # still fails), and a healed entry is reported stale. #11008 (open) fixes all three; this gate
+  # is what stops a fourth from shipping the same way in the meantime. Advisory until #11008
+  # merges and the fleet has run clean against the tightened check for a full cycle.
+  - id: jaxrs-path-prefix-leading-slash
+    name: "JAX-RS path-prefix literal missing its leading slash (#10997, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 3 files / 6 sites, all in openbank-psd2-service, all covered by open PR #11008"
+    budget_seconds: 15   # ~1.2s locally; generous for a slower runner
+    rationale: "A slash-less UriInfo.path prefix check never matches under RESTEasy Reactive, so the gate it guards silently never runs; this stops a new occurrence while #11008 fixes the 3 known ones."
+    review_after: "2026-12-31"
+    min_subjects: 1000   # 2521 service src/main .kt files scanned 2026-09-26
+    selftest: python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-jaxrs-path-prefix-leading-slash.py", ".github/scripts/jaxrs-path-prefix-leading-slash-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --root .
+
   # ADR-0321 D2: every SmallRye/MicroProfile Fault Tolerance annotation
   # (@Timeout/@Retry/@CircuitBreaker/@Bulkhead) on a service src/main declaration must carry
   # `@ResilienceProfile` (openbank-libs-runtime, com.openbank.libs.resilience) naming one of the
@@ -3152,6 +3178,26 @@ gates:
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
       python3 .github/scripts/check-domain-purity.py .
+
+  # ADR-0317: bounded-context packages leave openbank-libs-domain for openbank-libs-<context>
+  # so a business change rebuilds its 1-11 declarers, not all 57 core consumers. Three things
+  # silently undo that — a moved package reappearing in core, core depending on a context
+  # module, a libs module missing from LIBS_MODULES (#2983) — and this reports each. ADVISORY
+  # through phases 1-3, enforced in phase 4 (rules.yaml: architecture.libs_core_purity).
+  - id: libs-core-purity
+    name: "libs-core-purity — business packages stay out of libs-domain (ADR-0317, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Business packages drifting back into openbank-libs-domain, or a libs module missing from LIBS_MODULES, silently restores the 57-module rebuild fan-out ADR-0317 removes (or the #2983 no-rebuild defect)."
+    review_after: "2027-03-31"
+    verified: "2026-09-26 — advisory until ADR-0317 phases 2-3 move the remaining packages; 0 findings on the phase-1 tree, sabotage of each rule (a/b/c) goes red under --enforce"
+    budget_seconds: 10
+    min_subjects: 50   # 109 measured 2026-09-26 (libs-domain sources + 2 build files + libs modules)
+    selftest_inputs: [".github/scripts/check-libs-core-purity.py"]
+    selftest: python3 .github/scripts/check-libs-core-purity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-libs-core-purity.py
 
   # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
   # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
@@ -4378,6 +4424,10 @@ gates:
   # '## Security checklist' section with every box ticked — deleting the section is a
   # finding, same as leaving it blank, or the fix would be "delete the question".
   # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  # Items the DIFF decides (suppressions added, dependency manifests changed, and — when every
+  # money-path file is test/docs and no auth/crypto/PII/cardholder path changed — the judgement
+  # items) are answered by the gate with evidence in the step summary; only the rest need a tick.
+  # Anything unclassified (src/main, config, migrations, unknown paths) stays human: fail closed.
   - id: security-checklist-money-path
     name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
     group: security
@@ -4398,6 +4448,24 @@ gates:
       # Read the live body only after the checker proves this PR touches a money path.
       # The event body remains the fallback when the API is unavailable.
       python3 .github/scripts/check-security-checklist.py --live-body --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+
+  # #11301: the checklist gate answers the auth/PII/cardholder boxes from the reviewed
+  # `rules.yaml: security_sensitive_paths` declaration. A declaration nobody checks drifts
+  # narrower than the code; this keeps a floor under it — a crypto/JWT/TLS import, the shared
+  # four-eyes library, or a PII-/card-named field or column outside its category's globs fails.
+  - id: security-sensitive-paths-coverage
+    name: "security_sensitive_paths covers every strong sensitive-code signal (#11301, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 20   # one pass over the declared services' src/main
+    min_subjects: 16     # declared services at introduction; a shrink below this is the declaration eroding
+    rationale: "Auto-answering checklist items from a path declaration is only as honest as the declaration; a file that imports javax.crypto or carries a PAN field but sits outside its service's globs would let a sensitive change auto-pass."
+    review_after: "2027-03-28"
+    selftest: python3 .github/scripts/check-security-checklist.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-checklist.py", "openbank-libs/governance/rules.yaml"]
+    run: |
+      python3 .github/scripts/check-security-checklist.py --coverage
 
   # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
   # `gh pr create --body-file`, which never applies the template — so the section is absent by
@@ -5619,3 +5687,24 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-agent-admission.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
+
+  # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector
+  # (OpenBao Transit adapter; test-only AES-GCM adapter in libs-testing). A service's src/main that uses
+  # JCA/BouncyCastle/Tink key handling, X-Vault-Token or a Transit path is a second copy of
+  # key handling the libs port exists to replace. Today's eight files are
+  # baselined (shrink-only); a NEW file and a STALE baseline entry each exit 1. ADVISORY per
+  # ADR-0320 until card-issuance, the first consumer, has migrated — then enforced.
+  - id: field-crypto-in-libs
+    name: "service-local field crypto / Transit calls go through libs FieldProtector (ADR-0320 P3, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Per-service Cipher/Transit code duplicates key handling, AAD binding and fail-closed error handling that ADR-0320 P3 centralises in libs; a ratchet stops new copies while card-issuance migrates."
+    review_after: "2027-03-26"
+    verified: "2026-09-27 — ran check-field-crypto-in-libs.py on the branch: 2857 subjects, 8 service files with local field crypto, all 8 baselined, exit 0; advisory until card-issuance (ADR-0262) migrates to FieldProtector"
+    budget_seconds: 10
+    min_subjects: 1000   # 2857 service src/main .kt/.java/.sql files scanned 2026-09-27
+    selftest: python3 .github/scripts/check-field-crypto-in-libs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
+    run: |
+      python3 .github/scripts/check-field-crypto-in-libs.py --root .

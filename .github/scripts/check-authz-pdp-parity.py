@@ -89,6 +89,11 @@ IMAGE_SVC = re.compile(r"openbank-([a-z0-9][a-z0-9-]*)\b")
 NON_MODULE_IMAGES = {
     "openbank-keycloak": "our own Keycloak build (upstream image + realm), not a Quarkus module; "
                          "it has no src/main and therefore no @Authorize surface",
+    "openbank-pricing-service": "code lives in JiRaska/openbank-pricing (adopted under GitOps "
+                                "2026-09-28, openbank-pricing#1); its @Authorize coverage is a "
+                                "code-review follow-up in docs/threat-models/openbank-pricing-service.md",
+    "openbank-pricing-console": "Next.js console in JiRaska/openbank-pricing; it authorises nothing "
+                                "itself, pricing-service's OPA sidecar decides every write",
 }
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 

@@ -4,10 +4,16 @@
 
 package com.openbank.lending.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.lending.application.port.out.CompliancePackActivationRepository
+import com.openbank.lending.application.port.out.CompliancePackCodec
 import com.openbank.lending.infrastructure.persistence.entity.CompliancePackActivationEntity
 import com.openbank.libs.governance.MakerCheckerViolation
 import com.openbank.libs.governance.ProposalState
+import com.openbank.libs.lending.compliance.CompliancePack
+import com.openbank.libs.lending.compliance.CompliancePackParser
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.lending.compliance.PackProductType
 import io.smallrye.mutiny.Uni
@@ -26,7 +32,8 @@ class CompliancePackActivationServiceTest {
     private val clock = Clock.fixed(Instant.parse("2026-07-30T10:00:00Z"), ZoneOffset.UTC)
     private val registry = CompliancePackRegistry()
     private val repository = InMemoryActivationRepository()
-    private val service = CompliancePackActivationService(repository, registry, clock)
+    private val codec = JacksonCompliancePackCodec()
+    private val service = CompliancePackActivationService(repository, registry, clock, codec)
 
     private val czPackJson = """
         {
@@ -133,7 +140,7 @@ class CompliancePackActivationServiceTest {
             override fun compareAndSetDecision(entity: CompliancePackActivationEntity): Uni<Int> =
                 Uni.createFrom().item(0)
         }
-        val racedService = CompliancePackActivationService(losing, registry, clock)
+        val racedService = CompliancePackActivationService(losing, registry, clock, codec)
         val pending = racedService.propose(czPackJson, "maker-1").await().indefinitely()
 
         assertThatThrownBy {
@@ -193,5 +200,16 @@ class CompliancePackActivationServiceTest {
                 it.state == ProposalState.APPROVED || it.state == ProposalState.EXECUTED
             },
         )
+    }
+
+    /**
+     * A unit-test double for the [CompliancePackCodec] outbound port (ADR-0002) — the same
+     * decoding behaviour as the production `CompliancePackJson` adapter, but instantiated
+     * directly here so this application-layer test does not depend on the infrastructure class.
+     */
+    private class JacksonCompliancePackCodec : CompliancePackCodec {
+        private val mapper: ObjectMapper = ObjectMapper().registerKotlinModule()
+
+        override fun fromJson(json: String): CompliancePack = CompliancePackParser.fromMap(mapper.readValue(json))
     }
 }
