@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.infrastructure.rest.filter
 
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.psd2.infrastructure.security.QsealVerifier
 import jakarta.annotation.Priority
 import jakarta.ws.rs.Priorities
@@ -36,9 +37,7 @@ class QsealSignatureFilter(
 
     private val log = Logger.getLogger(QsealSignatureFilter::class.java)
 
-    // CodeQL java/log-injection: path is a raw request URI segment, logged verbatim below.
-    // Strip CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     override fun filter(ctx: ContainerRequestContext) {
         val path = ctx.uriInfo.path

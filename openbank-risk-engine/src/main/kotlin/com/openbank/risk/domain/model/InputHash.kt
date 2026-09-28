@@ -24,7 +24,7 @@ import java.security.MessageDigest
  */
 object InputHash {
 
-    fun of(inputs: LedgerInputs, loans: List<LoanContract>? = null): String {
+    fun of(inputs: LedgerInputs, loans: List<LoanContract>? = null, treasury: List<TreasuryDeal>? = null): String {
         val tb = inputs.trialBalance.map {
             listOf(
                 "TB",
@@ -45,7 +45,16 @@ object InputHash {
             listOf(loanLine(loan)) + loan.remainingInstallments.map { installmentLine(loan, it) }
         }
         val marker = if (loans == null) emptyList() else listOf("LENDING|loan-book")
-        val canonical = (listOf("asOf|${inputs.asOf}") + marker + (tb + sl + ln).sorted()).joinToString("\n")
+        // ADR-0315 D6: added only when read, so a run without the treasury read keeps its old hash.
+        val td = treasury.orEmpty().map { d ->
+            listOf(
+                "TD", d.dealId.toString(), d.product, d.currency, d.principal.c(), d.rate?.c() ?: "-",
+                d.valueDate.toString(), d.maturityDate.toString(), d.state,
+            ).joinToString("|")
+        }
+        val treasuryMarker = if (treasury == null) emptyList() else listOf("TREASURY|deals")
+        val canonical = (listOf("asOf|${inputs.asOf}") + marker + treasuryMarker + (tb + sl + ln + td).sorted())
+            .joinToString("\n")
         val digest = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }

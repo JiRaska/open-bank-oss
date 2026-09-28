@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.5](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.4...account-service-v0.31.5) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** remove duplicate UnauthorizedException mappers; add unused 404/409 bases ([#10923](https://github.com/JiRaska/open-bank-oss/issues/10923)) ([33ff330](https://github.com/JiRaska/open-bank-oss/commit/33ff330630515a4919ca6f15bfc9b8ce3cc6d1f9))
+
+## [0.31.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.3...account-service-v0.31.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.31.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.2...account-service-v0.31.3) (2026-09-21)
 
 

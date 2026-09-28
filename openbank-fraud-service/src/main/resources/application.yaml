@@ -183,6 +183,11 @@ mp:
     outbox:
       dispatch-enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   # Every service with an outbox entity must flip this explicitly — it defaults to false, and a
   # service that forgets ships an outbox that fills forever with no error anywhere.
   outbox:
