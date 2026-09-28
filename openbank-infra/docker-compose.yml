@@ -191,7 +191,7 @@ services:
   # Keycloak (IAM)
   # ─────────────────────────────────────────────
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0.5
+    image: quay.io/keycloak/keycloak:26.6.4
     container_name: openbank-keycloak
     restart: unless-stopped
     environment:
@@ -199,13 +199,12 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/openbank_keycloak
       KC_DB_USERNAME: openbank
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      KC_HOSTNAME: localhost
-      KC_HOSTNAME_PORT: 8080
+      # Hostname v2 (KC 25+): the v1 KC_HOSTNAME_PORT / KC_HOSTNAME_STRICT_HTTPS options are gone.
+      KC_HOSTNAME: http://localhost:8080
       KC_HOSTNAME_STRICT: "false"
-      KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_HTTP_ENABLED: "true"
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       KC_CACHE: local
       JAVA_OPTS_APPEND: "-Xms256m -Xmx384m"
     command: start-dev --import-realm
