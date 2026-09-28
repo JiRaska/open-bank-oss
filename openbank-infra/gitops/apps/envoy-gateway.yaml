@@ -1,0 +1,77 @@
+# Envoy Gateway controller — the Gateway API implementation that replaces the archived
+# ingress-nginx (ADR-0324). PHASE 0: installed alongside ingress-nginx, nothing routed.
+#
+# Pieces, in dependency order (each Application retries until its prerequisite exists):
+#   envoy-gateway-crds    Gateway API (standard channel) + gateway.envoyproxy.io CRDs
+#   envoy-gateway         this file: the controller (xDS server) in envoy-gateway-system
+#   envoy-gateway-config  components/envoy-gateway: GatewayClass `envoy`, EnvoyProxy (the
+#                         second NLB), the shared Gateway, PodMonitors, NetworkPolicies
+#
+# Chart + images verified 2026-09-28: gateway-helm v1.9.1 from the OCI registry manifest;
+# docker.io/envoyproxy/gateway:v1.9.1 and the proxy image the controller defaults to
+# (docker.io/envoyproxy/envoy:distroless-v1.39.1, digest-pinned in the controller source)
+# both publish linux/amd64 + linux/arm64 (`docker manifest inspect`). Sibling apps pin
+# chart versions, not image digests, so neither is digest-pinned here.
+#
+# Images are docker.io/-prefixed by the chart and the controller, so Kyverno's
+# `rewrite-docker-hub` rule (ecr-pull-through-rewrite.yaml) sends them through the ECR
+# pull-through cache like every other third-party chart; the openbank-* signature/SBOM
+# policy does not match them. No Kyverno change is needed.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: docker.io/envoyproxy
+    chart: gateway-helm
+    targetRevision: v1.9.1
+    helm:
+      releaseName: eg
+      valuesObject:
+        # CRDs belong to the envoy-gateway-crds Application (standard channel, upgraded
+        # with the chart, never pruned). Leaving this on would also install the
+        # experimental channel from the subchart's crds/ directory.
+        crds:
+          enabled: false
+        # The topology injector is a mutating webhook on pods/binding that copies the node's
+        # zone onto proxy pods for zone-aware routing. One proxy replica has no zone to be
+        # aware of, and a webhook the API server must reach is one more edge to open in the
+        # namespace's NetworkPolicy. Off for the sandbox.
+        topologyInjector:
+          enabled: false
+        deployment:
+          envoyGateway:
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        openbank.io/plane: platform
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

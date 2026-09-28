@@ -40,7 +40,9 @@ class QsealSignatureFilter(
     // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     override fun filter(ctx: ContainerRequestContext) {
-        val path = ctx.uriInfo.path
+        // RESTEasy Reactive's UriInfo.path carries a leading slash ("/v1/..."); normalise once so the
+        // prefix checks below match either form (#10997 — without this the gate never ran).
+        val path = ctx.uriInfo.path.removePrefix("/")
         // Only the Berlin write surface carries a body to sign; reads rely on QWAC transport auth.
         val signed = ctx.method == "POST" && (path.startsWith("v1/payments") || path.startsWith("v1/consents"))
         if (!signed) return
