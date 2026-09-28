@@ -8,7 +8,6 @@ import com.openbank.psd2.infrastructure.client.TppAuthorizationGuard
 import com.openbank.psd2.infrastructure.client.TppAuthorizationResponse
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
 import io.mockk.verify
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.core.Response
@@ -16,11 +15,18 @@ import jakarta.ws.rs.core.UriInfo
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException
 import org.junit.jupiter.api.Test
+import java.time.Duration
 
 /**
  * eIDAS QWAC transport-auth gate (ADR-0090 P1): gates the bespoke `open-banking/` surface (except
  * the open sandbox) and the Berlin `v1/` surface, resolves PISP vs AISP from the `/payments`
  * path segment, and fails closed on a downstream registry outage (circuit-open or any exception).
+ *
+ * The filter method now returns `Uni<Response?>` (#11008-follow-up): the blocking registry call
+ * runs offloaded on a worker pool so the filter never blocks the IO thread the guarded `suspend`
+ * resource methods keep it on. Every assertion below awaits that Uni instead of asserting on
+ * `ctx.abortWith(...)`, which the filter no longer calls directly — RESTEasy Reactive aborts the
+ * request itself using the Response the filter returns.
  */
 class EidasMtlsFilterTest {
 
@@ -37,25 +43,26 @@ class EidasMtlsFilterTest {
         return ctx
     }
 
+    private fun await(ctx: ContainerRequestContext): Response? =
+        filter.filter(ctx).await().atMost(Duration.ofSeconds(5))
+
     @Test
     fun `ungated paths (sandbox) are not intercepted`() {
         val ctx = ctxFor("open-banking/sandbox/ping", tppIdHeader = null)
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(result).isNull()
         verify(exactly = 0) { ctx.setProperty(any(), any()) }
     }
 
     @Test
     fun `missing TPP identification aborts with 401 CERTIFICATE_MISSING`() {
         val ctx = ctxFor("v1/accounts", tppIdHeader = null, sslDn = null)
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        assertThat(captured.captured.status).isEqualTo(401)
+        assertThat(result?.status).isEqualTo(401)
     }
 
     @Test
@@ -64,8 +71,9 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("cn=tpp-cert", true, setOf("AISP"), null)
         val ctx = ctxFor("v1/accounts", tppIdHeader = null, sslDn = "cn=tpp-cert")
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
+        assertThat(result).isNull()
         verify(exactly = 1) { ctx.setProperty("tppId", "cn=tpp-cert") }
     }
 
@@ -75,8 +83,9 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("tpp-1", true, setOf("PISP"), null)
         val ctx = ctxFor("v1/payments/sepa-credit-transfers")
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
+        assertThat(result).isNull()
         verify(exactly = 1) { guard.requireAuthorized("tpp-1", "PISP") }
         verify(exactly = 1) { ctx.setProperty("tppId", "tpp-1") }
     }
@@ -87,7 +96,7 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("tpp-1", true, setOf("AISP"), null)
         val ctx = ctxFor("v1/accounts")
 
-        filter.filter(ctx)
+        await(ctx)
 
         verify(exactly = 1) { guard.requireAuthorized("tpp-1", "AISP") }
     }
@@ -97,12 +106,10 @@ class EidasMtlsFilterTest {
         every { guard.requireAuthorized("tpp-1", "AISP") } returns
             TppAuthorizationResponse("tpp-1", false, emptySet(), "role revoked")
         val ctx = ctxFor("v1/accounts")
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        assertThat(captured.captured.status).isEqualTo(401)
+        assertThat(result?.status).isEqualTo(401)
         verify(exactly = 0) { ctx.setProperty("tppId", any()) }
     }
 
@@ -110,36 +117,30 @@ class EidasMtlsFilterTest {
     fun `circuit-open on the TPP registry aborts with 503`() {
         every { guard.requireAuthorized("tpp-1", "AISP") } throws CircuitBreakerOpenException("open")
         val ctx = ctxFor("v1/accounts")
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        assertThat(captured.captured.status).isEqualTo(503)
+        assertThat(result?.status).isEqualTo(503)
     }
 
     @Test
     fun `an unexpected exception from the registry aborts with 503`() {
         every { guard.requireAuthorized("tpp-1", "AISP") } throws RuntimeException("boom")
         val ctx = ctxFor("open-banking/accounts")
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        assertThat(captured.captured.status).isEqualTo(503)
+        assertThat(result?.status).isEqualTo(503)
     }
 
     // #10997: RESTEasy Reactive supplies UriInfo.path WITH a leading slash; both forms must gate.
     @Test
     fun `slash-prefixed v1 path without TPP identification aborts with 401`() {
         val ctx = ctxFor("/v1/accounts", tppIdHeader = null, sslDn = null)
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        assertThat(captured.captured.status).isEqualTo(401)
+        assertThat(result?.status).isEqualTo(401)
     }
 
     @Test
@@ -148,7 +149,7 @@ class EidasMtlsFilterTest {
             TppAuthorizationResponse("tpp-1", true, setOf("PISP"), null)
         val ctx = ctxFor("/v1/payments/sepa-credit-transfers")
 
-        filter.filter(ctx)
+        await(ctx)
 
         verify(exactly = 1) { ctx.setProperty("tppId", "tpp-1") }
     }
@@ -157,8 +158,8 @@ class EidasMtlsFilterTest {
     fun `slash-prefixed sandbox path is not intercepted`() {
         val ctx = ctxFor("/open-banking/sandbox/ping", tppIdHeader = null)
 
-        filter.filter(ctx)
+        val result = await(ctx)
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(result).isNull()
     }
 }
