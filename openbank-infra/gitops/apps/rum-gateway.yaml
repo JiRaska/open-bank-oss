@@ -91,9 +91,9 @@ spec:
             nginx.ingress.kubernetes.io/limit-rps: "20"
             nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
             nginx.ingress.kubernetes.io/proxy-body-size: "512k"
-            nginx.ingress.kubernetes.io/configuration-snippet: |
-              more_set_headers "X-Content-Type-Options: nosniff";
-              more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains";
+            # No header annotation: the two headers this host needs (nosniff,
+            # HSTS) are set by the controller on every response (ADR-0324
+            # interim hardening), so the former configuration-snippet is gone.
           hosts:
             - host: rum.open-bank.tech
               paths:
