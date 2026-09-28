@@ -88,6 +88,28 @@ spec:
               group_interval: 5m
               repeat_interval: 4h
               routes:
+                # Notification-DELIVERY meta-alerts must never depend on the very
+                # receiver they are reporting as broken (#11136): GoAlert's webhook
+                # integration was rejecting ~98% of notifications with HTTP 400
+                # "too many unacknowledged alerts for this service", and both
+                # AlertmanagerFailedToSendAlerts (severity=warning, kube-prometheus-
+                # stack's default alertmanager.rules mixin) and
+                # AlertmanagerClusterFailedToSendAlerts (severity=critical for the
+                # variant that actually fires — the mixin's "non-critical" copy has a
+                # `integration!~".*"` expr that can never match anything) end up on
+                # the same severity-keyed routes as every other alert below. Matching
+                # by alertname here, ahead of everything else, means delivery to Slack
+                # no longer depends on severity staying whatever it happens to be
+                # today — a future relabel or mixin bump can't silently regress this.
+                # continue: true so the alert still falls through into the ordinary
+                # severity-based routes underneath: Slack is the guaranteed leg,
+                # GoAlert stays a best-effort second attempt on top of it, matching the
+                # same "Slack first, GoAlert always attempted too" asymmetry already
+                # used for `severity = "critical"` below.
+                - matchers:
+                    - alertname =~ "^Alertmanager(Cluster)?FailedToSendAlerts$"
+                  receiver: 'slack-alerts'
+                  continue: true
                 # Davis-lite (ADR-0088): auto root-cause enrichment via HolmesGPT.
                 # `continue: true` so the SAME critical alert ALSO falls through to the
                 # delivery routes below — Holmes enriches, it never pages.

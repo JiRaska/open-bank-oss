@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.12.2...aml-service-v0.13.0) (2026-09-28)
+
+
+### Features
+
+* **aml:** bind case-create Idempotency-Key to a request fingerprint ([#10957](https://github.com/JiRaska/open-bank-oss/issues/10957)) ([580f6de](https://github.com/JiRaska/open-bank-oss/commit/580f6deb81500ec2e508cede63d059f1284dac0f))
+
 ## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.12.1...aml-service-v0.12.2) (2026-09-23)
 
 

@@ -72,6 +72,11 @@ quarkus:
       scope: jakarta.inject.Singleton
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   temporal:
     # ADR-0209 D1 (#2572): server-url and namespace were previously carried as this service's own
     # @WithDefault values in a per-service TemporalConfig copy. The shared contract in

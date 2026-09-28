@@ -4,7 +4,9 @@
 
 package com.openbank.psd2.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -31,7 +33,10 @@ import org.junit.jupiter.api.Test
  * with the dead outbox apparatus, so the service declares no outgoing channel at all.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.psd2.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_psd2_it")],
+)
 class Psd2BootSmokeIT {
 
     @Test

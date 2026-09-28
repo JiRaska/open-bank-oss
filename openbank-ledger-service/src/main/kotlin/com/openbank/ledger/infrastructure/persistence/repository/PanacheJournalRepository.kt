@@ -247,6 +247,27 @@ class PanacheJournalRepository(
         }
     }
 
+    override suspend fun accountBalanceInCurrency(
+        glAccountId: UUID,
+        currency: String,
+        asOf: LocalDate,
+        scope: LedgerScope,
+    ): Pair<BigDecimal, BigDecimal> {
+        val rows: List<*> = Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(accountCurrencyBalanceSql(scope))
+                    .setParameter("glAccountId", glAccountId)
+                    .setParameter("currency", currency)
+                    .setParameter("asOf", asOf)
+                    .resultList
+            }
+        }.awaitSuspending()
+
+        @Suppress("UNCHECKED_CAST")
+        val cols = rows.single() as Array<Any?>
+        return cols[0].toBig() to cols[1].toBig()
+    }
+
     override suspend fun controlAccountTieOut(controlAccountId: UUID, asOf: LocalDate): List<ControlAccountTieOut> {
         // Two queries per currency: GL aggregate (all lines for the control account) and
         // sub-ledger aggregate (only lines with sub_account_id). The difference is the tie-out delta.
@@ -428,6 +449,22 @@ class PanacheJournalRepository(
               and je.entry_date <= :asOf${scopeClause(scope)}
             group by ga.id, ga.code, ga.name, ga.type, jl.base_currency
             order by ga.code
+        """.trimIndent()
+
+        // One account's balance in its TRANSACTION currency (#11107): sums the native `amount`,
+        // not `base_amount`. `jl.currency_code = :currency` is also what excludes base-only lines:
+        // the FX revaluation (ADR-0046, FxRevaluationPosting) books its mark-to-ČNB legs as CZK
+        // lines (currency_code = base_currency = CZK, fx_rate set), so they carry no foreign amount
+        // and must never move a EUR/USD/GBP balance. An aggregate with no rows still returns one.
+        private fun accountCurrencyBalanceSql(scope: LedgerScope) = """
+            select coalesce(sum(case when jl.side = 'D' then jl.amount else 0 end), 0) as total_debit,
+                   coalesce(sum(case when jl.side = 'C' then jl.amount else 0 end), 0) as total_credit
+            from journal_lines jl
+            join journal_entries je on je.id = jl.journal_id
+            where je.status in $BOOKED_STATUSES
+              and je.entry_date <= :asOf
+              and jl.gl_account_id = :glAccountId
+              and jl.currency_code = :currency${scopeClause(scope)}
         """.trimIndent()
 
         // Fiscal-period aggregation behind the entity-level year close (ADR-0078 D5): booked

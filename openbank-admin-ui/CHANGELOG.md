@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.262.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.261.0...admin-ui-v0.262.0) (2026-09-28)
+
+
+### Features
+
+* **treasury:** show counterparty limit utilisation ([#11036](https://github.com/JiRaska/open-bank-oss/issues/11036)) ([64c0aeb](https://github.com/JiRaska/open-bank-oss/commit/64c0aeb0c1749445075490f3f5758fb15427b492))
+
+## [0.261.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.260.0...admin-ui-v0.261.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** list the COREP LCR templates ([#11114](https://github.com/JiRaska/open-bank-oss/issues/11114)) ([30448ec](https://github.com/JiRaska/open-bank-oss/commit/30448ec3ae61f3161b27848688497711919189df)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
+## [0.260.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.259.0...admin-ui-v0.260.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** render COREP C 02.00 with its data gaps ([#11106](https://github.com/JiRaska/open-bank-oss/issues/11106)) ([42c7f37](https://github.com/JiRaska/open-bank-oss/commit/42c7f3702d57c1427ae8e881a527d10ad31d0fe3)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
+## [0.259.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.258.0...admin-ui-v0.259.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** add treasury senior limit-override action ([#11006](https://github.com/JiRaska/open-bank-oss/issues/11006)) ([847a5a1](https://github.com/JiRaska/open-bank-oss/commit/847a5a177eff554db4859c16ce538a6a70990d8b))
+
 ## [0.258.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.257.0...admin-ui-v0.258.0) (2026-09-26)
 
 
