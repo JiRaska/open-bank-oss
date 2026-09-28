@@ -99,6 +99,14 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
+  `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
+  which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**
+  pricing-console already called `http://product-catalog.accounts.svc:8104` live (it was hand-applied and
+  unscanned); the edge is now declared and reviewed. **Spoofing / elevation:** unchanged — product-catalog
+  still authenticates every caller with a Keycloak JWT and authorises through its OPA sidecar, so network
+  reachability grants no data. **Residual:** the edge is plaintext HTTP inside the cluster (baselined in
+  `.github/asvs-l3-baseline.txt`); TLS for pricing's edges is a follow-up.
 - **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/accounts` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different account opening was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed open releases the claim so a retry can run. Because the Redis record expires (24 h) while the `account_idempotency` row (V14) does not, migration V30 adds nullable `account_idempotency.request_hash`, written in the same transaction as the account; `AccountService` refuses a key whose stored hash differs (409) — on the sequential replay path and on the concurrent-loser recovery path — so the check survives Redis expiry or eviction. **Residual window:** Redis records and `account_idempotency` rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely); onboarding-driven opens carry no fingerprint either. No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE account_idempotency DROP COLUMN request_hash` (see V30 header).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
@@ -820,3 +828,23 @@ decision use first; the additive projection table may remain until its consumer 
   none — response-plumbing de-duplication only; `AuthorizeInterceptor`, OPA policy evaluation and
   the Keycloak token validation path are untouched. Rollback: restore the deleted
   QuarkusUnauthorizedExceptionMapper class; no data or config migration involved.
+
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** AccountNotFoundExceptionMapper/AccountUpdateConflictExceptionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `CommonExceptionMappers.kt`, which document the deletion rather than contradict it).
+  `AccountNotFoundException`/`AccountUpdateConflictException` now extend
+  `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
+  by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,
+  unused, by #10923). Both exceptions keep their own domain-specific `code`
+  (`ACCOUNT_NOT_FOUND`/`CONCURRENT_MODIFICATION`) via the base class's `code` constructor
+  parameter, so status, `code` and `message` are byte-identical to the deleted mappers' output —
+  verified by `AccountExceptionMapperEquivalenceTest`. Only `traceId`'s source changes (random UUID
+  → the correlation MDC), which #10911 phase 1 established is not part of the wire contract.
+  `AuthorizationNotFoundExceptionMapper`/`AuthorizationNotOnAccountExceptionMapper` are
+  DELIBERATELY left alone: both render a shared, fixed message
+  (`"Authorization not found on this account"`) rather than `exception.message`, to avoid an
+  existence oracle across accounts — migrating to the lib base (which renders `exception.message`)
+  would leak that distinction onto the wire. **Risk class:** none — response-plumbing
+  de-duplication only; no endpoint, authorization or booking logic changes. Rollback: restore the
+  deleted mapper classes and revert the exception base classes.

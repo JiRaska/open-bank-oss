@@ -88,6 +88,15 @@ and deliberately not folded into an existing policy:
   currency the two would diverge, so it is treated like treasury's fixed-scale sites and left out
   of the registry until it migrates with its own decision.
 
+`RATIO_PERCENT` (added in review of #11011) is the registry's one **non-currency** policy:
+scale 2, HALF_UP, for dimensionless ratios and percentages reported for risk and limit
+monitoring — first site treasury's counterparty-limit utilisation
+(`CounterpartyExposure.utilisationPercent`, exposure x 100 / limit). It never rounds a monetary
+amount (a percentage fee amount is `FEE`). HALF_UP because that is the site's behaviour and a
+utilisation figure is read by a person against a threshold; HALF_EVEN's bias cancellation only
+pays off over sums of amounts. It applies as a single rounding of the quotient
+(`RoundingPolicy.divide`), byte-identical to the inline `divide(limit, 2, HALF_UP)` it replaces.
+
 Item 2 and item 3 below are amended to reflect the policy set as corrected; items 1 and 4 are
 unaffected. This amendment changes only what the ADR says the registry contains — it changes no
 posted amount and no code (phase 1 is libs-only per PR #11011).

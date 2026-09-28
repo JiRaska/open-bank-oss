@@ -548,3 +548,20 @@ not change any existing request's outcome until explicitly flipped.
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
   implementation this PR replaces.
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** DomesticPaymentNotFoundMapper/InvalidDomesticPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `ExceptionMappers.kt`'s detekt baseline entry, which document the deletion rather than contradict
+  it). `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
+  extend `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`,
+  handled by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper`
+  (added, unused, by #10923). Both already used the base's default codes
+  (`NOT_FOUND`/`CONFLICT`), so status, `code` and `message` are byte-identical to the deleted
+  mappers' output — verified by `DomesticPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s
+  source changes (`Ids.randomId()` → the correlation MDC), which #10911 phase 1 established is not
+  part of the wire contract. `DomesticPaymentIdempotencyConflictMapper` (a distinct
+  `application/problem+json` body shape) and `PaymentNotSettledMapper`/
+  `PaymentConfirmationRenderMapper` are untouched. **Risk class:** none — response-plumbing
+  de-duplication only; the payment workflow, delegated-spend binding and Temporal orchestration
+  are untouched. Rollback: restore the deleted mapper classes and revert the exception base
+  classes.

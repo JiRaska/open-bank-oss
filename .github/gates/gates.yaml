@@ -2953,6 +2953,27 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # ADR-0318: rounding belongs in libs' RoundingPolicy registry, not in a money-path service's
+  # inline setScale(n, RoundingMode.X). Per-service token counts measured 2026-09-26 are
+  # baselined in the script; a new site OR a stale (now lower) baseline is a finding.
+  # ADVISORY first, per the ADR; enforced once the money-path baseline is empty.
+  - id: money-rounding-inline-ratchet
+    name: "inline RoundingMode/setScale in money-path services ratchet (ADR-0318, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      Money-path services round with both HALF_UP and HALF_EVEN inline, so one amount can round
+      differently depending on which service touched it. ADR-0318 moves the rule into a named
+      RoundingPolicy registry; this ratchet keeps new inline sites from appearing meanwhile.
+    review_after: "2027-03-26"
+    verified: "2026-09-26 — advisory per ADR-0318 until the money-path baseline is empty; self-test flags a new site, a stale baseline and an unknown service, and an injected unknown baseline entry made the real run exit 1"
+    budget_seconds: 30
+    min_subjects: 12   # 25 money-path services measured 2026-09-26; half
+    selftest: python3 .github/scripts/check-money-rounding-inline.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
+    run: |
+      python3 .github/scripts/check-money-rounding-inline.py --root .
   # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
   # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
   # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
@@ -3199,6 +3220,26 @@ gates:
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
       python3 .github/scripts/check-domain-purity.py .
+
+  # ADR-0317: bounded-context packages leave openbank-libs-domain for openbank-libs-<context>
+  # so a business change rebuilds its 1-11 declarers, not all 57 core consumers. Three things
+  # silently undo that — a moved package reappearing in core, core depending on a context
+  # module, a libs module missing from LIBS_MODULES (#2983) — and this reports each. ADVISORY
+  # through phases 1-3, enforced in phase 4 (rules.yaml: architecture.libs_core_purity).
+  - id: libs-core-purity
+    name: "libs-core-purity — business packages stay out of libs-domain (ADR-0317, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Business packages drifting back into openbank-libs-domain, or a libs module missing from LIBS_MODULES, silently restores the 57-module rebuild fan-out ADR-0317 removes (or the #2983 no-rebuild defect)."
+    review_after: "2027-03-31"
+    verified: "2026-09-26 — advisory until ADR-0317 phases 2-3 move the remaining packages; 0 findings on the phase-1 tree, sabotage of each rule (a/b/c) goes red under --enforce"
+    budget_seconds: 10
+    min_subjects: 50   # 109 measured 2026-09-26 (libs-domain sources + 2 build files + libs modules)
+    selftest_inputs: [".github/scripts/check-libs-core-purity.py"]
+    selftest: python3 .github/scripts/check-libs-core-purity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-libs-core-purity.py
 
   # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
   # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
@@ -5688,3 +5729,24 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-agent-admission.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
+
+  # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector
+  # (OpenBao Transit adapter; test-only AES-GCM adapter in libs-testing). A service's src/main that uses
+  # JCA/BouncyCastle/Tink key handling, X-Vault-Token or a Transit path is a second copy of
+  # key handling the libs port exists to replace. Today's eight files are
+  # baselined (shrink-only); a NEW file and a STALE baseline entry each exit 1. ADVISORY per
+  # ADR-0320 until card-issuance, the first consumer, has migrated — then enforced.
+  - id: field-crypto-in-libs
+    name: "service-local field crypto / Transit calls go through libs FieldProtector (ADR-0320 P3, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Per-service Cipher/Transit code duplicates key handling, AAD binding and fail-closed error handling that ADR-0320 P3 centralises in libs; a ratchet stops new copies while card-issuance migrates."
+    review_after: "2027-03-26"
+    verified: "2026-09-27 — ran check-field-crypto-in-libs.py on the branch: 2857 subjects, 8 service files with local field crypto, all 8 baselined, exit 0; advisory until card-issuance (ADR-0262) migrates to FieldProtector"
+    budget_seconds: 10
+    min_subjects: 1000   # 2857 service src/main .kt/.java/.sql files scanned 2026-09-27
+    selftest: python3 .github/scripts/check-field-crypto-in-libs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
+    run: |
+      python3 .github/scripts/check-field-crypto-in-libs.py --root .
