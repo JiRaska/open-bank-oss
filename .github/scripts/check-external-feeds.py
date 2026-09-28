@@ -224,6 +224,7 @@ NOT_PROBED = [
     ("https://github.com/infracost/infracost/releases/download", "pinned infracost release binary fetched by the cloud-finops-collector CronJob (ADR-0316); sha256-verified, and a failed download or checksum fails the Job"),
     ("https://gitlab.com", "upstream source repo pinned by the GlitchTip chart; deploy-time"),
     ("https://grafana.github.io", "Helm chart repository; deploy-time, a failure blocks the Argo CD sync"),
+    ("https://grafana-community.github.io", "Helm chart repository (grafana-community successor charts); deploy-time, a failure blocks the Argo CD sync"),
     ("https://open-telemetry.github.io", "Helm chart repository; deploy-time"),
     ("https://prometheus-community.github.io", "Helm chart repository; deploy-time"),
     ("https://argoproj.github.io", "Helm chart repository; deploy-time"),

@@ -24,6 +24,27 @@ spec:
             # proxy buffer and 502s the admin-ui login. Set globally — per-Ingress
             # annotation is not honoured by this controller.
             proxy-buffer-size: "32k"
+            # ── Edge response headers WITHOUT snippets (ADR-0324 interim hardening) ──
+            # HSTS is owned by the controller, not by any Ingress: its Lua header
+            # filter sets Strict-Transport-Security on every TLS-served response.
+            # These two values reproduce what every per-Ingress snippet sent
+            # (2-year max-age + preload), so the header is identical on every host
+            # and no Ingress needs to (or may) set it itself.
+            hsts: "true"
+            hsts-include-subdomains: "true"
+            hsts-max-age: "63072000"
+            hsts-preload: "true"
+            # The ONLY response headers an Ingress may set through the
+            # `custom-headers` annotation (risk Medium, per-location, ConfigMap in the
+            # Ingress's own namespace). The controller denies the location if its
+            # ConfigMap names a header outside this list, so the list is the
+            # platform-owned boundary that replaces free-form `more_set_headers`
+            # snippets. Deliberately absent: Strict-Transport-Security (controller
+            # owned, above), Set-Cookie, Location, Access-Control-* (CORS), Server.
+            global-allowed-response-headers: "X-Frame-Options,Referrer-Policy,X-Robots-Tag,Permissions-Policy,Content-Security-Policy,Cross-Origin-Opener-Policy,Cross-Origin-Embedder-Policy,Cross-Origin-Resource-Policy"
+            # Strip the framework fingerprint (Next.js, Express) from every upstream
+            # response — what k8s/base's `more_clear_headers` snippet did per host.
+            hide-headers: "X-Powered-By"
             allow-snippet-annotations: "true"
             # Since ingress-nginx v1.12 (post CVE-2023-5043/5044), snippet
             # annotations are classified "Critical" risk and are REJECTED unless
@@ -35,6 +56,34 @@ spec:
             # Certificate"). Critical is acceptable on this single-tenant cluster;
             # re-evaluate for multi-tenant prod (prefer dropping snippets there).
             annotations-risk-level: "Critical"
+          # Headers that are correct on EVERY response of every host, API or UI:
+          # rendered once at http{} level (more_set_headers, inherited by every
+          # location and appended to a location's own custom-headers).
+          addHeaders:
+            X-Content-Type-Options: nosniff
+          # ModSecurity engine config for the Ingresses that opt in with
+          # `enable-modsecurity` (today only developer-portal, ADR-0093). The WAF
+          # policy was a `modsecurity-snippet` annotation — Critical risk, i.e.
+          # anyone able to write an Ingress could rewrite the WAF. It now lives in
+          # the controller's own pod spec: the file replaces the image's
+          # /etc/nginx/modsecurity/modsecurity.conf, which the controller loads for
+          # every modsecurity-enabled location that carries no snippet.
+          # The ConfigMap is IMMUTABLE and versioned by name (components/ingress-nginx,
+          # app ingress-nginx-config): changing the WAF policy means a new name here,
+          # which changes the pod template and rolls the controller. A subPath mount
+          # never sees an in-place edit, and nginx reads the file only on reload, so
+          # an editable ConfigMap would be a policy change that silently never lands.
+          # Until the ConfigMap exists a new controller pod waits in
+          # ContainerCreating while the old one keeps serving (maxUnavailable 0).
+          extraVolumes:
+            - name: modsecurity-conf
+              configMap:
+                name: ingress-nginx-modsecurity-v1
+          extraVolumeMounts:
+            - name: modsecurity-conf
+              mountPath: /etc/nginx/modsecurity/modsecurity.conf
+              subPath: modsecurity.conf
+              readOnly: true
           replicaCount: 1
           # Scrape the controller so edge-level 5xx are observable. ingress-nginx
           # records every request it proxies (nginx_ingress_controller_requests,
