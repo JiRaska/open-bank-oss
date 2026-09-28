@@ -41,7 +41,8 @@ spec:
 ---
 # Proxy: the listener ports are the internet edge. externalTrafficPolicy: Cluster means
 # the NLB's traffic arrives SNATed from arbitrary nodes, so the source cannot be narrowed
-# here; the allow-list lives on the NLB security group. Envoy Gateway shifts privileged
+# here; the allow-list is the Service's loadBalancerSourceRanges (Kyverno policy
+# edge-nlb-source-ranges), enforced on the node security group. Envoy Gateway shifts privileged
 # listener ports by +10000 (80 -> 10080, 443 -> 10443). Metrics to Prometheus only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

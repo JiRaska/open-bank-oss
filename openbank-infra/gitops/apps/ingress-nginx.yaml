@@ -7,6 +7,12 @@ kind: Application
 metadata:
   name: ingress-nginx
   namespace: argocd
+  annotations:
+    # The controller Service's loadBalancerSourceRanges is written at admission by the
+    # Kyverno policy edge-nlb-source-ranges (values are not in git). Without this, the
+    # server-side diff dry-run skips that mutation, sees the field as one to remove, and
+    # the app flaps OutOfSync -> selfHeal -> re-mutated forever.
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -117,8 +123,11 @@ spec:
             type: LoadBalancer
             # Cluster (not Local) so any NLB AZ-IP reaches the single controller
             # replica via kube-proxy — lets us point sslip.io at any NLB IP
-            # without AZ-pinning. Loses real client IP, fine for the sandbox
-            # (the IP allow-list is enforced at the NLB SG, below).
+            # without AZ-pinning. Loses real client IP, fine for the sandbox.
+            # The source-IP allow-list is spec.loadBalancerSourceRanges, which the
+            # in-tree provider turns into the node security-group rules; it is set
+            # by the Kyverno policy components/kyverno/edge-nlb-source-ranges.yaml
+            # from OpenBao, because the addresses must not be in a public repo.
             externalTrafficPolicy: Cluster
             annotations:
               service.beta.kubernetes.io/aws-load-balancer-type: nlb

@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# The edge NLB source-IP allow-list, in GitOps without its values in git (ADR-0324).
+#
+# WHAT WAS THERE BEFORE. Both edge Services (ingress-nginx, and the Envoy Gateway proxy
+# from ADR-0324 Phase 0) are `type: LoadBalancer` through the in-tree AWS cloud
+# provider, with NO `spec.loadBalancerSourceRanges`. For an NLB that provider
+# authorises the client traffic on the node security group from exactly that field,
+# defaulting to 0.0.0.0/0 when it is empty. Several comments here called the edge NLB
+# "IP-locked"; nothing in the repo made it so, and nothing would keep an out-of-band
+# security-group edit from being reconciled away by the provider. The only lever the
+# provider honours is the Service field, so that is what this sets.
+#
+# WHY THE VALUES ARE NOT IN THIS FILE. The allow-list is a set of operator egress
+# addresses — personal network data that does not belong in a public repo. It lives in
+# OpenBao KV `platform/edge-nlb`, property `source_ranges` (comma-separated CIDRs, no
+# spaces), synced by the ExternalSecret below into Secret kyverno/edge-nlb-source-ranges.
+# Kyverno reads that Secret and writes the list into every LoadBalancer Service:
+#   - at admission (rule `inject-on-admission`): every CREATE/UPDATE, whoever sends it —
+#     the ArgoCD sync of ingress-nginx, the Envoy Gateway controller reconciling the
+#     proxy Service, or a new LoadBalancer Service nobody planned for;
+#   - on existing Services (rule `inject-into-existing`): whenever the Secret changes, so
+#     editing the KV value re-locks both NLBs without touching either app.
+#
+# FAIL CLOSED. If the Secret is missing or empty the admission rule cannot resolve its
+# context and, with failurePolicy Fail, the Service write is REJECTED (a loud ArgoCD
+# SyncFailed), and `require-source-ranges` rejects any LoadBalancer Service that would
+# still end up without a list. An existing NLB keeps what it has; nothing is widened.
+# PREREQUISITE before the first sync: seed the KV value (runbook step in the PR).
+#
+# Scope: every `type: LoadBalancer` Service in the cluster. Today that is exactly the two
+# edge NLBs; a third public load balancer should have to explain itself, not inherit
+# 0.0.0.0/0.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: edge-nlb-source-ranges
+  namespace: kyverno
+  annotations:
+    # Not a credential, but an allow-list of operator addresses goes stale the same way:
+    # re-confirm every CIDR by this date.
+    openbank.io/rotation-deadline: "2027-03-31"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: edge-nlb-source-ranges
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: cidrs
+      remoteRef:
+        key: platform/edge-nlb
+        property: source_ranges
+---
+# The background controller patches EXISTING Services (rule `inject-into-existing`);
+# the chart grants it no Service write. Aggregated into its ClusterRole by label.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno-background-edge-nlb-source-ranges
+  labels:
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+    app.kubernetes.io/part-of: kyverno-policies
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: edge-nlb-source-ranges
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Edge NLB source-IP allow-list (ADR-0324)
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Sets spec.loadBalancerSourceRanges on every LoadBalancer Service from the
+      non-public Secret kyverno/edge-nlb-source-ranges, and rejects a LoadBalancer
+      Service that would otherwise be open to 0.0.0.0/0.
+spec:
+  failurePolicy: Fail
+  background: false
+  rules:
+    - name: inject-on-admission
+      match:
+        any:
+          - resources:
+              kinds: [Service]
+              operations: [CREATE, UPDATE]
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.type || '' }}"
+            operator: Equals
+            value: LoadBalancer
+      context:
+        - name: sourceranges
+          apiCall:
+            urlPath: /api/v1/namespaces/kyverno/secrets/edge-nlb-source-ranges
+            jmesPath: "split(base64_decode(data.cidrs), ',')"
+      mutate:
+        patchStrategicMerge:
+          spec:
+            loadBalancerSourceRanges: "{{ sourceranges }}"
+    - name: inject-into-existing
+      match:
+        any:
+          - resources:
+              kinds: [Secret]
+              namespaces: [kyverno]
+              names: [edge-nlb-source-ranges]
+      context:
+        - name: sourceranges
+          variable:
+            jmesPath: "split(base64_decode(request.object.data.cidrs), ',')"
+      mutate:
+        mutateExistingOnPolicyUpdate: true
+        targets:
+          - apiVersion: v1
+            kind: Service
+            namespace: ingress-nginx
+            name: "*"
+            preconditions:
+              all:
+                - key: "{{ target.spec.type || '' }}"
+                  operator: Equals
+                  value: LoadBalancer
+          - apiVersion: v1
+            kind: Service
+            namespace: envoy-gateway-system
+            name: "*"
+            preconditions:
+              all:
+                - key: "{{ target.spec.type || '' }}"
+                  operator: Equals
+                  value: LoadBalancer
+        patchStrategicMerge:
+          spec:
+            loadBalancerSourceRanges: "{{ sourceranges }}"
+    - name: require-source-ranges
+      match:
+        any:
+          - resources:
+              kinds: [Service]
+              operations: [CREATE, UPDATE]
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.type || '' }}"
+            operator: Equals
+            value: LoadBalancer
+      validate:
+        message: >-
+          LoadBalancer Service '{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}'
+          has no loadBalancerSourceRanges or allows 0.0.0.0/0. The edge allow-list comes from
+          OpenBao KV platform/edge-nlb (ADR-0324); seed it before creating a load balancer.
+        deny:
+          conditions:
+            any:
+              - key: "{{ length(request.object.spec.loadBalancerSourceRanges || `[]`) }}"
+                operator: Equals
+                value: 0
+              - key: "0.0.0.0/0"
+                operator: AnyIn
+                value: "{{ request.object.spec.loadBalancerSourceRanges || `[]` }}"

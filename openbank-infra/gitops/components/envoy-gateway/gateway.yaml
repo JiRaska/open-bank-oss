@@ -29,9 +29,10 @@ spec:
 #     Balancer Controller, the only AWS coupling stays one Service annotation (ADR-0027);
 #   - externalTrafficPolicy: Cluster, NOT Envoy Gateway's default of Local, so any NLB AZ
 #     IP reaches the single proxy replica via kube-proxy, exactly as today.
-# The source-IP allow-list is not in this repo for either NLB: it lives on the NLB's
-# security group, applied outside GitOps, and must be applied to this NLB the same way
-# before a host is moved to it.
+# The source-IP allow-list is spec.loadBalancerSourceRanges on the proxy Service, set for
+# both NLBs by the Kyverno policy components/kyverno/edge-nlb-source-ranges.yaml from
+# OpenBao (the addresses are not in this public repo). It is deliberately NOT in
+# envoyService below: a literal list would publish them.
 #
 # FinOps (ADR-0324): this is a SECOND NLB for the length of the migration, about
 # 0.025 USD/h (~$18/month) plus LCUs, on top of the ingress-nginx NLB. Steady state is
