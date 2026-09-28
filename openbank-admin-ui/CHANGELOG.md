@@ -1,5 +1,103 @@
 # Changelog
 
+## [0.262.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.0...admin-ui-v0.262.1) (2026-09-28)
+
+
+### Security
+
+* **kafka:** replace abandoned kafka-ui with kafbat fork v1.5.0 ([#11254](https://github.com/JiRaska/open-bank-oss/issues/11254)) ([eda65ac](https://github.com/JiRaska/open-bank-oss/commit/eda65ac12e5980d6d449ee4ebabefb6af49b951d)), closes [#11253](https://github.com/JiRaska/open-bank-oss/issues/11253)
+
+## [0.262.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.261.0...admin-ui-v0.262.0) (2026-09-28)
+
+
+### Features
+
+* **treasury:** show counterparty limit utilisation ([#11036](https://github.com/JiRaska/open-bank-oss/issues/11036)) ([64c0aeb](https://github.com/JiRaska/open-bank-oss/commit/64c0aeb0c1749445075490f3f5758fb15427b492))
+
+## [0.261.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.260.0...admin-ui-v0.261.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** list the COREP LCR templates ([#11114](https://github.com/JiRaska/open-bank-oss/issues/11114)) ([30448ec](https://github.com/JiRaska/open-bank-oss/commit/30448ec3ae61f3161b27848688497711919189df)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
+## [0.260.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.259.0...admin-ui-v0.260.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** render COREP C 02.00 with its data gaps ([#11106](https://github.com/JiRaska/open-bank-oss/issues/11106)) ([42c7f37](https://github.com/JiRaska/open-bank-oss/commit/42c7f3702d57c1427ae8e881a527d10ad31d0fe3)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
+## [0.259.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.258.0...admin-ui-v0.259.0) (2026-09-27)
+
+
+### Features
+
+* **admin-ui:** add treasury senior limit-override action ([#11006](https://github.com/JiRaska/open-bank-oss/issues/11006)) ([847a5a1](https://github.com/JiRaska/open-bank-oss/commit/847a5a177eff554db4859c16ce538a6a70990d8b))
+
+## [0.258.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.257.0...admin-ui-v0.258.0) (2026-09-26)
+
+
+### Features
+
+* **risk-engine:** Pillar 1 credit-risk capital, standardised approach (BCBS d424), with an admin-ui page (ADR-0313 phase 2) ([#10900](https://github.com/JiRaska/open-bank-oss/issues/10900)) ([67ae139](https://github.com/JiRaska/open-bank-oss/commit/67ae1397d549e5000d05dce095ba45658aea458b))
+
+## [0.257.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.256.0...admin-ui-v0.257.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** treasury section — blotter, new deal, four-eyes approval inbox, limits, daily position (ADR-0315) ([#10877](https://github.com/JiRaska/open-bank-oss/issues/10877)) ([c7de662](https://github.com/JiRaska/open-bank-oss/commit/c7de662d992be3f4f7e1475c8cf11e9406aeb12c))
+
+## [0.256.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.255.0...admin-ui-v0.256.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** LCR and NSFR on BCBS factors, with an admin-ui page (ADR-0313 phase 1) ([#10860](https://github.com/JiRaska/open-bank-oss/issues/10860)) ([6998a83](https://github.com/JiRaska/open-bank-oss/commit/6998a831635be984d661da2cb89f4aa9c5f469dd))
+
+## [0.255.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.254.0...admin-ui-v0.255.0) (2026-09-25)
+
+
+### Features
+
+* **risk-engine:** IRRBB — repricing gap, supervisory shocks, ΔEVE/ΔNII, with an admin-ui page (ADR-0313 phase 1) ([#10853](https://github.com/JiRaska/open-bank-oss/issues/10853)) ([5f5518f](https://github.com/JiRaska/open-bank-oss/commit/5f5518faefaf99fc041a06a0aed5c807b512bf64))
+
+## [0.254.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.253.0...admin-ui-v0.254.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
+## [0.253.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.1...admin-ui-v0.253.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** explain and expose every CI quality gate ([#10828](https://github.com/JiRaska/open-bank-oss/issues/10828)) ([8c46ca2](https://github.com/JiRaska/open-bank-oss/commit/8c46ca2828271e0e1646cde891f60f9c992661ef))
+
+## [0.252.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.252.0...admin-ui-v0.252.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish enforced SDLC controls from policy goals ([#10800](https://github.com/JiRaska/open-bank-oss/issues/10800)) ([a71a92c](https://github.com/JiRaska/open-bank-oss/commit/a71a92c2ed5c5008973a5ab03ebd858417b25bd3))
+
+## [0.252.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.1...admin-ui-v0.252.0) (2026-09-24)
+
+
+### Features
+
+* **admin-ui:** explain SDLC and quality gates ([#10790](https://github.com/JiRaska/open-bank-oss/issues/10790)) ([a7810fa](https://github.com/JiRaska/open-bank-oss/commit/a7810fa74ff124c35971e3d301ea4046aa674cc3))
+
+## [0.251.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.251.0...admin-ui-v0.251.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** retain Test Intelligence runtime evidence ([a53e86b](https://github.com/JiRaska/open-bank-oss/commit/a53e86baa8c4496508e97994af6dcbe791c159ab)), closes [#6613](https://github.com/JiRaska/open-bank-oss/issues/6613)
+
 ## [0.251.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.250.0...admin-ui-v0.251.0) (2026-09-23)
 
 

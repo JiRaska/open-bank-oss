@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.38.0...lending-service-v0.39.0) (2026-09-28)
+
+
+### Features
+
+* **lending:** bind Idempotency-Key to a request fingerprint ([#10958](https://github.com/JiRaska/open-bank-oss/issues/10958)) ([4d0ba3d](https://github.com/JiRaska/open-bank-oss/commit/4d0ba3d4ef50bc0f4ec24f89363999611eb8f081))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.1...lending-service-v0.38.0) (2026-09-26)
+
+
+### Features
+
+* **lending:** four-eyes void of an executed backfill's synthetic loans ([#10972](https://github.com/JiRaska/open-bank-oss/issues/10972)) ([30e2049](https://github.com/JiRaska/open-bank-oss/commit/30e2049acc41af80bb3aa6857cb212b8f3f97490))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.0...lending-service-v0.37.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **lending:** stop counting idempotent replays as posted in the ledger backfill ([#10938](https://github.com/JiRaska/open-bank-oss/issues/10938)) ([a28de17](https://github.com/JiRaska/open-bank-oss/commit/a28de17cd76c5203622236b02b2bb005c840f098))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.36.0...lending-service-v0.37.0) (2026-09-25)
+
+
+### Features
+
+* **admin-ui:** balance sheet & risk workspace, with the four-eyes ledger backfill ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10842](https://github.com/JiRaska/open-bank-oss/issues/10842)) ([5499e3a](https://github.com/JiRaska/open-bank-oss/commit/5499e3a11cd22f7b0c0e00b987b7622c935ffb7f))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.2...lending-service-v0.36.0) (2026-09-25)
+
+
+### Features
+
+* **infra:** risk, finance and treasury department roles ([#10618](https://github.com/JiRaska/open-bank-oss/issues/10618)) ([#10833](https://github.com/JiRaska/open-bank-oss/issues/10833)) ([43a94a2](https://github.com/JiRaska/open-bank-oss/commit/43a94a2cfb0267d53c7573a33b592df9b474d77c))
+
 ## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.35.1...lending-service-v0.35.2) (2026-09-24)
 
 

@@ -66,7 +66,7 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
 
     private companion object {
         const val REDIS_PORT = 6379
-        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
         const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
     }
 }

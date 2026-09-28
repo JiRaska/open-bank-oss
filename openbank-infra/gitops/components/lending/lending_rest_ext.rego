@@ -21,8 +21,8 @@
 #                                 differ from the registrant)
 #   lending.ledgerBackfill.*    — one-off four-eyes ledger backfill (#10746): read (dry-run),
 #                                 propose (maker), decide (checker, must differ — enforced in
-#                                 LedgerBackfillService), execute. ROLE_ADMIN humans only; see the
-#                                 veto at the end of this file.
+#                                 LedgerBackfillService), execute. ROLE_FINANCE / ROLE_ADMIN humans
+#                                 only (#10618); see the allow + veto at the end of this file.
 #
 # Base rest.rego already grants: operator-read-any (OPERATOR/ADMIN on *.read/*.list),
 # compliance-read-any (*.read), party-self-service (reads where the JWT sub equals the
@@ -202,9 +202,8 @@ prohibited if {
 	}
 }
 
-
 # #10746: the ledger backfill re-posts GL history for loans whose journals never reached the ledger.
-# It books real journals, so it is narrower than the desk: ROLE_ADMIN humans only. `operator-lending-write`
+# It books real journals, so it is narrower than the desk: ROLE_ADMIN (and, since #10618, ROLE_FINANCE) humans only. `operator-lending-write`
 # above would otherwise admit ROLE_OPERATOR to any `lending.*`, and base operator-read-any would admit
 # the dry-run read to any operator — including the service accounts that carry ROLE_OPERATOR (and, in
 # some realms, the shared client). The veto closes every path at once: no service account, whatever
@@ -214,7 +213,26 @@ prohibited if {
 	startswith(input.principal.id, "service-account-")
 }
 
+#
+# #10618: ROLE_FINANCE owns this flow (it is the department that answers for the GL). Its own allow
+# reason below, since neither operator-lending-write nor operator-read-any names it. The veto is
+# widened to "neither ROLE_ADMIN nor ROLE_FINANCE"; the service-account veto above is unchanged, so a
+# service account holding ROLE_FINANCE is still refused. Execute is granted to FINANCE too: the
+# four-eyes control is propose/approve by two different people, bound to the plan hash that
+# LedgerBackfillService re-checks at execution — keeping execute ADMIN-only would make a platform
+# administrator a party to every finance posting, which is the wrong segregation of duties.
+allowed_reasons contains "finance-ledger-backfill" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	"ROLE_FINANCE" in input.principal.roles
+	startswith(input.action, "lending.ledgerBackfill.")
+}
+
 prohibited if {
 	startswith(input.action, "lending.ledgerBackfill.")
-	not "ROLE_ADMIN" in input.principal.roles
+	not backfill_role_held
 }
+
+backfill_role_held if "ROLE_ADMIN" in input.principal.roles
+
+backfill_role_held if "ROLE_FINANCE" in input.principal.roles

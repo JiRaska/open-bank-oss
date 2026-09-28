@@ -112,7 +112,7 @@ object ApprovalCopy {
             else -> KIND_CS
         }
         val noun = table[kind] ?: if (cs) "požadavek" else "a request"
-        return if (kind == "PAYMENT") "$noun ${amountAndPayee(vars, cs)}".trimEnd() else noun
+        return if (kind in WITH_AMOUNT) "$noun ${amountAndPayee(vars, cs)}".trimEnd() else noun
     }
 
     private fun amountAndPayee(vars: Map<String, String>, cs: Boolean): String = buildString {
@@ -146,7 +146,12 @@ object ApprovalCopy {
         "POLICY_CHANGE" to "změna pravidel podepisování",
         "PAYEE_ADD" to "přidání důvěryhodného účtu",
         "PAYEE_REMOVE" to "odebrání důvěryhodného účtu",
+        "STANDING_ORDER" to "zřízení trvalého příkazu",
+        "SDD_MANDATE" to "zřízení souhlasu s inkasem",
     )
+
+    /** Kinds whose copy names the amount and payee (#10281): an SDD mandate has neither amount nor IBAN. */
+    private val WITH_AMOUNT = setOf("PAYMENT", "STANDING_ORDER")
 
     /** Czech object case ("chce provést platbu"); only PAYMENT and POLICY_CHANGE decline. */
     private val KIND_CS_ACCUSATIVE = KIND_CS + mapOf(
@@ -158,5 +163,7 @@ object ApprovalCopy {
         "POLICY_CHANGE" to "a signing-policy change",
         "PAYEE_ADD" to "adding a trusted payee",
         "PAYEE_REMOVE" to "removing a trusted payee",
+        "STANDING_ORDER" to "a standing order",
+        "SDD_MANDATE" to "a direct-debit mandate",
     )
 }

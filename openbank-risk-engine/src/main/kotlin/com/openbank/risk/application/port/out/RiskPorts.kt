@@ -13,6 +13,7 @@ import com.openbank.risk.domain.model.LoanContract
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutMismatch
+import com.openbank.risk.domain.model.TreasuryDeal
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -31,7 +32,31 @@ interface LendingPort {
     suspend fun readLoanBook(asOf: LocalDate): List<LoanContract>
 }
 
+/** A run's manifest without its mismatch rows, for the run list. */
+data class SnapshotRunSummary(
+    val id: UUID,
+    val asOf: LocalDate,
+    val recordedAt: Instant,
+    val provenance: String,
+    val status: String,
+    val positionCount: Int,
+    val mismatchCount: Int,
+)
+
+/** A curve set without its pillars, for the curve-set list. */
+data class CurveSetSummary(
+    val id: UUID,
+    val asOf: LocalDate,
+    val provenance: String,
+    val source: String,
+    val recordedAt: Instant,
+    val indices: List<String>,
+)
+
 interface SnapshotRepository {
+    /** The [limit] most recently recorded runs, newest first. */
+    suspend fun listRecent(limit: Int): List<SnapshotRunSummary>
+
     suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun?
 
     suspend fun findById(id: UUID): SnapshotRun?
@@ -65,9 +90,41 @@ data class FxFixingRate(
     val receivedAt: Instant,
 )
 
+/**
+ * The bank's money-market deals (ADR-0315 D6), maintained from treasury-service's `treasury.deal.*`
+ * events. [apply] is monotonic and idempotent per deal: a state only advances, so a redelivered or
+ * out-of-date event changes nothing.
+ */
+interface TreasuryDealBook {
+    suspend fun dealsOnBook(asOf: LocalDate): List<TreasuryDeal>
+
+    /** Returns true when the event changed the stored deal. */
+    suspend fun apply(event: TreasuryDealEvent): Boolean
+}
+
+/** One `treasury.deal.*` event as the book needs it; [rate] is present only on `booked`. */
+data class TreasuryDealEvent(
+    val state: String,
+    val dealId: UUID,
+    val product: String,
+    val counterpartyId: String,
+    val currency: String,
+    val principal: BigDecimal,
+    val rate: BigDecimal?,
+    val valueDate: LocalDate?,
+    val maturityDate: LocalDate?,
+)
+
 interface FxFixingRepository {
     /** Inserts each rate unless (source, fixingDate, currency) exists. Returns how many were new. */
     suspend fun insertIfAbsent(rates: List<FxFixingRate>): Int
+
+    /**
+     * The [source] fixing of [currency] against [quoteCurrency] in effect at [at]: `validFrom <= at <
+     * validTo`, newest `validFrom` first — fx-service's own `getCnbRate(asOf)` rule, which the
+     * ledger's FX revaluation reads. Null when none is in effect.
+     */
+    suspend fun inEffect(source: String, currency: String, quoteCurrency: String, at: Instant): FxFixingRate?
 }
 
 class SnapshotNotFoundException(id: UUID) : RuntimeException("snapshot run $id not found")
@@ -77,6 +134,9 @@ class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismat
     RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")
 
 interface CurveSetRepository {
+    /** The [limit] most recently recorded curve sets, newest first. */
+    suspend fun listRecent(limit: Int): List<CurveSetSummary>
+
     /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
     suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
 

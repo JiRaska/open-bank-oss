@@ -21,6 +21,12 @@ data class CreateAmlCaseCommand(
     val alertCode: String,
     val alertDetail: String?,
     val matchedEntity: String?,
+    /**
+     * Fingerprint of the HTTP request this command came from (#10916), persisted with the case so
+     * a replay by [idempotencyKey] can tell a retry from a key reused for a different case after
+     * the Redis record is gone. `null` for callers with no HTTP request (onboarding screening).
+     */
+    val requestHash: String? = null,
 )
 
 data class ListAmlCasesQuery(

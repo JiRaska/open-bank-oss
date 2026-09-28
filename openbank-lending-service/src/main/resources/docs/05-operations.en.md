@@ -69,10 +69,10 @@ Check the `InterestAccrualScheduler` logs ("interest accrual pass: N installment
 Check the `ProvisioningCycleScheduler` logs ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Interval is `LENDING_PROVISIONING_EVERY` (default ~720h/30d, delayed 60s). Zero journals posted for a period with loans assessed is **expected and correct** when no loan's stage/ECL changed since the prior period — check the `loan_provisioning` table for the period's rows before assuming a failure. The pass is idempotent per `(loan_id, period)`; a missed window self-heals on the next tick, but a book larger than `LENDING_PROVISIONING_BATCH_SIZE` is only partially covered per tick (no continuation cursor yet — tracked in the threat model).
 
 ### Ledger backfill (one-off, #10746)
-For loans whose GL history never reached the ledger (#6057). ROLE_ADMIN only, two different people.
+For loans whose GL history never reached the ledger (#6057). ROLE_FINANCE or ROLE_ADMIN (humans only), two different people (#10618). The admin console runs the whole flow under Balance sheet & risk → Ledger backfill.
 1. **Dry-run** (writes nothing): `GET /api/v1/lending/ledger-backfill/plan?cutoverDate=<today>&disbursedBefore=<date>`. Check `executable=true`, `journalCount`, `plan.tieOut[*].ties=true` (Loans Receivable after == lending unpaid principal per currency) and `glTotals`. Confirm in ledger that none of the `loan:<id>:…` references exist yet.
 2. **Propose** (maker): `POST /api/v1/lending/ledger-backfill/requests` `{"cutoverDate":"<today>","disbursedBefore":"<date>"}`.
-3. **Approve** (checker, a different admin): `POST /requests/{id}/decide` `{"approve":true,"reason":"…"}`. Self-approval answers 422.
+3. **Approve** (checker, a different finance user or admin): `POST /requests/{id}/decide` `{"approve":true,"reason":"…"}`. Self-approval answers 422.
 4. **Execute**: `POST /requests/{id}/execute?execute=true` on the cut-over day. Without `execute=true` it only returns the plan. 409 means the book moved since approval, the cut-over date passed, or another run holds the lease: propose again.
 5. A loan whose leg fails stops at that leg, the others continue, and the request stays APPROVED. Fix the cause and run step 4 again. Legs already booked replay as no-ops in ledger.
 6. **Reverse**: reverse each journal in ledger-service (`reverseJournal`), finding them by idempotency key `loan:<id>:…`. The reversal lands in the current open day.

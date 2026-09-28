@@ -528,6 +528,9 @@ rules:
       # Without this the keystore ExternalSecret sits at SecretSyncedError and no pod is ever
       # created (#2749).
       - loyalty-service
+      # ADR-0315: treasury deal-events producer, ns treasury (first ESO client there). Without
+      # this the keystore ExternalSecret sits at SecretSyncedError and no pod is ever created (#2749).
+      - treasury-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

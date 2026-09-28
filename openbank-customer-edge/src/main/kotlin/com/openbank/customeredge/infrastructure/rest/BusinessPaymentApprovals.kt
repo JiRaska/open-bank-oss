@@ -15,14 +15,28 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
-/** The payment rails a business payment can be held for, and released to. Closed: the release never takes a URL from data. */
-enum class PaymentRail { DOMESTIC, SEPA, SEPA_INSTANT, SWIFT }
+/**
+ * The upstreams a business instruction can be held for, and released to. Closed: the release never
+ * takes a URL from data. The four payment rails, plus the two recurring-outflow services (#10281).
+ */
+enum class PaymentRail(val kind: String) {
+    DOMESTIC("PAYMENT"),
+    SEPA("PAYMENT"),
+    SEPA_INSTANT("PAYMENT"),
+    SWIFT("PAYMENT"),
+    STANDING_ORDER("STANDING_ORDER"),
+    SDD_MANDATE("SDD_MANDATE"),
+}
 
-/** What a payment route hands the hold: the exact rail request plus the fields a signer is shown. */
+/**
+ * What a route hands the hold: the exact upstream request plus the fields a signer is shown.
+ * [amount]/[currency] are null only for an SDD mandate, which has no amount (sdd-service stores no
+ * maximum) and is therefore evaluated against the strictest rule (ADR-0312 addendum).
+ */
 data class HeldPayment(
     val rail: PaymentRail,
-    val amount: String,
-    val currency: String,
+    val amount: String?,
+    val currency: String?,
     /** The creditor exactly as the initiator's device signed it (dynamic linking). */
     val creditor: String?,
     val creditorName: String?,
@@ -30,6 +44,8 @@ data class HeldPayment(
     val debtorAccountId: String,
     /** The body the rail would have received now. Frozen; posted verbatim on release. */
     val railRequest: String,
+    /** Kind-specific fields a signer is shown: frequency, creditorIdentifier, mandateReference. */
+    val extras: Map<String, String?> = emptyMap(),
 )
 
 /**
@@ -87,6 +103,12 @@ class BusinessPaymentApprovals(
     @ConfigProperty(name = "openbank.edge.swift-service-url")
     lateinit var swiftServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.standing-order-service-url")
+    lateinit var standingOrderServiceUrl: String
+
+    @ConfigProperty(name = "openbank.edge.sdd-service-url")
+    lateinit var sddServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.sca-service-url")
     lateinit var scaServiceUrl: String
 
@@ -128,11 +150,12 @@ class BusinessPaymentApprovals(
         audit.emit(
             eventType = "CUSTOMER_PAYMENT_HELD",
             partyId = entity.toString(),
-            operation = "payments.${payment.rail.name.lowercase()}",
+            operation = operationOf(payment.rail),
             result = "SUCCESS",
             resourceId = approvalId,
             details = mapOf(
                 "initiatorPartyId" to customer.human.toString(),
+                "kind" to payment.rail.kind,
                 "required" to required.toString(),
                 "amount" to payment.amount,
                 "currency" to payment.currency,
@@ -152,11 +175,12 @@ class BusinessPaymentApprovals(
     private fun evaluate(entity: UUID, payment: HeldPayment): JsonNode? {
         val body = objectMapper.writeValueAsString(
             mapOf(
+                "kind" to payment.rail.kind,
                 "amount" to payment.amount,
                 "currency" to payment.currency,
-                "creditorIban" to payment.creditor,
+                "creditorIban" to payment.creditor.takeUnless { payment.rail == PaymentRail.SDD_MANDATE },
                 "rail" to payment.rail.name,
-            ),
+            ).filterValues { it != null },
         )
         val reply = signing.evaluate(entity, body)
         return if (reply.ok) read(reply.body) else null
@@ -165,16 +189,17 @@ class BusinessPaymentApprovals(
     private fun createBody(human: UUID, challenge: UUID, p: HeldPayment): String {
         val payload = objectMapper.createObjectNode().apply {
             put("rail", p.rail.name)
-            put("amount", p.amount)
-            put("currency", p.currency)
-            p.creditor?.let { put("creditorIban", it) }
+            p.amount?.let { put("amount", it) }
+            p.currency?.let { put("currency", it) }
+            if (p.rail != PaymentRail.SDD_MANDATE) p.creditor?.let { put("creditorIban", it) }
+            p.extras.forEach { (k, v) -> v?.let { put(k, it) } }
             p.creditorName?.let { put("creditorName", it) }
             p.reference?.let { put("reference", it) }
             put("debtorAccountId", p.debtorAccountId)
             set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
         }
         val body = objectMapper.createObjectNode().apply {
-            put("kind", "PAYMENT")
+            put("kind", p.rail.kind)
             set<JsonNode>("payload", payload)
             putObject("initiatorSignature").apply {
                 put("partyId", human.toString())
@@ -210,7 +235,7 @@ class BusinessPaymentApprovals(
         val ref = read(respBody)?.path("id")?.textOrNull()
         val error = if (ok) null else "rail answered ${resp.status}: ${respBody.take(ERROR_MAX_CHARS)}"
         report(entity, approvalId, ok, ref, error)
-        val operation = "payments.${rail.name.lowercase()}"
+        val operation = operationOf(rail)
         val details = mapOf("railStatus" to resp.status.toString(), "paymentId" to ref)
         if (ok) {
             audit.emit(
@@ -246,11 +271,19 @@ class BusinessPaymentApprovals(
         signing.releaseResult(entity, approvalId, body)
     }
 
+    private fun operationOf(rail: PaymentRail): String = when (rail) {
+        PaymentRail.STANDING_ORDER -> "standingOrders.create"
+        PaymentRail.SDD_MANDATE -> "sdd.mandates.create"
+        else -> "payments.${rail.name.lowercase()}"
+    }
+
     fun railUrl(rail: PaymentRail): String = when (rail) {
         PaymentRail.DOMESTIC -> "$domesticPaymentServiceUrl/api/v1/domestic-payments"
         PaymentRail.SEPA -> "$sepaPaymentServiceUrl/api/v1/sepa-payments"
         PaymentRail.SEPA_INSTANT -> "$sepaInstantServiceUrl/api/v1/sepa-instant"
         PaymentRail.SWIFT -> "$swiftServiceUrl/api/v1/swift"
+        PaymentRail.STANDING_ORDER -> "$standingOrderServiceUrl/api/v1/standing-orders"
+        PaymentRail.SDD_MANDATE -> "$sddServiceUrl/api/v1/sdd/mandates"
     }
 
     private fun read(body: String): JsonNode? = runCatching { objectMapper.readTree(body) }.getOrNull()

@@ -1,0 +1,40 @@
+# ArgoCD app for the pricing service + console + pricing-db (JiRaska/openbank-pricing#1).
+#
+# Until 2026-09-28 the whole `pricing` namespace was applied by hand (kubectl apply,
+# no ArgoCD tracking id on any object) and no repository held its manifests. These
+# were exported from the live objects and are ADOPTED in place by server-side apply:
+# the running Deployments, Services, Ingress, ExternalSecrets, NetworkPolicies and the
+# CNPG Cluster keep their identity, so pricing-db is taken over, not recreated.
+# Application code and images stay in JiRaska/openbank-pricing; only the deployment
+# lives here, where the CNPG, NetworkPolicy and edge-exposure gates cover it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pricing
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/pricing
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pricing
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      # ServerSideApply: adopts the hand-applied objects without a delete/recreate, and
+      # the OPA bundle ConfigMap is too large for client-side last-applied-configuration.
+      - ServerSideApply=true

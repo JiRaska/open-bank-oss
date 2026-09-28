@@ -30,7 +30,7 @@ import java.util.UUID
 /**
  * Consumer-driven contract for lending's loan-book read, `GET /api/v1/lending/loan-book`
  * (ADR-0314 D4). The pact is committed to `pacts/` (git-pact, ADR-0063) and REPLAYED by
- * `LendingLoanBookPactProviderTest` (`@PactFolder`) in openbank-lending-service on every PR.
+ * `LendingLoanBookPactProviderVerificationTest` (`@PactFolder`) in openbank-lending-service on every PR.
  *
  * The expected path is a LITERAL, never derived from [com.openbank.risk.infrastructure.client.LendingRestClient]'s
  * `@Path`: deriving both sides from the annotation keeps the test green when the client points at a

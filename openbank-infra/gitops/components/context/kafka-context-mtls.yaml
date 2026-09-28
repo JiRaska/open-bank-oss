@@ -56,7 +56,7 @@ spec:
         operations: [Read]
         host: "*"
 ---
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: context-service-kafka-keystore
@@ -70,7 +70,7 @@ spec:
   target: { name: context-service-kafka-keystore, creationPolicy: Owner, deletionPolicy: Retain }
   dataFrom: [{ extract: { key: context-service } }]
 ---
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: kafka-cluster-ca-truststore

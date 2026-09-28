@@ -58,9 +58,10 @@ class RiskLoanInstrumentIT {
         ledger.inputs = Fixtures.tiedOut()
     }
 
-    private fun snapshot(asOf: String, status: String): String = given().contentType("application/json")
-        .body("""{"asOf":"$asOf"}""").`when`().post("/api/v1/risk/snapshots")
-        .then().statusCode(201).body("status", equalTo(status)).extract().path("id")
+    private fun snapshot(asOf: String, status: String, httpStatus: Int = 201): String =
+        given().contentType("application/json")
+            .body("""{"asOf":"$asOf"}""").`when`().post("/api/v1/risk/snapshots")
+            .then().statusCode(httpStatus).body("status", equalTo(status)).extract().path("id")
 
     private fun curveSet(asOf: String): String = given().contentType("application/json")
         .body(
@@ -103,6 +104,39 @@ class RiskLoanInstrumentIT {
         assertThat(czk["total"].decimalValue()).isEqualByComparingTo(bucketSum)
         assertThat(body["expandedPositions"].asInt()).isEqualTo(4)
         assertThat(body["notExpanded"].asInt()).isEqualTo(2) // 1001 nostro, 3000 equity — not 1200
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `same ledger and as-of with a changed loan rate creates a distinct replay manifest`() {
+        val sixPercent = lendingLoan(
+            id = Fixtures.LOAN_A,
+            method = com.openbank.libs.lending.AmortizationMethod.EQUAL_PRINCIPAL,
+            rate = "0.06",
+        )
+        val sevenPercent = lendingLoan(
+            id = Fixtures.LOAN_A,
+            method = com.openbank.libs.lending.AmortizationMethod.EQUAL_PRINCIPAL,
+            rate = "0.07",
+        )
+        assertThat(sixPercent.outstandingPrincipal).isEqualByComparingTo(sevenPercent.outstandingPrincipal)
+        assertThat(sixPercent.remainingInstallments.map { it.principal })
+            .isEqualTo(sevenPercent.remainingInstallments.map { it.principal })
+        assertThat(sixPercent.remainingInstallments.map { it.interest })
+            .isNotEqualTo(sevenPercent.remainingInstallments.map { it.interest })
+
+        ledger.inputs = tiedOutWithLoans(sixPercent.outstandingPrincipal)
+        lending.loans = listOf(sixPercent)
+        val asOf = "2026-09-26"
+        val originalRun = snapshot(asOf, "TIED_OUT")
+
+        lending.loans = listOf(sevenPercent)
+        val repricedRun = snapshot(asOf, "TIED_OUT")
+        val replay = snapshot(asOf, "TIED_OUT", httpStatus = 200)
+
+        assertThat(repricedRun).isNotEqualTo(originalRun)
+        assertThat(replay).isEqualTo(repricedRun)
+        assertThat(count("SELECT count(*) FROM snapshot_run WHERE as_of = ?::date", asOf)).isEqualTo(2)
     }
 
     @Test

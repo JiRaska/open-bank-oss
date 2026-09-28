@@ -14,8 +14,18 @@ interface LedgerBackfillRequestRepository {
     fun save(entity: LedgerBackfillRequestEntity): Uni<LedgerBackfillRequestEntity>
     fun findById(id: UUID): Uni<LedgerBackfillRequestEntity?>
 
+    /** The [limit] most recently proposed requests, newest first — the console's request history (#10618). */
+    fun listRecent(limit: Int): Uni<List<LedgerBackfillRequestEntity>>
+
     /** A still-PROPOSED request for the same plan hash — the natural key a retried propose replays to. */
     fun findProposedByHash(planHash: String): Uni<LedgerBackfillRequestEntity?>
+
+    /**
+     * Every APPROVED or EXECUTED request for the same plan hash, newest first (#10904). A plan already
+     * signed off or already posted must not get a second request: the ledger would replay every leg
+     * idempotently, post nothing, and the second request would still report its loans as posted.
+     */
+    fun findSignedOffByHash(planHash: String): Uni<List<LedgerBackfillRequestEntity>>
 
     /** Apply a decision only if the row is still PROPOSED, in one statement. `1` = this caller won. */
     fun compareAndSetDecision(entity: LedgerBackfillRequestEntity): Uni<Int>

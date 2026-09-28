@@ -6,7 +6,10 @@ package com.openbank.risk.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
+import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -36,7 +39,10 @@ import java.util.UUID
 @Path("/api/v1/risk/snapshots")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+// #10618: the risk and finance departments read every endpoint here; only ROLE_RISK (never FINANCE)
+// joins the write below. Literal names, like lending's ROLE_CREDIT_RISK: adding them to libs Roles.kt
+// would rebuild the whole fleet for two constants.
+@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, "ROLE_RISK", "ROLE_FINANCE")
 class RiskResource {
 
     @Inject
@@ -45,9 +51,19 @@ class RiskResource {
     @Inject
     lateinit var cashFlows: CashFlowUseCase
 
+    @Inject
+    lateinit var irrbb: IrrbbUseCase
+
+    @Inject
+    lateinit var liquidity: LiquidityUseCase
+
+    @Inject
+    lateinit var capital: CapitalUseCase
+
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
     @Authorize(action = "risk.snapshot.create")
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, "ROLE_RISK")
     suspend fun create(request: CreateSnapshotRequest?): Response {
         val raw = requireNotNull(request?.asOf) { "field 'asOf' is required" }
         val asOf = try {
@@ -59,6 +75,13 @@ class RiskResource {
         val status = if (outcome.replayed) Response.Status.OK else Response.Status.CREATED
         return Response.status(status).entity(outcome.run.toResponse()).build()
     }
+
+    /** Bounded list for the console (#10618); the mismatches themselves are on the run manifest. */
+    @GET
+    @Operation(summary = "The most recently recorded snapshot runs, newest first (limit 1..100, default 25)")
+    @Authorize(action = "risk.snapshot.read", resource = "")
+    suspend fun list(@QueryParam("limit") limit: Int?): Response =
+        Response.ok(SnapshotRunListResponse(snapshots.listRuns(boundedLimit(limit)).map { it.toDto() })).build()
 
     @GET
     @Path("/{id}")
@@ -94,13 +117,58 @@ class RiskResource {
     @Path("/{id}/cash-flows")
     @Operation(summary = "Bucketed cash flows and PV of a TIED_OUT run under a curve set; 409 for an UNTIED one")
     @Authorize(action = "risk.snapshot.read", resource = "#id")
-    suspend fun cashFlows(@PathParam("id") id: UUID, @QueryParam("curveSetId") curveSetId: String?): Response {
+    suspend fun cashFlows(@PathParam("id") id: UUID, @QueryParam("curveSetId") curveSetId: String?): Response =
+        Response.ok(cashFlows.project(id, parseCurveSetId(curveSetId)).toResponse()).build()
+
+    /**
+     * IRRBB of a TIED_OUT run (ADR-0313 phase 1): repricing gap, ΔEVE under the six BCBS d368
+     * scenarios, ΔNII (parallel up/down). `tier1Capital` is optional and only ever the caller's:
+     * without it the outlier ratio is not computed. Same gates as cash flows: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/irrbb")
+    @Operation(summary = "IRRBB (repricing gap, ΔEVE, ΔNII) of a TIED_OUT run under a curve set; 409 for an UNTIED one")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun irrbb(
+        @PathParam("id") id: UUID,
+        @QueryParam("curveSetId") curveSetId: String?,
+        @QueryParam("tier1Capital") tier1Capital: String?,
+    ): Response {
+        val tier1 = tier1Capital?.takeIf { it.isNotBlank() }?.let {
+            requireNotNull(it.trim().toBigDecimalOrNull()) { "query parameter 'tier1Capital' must be a decimal number" }
+        }
+        return Response.ok(irrbb.analyse(id, parseCurveSetId(curveSetId), tier1).toResponse()).build()
+    }
+
+    /**
+     * LCR (BCBS d238) and NSFR (BCBS d295) of a TIED_OUT run (ADR-0313 phase 1), under the
+     * versioned parameter set `openbank.risk.liquidity.*`. Same gate as positions: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/liquidity")
+    @Operation(summary = "LCR and NSFR of a TIED_OUT run with components, caps and assumptions; 409 for an UNTIED one")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun liquidity(@PathParam("id") id: UUID): Response = Response.ok(liquidity.analyse(id).toResponse()).build()
+
+    /**
+     * Pillar 1 credit-risk RWA (BCBS d424 standardised approach), the 8% own-funds requirement and
+     * the capital ratios where own funds are in the snapshot (ADR-0313 phase 2), under the versioned
+     * parameter set `openbank.risk.capital.sa.*`. Same gate as positions: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/capital")
+    @Operation(
+        summary = "Credit-risk RWA (standardised approach), own-funds requirement and ratios; 409 for an UNTIED run",
+    )
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun capital(@PathParam("id") id: UUID): Response = Response.ok(capital.analyse(id).toResponse()).build()
+
+    private fun parseCurveSetId(curveSetId: String?): UUID {
         val raw = requireNotNull(curveSetId) { "query parameter 'curveSetId' is required" }
-        val setId = try {
+        return try {
             UUID.fromString(raw)
         } catch (e: IllegalArgumentException) {
             throw IllegalArgumentException("query parameter 'curveSetId' must be a UUID", e)
         }
-        return Response.ok(cashFlows.project(id, setId).toResponse()).build()
     }
 }

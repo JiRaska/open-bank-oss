@@ -120,7 +120,7 @@ class PostgresRedisRedpandaTestResource : QuarkusTestResourceLifecycleManager {
 
     companion object {
         private const val REDIS_PORT = 6379
-        private const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        private const val POSTGRES_IMAGE = "postgres:18.6-alpine"
         private const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
         private const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
 

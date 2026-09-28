@@ -144,7 +144,7 @@ spec:
 # Projects the Strimzi-minted keystore Secret from `messaging` into `onboarding`.
 # `dataFrom.extract` copies every key verbatim (preserves binary PKCS#12).
 # deletionPolicy: Retain so a transient store/RBAC blip never deletes a live cert.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -166,7 +166,7 @@ spec:
 ---
 # ── ExternalSecret: cluster CA truststore ─────────────────────────────────────
 # Shared cluster-CA truststore — same for every client; one projection per namespace.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

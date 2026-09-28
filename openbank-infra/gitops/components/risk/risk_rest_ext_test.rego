@@ -93,3 +93,86 @@ test_snapshot_create_reason_does_not_cover_curve_sets if {
 		"action": "risk.curve-set.create",
 	}
 }
+
+# ── #10618: department roles ───────────────────────────────────────────────────────────────
+
+risk_user := {"type": "HUMAN", "id": "u-risk", "roles": ["ROLE_RISK"]}
+
+finance_user := {"type": "HUMAN", "id": "u-fin", "roles": ["ROLE_FINANCE"]}
+
+# Mirrors rules.yaml authz.role_action_matrix for the two department roles (the CI trio loads no
+# data document). The live-bundle decision is re-checked with `opa eval` over rules-opa-data.yaml.
+dept_rules := {"authz": {"role_action_matrix": {
+	"ROLE_RISK": {"grant": ["risk.snapshot.read", "risk.curve-set.read"]},
+	"ROLE_FINANCE": {"grant": ["risk.snapshot.read", "risk.curve-set.read"]},
+}}}
+
+test_risk_may_read_snapshots_and_curve_sets if {
+	every action in ["risk.snapshot.read", "risk.curve-set.read"] {
+		rest.allow with input as {"principal": risk_user, "action": action}
+			with data.rules as dept_rules
+	}
+}
+
+test_finance_may_read_snapshots_and_curve_sets if {
+	every action in ["risk.snapshot.read", "risk.curve-set.read"] {
+		rest.allow with input as {"principal": finance_user, "action": action}
+			with data.rules as dept_rules
+	}
+}
+
+test_risk_may_create_snapshot_and_upload_curve_set if {
+	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
+		rest.allow with input as {"principal": risk_user, "action": action}
+	}
+}
+
+test_finance_is_denied_risk_writes if {
+	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
+		not rest.allow with input as {"principal": finance_user, "action": action}
+			with data.rules as dept_rules
+	}
+}
+
+# A service account holding ROLE_RISK must still be refused every write.
+test_service_account_with_risk_role_is_denied_writes if {
+	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_RISK"]},
+			"action": action,
+		}
+			with data.rules as dept_rules
+	}
+}
+
+test_treasury_roles_grant_nothing_in_risk if {
+	every action in ["risk.snapshot.read", "risk.curve-set.read", "risk.snapshot.create"] {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "u-tr", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]},
+			"action": action,
+		}
+			with data.rules as dept_rules
+	}
+}
+
+finrep_m2m := {"type": "HUMAN", "id": "service-account-openbank-finrep", "roles": ["ROLE_API"]}
+
+test_finrep_m2m_may_read_a_snapshot if {
+	rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.read"}
+}
+
+test_finrep_m2m_is_denied_create if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.create"}
+}
+
+test_finrep_m2m_is_denied_curve_set_create if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.curve-set.create"}
+}
+
+# Same ROLE_API, different machine: the grant is by identity, not by role.
+test_other_api_service_account_is_denied_read if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]},
+		"action": "risk.snapshot.read",
+	}
+}

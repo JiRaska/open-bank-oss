@@ -22,7 +22,7 @@
 # annotation stops ArgoCD's prune from removing this ESO-owned Secret (not in git).
 # The `observability` namespace is created by apps/glitchtip.yaml; ESO retries
 # until it exists.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: glitchtip-secrets

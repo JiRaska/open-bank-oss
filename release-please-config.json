@@ -451,6 +451,12 @@
       "exclude-paths": [
         "openbank-risk-engine/src/test"
       ]
+    },
+    "openbank-treasury-service": {
+      "component": "treasury-service",
+      "exclude-paths": [
+        "openbank-treasury-service/src/test"
+      ]
     }
   }
 }

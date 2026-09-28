@@ -242,6 +242,19 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-21** — **First per-service M2M identity on the ledger write path (#10486 step 1).**
   interest-service's capitalization journal now arrives as its own Keycloak client
   `openbank-interest` (principal `service-account-openbank-interest`, realm role `ROLE_API` only)
@@ -526,3 +539,50 @@ set) apply equally to the new `ledger.approval.decide` action.
   ledger already authorizes for `ledger.read`. No rego, RBAC or listener change here. **STRIDE-I:**
   one more reader of per-customer deposit-control balances; it writes nothing to the ledger.
   Rollback: remove the risk-engine Deployment env and regenerate the policies.
+- **2026-09-25** — **New caller: treasury-service on its own identity (ADR-0315).** `service-treasury-ledger-post` (`service-account-openbank-treasury`, Keycloak client `openbank-treasury`, ROLE_API only) is gated on `input.principal.id` and on `ledger.create` alone; it posts deal settlement, maturity and reversal journals (idempotency key `treasury:<dealId>:<settled|matured|reversed>`) and reverses by posting an offsetting journal, so it holds no `ledger.reverse`, `ledger.read` or any other ledger action. The edge is the private-CA mTLS listener on 8443 (client cert `treasury-internal-tls`), and the ledger ingress allow-list gains the `treasury` namespace. **STRIDE-E:** one more money-path writer, bounded to balanced journal creation by identity. Measured with `opa test`: the identity is DENIED reverse/trigger/replay/approve/close.draft/read, and the rule admits no other ROLE_API account; replacing its `principal.id` line with a `service-account-` prefix match turns three must-deny tests red. Rollback: remove the rule and the treasury Deployment env, regenerate bundles and policies.
+- **2026-09-25 — treasury chart (ADR-0315, #10618).** `V29__treasury_money_market_accounts.sql` seeds
+  14 leaf accounts with fixed ids (EUR nostro 1002; MM placements 1500/1501; deposit facility at ČNB
+  1510; accrued interest 1520/1521 and 2310/2311; MM borrowings 2300/2301; MM interest income
+  4200/4201 and expense 5200/5201) and re-keys CZK nostro 1001 to its fixed id ONLY while nothing
+  references it (journal lines, child accounts, frozen-period trial-balance lines); otherwise it
+  leaves 1001 untouched and treasury's CZK postings fail with 422 rather than land elsewhere.
+  **STRIDE-T:** no validation or posting path changes — the accounts are ordinary leaves under the
+  same currency-match and balance checks, written only through `postJournal`.
+- **2026-09-26** — **`POST /api/v1/journals` answers `Idempotent-Replayed: true|false` (#10904).**
+  A replayed idempotency key got the same 201 and the same body as the original posting, so a
+  caller could not tell a posting from a no-op. The lending ledger backfill proved the harm: a second
+  request replayed all 352 legs, booked nothing, and still reported 44 loans as posted. The use case
+  now returns whether the key was already posted, from both the sequential replay and the
+  concurrent-race recovery, and the resource sets the header. Status code and body are unchanged.
+  **STRIDE-I:** the header tells the caller only whether a key it supplied itself was already
+  posted. It is set solely on the authenticated create path (`ROLE_API`/`ROLE_OPERATOR`, then
+  per-identity rego), and answering at all already required a balanced, valid request, so it is no
+  oracle over other callers' keys beyond what the unchanged replay body already returned.
+  **STRIDE-R:** it strengthens non-repudiation, because a caller's audit record can now tell "posted"
+  from "already posted". No validation, posting, lock or outbox path changes. Rollback: drop the header.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
+
+- **2026-09-27** — **Read-only balance in an account's own currency (#11107).**
+  `GET /api/v1/journals/accounts/{code}/balance?asOf=&currency=` sums the native `amount` of booked
+  lines on one GL account in one transaction currency (every other aggregate here sums the CZK
+  `base_amount`), so a foreign-currency nostro such as 1002 EUR has a balance in EUR. It is gated
+  exactly like the trial balance (`@RolesAllowed` read roles, OPA `ledger.read`); no new action, no
+  rego change, no write, lock or outbox path. **STRIDE-T (misstatement):** only lines whose own
+  currency equals `currency` contribute, which also excludes the FX revaluation's base-only CZK legs;
+  `scope` defaults to `REAL_ONLY` as on the trial balance. `AccountCurrencyBalanceIT` asserts the exact
+  sum against real Postgres with a base-only line, a later line, a PENDING line and another account's
+  lines present; dropping the currency predicate turns 3 of its 4 tests red. **STRIDE-I:** it reveals
+  one account's total that the trial balance already reveals to the same callers, in a different
+  unit. Required `asOf`/`currency` are nullable + `requireNotNull` (400), an unknown code is 404.
+  Rollback: remove the endpoint.
