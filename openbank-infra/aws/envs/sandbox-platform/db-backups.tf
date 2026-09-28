@@ -185,7 +185,10 @@ locals {
     # is empty. Only `aws s3 ls` can tell the two apart.
     wealth       = { namespace = "wealth", sa = "wealth-db" }
     tpp-registry = { namespace = "tpp-registry", sa = "tpp-registry-db" }
-    vop          = { namespace = "payments", sa = "vop-db" }
+    # JiRaska/openbank-pricing#1: pricing moves under GitOps with a barmanObjectStore. Declared
+    # BEFORE the manifest lands, so WAL archiving never runs without credentials.
+    pricing = { namespace = "pricing", sa = "pricing-db" }
+    vop     = { namespace = "payments", sa = "vop-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
     # attempted an archive, so nothing alerted, and they would have had no recovery point the
     # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded

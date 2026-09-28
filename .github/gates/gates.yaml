@@ -2974,6 +2974,32 @@ gates:
     run: |
       python3 .github/scripts/check-raw-http-client.py --root .
 
+  # #10997: RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash, so a
+  # prefix check written without one (`path.startsWith("v1/")`) is always false and the gate it
+  # guards never runs — fail-closed (every call the filter should have let through is instead
+  # rejected downstream), not a bypass, which is why nothing 5xx's and nothing alerts.
+  # `openbank-psd2-service`'s EidasMtlsFilter, QsealSignatureFilter and BespokeDeprecationFilter
+  # all shipped this way; a mock-based unit test cannot see it because the mock supplies the
+  # exact slash-less string the code expects. Ratchet, not a flat fail: the 3 files measured
+  # 2026-09-26 are baselined per file (count, so a second slash-less site in a baselined file
+  # still fails), and a healed entry is reported stale. #11008 (open) fixes all three; this gate
+  # is what stops a fourth from shipping the same way in the meantime. Advisory until #11008
+  # merges and the fleet has run clean against the tightened check for a full cycle.
+  - id: jaxrs-path-prefix-leading-slash
+    name: "JAX-RS path-prefix literal missing its leading slash (#10997, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 3 files / 6 sites, all in openbank-psd2-service, all covered by open PR #11008"
+    budget_seconds: 15   # ~1.2s locally; generous for a slower runner
+    rationale: "A slash-less UriInfo.path prefix check never matches under RESTEasy Reactive, so the gate it guards silently never runs; this stops a new occurrence while #11008 fixes the 3 known ones."
+    review_after: "2026-12-31"
+    min_subjects: 1000   # 2521 service src/main .kt files scanned 2026-09-26
+    selftest: python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-jaxrs-path-prefix-leading-slash.py", ".github/scripts/jaxrs-path-prefix-leading-slash-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --root .
+
   # ADR-0321 D2: every SmallRye/MicroProfile Fault Tolerance annotation
   # (@Timeout/@Retry/@CircuitBreaker/@Bulkhead) on a service src/main declaration must carry
   # `@ResilienceProfile` (openbank-libs-runtime, com.openbank.libs.resilience) naming one of the
@@ -4399,6 +4425,10 @@ gates:
   # '## Security checklist' section with every box ticked — deleting the section is a
   # finding, same as leaving it blank, or the fix would be "delete the question".
   # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  # Items the DIFF decides (suppressions added, dependency manifests changed, and — when every
+  # money-path file is test/docs and no auth/crypto/PII/cardholder path changed — the judgement
+  # items) are answered by the gate with evidence in the step summary; only the rest need a tick.
+  # Anything unclassified (src/main, config, migrations, unknown paths) stays human: fail closed.
   - id: security-checklist-money-path
     name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
     group: security
@@ -4419,6 +4449,24 @@ gates:
       # Read the live body only after the checker proves this PR touches a money path.
       # The event body remains the fallback when the API is unavailable.
       python3 .github/scripts/check-security-checklist.py --live-body --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+
+  # #11301: the checklist gate answers the auth/PII/cardholder boxes from the reviewed
+  # `rules.yaml: security_sensitive_paths` declaration. A declaration nobody checks drifts
+  # narrower than the code; this keeps a floor under it — a crypto/JWT/TLS import, the shared
+  # four-eyes library, or a PII-/card-named field or column outside its category's globs fails.
+  - id: security-sensitive-paths-coverage
+    name: "security_sensitive_paths covers every strong sensitive-code signal (#11301, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 20   # one pass over the declared services' src/main
+    min_subjects: 16     # declared services at introduction; a shrink below this is the declaration eroding
+    rationale: "Auto-answering checklist items from a path declaration is only as honest as the declaration; a file that imports javax.crypto or carries a PAN field but sits outside its service's globs would let a sensitive change auto-pass."
+    review_after: "2027-03-28"
+    selftest: python3 .github/scripts/check-security-checklist.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-checklist.py", "openbank-libs/governance/rules.yaml"]
+    run: |
+      python3 .github/scripts/check-security-checklist.py --coverage
 
   # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
   # `gh pr create --body-file`, which never applies the template — so the section is absent by
