@@ -97,7 +97,7 @@ spec:
         host: "*"
 ---
 # Project account-service keystore from `messaging` into `accounts` namespace.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -118,7 +118,7 @@ spec:
         key: account-service
 ---
 # Shared cluster-CA truststore for all Kafka clients in `accounts`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

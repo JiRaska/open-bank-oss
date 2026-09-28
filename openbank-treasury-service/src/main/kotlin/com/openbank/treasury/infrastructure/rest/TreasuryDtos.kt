@@ -29,7 +29,7 @@ data class DraftDealRequest(
     val rate: BigDecimal? = null,
     val tradeDate: LocalDate? = null,
     val valueDate: LocalDate? = null,
-    /** Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY, always overnight. */
+    /** Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY and CNB_LOMBARD, always overnight. */
     val maturityDate: LocalDate? = null,
     val rationale: String? = null,
 )
@@ -65,6 +65,14 @@ data class TransitionResponse(
     val note: String?,
 )
 
+data class LimitOverrideResponse(
+    val by: String,
+    val reason: String,
+    val at: Instant,
+    val coversExposureUpTo: BigDecimal,
+    val limitAtOverride: BigDecimal,
+)
+
 data class JournalRefResponse(val event: String, val idempotencyKey: String, val journalId: UUID, val postedAt: Instant)
 
 data class DealResponse(
@@ -87,6 +95,8 @@ data class DealResponse(
     val approvedBy: String?,
     val rationale: String?,
     val limitCheck: LimitCheckResponse?,
+    /** A senior approver's recorded override of a limit breach (ADR-0315 D4); null when none. */
+    val limitOverride: LimitOverrideResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
     val history: List<TransitionResponse>,
@@ -113,6 +123,9 @@ data class DealResponse(
             approvedBy = d.approvedBy?.id,
             rationale = d.rationale,
             limitCheck = d.limitCheck?.let(LimitCheckResponse::from),
+            limitOverride = d.limitOverride?.let {
+                LimitOverrideResponse(it.by.id, it.reason, it.at, it.coversExposureUpTo, it.limitAtOverride)
+            },
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
             history = d.history.map {
@@ -146,6 +159,42 @@ data class CounterpartyResponse(
         )
     }
 }
+
+/**
+ * Read-only per counterparty/currency limit-utilisation line (ADR-0315 D4, #10896). `utilised`
+ * and `breached` are computed the exact same way as the booking-time limit check — both derive
+ * from [com.openbank.treasury.domain.model.Deal.LIMIT_CONSUMING_STATES] via the same repository
+ * query — so this view cannot disagree with what actually blocks booking.
+ */
+data class LimitUtilisationEntryResponse(
+    val counterpartyId: String,
+    val name: String,
+    val synthetic: Boolean,
+    val currency: String,
+    val limit: BigDecimal,
+    val utilised: BigDecimal,
+    val available: BigDecimal,
+    val utilisationPercent: BigDecimal,
+    val breached: Boolean,
+    val activeOverrides: Int,
+) {
+    companion object {
+        fun from(e: CounterpartyExposure) = LimitUtilisationEntryResponse(
+            counterpartyId = e.counterparty.id,
+            name = e.counterparty.name,
+            synthetic = e.counterparty.synthetic,
+            currency = e.currency,
+            limit = e.limit,
+            utilised = e.exposure,
+            available = e.headroom,
+            utilisationPercent = e.utilisationPercent,
+            breached = e.breached,
+            activeOverrides = e.activeOverrides,
+        )
+    }
+}
+
+data class LimitUtilisationResponse(val limits: List<LimitUtilisationEntryResponse>)
 
 data class CurrencyPositionResponse(
     val currency: String,

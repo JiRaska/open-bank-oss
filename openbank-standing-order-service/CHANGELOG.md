@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.5...standing-order-service-v0.17.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.16.5](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.4...standing-order-service-v0.16.5) (2026-09-21)
 
 

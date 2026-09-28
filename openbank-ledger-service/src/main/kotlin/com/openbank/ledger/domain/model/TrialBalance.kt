@@ -78,3 +78,20 @@ data class ControlAccountTieOut(
 ) {
     val isTiedOut: Boolean get() = delta.compareTo(BigDecimal.ZERO) == 0
 }
+
+/**
+ * One GL account's booked balance in a single TRANSACTION currency (#11107), summed from the
+ * native `amount` of its journal lines rather than the CZK `base_amount` every other aggregate
+ * here uses. Only lines whose own currency is [currency] contribute, so a base-only CZK line
+ * (the FX revaluation's mark-to-ČNB legs, ADR-0046) never moves a foreign-currency balance.
+ * Asset-style sign: [net] = debit − credit.
+ */
+data class AccountCurrencyBalance(
+    val code: String,
+    val currency: String,
+    val asOf: java.time.LocalDate,
+    val totalDebit: BigDecimal,
+    val totalCredit: BigDecimal,
+) {
+    val net: BigDecimal get() = totalDebit.subtract(totalCredit)
+}
