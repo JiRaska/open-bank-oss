@@ -219,4 +219,35 @@ test.describe('approval workbench', () => {
     await expect(page.getByText(/Domain approval inbox could not be loaded|Doménovou schvalovací frontu se nepodařilo načíst/)).toBeVisible()
     await expect(page.getByText(/No domain approvals pending|Žádná doménová schvalování nečekají/)).toHaveCount(0)
   })
+
+  test('shows treasury and backfill audit context without masking a truncated backfill source', async ({ page }) => {
+    await page.route('**/api/agent/proposals*', route =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    )
+    await page.route('**/api/approvals/pending', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [
+          { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', proposedAt: '2026-09-20T10:00:00Z' },
+          { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', proposedAt: '2026-09-20T11:00:00Z' },
+        ],
+        sources: approvalSources({ treasury: 'ok', 'ledger-backfill': 'unavailable' }),
+      }),
+    }))
+    await page.route('**/api/governance/agent-identities', route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ available: true, agents: [] }),
+    }))
+
+    await page.goto('/approvals')
+
+    await expect(page.getByText(/This queue is incomplete|Fronta není úplná/)).toContainText('ledger-backfill')
+    const treasury = page.getByTestId('domain-approval-treasury:deal-7')
+    await expect(treasury.getByTestId('approval-maker')).toContainText('dealer.two')
+    await expect(treasury.locator('time')).toHaveAttribute('datetime', '2026-09-20T10:00:00Z')
+    await expect(treasury.getByRole('link')).toHaveAttribute('href', '/treasury/deals/deal-7')
+    const backfill = page.getByTestId('domain-approval-ledger-backfill:request-7')
+    await expect(backfill.getByTestId('approval-maker')).toContainText('finance.one')
+    await expect(backfill.getByRole('link')).toHaveAttribute('href', '/balance-sheet/ledger-backfill')
+    await expect(page.getByText(/No domain approvals pending|Žádná doménová schvalování nečekají/)).toHaveCount(0)
+  })
 })
