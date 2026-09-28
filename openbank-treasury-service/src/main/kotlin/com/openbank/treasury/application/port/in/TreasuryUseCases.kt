@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.port.`in`
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.domain.model.Actor
@@ -12,7 +13,6 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.LocalDate
 import java.util.UUID
 
@@ -53,12 +53,11 @@ data class CounterpartyExposure(
         get() = if (limit.signum() == 0) {
             BigDecimal.ZERO
         } else {
-            exposure.multiply(HUNDRED).divide(limit, UTILISATION_SCALE, RoundingMode.HALF_UP)
+            RoundingPolicy.RATIO_PERCENT.divide(exposure.multiply(HUNDRED), limit)
         }
 
     private companion object {
         val HUNDRED: BigDecimal = BigDecimal(100)
-        const val UTILISATION_SCALE = 2
     }
 }
 
