@@ -208,9 +208,26 @@ class ContextApiIT {
             .body("affectedByType", hasEntry("PAYMENT", 2))
             .body("total", equalTo(2))
             .body("drilldownAvailable", equalTo(false))
+            .body("projectionStatus", equalTo("AVAILABLE"))
             .extract().asString()
 
         assertThat(response).doesNotContain("payment:")
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
+    fun `authorized missing incident is explicitly unknown and audited`() {
+        val reference = UUID.randomUUID().toString()
+        seedAssignment(CASE, "INCIDENT_IMPACT")
+        given()
+            .header("X-Investigation-Case-Id", CASE)
+            .header("X-Investigation-Purpose", "INCIDENT_IMPACT")
+            .`when`().get("/api/v1/context/incidents/$reference/impact")
+            .then().statusCode(200)
+            .body("projectionStatus", equalTo("MISSING"))
+            .body("total", equalTo(0))
+            .body("affectedByType.size()", equalTo(0))
+        assertThat(auditDecisions("incident:$reference")).containsExactly("ALLOWED")
     }
 
     @Test
@@ -480,7 +497,9 @@ class ContextApiIT {
         const val ACTOR = "context-investigator"
         const val CASE = "case-context-it"
         const val PURPOSE = "PAYMENT_COMPLAINT"
-        val NOW: Instant = Instant.now()
+
+        // Lifecycle fixtures add seconds per revision; keep every event before the default asOf query.
+        val NOW: Instant = Instant.now().minusSeconds(60)
     }
 }
 

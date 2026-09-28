@@ -32,8 +32,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  corpus-preflight:
+    name: Verify public fuzz seed corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify public seed corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          seed_dir="$(mktemp -d)"
+          trap 'rm -rf "$seed_dir"' EXIT
+          git clone --quiet --depth 1 --filter=blob:none --sparse \
+            --branch codex/cflite-corpus-seeds \
+            https://github.com/JiRaska/open-bank-oss.git "$seed_dir"
+          git -C "$seed_dir" sparse-checkout set corpus
+          diff -u \
+            <(printf '%s\n' corpus/Pacs008ReaderFuzzer/seed1 corpus/RodneCisloFuzzer/seed1) \
+            <(git -C "$seed_dir" ls-tree -r --name-only HEAD corpus | sort)
+          printf '%s\n' \
+            'ccd10ba161d4ae83d6edc67e4cba4739d87bc53d976c661c39f465a4ed992d8f  corpus/Pacs008ReaderFuzzer/seed1' \
+            '5224f2c2af064922a3fff561c92067e2b8dc95a40dbceb14b1a0721284d85871  corpus/RodneCisloFuzzer/seed1' \
+            | (cd "$seed_dir" && sha256sum -c -)
   fuzz-pr:
     name: Fuzz changed code (Jazzer, 300s)
+    needs: corpus-preflight
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 45
     continue-on-error: true  # advisory-first: promote to blocking once proven (ADR-0144 idiom)
@@ -43,6 +66,14 @@ jobs:
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
         with:
           language: jvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # The repository has >360k Actions artifacts. The default artifact filestore
+          # searches that collection for coverage and corpus on every PR and exhausts
+          # the installation API limit before the 300s fuzz budget can finish (#10268).
+          # This public seed branch is read-only to PR jobs; no PAT or write token.
+          storage-repo: https://github.com/JiRaska/open-bank-oss.git
+          storage-repo-branch: codex/cflite-corpus-seeds
+          storage-repo-branch-coverage: codex/cflite-corpus-seeds
           sanitizer: address
       - name: Run fuzzers (code-change mode)
         uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
@@ -51,4 +82,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fuzz-seconds: 300
           mode: code-change
+          storage-repo: https://github.com/JiRaska/open-bank-oss.git
+          storage-repo-branch: codex/cflite-corpus-seeds
+          storage-repo-branch-coverage: codex/cflite-corpus-seeds
           sanitizer: address

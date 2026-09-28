@@ -11,7 +11,7 @@
 # the pod green while every downstream M2M call would have gone out unauthenticated. That is the
 # #3471 failure mode caught before it bit — and the reason a per-service KV entry is not free:
 # it adds a manual seed step, and the seed step is the half that goes missing (#3485).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: mcp-service-secrets

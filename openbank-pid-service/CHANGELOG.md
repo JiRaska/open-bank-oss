@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.3...pid-service-v0.10.4) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
 ## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.2...pid-service-v0.10.3) (2026-09-13)
 
 

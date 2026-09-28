@@ -7,6 +7,7 @@ package com.openbank.kyb.integration
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.it.PostgresTestResource
+import com.openbank.kyb.it.StubDocumentGateway
 import com.openbank.kyb.it.StubPartyGateway
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -63,6 +64,39 @@ class KybCaseApiIT {
 
     private val initiator = UUID.randomUUID()
     private val cosigner = UUID.randomUUID()
+
+    @Inject
+    lateinit var documents: StubDocumentGateway
+
+    private fun accept(party: UUID, caseId: String) {
+        val disclosures = StubDocumentGateway.DISCLOSURES.joinToString(",") {
+            """{"code":"${it.code}","version":"${it.version}","sha256":"${it.sha256}"}"""
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", party.toString())
+            body("""{"disclosures":[$disclosures]}""")
+        } When { post("/api/v1/kyb/cases/$caseId/agreement/accept") } Then { statusCode(200) }
+    }
+
+    private fun sign(party: UUID, caseId: String, ref: String, status: Int, error: String) {
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", party.toString())
+            body("""{"signatureRef":"$ref"}""")
+        } When { post("/api/v1/kyb/cases/$caseId/sign") } Then {
+            statusCode(status)
+            body("error", equalTo(error))
+        }
+    }
+
+    private companion object {
+        const val QUESTIONNAIRE = """{"purpose":"OPERATING_ACCOUNT","expectedMonthlyTurnover":"UP_TO_1M",
+            "sourceOfFunds":["BUSINESS_REVENUE"],"cashIntensive":false,"countries":["CZ","DE"],
+            "taxResidencies":["CZ"],"fatcaStatus":"ACTIVE_NFFE","crsStatus":"ACTIVE_NFE"}"""
+        const val DECLARATIONS =
+            """{"uboConfirmed":true,"peps":[{"name":"Eva Dvořáková","isPep":false}],"truthful":true}"""
+    }
 
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
@@ -170,11 +204,85 @@ class KybCaseApiIT {
             post("/api/v1/kyb/invitations/$token/claim")
         } Then { statusCode(409) }
 
-        // 7. both sign
+        // 7. the company questionnaire and the declarations. A stranger may not answer.
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            body(QUESTIONNAIRE)
+        } When { put("/api/v1/kyb/cases/$caseId/questionnaire") } Then { statusCode(403) }
         Given {
             contentType("application/json")
             header("X-Customer-Party-Id", initiator.toString())
-            body("""{"signatureRef":"cer-1"}""")
+            body(QUESTIONNAIRE)
+        } When { put("/api/v1/kyb/cases/$caseId/questionnaire") } Then {
+            statusCode(200)
+            body("questionnaire.purpose", equalTo("OPERATING_ACCOUNT"))
+        }
+        // Jana's PEP status is on her customer profile, so only Eva needs a declared entry; a
+        // declaration that leaves Eva out, or is not confirmed truthful, is a 400.
+        parties.pep[initiator] = false
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", initiator.toString())
+            body("""{"uboConfirmed":true,"peps":[],"truthful":true}""")
+        } When { put("/api/v1/kyb/cases/$caseId/declarations") } Then { statusCode(400) }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", initiator.toString())
+            body(DECLARATIONS.replace("\"truthful\":true", "\"truthful\":false"))
+        } When { put("/api/v1/kyb/cases/$caseId/declarations") } Then { statusCode(400) }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", initiator.toString())
+            body(DECLARATIONS)
+        } When { put("/api/v1/kyb/cases/$caseId/declarations") } Then {
+            statusCode(200)
+            body("declarations.peps", hasSize<Any>(2))
+        }
+        Given {
+            header("X-Customer-Party-Id", cosigner.toString())
+        } When { get("/api/v1/kyb/cases/$caseId/questionnaire/prefill") } Then {
+            statusCode(200)
+            body("knownPersons", hasSize<Any>(2))
+            // Jana's PEP fact is on file, but it is HER data: the co-signer is told only that it exists.
+            body("knownPersons.find { it.partyId == '$initiator' }.pepOnFile", equalTo(true))
+            body("knownPersons.find { it.partyId == '$initiator' }.pep", nullValue())
+        }
+
+        // 8. the agreement: rendered by document-service, its ceremony recorded on the case
+        val ceremonyId = (
+            Given {
+                header("X-Customer-Party-Id", cosigner.toString())
+            } When { post("/api/v1/kyb/cases/$caseId/agreement?lang=cs") } Then {
+                statusCode(200)
+                body("caseId", equalTo(caseId))
+                body("disclosures", hasSize<Any>(2))
+            }
+            ).extract().path<String>("ceremonyId")
+
+        // 9. refusals: no acceptance yet; a stale disclosure set; a ref that is not the ceremony;
+        //    a ceremony the caller has not actually signed.
+        sign(initiator, caseId, ceremonyId, 409, "DISCLOSURES_NOT_ACCEPTED")
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", initiator.toString())
+            body("""{"disclosures":[{"code":"VOP_CS","version":"1.0.0","sha256":"${"b".repeat(64)}"}]}""")
+        } When { post("/api/v1/kyb/cases/$caseId/agreement/accept") } Then {
+            statusCode(409)
+            body("error", equalTo("DISCLOSURES_STALE"))
+        }
+        accept(initiator, caseId)
+        accept(cosigner, caseId)
+        sign(initiator, caseId, "cer-1", 409, "SIGNATURE_REF_MISMATCH")
+        sign(initiator, caseId, ceremonyId, 409, "CEREMONY_NOT_SIGNED")
+
+        // 10. both sign the ceremony in document-service, then here
+        documents.signedBy.getOrPut(UUID.fromString(caseId)) { java.util.concurrent.ConcurrentHashMap.newKeySet() }
+            .addAll(listOf(initiator, cosigner))
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", initiator.toString())
+            body("""{"signatureRef":"$ceremonyId"}""")
         } When {
             post("/api/v1/kyb/cases/$caseId/sign")
         } Then {
@@ -184,16 +292,17 @@ class KybCaseApiIT {
         Given {
             contentType("application/json")
             header("X-Customer-Party-Id", cosigner.toString())
-            body("""{"signatureRef":"cer-2"}""")
+            body("""{"signatureRef":"$ceremonyId"}""")
         } When {
             post("/api/v1/kyb/cases/$caseId/sign")
         } Then {
             statusCode(200)
             body("status", equalTo("SIGNED"))
         }
+        assertThat(parties.mandates.filter { it.evidenceRef.contains(ceremonyId) }).hasSize(2)
         assertThat(parties.mandates.filter { it.evidenceRef.contains(caseId) }).hasSize(2)
 
-        // 8. the outbox holds one row per lifecycle event, written in the same transactions
+        // 11. the outbox holds one row per lifecycle event, written in the same transactions
         DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->
             c.createStatement().executeQuery(
                 "select event_type from kyb_outbox where aggregate_id = '$caseId' order by id",
@@ -208,7 +317,7 @@ class KybCaseApiIT {
             }
         }
 
-        // 9. "cases I am involved in" for the co-signer
+        // 12. "cases I am involved in" for the co-signer
         Given {
             header("X-Customer-Party-Id", cosigner.toString())
         } When { get("/api/v1/kyb/cases?partyId=$cosigner") } Then

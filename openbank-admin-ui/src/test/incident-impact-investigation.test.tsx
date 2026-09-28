@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IncidentImpactInvestigation } from '@/components/context/IncidentImpactInvestigation'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
@@ -46,10 +46,40 @@ describe('incident impact investigation', () => {
 
     await submit()
 
-    expect(await screen.findByText('Total 4')).toBeInTheDocument()
+    expect(await screen.findByText('Observed 4')).toBeInTheDocument()
     expect(screen.getByText('PAYMENT: 3')).toBeInTheDocument()
     expect(screen.getByText(/customer identifiers are never returned/)).toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(1)
+  })
+
+  it('discards a late aggregate after the selected incident changes', async () => {
+    let resolve!: (value: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(done => { resolve = done })))
+    render(<LanguageProvider initialLanguage="en"><IncidentImpactInvestigation incidents={[...incidents]} /></LanguageProvider>)
+    await submit()
+    fireEvent.change(screen.getByLabelText('Incident'), { target: { value: '' } })
+    await act(async () => { resolve(new Response(JSON.stringify({
+      affectedByType: { SERVICE: 2 }, total: 2, drilldownAvailable: false, projectionStatus: 'AVAILABLE',
+    }))) })
+    expect(screen.queryByText('Observed 2')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Aggregate incident impact map' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['MISSING', {}, 0, 'Impact is unknown.'],
+    ['PARTIAL', { SERVICE: 2 }, 2, 'counts cover only the retrieved slice'],
+    ['UNKNOWN', {}, 0, 'does not report projection completeness'],
+  ])('reports %s without implying an all-clear', async (projectionStatus, affectedByType, total, message) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      affectedByType, total, drilldownAvailable: false, projectionStatus,
+    }))))
+    render(<LanguageProvider initialLanguage="en"><IncidentImpactInvestigation incidents={[...incidents]} /></LanguageProvider>)
+    await submit()
+    expect(await screen.findByRole('status')).toHaveTextContent(String(message))
+    if (projectionStatus === 'MISSING') expect(screen.queryByText('Observed 0')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'another-case' } })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Aggregate incident impact map' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -63,6 +93,6 @@ describe('incident impact investigation', () => {
     await submit()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Impact could not be verified safely.')
-    expect(screen.queryByText(/Total /)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Observed /)).not.toBeInTheDocument()
   })
 })

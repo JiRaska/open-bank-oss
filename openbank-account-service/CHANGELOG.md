@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.5...account-service-v0.32.0) (2026-09-28)
+
+
+### Features
+
+* **account:** bind Idempotency-Key to a request fingerprint ([#10953](https://github.com/JiRaska/open-bank-oss/issues/10953)) ([165384d](https://github.com/JiRaska/open-bank-oss/commit/165384de33b027af7312e35a3163a20e527d00bb))
+
+## [0.31.5](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.4...account-service-v0.31.5) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** remove duplicate UnauthorizedException mappers; add unused 404/409 bases ([#10923](https://github.com/JiRaska/open-bank-oss/issues/10923)) ([33ff330](https://github.com/JiRaska/open-bank-oss/commit/33ff330630515a4919ca6f15bfc9b8ce3cc6d1f9))
+
+## [0.31.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.3...account-service-v0.31.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.31.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.2...account-service-v0.31.3) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.31.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.1...account-service-v0.31.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.0...account-service-v0.31.1) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.1...account-service-v0.31.0) (2026-09-20)
+
+
+### Features
+
+* **account:** open the business current account when a business party activates ([#10374](https://github.com/JiRaska/open-bank-oss/issues/10374)) ([e204c40](https://github.com/JiRaska/open-bank-oss/commit/e204c405f782ed0820e546eb6925fd8e89fa42be))
+
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.30.0...account-service-v0.30.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **sca:** add an mTLS listener and give account-service's SCA approval a URL and a bearer ([#10402](https://github.com/JiRaska/open-bank-oss/issues/10402)) ([99bf2e3](https://github.com/JiRaska/open-bank-oss/commit/99bf2e3acb7fde204fae95e322546cdea6031b44)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.29.0...account-service-v0.30.0) (2026-09-17)
+
+
+### Features
+
+* **account:** open the business current account at digital onboarding ([#10173](https://github.com/JiRaska/open-bank-oss/issues/10173)) ([b8cbf1d](https://github.com/JiRaska/open-bank-oss/commit/b8cbf1d928d84ff360cf0560f2c7d725eb711dc7))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.28.0...account-service-v0.29.0) (2026-09-13)
 
 

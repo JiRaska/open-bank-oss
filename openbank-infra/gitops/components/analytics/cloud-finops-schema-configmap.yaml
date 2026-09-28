@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ClickHouse schema for the cloud FinOps dashboard (ADR-0316).
+#
+# Delivered the same way as ci-gate-runs-schema-configmap.yaml, for the same reason: the live
+# ClickHouse already has data, so clickhouse-init (first boot only) would never run this. The
+# ci-gate-runs-schema-apply PostSync Job mounts this ConfigMap and applies it statement by
+# statement; every statement is idempotent. A ConfigMap is a resource ArgoCD DIFFS, so editing
+# this file is what triggers the sync that re-runs the hook.
+#
+# Written by the admin-ui/cloud-finops-collector CronJob via
+# openbank-infra/scripts/cloud-finops-collect.py — field names match its row dicts verbatim.
+# Rows carry infrastructure metadata and prices only; no customer or regulated data, so the
+# TTL is a trend horizon (25 months: two years of month-over-month plus headroom).
+#
+# NOTE: no semicolon inside any comment in the data block below — the apply Job splits
+# statements on a semicolon at end of line.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-finops-schema
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: cloud-finops
+data:
+  cloud-finops.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Cloud FinOps (ADR-0316). One run = one collector invocation (run_id).
+    CREATE DATABASE IF NOT EXISTS openbank_analytics;
+
+    -- IaC estimate: one row per priced resource per run (infracost breakdown).
+    CREATE TABLE IF NOT EXISTS openbank_analytics.finops_iac_resources
+    (
+        run_ts        DateTime64(3, 'UTC'),
+        run_id        String,
+        env           LowCardinality(String),
+        project       LowCardinality(String),
+        resource      String,
+        resource_type LowCardinality(String),
+        category      LowCardinality(String),
+        tags          Map(String, String),
+        monthly_cost  Float64
+    )
+    ENGINE = MergeTree
+    ORDER BY (env, run_ts, resource)
+    PARTITION BY toYYYYMM(run_ts)
+    TTL toDateTime(run_ts) + INTERVAL 25 MONTH;
+
+    -- FinOps policy findings: one row per (resource, rule) violation per run.
+    CREATE TABLE IF NOT EXISTS openbank_analytics.finops_findings
+    (
+        run_ts             DateTime64(3, 'UTC'),
+        run_id             String,
+        env                LowCardinality(String),
+        project            LowCardinality(String),
+        resource           String,
+        resource_type      LowCardinality(String),
+        rule_id            LowCardinality(String),
+        rules_version      LowCardinality(String),
+        severity           LowCardinality(String),
+        message            String,
+        est_monthly_saving Float64
+    )
+    ENGINE = MergeTree
+    ORDER BY (env, run_ts, rule_id, resource)
+    PARTITION BY toYYYYMM(run_ts)
+    TTL toDateTime(run_ts) + INTERVAL 25 MONTH;
+
+    -- Actual spend (Cost Explorer DAILY x SERVICE). Cost Explorer revises recent days for up to
+    -- ~72h, so every run re-pulls a window and the LATEST collected_at wins per (day, service).
+    -- Query with FINAL or argMax(amount, collected_at).
+    CREATE TABLE IF NOT EXISTS openbank_analytics.finops_aws_daily_cost
+    (
+        usage_date   Date,
+        service      LowCardinality(String),
+        category     LowCardinality(String),
+        amount       Float64,
+        currency     LowCardinality(String),
+        collected_at DateTime64(3, 'UTC')
+    )
+    ENGINE = ReplacingMergeTree(collected_at)
+    ORDER BY (usage_date, service)
+    PARTITION BY toYYYYMM(usage_date)
+    TTL usage_date + INTERVAL 25 MONTH;
+
+    -- One row per SUCCESSFUL run, written last by the collector after every other insert has
+    -- been read back. max(run_ts) here is the data-freshness signal.
+    CREATE TABLE IF NOT EXISTS openbank_analytics.finops_ingest_runs
+    (
+        run_ts                   DateTime64(3, 'UTC'),
+        run_id                   String,
+        rules_version            LowCardinality(String),
+        envs                     UInt16,
+        resources                UInt32,
+        findings                 UInt32,
+        compliance               Float64,
+        iac_monthly_cost         Float64,
+        potential_monthly_saving Float64,
+        ce_rows                  UInt32
+    )
+    ENGINE = MergeTree
+    ORDER BY run_ts
+    TTL toDateTime(run_ts) + INTERVAL 25 MONTH;

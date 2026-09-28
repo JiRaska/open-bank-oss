@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.34.0...notification-service-v0.34.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** resolve checker identity after the approval null-body check ([#11047](https://github.com/JiRaska/open-bank-oss/issues/11047)) ([a2840ad](https://github.com/JiRaska/open-bank-oss/commit/a2840ad8c1f5e7c6083e66468f8e3b365240a38f))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.1...notification-service-v0.34.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.0...notification-service-v0.33.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **notification:** point EMAIL recipient resolution at party-service, not localhost ([#10382](https://github.com/JiRaska/open-bank-oss/issues/10382)) ([c0fbf06](https://github.com/JiRaska/open-bank-oss/commit/c0fbf068d4ac6fcd60b835c1a169ee7266e5bc2f)), closes [#10372](https://github.com/JiRaska/open-bank-oss/issues/10372)
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.32.0...notification-service-v0.33.0) (2026-09-19)
+
+
+### Features
+
+* **notification:** notify co-signers of multi-signature approvals ([#10313](https://github.com/JiRaska/open-bank-oss/issues/10313)) ([2fc178a](https://github.com/JiRaska/open-bank-oss/commit/2fc178a40d6d397796f212c4f6b11bc518d8ce35))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.31.1...notification-service-v0.32.0) (2026-09-13)
 
 

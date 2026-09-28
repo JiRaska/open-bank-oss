@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.2...kyc-service-v0.16.0) (2026-09-17)
+
+
+### Features
+
+* **kyc:** route a risky AML self-declaration to enhanced due diligence ([#10208](https://github.com/JiRaska/open-bank-oss/issues/10208)) ([aa7ccde](https://github.com/JiRaska/open-bank-oss/commit/aa7ccde76a41ccbd53037ede7f1f845249c9fa4d)), closes [#10200](https://github.com/JiRaska/open-bank-oss/issues/10200)
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.1...kyc-service-v0.15.2) (2026-09-13)
 
 

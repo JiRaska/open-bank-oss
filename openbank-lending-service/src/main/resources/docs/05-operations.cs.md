@@ -72,6 +72,16 @@ Každý průchod nejprve trvale zapíše `provisioning_cycle_run` se stavem `RUN
 
 U starší mezery zachovej řádek běhu a porovnej potvrzené řádky `loan_provisioning` a reference allowance outboxu s nezávisle uchovanými důkazy o úvěrech a účetních zápisech daného dne. Chybějící řádky ani deníky nevytvářej z dnešního proměnlivého stavu. V případu odsouhlasení zaznamenej dotčenou populaci, nejistoty, rozhodnutí schvalovatele a reference případné schválené účetní korekce **k aktuálnímu datu**. Řádek běhu zůstává neuzavřený, dokud nevznikne kontrolovaný mechanismus uzavření; nepřepisuj jej na `COMPLETE` jen kvůli utišení alertu.
 
+### Doúčtování do hlavní knihy (jednorázové, #10746)
+Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6057). ROLE_FINANCE nebo ROLE_ADMIN (pouze lidé), dvě různé osoby (#10618). Celý postup lze provést v administraci: Rozvaha a riziko → Doúčtování úvěrů.
+1. **Zkouška nanečisto** (nic nezapisuje): `GET /api/v1/lending/ledger-backfill/plan?cutoverDate=<dnes>&disbursedBefore=<datum>`. Ověřte `executable=true`, `plan.tieOut[*].ties=true` a `glTotals`.
+2. **Návrh** (maker): `POST /api/v1/lending/ledger-backfill/requests`.
+3. **Schválení** (checker, jiný uživatel financí nebo admin): `POST /requests/{id}/decide`. Vlastní schválení vrací 422.
+4. **Provedení**: `POST /requests/{id}/execute?execute=true` v den cut-overu. 409 znamená, že se kniha od schválení změnila, cut-over uplynul, nebo běží jiné provedení.
+5. U selhání se úvěr zastaví na první chybě a žádost zůstává APPROVED. Po opravě krok 4 zopakujte. Už zaúčtované zápisy se v hlavní knize přehrají bez účinku.
+6. **Storno**: každý zápis stornujte v ledger-service (`reverseJournal`) podle klíče `loan:<id>:…`.
+Zápisy se účtují k datu cut-overu, s původním datem události ve `valueDate`. Pouze hlavní kniha: na účet klienta se nic nepřipisuje.
+
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
 

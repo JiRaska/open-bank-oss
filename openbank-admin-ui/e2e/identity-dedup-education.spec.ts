@@ -9,6 +9,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('identity deduplication remains understandable and accessible in both themes', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/docs/identity-dedup')
 
   await expect(page.getByRole('heading', { level: 1, name: /Identita a deduplikace|Identity & Deduplication/ })).toBeVisible()
@@ -17,12 +18,16 @@ test('identity deduplication remains understandable and accessible in both theme
   await expect(page.getByText('NEEDS_MANUAL_VERIFICATION', { exact: true }).first()).toBeVisible()
 
   for (const dark of [false, true]) {
-    await page.locator('html').evaluate((element, enabled) => element.classList.toggle('dark', enabled), dark)
     if (dark) {
+      await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
+      await expect(page.locator('html')).toHaveClass(/dark/)
       await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     } else {
       await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
     }
+    // Theme endpoints meet AA, but several shared surfaces deliberately animate for 200 ms.
+    // Axe must inspect a settled theme rather than an invalid in-between colour pair.
+    await page.waitForTimeout(250)
     const scan = await new AxeBuilder({ page })
       .include('#main-content')
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])

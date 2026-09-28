@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
 import { auth } from '@/auth'
+import { defaultTrendWindow } from '@/lib/fx/trend'
 
 const FX_SERVICE_URL = process.env.FX_SERVICE_URL ?? 'http://localhost:8119'
 const CURRENCY = /^[A-Z]{3}$/
@@ -15,13 +16,11 @@ export async function GET(_request: Request, context: { params: Promise<{ base: 
   const accessToken = session?.user?.accessToken
   if (!accessToken) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const to = new Date()
-  const from = new Date(to)
-  from.setUTCMonth(from.getUTCMonth() - 3)
+  const { from, to } = defaultTrendWindow()
   try {
     const serviceUrl = inCluster() ? await resolveInClusterBaseUrl('fx-service') : FX_SERVICE_URL
     if (!serviceUrl) return NextResponse.json({ error: 'FX history unavailable' }, { status: 503 })
-    const url = `${serviceUrl}/api/v1/fx/rates/${base}/${quote}/history?source=CNB&limit=100&from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`
+    const url = `${serviceUrl}/api/v1/fx/rates/${base}/${quote}/history?source=CNB&limit=100&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
     const response = await fetch(url, {
       cache: 'no-store',
       headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },

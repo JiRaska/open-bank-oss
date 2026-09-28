@@ -6,7 +6,7 @@ package com.openbank.transaction.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.transaction.application.port.out.BalanceCoverPort
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -25,14 +25,17 @@ import java.util.UUID
 
 /**
  * Typed client for the balance-service cover endpoints. The hold legs are money-relevant and gated by
- * `@RolesAllowed(SERVICE, OPERATOR, ADMIN)` on balance-service, so the client attaches an M2M bearer
- * via [OidcClientRequestReactiveFilter] (oidc-client `openbank-services`, which carries ROLE_OPERATOR).
+ * `@RolesAllowed(API, OPERATOR, ADMIN)` on balance-service, so the client attaches an M2M bearer
+ * via the named oidc-client `m2m` (Keycloak client `openbank-transaction`, ROLE_API only; balance's
+ * OPA grants it balance.hold / balance.holdRelease by identity, #10486).
  * Without it these calls are rejected 401. Booked debit/credit is no longer driven from here — the
  * ledger projection owns the booked balance (ADR-0039 Phase D-2).
  */
 @RegisterRestClient(configKey = "balance-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-transaction` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/balances")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

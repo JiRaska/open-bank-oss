@@ -138,3 +138,50 @@ test_pid_ext_denied_for_ai_agent if {
 		"action": "party.changeStatus",
 	}
 }
+
+# --- #10486 batch 6: party.read by named machine identity (ROLE_API only) ---
+
+b6_pid_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+
+b6_pid_rules := {
+	"authz": {"role_action_matrix": {}},
+	"money_path_services": [],
+	"money_path_action_prefixes": {},
+	"four_eyes": {"verbs": [], "actions": []},
+	"feature_flags": {"prohibited_flag_combinations": [], "money_path_flags": []},
+	"shared_m2m_write_prohibition": {"reasons": []},
+}
+
+test_b6_delegation_may_read_a_party if {
+	d := rest.allow with input as {"principal": b6_pid_sa("delegation"), "action": "party.read"}
+		with data.rules as b6_pid_rules
+	d.allow == true
+	"service-delegation-party-read" in rest.allowed_reasons with input as {"principal": b6_pid_sa("delegation"), "action": "party.read"}
+		with data.rules as b6_pid_rules
+}
+
+# (identity.eudi.* is left out: customer-eudi-request admits any authenticated HUMAN by design,
+# and those endpoints are gated by their own RBAC; unchanged by this batch.)
+test_b6_delegation_denied_every_other_pid_action if {
+	every action in {
+		"party.changeStatus", "pid.resolve", "identity.register", "identity.resolve", "identity.link",
+	} {
+		rest.allow == false with input as {"principal": b6_pid_sa("delegation"), "action": action}
+			with data.rules as b6_pid_rules
+	}
+}
+
+test_b6_other_role_api_sa_denied_party_read if {
+	every p in ["mcp", "services", "kyb", "party"] {
+		rest.allow == false with input as {"principal": b6_pid_sa(p), "action": "party.read"}
+			with data.rules as b6_pid_rules
+	}
+}
+
+test_b6_staff_keep_party_read if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN"] {
+		d := rest.allow with input as {"principal": {"type": "HUMAN", "id": "u-staff", "roles": [role]}, "action": "party.read"}
+			with data.rules as b6_pid_rules
+		d.allow == true
+	}
+}

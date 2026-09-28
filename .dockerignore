@@ -59,6 +59,11 @@
 # --- VCS ---
 .git/
 .github/
+!.github/
+.github/*
+!.github/gates/
+.github/gates/*
+!.github/gates/gates.yaml
 .gitignore
 .gitattributes
 .dockerignore

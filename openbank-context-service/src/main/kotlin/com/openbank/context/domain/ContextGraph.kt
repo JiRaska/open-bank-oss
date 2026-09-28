@@ -39,11 +39,14 @@ data class ContextNeighborhood(
     val edges: List<ContextEdge>,
     val truncated: Boolean,
 )
+enum class ImpactProjectionStatus { MISSING, PARTIAL, AVAILABLE }
+
 data class IncidentImpact(
     val incidentRef: String,
     val affectedByType: Map<String, Int>,
     val total: Int,
     val drilldownAvailable: Boolean,
+    val projectionStatus: ImpactProjectionStatus,
 )
 data class Investigator(val id: String, val roles: List<String>)
 data class InvestigationContext(val caseId: String, val purpose: String, val asOf: Instant)

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.2...clearing-service-v0.11.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.1...clearing-service-v0.11.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.0...clearing-service-v0.11.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **ledger:** give ledger an mTLS listener and point clearing + interest at it ([#10397](https://github.com/JiRaska/open-bank-oss/issues/10397)) ([4e21311](https://github.com/JiRaska/open-bank-oss/commit/4e21311eac1a431c3670d0f4c86ccb38d762e3ba))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.1...clearing-service-v0.11.0) (2026-09-14)
 
 

@@ -53,4 +53,17 @@ describe('context graph control BFFs', () => {
     const request = new NextRequest('http://localhost/api/context/incidents/i-1/impact?caseId=case-7&purpose=INCIDENT_IMPACT')
     expect((await GET(request, { params: Promise.resolve({ reference: 'i-1' }) })).status).toBe(502)
   })
+
+  it('preserves partial coverage but drops upstream identifiers and unexpected evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      affectedByType: { SERVICE: 2 }, total: 2, drilldownAvailable: false, projectionStatus: 'PARTIAL',
+      nodes: [{ partyId: 'synthetic-hidden-party' }], internalNotes: 'must-not-disclose',
+    }))))
+    const { GET } = await import('@/app/api/context/incidents/[reference]/impact/route')
+    const request = new NextRequest('http://localhost/api/context/incidents/i-1/impact?caseId=case-7&purpose=INCIDENT_IMPACT')
+    const response = await GET(request, { params: Promise.resolve({ reference: 'i-1' }) })
+    expect(await response.json()).toEqual({
+      affectedByType: { SERVICE: 2 }, total: 2, drilldownAvailable: false, projectionStatus: 'PARTIAL',
+    })
+  })
 })

@@ -4,17 +4,21 @@
 
 package com.openbank.kyb.infrastructure.registry
 
+import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.kyb.domain.model.IdentifierChecksums
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RepresentationMode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Optional
 
 class DemoEntityTest {
 
@@ -23,7 +27,7 @@ class DemoEntityTest {
 
     @Test
     fun `switched off, it answers for nothing — the default must be the safe state`() {
-        val off = DemoEntity(false, "Oldřich Vaněk", clock)
+        val off = DemoEntity(false, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", Optional.empty(), clock)
         assertThat(off.isDemo(demoIco)).isFalse()
         assertThat(off.answersSearch(IdentifierScheme.CZ_ICO, RegistrySearchQuery("OpenBank Demo"))).isFalse()
     }
@@ -36,7 +40,7 @@ class DemoEntityTest {
 
     @Test
     fun `switched on, it answers only for its own IČO and only for a search that means it`() {
-        val on = DemoEntity(true, "Oldřich Vaněk", clock)
+        val on = DemoEntity(true, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", Optional.empty(), clock)
         assertThat(on.isDemo(demoIco)).isTrue()
         assertThat(on.isDemo(LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, "45274649"))).isFalse()
         assertThat(on.answersSearch(IdentifierScheme.CZ_ICO, RegistrySearchQuery("openbank demo"))).isTrue()
@@ -52,7 +56,16 @@ class DemoEntityTest {
 
     @Test
     fun `the extract is unmistakably fictitious and names the configured person as sole representative`() {
-        val ex = DemoEntity(true, "Oldřich Vaněk", clock).extract()
+        val ex = DemoEntity(
+            true,
+            "Oldřich Vaněk",
+            "Ukázková 1",
+            "Praha",
+            "11000",
+            "CZ",
+            Optional.empty(),
+            clock,
+        ).extract()
         assertThat(ex.source).isEqualTo(RegistryExtract.SANDBOX_DEMO_SOURCE)
         assertThat(ex.sourceRef).contains("SANDBOX DEMO")
         assertThat(ex.registeredAddress?.postalCode).isEqualTo("00000")
@@ -60,5 +73,57 @@ class DemoEntityTest {
         assertThat(ex.representationRule.requiredSigners).isEqualTo(1)
         // A rule text is required so the human attestation step applies to the demo too.
         assertThat(ex.representationRule.sourceText).isNotBlank()
+    }
+
+    @Test
+    fun `the representative carries a fictitious address the sandbox demo user also carries`() {
+        val rep = DemoEntity(true, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", Optional.empty(), clock)
+            .extract().representatives.single()
+        assertThat(rep.address).isEqualTo(RegisteredAddress("Ukázková 1", "Praha", "11000", "CZ"))
+        val yaml = File("src/main/resources/application.yaml").readText()
+        assertThat(yaml).contains(
+            "street: \${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_STREET:Ukázková 1}",
+            "city: \${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_CITY:Praha}",
+            "postal-code: \${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_POSTAL_CODE:11000}",
+            "country: \${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_COUNTRY:CZ}",
+        )
+    }
+
+    private fun joint(second: String?) =
+        DemoEntity(true, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", Optional.ofNullable(second), clock)
+
+    @Test
+    fun `with a second jednatel the register reads two jednatelé acting jointly`() {
+        val ex = joint("Jana Testová").extract()
+        assertThat(ex.representatives.map { it.fullName }).containsExactly("Oldřich Vaněk", "Jana Testová")
+        assertThat(ex.representationRule.mode).isEqualTo(RepresentationMode.JOINT_N)
+        assertThat(ex.representationRule.requiredSigners).isEqualTo(2)
+    }
+
+    @Test
+    fun `the joint rule text parses to the same verdict the demo claims, and the sole text to SOLE`() {
+        // The attesting operator reads the text; it must say what the structured rule says.
+        val jointRule = CzechRepresentationRuleParser.parse(
+            joint("Jana Testová").extract().representationRule.sourceText,
+        )
+        assertThat(jointRule.mode).isEqualTo(RepresentationMode.JOINT_N)
+        assertThat(jointRule.requiredSigners).isEqualTo(2)
+        val soleRule = CzechRepresentationRuleParser.parse(joint(null).extract().representationRule.sourceText)
+        assertThat(soleRule.mode).isEqualTo(RepresentationMode.SOLE)
+    }
+
+    @Test
+    fun `a blank second name is no second jednatel — the SOLE single-member shape stays reachable`() {
+        val ex = joint("  ").extract()
+        assertThat(ex.representatives).hasSize(1)
+        assertThat(ex.representationRule.mode).isEqualTo(RepresentationMode.SOLE)
+    }
+
+    @Test
+    fun `application yaml ships the second jednatel, so the sandbox demo is a joint company`() {
+        val yaml = File("src/main/resources/application.yaml").readText()
+        assertThat(
+            yaml,
+        ).contains("second-representative-name: \${OPENBANK_KYB_DEMO_ENTITY_SECOND_REPRESENTATIVE:Jana Testová}")
     }
 }

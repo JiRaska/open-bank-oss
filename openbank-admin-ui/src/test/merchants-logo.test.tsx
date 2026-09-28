@@ -66,6 +66,10 @@ describe('merchant logos', () => {
     expect(img.src).toContain('size=64')
     // The token is what makes a year-long immutable cache safe: replaced bytes are a new URL.
     expect(img.src).toContain(`v=${HASH.slice(0, 16)}`)
+    // Catalogue pages contain up to 50 rows. Logos below the viewport must not compete with the
+    // operator's worklist and controls during the critical render.
+    expect(img).toHaveAttribute('loading', 'lazy')
+    expect(img).toHaveAttribute('decoding', 'async')
   })
 
   /**

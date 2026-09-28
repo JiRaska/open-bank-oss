@@ -27,10 +27,10 @@
 .cardTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 13px; }
 .source { display: flex; align-items: center; gap: 7px; color: var(--text-primary); font-size: 12px; font-weight: 700; }
 .sourceHint { margin-top: 3px; color: var(--text-tertiary); font-size: 10.5px; }
-.pill { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
-.good { color: var(--success); background: var(--success-bg); }
-.warn { color: var(--warning); background: var(--warning-bg); }
-.bad { color: var(--danger); background: var(--danger-bg); }
+.pill { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.good { color: var(--success-text); background: var(--success-bg); }
+.warn { color: var(--warning-text); background: var(--warning-bg); }
+.bad { color: var(--danger-text); background: var(--danger-bg); }
 .neutral { color: var(--text-tertiary); background: var(--surface-3); }
 .value { overflow: hidden; color: var(--text-primary); font-size: 24px; font-weight: 720; letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
 .label { min-height: 34px; margin-top: 5px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }

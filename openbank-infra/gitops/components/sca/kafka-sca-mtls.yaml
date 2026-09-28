@@ -51,7 +51,7 @@ spec:
 ---
 # Keystore projection: Strimzi User Operator writes the per-user keystore Secret
 # in `messaging`; ESO projects it into `sca` for pod volume mount.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -74,7 +74,7 @@ spec:
 ---
 # Shared cluster-CA truststore — same cert for every TLS client; projected from
 # `messaging` into `sca` so pods can verify the broker certificate.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

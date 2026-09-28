@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Schema: openbank-libs/governance/governance.schema.json
+#
+# Treasury (ADR-0315): the bank's own money-market deals with four-eyes booking. MONEY-PATH —
+# every settled/matured/reversed deal posts a journal to the ledger through its API.
+dataDomain: core
+primaryDatastore: PostgreSQL
+databaseName: openbank_treasury
+dataLineageRole: producer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: false
+lineage:
+  upstream: []
+  downstream:
+    - serviceName: ledger-service
+      relationType: api
+      description: posts settlement, maturity and reversal journals via POST /api/v1/journals (ADR-0315 D5)
+    - serviceName: audit-service
+      relationType: topic
+      description: openbank.treasury.deal.events (booked/settled/matured/reversed) reach the audit trail
+databaseLineage:
+  ownedDatabases:
+    - openbank_treasury
+  dependentDatabases: []

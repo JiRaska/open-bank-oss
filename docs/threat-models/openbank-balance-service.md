@@ -174,6 +174,19 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-06** — Hold placement is now replay-safe (#8351, ADR-0287). `placeHold` checks the
   caller-supplied natural key (accountId, currency, referenceId) before reserving and replays the
   original hold on a retry — previously a retried `POST /{accountId}/holds` reserved TWICE, keeping
@@ -193,7 +206,7 @@ also be deleted (nothing else in balance-service depends on it).
 
 - **2026-09-02** — Doc correction, no behavior change: §3 and the S1 residual named three controls
   by names that do not exist in the tree. (1) The `@PermitAll` regression guard was credited to
-  `BalanceResourceSecurityTest`; that class is in no Kotlin source — the guard is real and is
+  `BalanceResourceSecurityTest`, but no such class exists in Kotlin source — the guard is real and is
   `BalanceSecurityContractTest`, which asserts by reflection that no `BalanceResource` /
   `ReconciliationResource` endpoint is `@PermitAll` and that every one carries `@RolesAllowed`.
   (2) The write endpoints were described as `@RolesAllowed(SERVICE, ...)`; the constant is
@@ -334,3 +347,16 @@ also be deleted (nothing else in balance-service depends on it).
   No new surface, role, or data flow — same endpoint, same authz, tighter input handling.
   Risk class = **availability/information disclosure** (500s on an operator control endpoint).
   Rollback: revert the guard; no stored data or schema changes.
+- **2026-09-21** — **Two per-service identities on the balance writes (#10486 batch 2).** `service-transaction-balance-hold` (`service-account-openbank-transaction`: `balance.hold` + `balance.holdRelease`) and `service-settlement-balance-move` (`service-account-openbank-settlement`: `balance.debit` + `balance.credit`), each gated on `input.principal.id`. No RBAC change: `BalanceResource` already admits `ROLE_API` on all four writes, which means OPA was — and is — the whole control for any ROLE_API caller; `balance_rest_ext_test.rego` now proves another ROLE_API service account is DENIED all four, each identity is denied every other balance action (incl. `initialize`, `overdraftLimit`, `reconciliation.run`, `approval.decide`), and neither rule admits the shared client. Removing either `principal.id` line turns 3 tests red. `AUTHZ_ENFORCE` is `"true"` for balance-service in gitops. Rollback: revert together with the callers.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11061),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.

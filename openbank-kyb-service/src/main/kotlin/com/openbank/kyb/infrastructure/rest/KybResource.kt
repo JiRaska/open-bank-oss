@@ -4,12 +4,16 @@
 
 package com.openbank.kyb.infrastructure.rest
 
+import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
+import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
+import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
+import com.openbank.kyb.application.port.`in`.PrepareAgreementCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
 import com.openbank.kyb.application.port.`in`.RegistrySearchUseCase
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
@@ -24,14 +28,19 @@ import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.infrastructure.rest.dto.AcceptDisclosuresRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
+import com.openbank.kyb.infrastructure.rest.dto.BusinessAgreementResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
+import com.openbank.kyb.infrastructure.rest.dto.DeclarationsRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
 import com.openbank.kyb.infrastructure.rest.dto.InviteCosignersRequest
 import com.openbank.kyb.infrastructure.rest.dto.LookupRequest
 import com.openbank.kyb.infrastructure.rest.dto.MatchInitiatorRequest
+import com.openbank.kyb.infrastructure.rest.dto.QuestionnairePrefillResponse
+import com.openbank.kyb.infrastructure.rest.dto.QuestionnaireRequest
 import com.openbank.kyb.infrastructure.rest.dto.RejectRequest
 import com.openbank.kyb.infrastructure.rest.dto.RepresentationDecisionResponse
 import com.openbank.kyb.infrastructure.rest.dto.ResolveReviewRequest
@@ -51,6 +60,7 @@ import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -329,10 +339,93 @@ class KybResource {
         return Response.ok(CaseResponse.from(case, caller)).build()
     }
 
+    // --- AML questionnaire, declarations, agreement (business-contract spec, W2) -------------
+
+    @PUT
+    @Path("/cases/{id}/questionnaire")
+    @Authorize(action = "kyb.case.questionnaire", resource = "#id")
+    @Operation(summary = "Answer the company's AML / FATCA / CRS questionnaire (initiator or signer)")
+    suspend fun questionnaire(
+        @PathParam("id") id: UUID,
+        request: QuestionnaireRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        val q = requireNotNull(request) { "request body is required" }.toDomain()
+        val case = onboarding.answerQuestionnaire(AnswerQuestionnaireCommand(id, caller, q))
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
+    @GET
+    @Path("/cases/{id}/questionnaire/prefill")
+    @Authorize(action = "kyb.case.questionnaire", resource = "#id")
+    @Operation(
+        summary = "People already known as customers and the caller's previous questionnaire, to pre-fill the forms",
+    )
+    suspend fun questionnairePrefill(
+        @PathParam("id") id: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        val prefill = onboarding.questionnairePrefill(id, caller)
+        return Response.ok(QuestionnairePrefillResponse.from(prefill, caller)).build()
+    }
+
+    @PUT
+    @Path("/cases/{id}/declarations")
+    @Authorize(action = "kyb.case.declarations", resource = "#id")
+    @Operation(summary = "Confirm the beneficial owners, declare PEP status and truthfulness")
+    suspend fun declarations(
+        @PathParam("id") id: UUID,
+        request: DeclarationsRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        val d = requireNotNull(request) { "request body is required" }.toDomain()
+        val case = onboarding.makeDeclarations(MakeDeclarationsCommand(id, caller, d))
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/agreement")
+    // No body: a client that sends none also sends no Content-Type, which the class-level JSON
+    // @Consumes would answer with 415.
+    @Consumes(MediaType.WILDCARD)
+    @Authorize(action = "kyb.case.agreement", resource = "#id")
+    @Operation(summary = "Render (idempotently) the business framework agreement and its signature ceremony")
+    suspend fun agreement(
+        @PathParam("id") id: UUID,
+        @QueryParam("lang") lang: String?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        val language = lang?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: DEFAULT_LANG
+        val view = onboarding.prepareAgreement(PrepareAgreementCommand(id, caller, language))
+        return Response.ok(BusinessAgreementResponse.from(view)).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/agreement/accept")
+    @Authorize(action = "kyb.case.agreement", resource = "#id")
+    @Operation(summary = "Accept the agreement's disclosure documents, bound to code, version and sha256")
+    suspend fun acceptAgreement(
+        @PathParam("id") id: UUID,
+        request: AcceptDisclosuresRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        val accepted = requireNotNull(request) { "request body is required" }.toDomain()
+        val case = onboarding.acceptDisclosures(AcceptDisclosuresCommand(id, caller, accepted))
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
     @POST
     @Path("/cases/{id}/sign")
     @Authorize(action = "kyb.case.sign", resource = "#id")
-    @Operation(summary = "Record one signer's completed signature ceremony")
+    @Operation(
+        summary = "Record one signer's signature: signatureRef must be the case's ceremony id, and " +
+            "document-service must record the caller as SIGNED in it",
+    )
     suspend fun sign(
         @PathParam("id") id: UUID,
         request: SignRequest?,
@@ -488,5 +581,6 @@ class KybResource {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
         private const val MAX_PAGE = 100
         private const val MIN_REASON = 10
+        private const val DEFAULT_LANG = "cs"
     }
 }

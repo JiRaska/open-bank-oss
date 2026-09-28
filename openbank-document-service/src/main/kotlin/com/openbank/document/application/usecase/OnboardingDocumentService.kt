@@ -188,7 +188,10 @@ class OnboardingDocumentService(
         val wantCode = frameworkCode(lang)
         val agreementKey = agreementKey(partyRef)
         val agreements = documentQueryUseCase.listByParty(partyRef)
-            .filter { it.templateCode.startsWith(FRAMEWORK_BASE) && it.status != DocumentStatus.ARCHIVED }
+            // Exact codes, not a prefix: RAMCOVA_SMLOUVA_PO_* (a company's business agreement) shares
+            // the prefix, and step 3 below would otherwise archive a pending business agreement the
+            // moment someone acting for that company opened the retail agreement screen.
+            .filter { it.templateCode in RETAIL_FRAMEWORK_CODES && it.status != DocumentStatus.ARCHIVED }
 
         // 1. Already signed (any language): onboarding signing is complete — return it untouched.
         //    A signed contract is the immutable legal record; never re-render or supersede it.
@@ -278,5 +281,6 @@ class OnboardingDocumentService(
         const val FRAMEWORK_BASE = "RAMCOVA_SMLOUVA"
         const val DEFAULT_LOCALE = "CS"
         val SUPPORTED_LOCALES = setOf("CS", "EN")
+        val RETAIL_FRAMEWORK_CODES = SUPPORTED_LOCALES.map { "${FRAMEWORK_BASE}_$it" }.toSet()
     }
 }

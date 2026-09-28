@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA server certificate for transaction-service's east-west mTLS listener (8443). The existing HTTP listener
+# remains during the east-west TLS migration; new consumers use the parallel 8443 listener.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: transaction-service-internal-tls
+  namespace: payments
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: transaction-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - transaction-service.payments.svc
+    - transaction-service.payments.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

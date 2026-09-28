@@ -86,7 +86,7 @@ class NoOpLendingAdaptersTest {
         val ead = eur("10000.00")
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
-            ConservativeRiskParameterSource().parametersFor(loan, ead).await().indefinitely()
+            ConservativeRiskParameterSource(false).parametersFor(loan, ead).await().indefinitely()
         }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("validated credit risk model")
         val inputs = ConservativeRiskParameterSource(true).parametersFor(loan, ead).await().indefinitely()
 

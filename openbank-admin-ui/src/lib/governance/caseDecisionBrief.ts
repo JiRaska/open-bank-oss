@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-export type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED'
+export type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED' | 'HALTED'
 export type CaseEntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED' | 'POLICY_DECISION' | 'SIGNAL_INVOKED' | 'SIGNAL_CONSUMED' | 'CONTRIBUTION_PERSISTED'
 
 export interface CaseThreadEntry {

@@ -114,7 +114,7 @@ class LendingGlOutcomeTest {
         applications, loans, installments, collateral, ledger,
         valuation, riskParameters, events, clock, provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-        OriginationConfig(false),
+        OriginationConfig(false, false),
         NoOpOriginationWorkflowPort(),
         OriginationDecisionService(
             NoOpCreditBureauPort(),

@@ -12,6 +12,9 @@
 #   kyb.case.match-initiator   — POST /kyb/cases/{id}/initiator
 #   kyb.case.invite            — POST /kyb/cases/{id}/cosigners
 #   kyb.invitation.claim       — POST /kyb/invitations/{token}/claim
+#   kyb.case.questionnaire     — PUT  /kyb/cases/{id}/questionnaire, GET …/questionnaire/prefill
+#   kyb.case.declarations      — PUT  /kyb/cases/{id}/declarations
+#   kyb.case.agreement         — POST /kyb/cases/{id}/agreement, POST …/agreement/accept
 #   kyb.case.sign              — POST /kyb/cases/{id}/sign
 #   kyb.case.abandon           — POST /kyb/cases/{id}/abandon
 #   kyb.case.review.resolve    — POST /kyb/cases/{id}/review/resolve (staff)
@@ -56,6 +59,9 @@ allowed_reasons contains "edge-service-kyb" if {
 		"kyb.case.match-initiator",
 		"kyb.case.invite",
 		"kyb.invitation.claim",
+		"kyb.case.questionnaire",
+		"kyb.case.declarations",
+		"kyb.case.agreement",
 		"kyb.case.sign",
 		"kyb.case.abandon",
 	}

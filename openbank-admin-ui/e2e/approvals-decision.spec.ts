@@ -190,9 +190,13 @@ test.describe('approval workbench', () => {
 
     const handoff = page.getByRole('link', { name: new RegExp(`Open governed review for approval ${sanctionsApproval.id}|Otevřít řízenou kontrolu žádosti ${sanctionsApproval.id}`) })
     await expect(handoff).toHaveAttribute('href', '/sanctions?approvalId=sanctions-approval%20%2F%2042#sanctions-approval-id')
-    await handoff.click()
-
-    await expect(page).toHaveURL(/\/sanctions\?approvalId=sanctions-approval%20%2F%2042#sanctions-approval-id$/)
+    await Promise.all([
+      page.waitForURL(
+        /\/sanctions\?approvalId=sanctions-approval%20%2F%2042#sanctions-approval-id$/,
+        { waitUntil: 'domcontentloaded', timeout: 15_000 },
+      ),
+      handoff.click(),
+    ])
     await expect(page.getByLabel(/Approval id|ID žádosti/)).toHaveValue(sanctionsApproval.id)
   })
 
