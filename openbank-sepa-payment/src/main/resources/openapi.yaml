@@ -19,7 +19,9 @@ info:
   # 1.11.0 is the next free number. Read off live origin/main in the same turn as this edit —
   # a taken version is textually identical to a free one, so no merge could have caught it, and
   # the four-PR queue on this one spec is exactly the shape that keeps producing the collision.
-  version: 1.11.0
+  # 1.11 -> 1.12 (#10916): additive — create documents 409 IDEMPOTENCY_KEY_REUSED (key reused
+  # with a different request) and 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (same request in flight).
+  version: 1.12.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -66,7 +68,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: Idempotent replay
+          $ref: '#/components/responses/IdempotencyConflict'
     get:
       tags: [SEPA Payments]
       summary: List SEPA payments
@@ -299,6 +301,18 @@ components:
         format: uuid
 
   responses:
+    IdempotencyConflict:
+      description: >-
+        Idempotency-Key conflict (#10916), distinguished by `code`.
+        IDEMPOTENCY_KEY_REUSED — the key was already used for a different request (method, path or
+        canonical body differ); nothing is created and the stored response is not replayed.
+        IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still being processed under this key;
+        retry later. A completed same-body retry is not a 409: it replays the stored 201 with
+        `X-Idempotency-Replayed: true`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Forbidden:
       description: Authenticated but denied by the OPA authorization policy (ADR-0034)
       content:
