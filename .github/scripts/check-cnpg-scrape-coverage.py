@@ -198,6 +198,7 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
                 "path": str(rel),
                 "scraped": monitoring.get("enablePodMonitor") is True,
                 "backed_up": bool((spec.get("backup") or {}).get("barmanObjectStore")),
+                "instances": int(spec.get("instances") or 1),
             }
     return found, errors
 
@@ -212,6 +213,15 @@ def _namespace_from_kustomization(path: Path) -> str | None:
         if parent == REPO:
             break
     return None
+
+
+DEGRADED_DESC = (
+    "For 15 minutes fewer Postgres instances have answered a scrape than the Cluster declares. An HA"
+    " cluster in this state has no failover target; a single-instance one is down. Check"
+    " `kubectl get cluster,pods -n <namespace>` for a Pending or ContainerCreating instance, then the"
+    " pod events for a volume that cannot attach (FailedAttachVolume / VolumeInUse) -- that is a"
+    " node that has not released its EBS volume, see NodeClaimAwaitingVolumeDetachment (ADR-0325)."
+)
 
 
 def render(clusters: dict[str, dict]) -> str:
@@ -239,6 +249,22 @@ def render(clusters: dict[str, dict]) -> str:
             f"            namespace: {c['namespace']}",
             f"            cluster: {c['name']}",
             f"            origin: {c['origin']}",
+        ]
+    lines += [
+        "",
+        "        # ADR-0325: how many instances each manifest DECLARES. A chart-created cluster",
+        "        # has no manifest here to read, so it has no declared count and is not judged.",
+    ]
+    for key in sorted(clusters):
+        c = clusters[key]
+        if c["origin"] != "manifest":
+            continue
+        lines += [
+            "        - record: openbank:cnpg_cluster_instances_declared",
+            f"          expr: vector({c['instances']})",
+            "          labels:",
+            f"            namespace: {c['namespace']}",
+            f"            cluster: {c['name']}",
         ]
     lines += [
         "",
@@ -298,6 +324,35 @@ def render(clusters: dict[str, dict]) -> str:
         "          annotations:",
         '            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is declared in gitops but its namespace does not exist"',
         f'            description: "{NOT_DEPLOYED_DESC}"',
+        "",
+        "        # Instances actually serving: a target that answers. A pod that cannot attach its",
+        "        # volume never gets an IP, so it is not a target at all and simply is not counted.",
+        "        - record: openbank:cnpg_cluster_instances_up",
+        "          expr: |",
+        '            count by (namespace, cluster) (',
+        '              label_replace(up{container="postgres"} == 1, "cluster", "$1", "pod", "(.+)-[0-9]+")',
+        "            )",
+        "",
+        "        - alert: PostgresClusterDegraded",
+        "          # ADR-0325. On 2026-09-28 ~22 clusters sat with instances unable to attach their",
+        "          # EBS volumes and nothing named it: a Pending/ContainerCreating pod has no scrape",
+        "          # target, so PostgresInstanceDown (up == 0) cannot see it, and an HA cluster that",
+        "          # lost its standby still answers on the primary. Compare what the manifest DECLARES",
+        "          # with what answers. The `or ... * 0` arm makes a cluster with NO answering",
+        "          # instance read as 0 rather than vanish -- absent is not healthy.",
+        "          expr: |",
+        "            openbank:cnpg_cluster_instances_declared",
+        "              > on (namespace, cluster)",
+        "            (",
+        "              openbank:cnpg_cluster_instances_up",
+        "                or on (namespace, cluster) (openbank:cnpg_cluster_instances_declared * 0)",
+        "            )",
+        "          for: 15m",
+        "          labels:",
+        "            severity: critical",
+        "          annotations:",
+        '            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} has fewer instances serving than it declares"',
+        f'            description: "{DEGRADED_DESC}"',
     ]
     return "\n".join(lines) + "\n"
 
@@ -338,13 +393,14 @@ def render_fixture(clusters: dict[str, dict]) -> str:
             if k in exclude:
                 continue
             c = clusters[k]
-            out += [
-                (
-                    f'      - series: \'up{{container="postgres",'
-                    f'namespace="{c["namespace"]}",pod="{c["name"]}-1",job="{c["name"]}"}}\''
-                ),
-                f'        values: "{value}"',
-            ]
+            for i in range(1, max(1, c.get("instances", 1)) + 1):
+                out += [
+                    (
+                        f'      - series: \'up{{container="postgres",'
+                        f'namespace="{c["namespace"]}",pod="{c["name"]}-{i}",job="{c["name"]}"}}\''
+                    ),
+                    f'        values: "{value}"',
+                ]
         return out
 
     def ns_series(exclude: set[str] = frozenset()) -> list[str]:
@@ -402,7 +458,33 @@ def render_fixture(clusters: dict[str, dict]) -> str:
     L += ["    alert_rule_test:", "      - eval_time: 30m",
           "        alertname: PostgresClusterUnscraped", "        exp_alerts: []",
           "      - eval_time: 40m",
-          "        alertname: PostgresClusterDeclaredNotDeployed", "        exp_alerts: []", ""]
+          "        alertname: PostgresClusterDeclaredNotDeployed", "        exp_alerts: []",
+          "      - eval_time: 40m",
+          "        alertname: PostgresClusterDegraded", "        exp_alerts: []", ""]
+
+    ha = next((k for k in keys if clusters[k].get("instances", 1) >= 2), None)
+    if ha is not None:
+        an, ac = clusters[ha]["namespace"], clusters[ha]["name"]
+        L += [f"  # 2b. NEGATIVE CASE (ADR-0325): {ha} declares {clusters[ha]['instances']} instances and its",
+              "  #     last one never becomes a target (volume cannot attach). Must page DEGRADED;",
+              "  #     case 2 above, with every instance answering, is its control.",
+              "  - interval: 1m",
+              '    name: "an HA cluster missing an instance is degraded, not healthy"',
+              "    input_series:"]
+        L += up_series({ha}, "1+0x40")
+        for i in range(1, clusters[ha]["instances"]):
+            L += [f'      - series: \'up{{container="postgres",namespace="{an}",pod="{ac}-{i}",job="{ac}"}}\'',
+                  '        values: "1+0x40"']
+        L += ns_series()
+        L += ["    alert_rule_test:", "      - eval_time: 30m",
+              "        alertname: PostgresClusterDegraded", "        exp_alerts:",
+              "          - exp_labels:", "              severity: critical",
+              f"              namespace: {an}", f"              cluster: {ac}",
+              "            exp_annotations:",
+              f'              summary: "CNPG cluster {an}/{ac} has fewer instances serving than it declares"',
+              f'              description: "{DEGRADED_DESC}"',
+              "      - eval_time: 30m",
+              "        alertname: PostgresClusterUnscraped", "        exp_alerts: []", ""]
 
     L += ["  # 3. CONTROL: DOWN is not UNSCRAPED. `up == 0` means the target EXISTS and the",
           "  #    scrape failed -- PostgresInstanceDown's job. Conflating the two would",
@@ -502,6 +584,7 @@ def build(strict: bool = True) -> tuple[dict[str, dict], list[str]]:
             "path": decl["file"],
             "scraped": False,
             "backed_up": False,
+            "instances": 0,
             "origin": "chart",
         }
 
@@ -651,6 +734,10 @@ def self_test() -> int:
         # every case is about an expression that can only ever match nothing.
         if "kube_namespace_created" not in fx:
             print("SELF-TEST FAIL: fixture supplies no kube_namespace_created series"); ok = False
+        if "alertname: PostgresClusterDegraded" not in fx:
+            print("SELF-TEST FAIL: fixture never exercises the degraded alert"); ok = False
+        if "alert: PostgresClusterDegraded" not in out:
+            print("SELF-TEST FAIL: generated rule has no PostgresClusterDegraded"); ok = False
         if "PostgresClusterDeclaredNotDeployed" not in fx:
             print("SELF-TEST FAIL: fixture never exercises the not-deployed alert"); ok = False
 
