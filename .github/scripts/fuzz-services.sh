@@ -298,7 +298,7 @@ for svc in $SERVICES; do
     -e POSTGRES_USER="${DBUSER}" \
     -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
     -e POSTGRES_DB="${DB}" \
-    postgres:16.3-alpine >/dev/null
+    postgres:18.6-alpine >/dev/null
   PG_UP=0
   for _ in $(seq 1 30); do
     docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && { PG_UP=1; break; }

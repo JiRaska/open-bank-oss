@@ -16,7 +16,7 @@ spec:
   source:
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
     chart: opentelemetry-collector
-    targetRevision: 0.158.0
+    targetRevision: 0.173.1
     helm:
       valuesObject:
         fullnameOverride: otel-collector
@@ -58,7 +58,7 @@ spec:
               send_batch_max_size: 2048
               timeout: 5s
           exporters:
-            otlp/tempo:
+            otlp_grpc/tempo:
               endpoint: tempo.observability.svc:4317
               tls:
                 insecure: true
@@ -85,7 +85,7 @@ spec:
               traces:
                 receivers: [otlp]
                 processors: [memory_limiter, batch]
-                exporters: [otlp/tempo]
+                exporters: [otlp_grpc/tempo]
   destination:
     server: https://kubernetes.default.svc
     namespace: observability
