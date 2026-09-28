@@ -1,0 +1,46 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/custom-headers: pricing/pricing-console-edge-headers-v1
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    openbank.io/edge-exposure: internal
+  name: pricing-console
+  namespace: pricing
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: pricing.open-bank.tech
+    http:
+      paths:
+      - backend:
+          service:
+            name: pricing-console
+            port:
+              number: 3100
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - pricing.open-bank.tech
+    secretName: pricing-console-tls
+---
+# Edge response headers for this host, served by ingress-nginx's `custom-headers` annotation
+# (ADR-0324 interim hardening) instead of a Critical-risk `configuration-snippet`. Keys must be
+# in the controller's `global-allowed-response-headers` (apps/ingress-nginx.yaml) or the
+# controller denies the location (503). HSTS and X-Content-Type-Options are NOT listed here:
+# the controller sets both on every response (hsts-*, add-headers).
+# IMMUTABLE, VERSIONED BY NAME, SYNC-WAVE -1: the controller re-reads this ConfigMap only when
+# the Ingress that names it changes, so change a header by adding `-v2` and repointing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pricing-console-edge-headers-v1
+  namespace: pricing
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+immutable: true
+data:
+  X-Frame-Options: "SAMEORIGIN"
+  Referrer-Policy: "strict-origin-when-cross-origin"

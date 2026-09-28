@@ -6,9 +6,7 @@ package com.openbank.account.infrastructure.rest
 
 import com.openbank.account.application.port.out.AccountScreeningUnavailableException
 import com.openbank.account.application.usecase.AccountNotEmptyException
-import com.openbank.account.application.usecase.AccountNotFoundException
 import com.openbank.account.application.usecase.AccountOpeningBlockedByScreeningException
-import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.application.usecase.AuthorizationNotFoundException
 import com.openbank.account.application.usecase.AuthorizationNotOnAccountException
 import com.openbank.libs.api.error.ApiError
@@ -20,45 +18,17 @@ import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import org.jboss.logging.Logger
 import java.time.Instant
-import java.util.UUID
 
 // Generic IllegalArgument/IllegalState/Exception mappers are provided by openbank-libs
 // (com.openbank.libs.api.error.CommonExceptionMappers) with log-correlated traceIds.
 // Declaring them here too is a non-deterministic JAX-RS @Provider collision (ADR-0048/0049 D4).
-@Provider
-class AccountNotFoundExceptionMapper : ExceptionMapper<AccountNotFoundException> {
-    override fun toResponse(exception: AccountNotFoundException): Response = Response.status(Response.Status.NOT_FOUND)
-        .entity(
-            ApiError(
-                traceId = UUID.randomUUID().toString(),
-                status = 404,
-                code = "ACCOUNT_NOT_FOUND",
-                message = exception.message ?: "Account not found",
-                timestamp = Instant.now(),
-            ),
-        )
-        .build()
-}
 
-// 409 concurrent-modification conflict (#465): a lifecycle update (freeze/unfreeze/close/
-// activate/goal) raced another writer — the caller read a version the row no longer has.
-// Dedicated type so the status is deterministic (see issue #526 on the IllegalStateException
-// mapper collision between libs-runtime and services).
-@Provider
-class AccountUpdateConflictExceptionMapper : ExceptionMapper<AccountUpdateConflictException> {
-    override fun toResponse(exception: AccountUpdateConflictException): Response =
-        Response.status(Response.Status.CONFLICT)
-            .entity(
-                ApiError(
-                    traceId = Ids.randomId().toString(),
-                    status = 409,
-                    code = "CONCURRENT_MODIFICATION",
-                    message = exception.message ?: "Account was modified concurrently",
-                    timestamp = Instant.now(),
-                ),
-            )
-            .build()
-}
+// AccountNotFoundExceptionMapper / AccountUpdateConflictExceptionMapper (404/409) removed here
+// (#10911/#11059 phase 3): AccountNotFoundException/AccountUpdateConflictException now extend the
+// libs-domain ResourceNotFoundException/ResourceConflictException bases (keeping their own
+// "ACCOUNT_NOT_FOUND"/"CONCURRENT_MODIFICATION" codes), handled by libs-runtime's
+// ResourceNotFoundExceptionMapper/ResourceConflictExceptionMapper — same status, code and ApiError
+// shape. See AccountExceptionMapperEquivalenceTest.
 
 // 422 — closing an account that still holds money is a well-formed request against the wrong
 // state, not a conflict with another writer (409) or a bad request shape (400).

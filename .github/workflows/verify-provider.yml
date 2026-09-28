@@ -6,8 +6,12 @@
 # provider's build+verify on the ARC pool (broker access), turning a ~30-job wedge into one ~5-min
 # job. Same reusable workflow, same publish path (github.ref==main ⇒ PUBLISH_RESULTS=true).
 #
-# Maintainer-triggered only (workflow_dispatch). Runs on main. No new runners, no full-fleet.
+# Maintainer- or reconciler-triggered (workflow_dispatch). Runs on main. No new runners, no full-fleet.
 name: Verify one provider
+# The Actions run-list API returns workflow_dispatch inputs as null. The reconciler
+# needs provider + stable input key in display_title to distinguish a failed run
+# from new Pact content without fetching every run's jobs on every 30-minute tick.
+run-name: "pact-verify:${{ inputs.service }}:${{ inputs.reconcile_key || 'manual' }}:${{ inputs.reconcile_key && 'auto' || 'manual' }}"
 
 on:
   workflow_dispatch:
@@ -30,6 +34,11 @@ on:
         # Blank deliberately means the checked-out ref. A distinct value checks out deployed P,
         # then overlays the one approved Ledger provider-state fixture blob from ref F.
         description: "Provider version P to publish. Blank = ref; distinct P is Ledger-only and uses one approved fixture from ref F."
+        required: false
+        default: ""
+        type: string
+      reconcile_key:
+        description: "Reconciler input fingerprint. Leave blank for an explicit maintainer retry."
         required: false
         default: ""
         type: string

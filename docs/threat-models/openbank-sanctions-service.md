@@ -243,3 +243,30 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   deactivateMissing runs only after a fully-consumed stream, so a mid-stream failure keeps the
   previously stored entries (#1432). No endpoint, authz or DB schema change; rollback = revert
   the commit or set `SANCTIONS_EU_SOURCE=opensanctions`.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site is migrated to
+  `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

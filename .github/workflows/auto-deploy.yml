@@ -44,6 +44,7 @@ on:
       - "openbank-libs/gradle/**"
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
+      - "openbank-libs-lending/build.gradle.kts"
       - "build-logic/**"
       # Release-please bumps version.txt, yet a release-only commit touches nothing
       # under src/main/**. That left the new version with no image built, causing

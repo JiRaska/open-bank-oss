@@ -6,14 +6,15 @@ package com.openbank.psd2.infrastructure.rest.filter
 
 import com.openbank.libs.security.sanitizeForLog
 import com.openbank.psd2.infrastructure.security.QsealVerifier
-import jakarta.annotation.Priority
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.infrastructure.Infrastructure
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Priorities
 import jakarta.ws.rs.container.ContainerRequestContext
-import jakarta.ws.rs.container.ContainerRequestFilter
 import jakarta.ws.rs.core.Response
-import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import org.jboss.resteasy.reactive.server.ServerRequestFilter
 import java.io.ByteArrayInputStream
 
 /**
@@ -27,39 +28,61 @@ import java.io.ByteArrayInputStream
  * logged but the request proceeds — sandboxes have no real QSEAL chain. Flip to `true` per
  * environment to reject unsigned/forged requests (`SIGNATURE_INVALID`). Mirrors the OPA
  * advisory→enforce rollout (ADR-0034).
+ *
+ * **Runs on the IO thread by default (#11008-follow-up, issue TBD).** The guarded Berlin resource
+ * methods are Kotlin `suspend fun`s (non-blocking to RESTEasy Reactive), and a `@ServerRequestFilter`
+ * inherits the thread of the method it guards — it does not get a worker thread of its own.
+ * [ContainerRequestContext.entityStream] can only be read with a genuinely BLOCKING call, so once
+ * #10997 made this filter actually run on `v1/payments`/`v1/consents` POSTs, every one of them threw
+ * `BlockingOperationNotAllowedException` ("Attempting a blocking read on io thread") before the
+ * resource ever ran — measured via `PisIdempotencyFingerprintIT`'s Berlin path surfacing as a bare
+ * 500/422. `@Blocking` on the `suspend` resource method is refused by Quarkus outright, and reading
+ * the body off `@Context RoutingContext` NPEs this early in the filter chain (the Vert.x body
+ * hasn't been bound to the routing context yet at JAX-RS filter time). The fix offloads the read —
+ * and the signature verification that depends on the raw bytes — onto
+ * [Infrastructure.getDefaultWorkerPool] via `Uni.createFrom().item { }.runSubscriptionOn(...)`
+ * (same pattern as `CopilotChatResource.chatStream`), and returns `Uni<Response?>`: `null` lets the
+ * filter chain proceed, a non-null item aborts with that response — mirroring the old
+ * `ctx.abortWith(...)` calls exactly.
  */
-@Provider
-@Priority(Priorities.AUTHORIZATION)
+@ApplicationScoped
 class QsealSignatureFilter(
     @ConfigProperty(name = "openbank.psd2.qseal.enforce", defaultValue = "false")
     private val enforce: Boolean,
-) : ContainerRequestFilter {
+) {
 
     private val log = Logger.getLogger(QsealSignatureFilter::class.java)
 
-    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
-
-    override fun filter(ctx: ContainerRequestContext) {
-        val path = ctx.uriInfo.path
+    // Must run after EidasMtlsFilter (AUTHENTICATION): restores the @Priority the
+    // ContainerRequestFilter carried before the conversion — a bare @ServerRequestFilter is USER.
+    @ServerRequestFilter(priority = Priorities.AUTHORIZATION)
+    fun filter(ctx: ContainerRequestContext): Uni<Response?> {
+        // RESTEasy Reactive's UriInfo.path carries a leading slash ("/v1/..."); normalise once so the
+        // prefix checks below match either form (#10997 — without this the gate never ran).
+        val path = ctx.uriInfo.path.removePrefix("/")
         // Only the Berlin write surface carries a body to sign; reads rely on QWAC transport auth.
         val signed = ctx.method == "POST" && (path.startsWith("v1/payments") || path.startsWith("v1/consents"))
-        if (!signed) return
+        if (!signed) return Uni.createFrom().nullItem()
 
-        val body = ctx.entityStream.readBytes()
-        ctx.entityStream = ByteArrayInputStream(body)
+        // entityStream.readBytes() is a genuinely blocking call — must not run on the IO thread.
+        return Uni.createFrom().item<Response?> {
+            val body = ctx.entityStream.readBytes()
+            ctx.entityStream = ByteArrayInputStream(body)
 
-        val outcome = evaluate(ctx, body)
-        if (outcome == Outcome.VALID) return
-
-        if (enforce) {
-            log.warnf("QSEAL %s on %s — rejecting (enforce)", outcome, path.sanitizeForLog())
-            val err = mapOf(
-                "tppMessages" to listOf(mapOf("category" to "ERROR", "code" to "SIGNATURE_INVALID")),
-            )
-            ctx.abortWith(Response.status(Response.Status.UNAUTHORIZED).entity(err).build())
-        } else {
-            log.debugf("QSEAL %s on %s — allowing (advisory)", outcome, path.sanitizeForLog())
-        }
+            val outcome = evaluate(ctx, body)
+            if (outcome == Outcome.VALID) {
+                null
+            } else if (enforce) {
+                log.warnf("QSEAL %s on %s — rejecting (enforce)", outcome, path.sanitizeForLog())
+                val err = mapOf(
+                    "tppMessages" to listOf(mapOf("category" to "ERROR", "code" to "SIGNATURE_INVALID")),
+                )
+                Response.status(Response.Status.UNAUTHORIZED).entity(err).build()
+            } else {
+                log.debugf("QSEAL %s on %s — allowing (advisory)", outcome, path.sanitizeForLog())
+                null
+            }
+        }.runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
     }
 
     private enum class Outcome { VALID, MISSING, BAD_DIGEST, BAD_SIGNATURE }

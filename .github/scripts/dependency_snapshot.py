@@ -109,6 +109,14 @@ def inventory(repo):
     return modules
 
 
+def shard_timeout(deadline, now, limit):
+    """Keep serial shards inside the producer's total resolution budget."""
+    remaining = deadline - now
+    if remaining <= 0:
+        raise RuntimeError('fleet dependency resolution exceeded its 20-minute budget')
+    return min(limit, remaining)
+
+
 def run_bounded(command, repo, env, logfile, timeout=180):
     import os
     import signal
@@ -173,6 +181,10 @@ def generate(repo, output, env, extra_arguments=()):
     if env.get('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') != excluded:
         raise ValueError('unexpected dependency configuration policy')
     modules = inventory(repo)
+    # Nineteen serial shards can otherwise consume 58 minutes under their
+    # individual caps, while the Actions job ends after 30. Reserve ten minutes
+    # for setup, validation and submission; never publish a partial graph.
+    deadline = time.monotonic() + 20 * 60
     (output / 'inventory.json').write_text(json.dumps(modules, indent=2))
     expected = [f'shard-{i // 4:02}' for i in range(0, len(modules), 4)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
@@ -203,7 +215,7 @@ def generate(repo, output, env, extra_arguments=()):
         # while still resolving projects. Keep every shard bounded, but give
         # only this extra-work shard measured cold-run headroom.
         run_bounded(command, repo, child_env, shard / 'run.log',
-                    timeout=240 if i == 0 else 180)
+                    timeout=shard_timeout(deadline, time.monotonic(), 240 if i == 0 else 180))
         verify_coverage(coverage, projects, sha)
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:
