@@ -19,6 +19,33 @@ function listSchema(api: ReturnType<typeof contract>, path: string) {
 }
 
 describe('specialist approval inbox provider contracts', () => {
+  it('reads Treasury pending deals with their submitted actor and transition time', () => {
+    const api = contract('openbank-treasury-service')
+    expect(listSchema(api, '/api/v1/treasury/deals')).toBe('#/components/schemas/Deal')
+    const states = api.components.schemas.DealState
+    expect(states.enum).toContain('PENDING_APPROVAL')
+    const fields = api.components.schemas.Deal.properties
+    expect(fields).toHaveProperty('dealId')
+    expect(fields).toHaveProperty('submittedBy')
+    expect(fields.history.items.$ref).toBe('#/components/schemas/Transition')
+    const transition = api.components.schemas.Transition.properties
+    expect(transition).toHaveProperty('to')
+    expect(transition.at.format).toBe('date-time')
+  })
+
+  it('reads bounded lending backfill history with its proposer and nullable timestamp', () => {
+    const api = contract('openbank-lending-service')
+    const list = api.paths['/api/v1/lending/ledger-backfill/requests'].get
+    const limit = list.parameters.find((parameter: { name: string }) => parameter.name === 'limit')
+    expect(limit.schema.maximum).toBe(100)
+    expect(list.responses['200'].content['application/json'].schema.properties.requests.items.$ref)
+      .toBe('#/components/schemas/LedgerBackfillRequestView')
+    const fields = api.components.schemas.LedgerBackfillRequestView.properties
+    expect(fields.state.enum).toContain('PROPOSED')
+    expect(fields).toHaveProperty('proposedBy')
+    expect(fields.proposedAt.nullable).toBe(true)
+  })
+
   it('reads the lending compliance-pack proposal actor and nullable proposal time', () => {
     const api = contract('openbank-lending-service')
     expect(listSchema(api, '/api/v1/lending/compliance-packs/proposals/pending'))
