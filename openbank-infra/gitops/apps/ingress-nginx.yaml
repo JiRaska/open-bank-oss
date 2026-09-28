@@ -1,7 +1,6 @@
 # Cluster edge. ingress-nginx (not the AWS ALB controller) keeps the edge
 # cloud-agnostic per ADR-0027 — the only AWS coupling is the Service annotation
-# that asks the in-tree cloud provider for an NLB. Single replica for sandbox
-# FinOps; prod should raise replicaCount and add PodDisruptionBudget.
+# that asks the in-tree cloud provider for an NLB. Two replicas + PDB (below).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -84,7 +83,35 @@ spec:
               mountPath: /etc/nginx/modsecurity/modsecurity.conf
               subPath: modsecurity.conf
               readOnly: true
-          replicaCount: 1
+          # One replica in EVERY AZ the NLB has an address in. With
+          # externalTrafficPolicy: Local and cross-zone off, an NLB address whose AZ
+          # has no controller has no healthy target: connections to it fail until the
+          # NLB and the Route53 alias drop that AZ from DNS, which took minutes on
+          # 2026-09-28 when two replicas sat in 1a/1b and the 1c address kept being
+          # answered (about a third of new connections failed). Three replicas with
+          # REQUIRED zone spread keep every address backed, so a single pod or node
+          # loss only removes one AZ instead of opening a hole. Karpenter provisions
+          # into the AZ the constraint asks for. The PDB keeps two serving through
+          # voluntary disruption (drift, consolidation, drains).
+          replicaCount: 3
+          minAvailable: 2
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+                  app.kubernetes.io/instance: ingress-nginx
+                  app.kubernetes.io/component: controller
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+                  app.kubernetes.io/instance: ingress-nginx
+                  app.kubernetes.io/component: controller
           # Scrape the controller so edge-level 5xx are observable. ingress-nginx
           # records every request it proxies (nginx_ingress_controller_requests,
           # labelled by status) — including the failures that never reach a backend
@@ -115,11 +142,16 @@ spec:
           allowSnippetAnnotations: true
           service:
             type: LoadBalancer
-            # Cluster (not Local) so any NLB AZ-IP reaches the single controller
-            # replica via kube-proxy — lets us point sslip.io at any NLB IP
-            # without AZ-pinning. Loses real client IP, fine for the sandbox
-            # (the IP allow-list is enforced at the NLB SG, below).
-            externalTrafficPolicy: Cluster
+            # Local: the NLB delivers only to nodes running a controller replica
+            # (health-checked on healthCheckNodePort) and there is no kube-proxy SNAT,
+            # so nginx sees the real client IP. Required by the per-host source
+            # allow-list on internal Ingresses (ADR-0324 mixed edge,
+            # edge-internal-host-allowlist); with Cluster every request arrived from a
+            # node IP. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
+            # stays off (inter-AZ data cost): the NLB drops an AZ with no healthy
+            # target from its DNS answers. Hostnames come from external-dns, so nothing
+            # pins a single NLB IP any more (the old sslip.io reason for Cluster).
+            externalTrafficPolicy: Local
             annotations:
               service.beta.kubernetes.io/aws-load-balancer-type: nlb
               service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing

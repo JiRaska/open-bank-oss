@@ -100,6 +100,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
@@ -217,6 +219,8 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
@@ -448,6 +452,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
@@ -565,6 +571,8 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
@@ -773,6 +781,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
@@ -890,6 +900,8 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
@@ -1104,6 +1116,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
@@ -1221,6 +1235,8 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
@@ -1438,6 +1454,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
@@ -1555,6 +1573,8 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
@@ -1765,6 +1785,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
@@ -1882,6 +1904,8 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
