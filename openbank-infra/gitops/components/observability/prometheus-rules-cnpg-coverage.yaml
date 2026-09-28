@@ -456,12 +456,12 @@ spec:
             namespace: accounts
             cluster: product-catalog-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: ai-platform
             cluster: langfuse-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: ai-platform
             cluster: litellm-db
@@ -516,7 +516,7 @@ spec:
             namespace: context
             cluster: context-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: control-liveness-sentinel
             cluster: liveness-db
@@ -556,7 +556,7 @@ spec:
             namespace: finops-agent
             cluster: finops-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: flaky-test-hunter
             cluster: flakytest-db
@@ -571,7 +571,7 @@ spec:
             namespace: fx
             cluster: fx-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: governance-auditor
             cluster: govaudit-db
@@ -581,7 +581,7 @@ spec:
             namespace: iam
             cluster: keycloak-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: incentive
             cluster: incentive-db
@@ -591,12 +591,12 @@ spec:
             namespace: interest
             cluster: interest-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: kyb
             cluster: kyb-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: kyc
             cluster: kyc-db
@@ -611,7 +611,7 @@ spec:
             namespace: lending
             cluster: lending-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: loyalty
             cluster: loyalty-db
@@ -626,7 +626,7 @@ spec:
             namespace: notifications
             cluster: notifications-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: observability
             cluster: goalert-db
@@ -716,7 +716,7 @@ spec:
             namespace: platform
             cluster: copilot-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: platform
             cluster: mcp-db

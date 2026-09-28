@@ -30,7 +30,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
@@ -74,6 +78,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
@@ -104,6 +110,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
@@ -114,11 +122,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
@@ -126,7 +138,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -137,6 +153,8 @@ tests:
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -149,6 +167,8 @@ tests:
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
         values: "1+0x40"
@@ -213,6 +233,8 @@ tests:
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
@@ -404,7 +426,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
@@ -448,6 +474,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
@@ -478,6 +506,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
@@ -488,11 +518,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
@@ -500,7 +534,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -511,6 +549,8 @@ tests:
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -523,6 +563,8 @@ tests:
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
         values: "1+0x40"
@@ -587,6 +629,8 @@ tests:
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
@@ -755,7 +799,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
@@ -799,6 +847,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
@@ -829,6 +879,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
@@ -839,11 +891,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
@@ -851,7 +907,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -862,6 +922,8 @@ tests:
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -874,6 +936,8 @@ tests:
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
         values: "1+0x40"
@@ -938,6 +1002,8 @@ tests:
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
@@ -1112,7 +1178,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
@@ -1156,6 +1226,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
@@ -1186,6 +1258,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
@@ -1196,11 +1270,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
@@ -1208,7 +1286,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -1219,6 +1301,8 @@ tests:
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -1231,6 +1315,8 @@ tests:
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
         values: "1+0x40"
@@ -1295,6 +1381,8 @@ tests:
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
@@ -1472,7 +1560,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
@@ -1516,6 +1608,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
@@ -1546,6 +1640,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
@@ -1556,11 +1652,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
@@ -1568,7 +1668,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -1579,6 +1683,8 @@ tests:
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -1591,6 +1697,8 @@ tests:
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
         values: "1+0x40"
@@ -1655,6 +1763,8 @@ tests:
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
@@ -1827,6 +1937,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
@@ -1869,6 +1981,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
@@ -1899,6 +2013,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
@@ -1909,11 +2025,15 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
@@ -1921,7 +2041,11 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -1932,6 +2056,8 @@ tests:
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -1944,6 +2070,8 @@ tests:
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
         values: "1+0x40"
@@ -2008,6 +2136,8 @@ tests:
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
         values: "1+0x40"
