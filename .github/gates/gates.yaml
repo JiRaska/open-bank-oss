@@ -490,6 +490,26 @@ gates:
       # 8 self-test cases, both directions, including prose-in-a-comment near-misses.
       python3 .github/scripts/check-untrusted-pg-extension.py --enforce
 
+  - id: eso-crd-api-version
+    name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
+    group: gitops
+    budget_seconds: 10
+    mode: enforced
+    min_subjects: 100   # ~215 external-secrets.io-group manifests on origin/main today; floors at roughly half
+    rationale: "ESO 0.17 stops serving external-secrets.io/v1beta1 (and the already-deprecated v1alpha1) CRD storage — a manifest still on either group/version fails to sync the moment the chart Application in openbank-infra/gitops/apps/external-secrets.yaml crosses that line, and the failing files are not the ones the bump PR touched, so nothing in that diff hints at the cause. Refs #11126."
+    review_after: "2027-03-27"
+    selftest: python3 .github/scripts/check-eso-crd-api-version.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-eso-crd-api-version.py"]
+    run: |
+      # Falsified both ways (7 self-test cases) plus a run against the real tree: with the chart
+      # pin simulated at 0.17.0 and a synthetic v1beta1 ExternalSecret dropped into gitops, this
+      # exits 1; on origin/main today (chart 0.16.2, all 215 external-secrets.io manifests already
+      # on v1 after #11128) it exits 0. Below 0.17.0 the gate is a deliberate no-op — it exists to
+      # keep the chart bump and the apiVersion migration in the same PR, not to force a migration
+      # nobody has decided on yet.
+      python3 .github/scripts/check-eso-crd-api-version.py --enforce
+
   - id: litellm-config-revision
     name: "a litellm-config change bumps the pod-roll annotation (an unrolled pod keeps its old model list)"
     group: gitops
