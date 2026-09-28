@@ -113,6 +113,28 @@ changed_files() {
   gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null
 }
 
+# File overlap is not image overlap: payments-services.yaml holds several distinct workloads.
+# The parser accepts only unambiguous image pin replacements; an unreadable or unusual diff
+# yields no keys and therefore cannot authorize closing another PR.
+changed_image_keys() {
+  local pr="$1"
+  if [ -n "${SUPERSEDE_IMAGES_HOOK:-}" ]; then
+    "$SUPERSEDE_IMAGES_HOOK" "$pr"
+    return
+  fi
+  gh pr diff "$pr" --repo "$REPO" --patch 2>/dev/null |
+    python3 "$(dirname "${BASH_SOURCE[0]}")/deploy-pr-image-keys.py"
+}
+
+overlaps() {
+  local first="$1" second="$2" line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    grep -qxF -- "$line" <<<"$second" && return 0
+  done <<<"$first"
+  return 1
+}
+
 # rc 0 iff every non-empty line of $2 (the PR being considered for closure) appears in $1 (the
 # survivor). An EMPTY subset is deliberately never treated as "covered" here — that decision
 # belongs to the caller, which must refuse to close on empty/unreadable file lists (unknown must
@@ -138,7 +160,7 @@ classify_coverage() {
 run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
   local n ref other_sha verdict failed=0 stale_keep=0 closed=0 skipped=0
-  local KEEP_FILES other_files cov_verdict
+  local KEEP_FILES other_files cov_verdict KEEP_KEYS other_keys key_verdict
 
   if [ -z "$PAIRS" ]; then
     echo "supersede: no other open '$PREFIX*' PRs besides #$KEEP — nothing to close."
@@ -148,6 +170,7 @@ run() {
   # Fetched once, reused for every candidate. An unreadable diff yields "" and classify_coverage()
   # then refuses to close anything against it — never treated as "covers everything".
   KEEP_FILES="$(changed_files "$KEEP")"
+  if ! KEEP_KEYS="$(changed_image_keys "$KEEP")"; then KEEP_KEYS=''; fi
 
   while IFS=$'\t' read -r n ref; do
     [ -n "$n" ] || continue
@@ -164,9 +187,31 @@ run() {
              "other_files=[$(printf '%s' "$other_files" | tr '\n' ' ')]"
         continue
       fi
+      if ! other_keys="$(changed_image_keys "$n")"; then other_keys=''; fi
+      key_verdict="$(classify_coverage "$KEEP_KEYS" "$other_keys")"
+      if [ "$key_verdict" != "CLOSE" ]; then
+        skipped=$((skipped + 1))
+        echo "::warning::supersede: #$KEEP does not cover every image pin in #$n (or its diff is" \
+             "unreadable) — leaving #$n OPEN."
+        continue
+      fi
     fi
     case "$verdict" in
       STALE_KEEP)
+        other_files="$(changed_files "$n")"
+        if [ -n "$KEEP_FILES" ] && [ -n "$other_files" ] && ! overlaps "$KEEP_FILES" "$other_files"; then
+          skipped=$((skipped + 1))
+          echo "::warning::supersede: #$KEEP is older than #$n, but their changed files are" \
+               "disjoint — leaving both OPEN without blocking #$KEEP."
+          continue
+        fi
+        if ! other_keys="$(changed_image_keys "$n")"; then other_keys=''; fi
+        if [ -n "$KEEP_KEYS" ] && [ -n "$other_keys" ] && ! overlaps "$KEEP_KEYS" "$other_keys"; then
+          skipped=$((skipped + 1))
+          echo "::warning::supersede: #$KEEP is older than #$n, but their image pins are" \
+               "disjoint — leaving both OPEN without blocking #$KEEP."
+          continue
+        fi
         stale_keep=1
         echo "::error::supersede: #$KEEP pins ${KEEP_SHA:0:8}, which is an ANCESTOR of #$n's ${other_sha:0:8}." \
              "This build finished later than a NEWER commit's, so #$KEEP would roll those services BACK." \
@@ -248,6 +293,9 @@ dump_out() { # dump_out <captured output>
 
 self_test() {
   local tmp rc out ok=0
+  # Keep the parser proof in the existing required self-test gate. The run() fixtures below
+  # validate the decisions; these tests validate the real diff-to-image-key boundary.
+  python3 "$(dirname "${BASH_SOURCE[0]}")/tests/test_deploy_pr_image_keys.py" || return 1
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
   # Fake compare: OLD..NEW is `ahead`, NEW..OLD is `behind`, anything else `diverged`.
@@ -280,11 +328,32 @@ case "$pr" in
           "openbank-infra/gitops/components/aml/aml-service.yaml" \
           "openbank-infra/gitops/components/kyc/kyc-service.yaml" ;;
   7320) printf '%s\n' "openbank-infra/gitops/components/aml/aml-service.yaml" ;;
+  11369) printf '%s\n' "openbank-infra/gitops/components/ledger/ledger-service.yaml" ;;
+  11368) printf '%s\n' "openbank-infra/gitops/components/mcp/mcp-service.yaml" ;;
+  11401|11402|11403) printf '%s\n' "openbank-infra/gitops/components/payments/payments-services.yaml" ;;
   *) echo "" ;;
 esac
 HOOK
   chmod +x "$tmp/files"
   export SUPERSEDE_FILES_HOOK="$tmp/files"
+  cat > "$tmp/images" <<'HOOK'
+#!/usr/bin/env bash
+case "$1" in
+  6222|6225|1|2) printf 'shared/shared-service.yaml\topenbank-shared\n' ;;
+  7313) printf 'balances/balance-service.yaml\topenbank-balance-service\n' ;;
+  7319) printf 'accounts/account-service.yaml\topenbank-account-service\n' ;;
+  7314) printf 'kyc/kyc-service.yaml\topenbank-kyc-service\n' ;;
+  7327) printf 'aml/aml-service.yaml\topenbank-aml-service\nkyc/kyc-service.yaml\topenbank-kyc-service\n' ;;
+  7320) printf 'aml/aml-service.yaml\topenbank-aml-service\n' ;;
+  11369) printf 'ledger/ledger-service.yaml\topenbank-ledger-service\n' ;;
+  11368) printf 'mcp/mcp-service.yaml\topenbank-mcp-service\n' ;;
+  11401|11403) printf 'payments/payments-services.yaml\topenbank-domestic-payment\n' ;;
+  11402) printf 'payments/payments-services.yaml\topenbank-transaction-service\n' ;;
+  *) return 1 ;;
+esac
+HOOK
+  chmod +x "$tmp/images"
+  export SUPERSEDE_IMAGES_HOOK="$tmp/images"
   local OLD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local NEW=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   local P=chore/gitops-auto-deploy-
@@ -352,11 +421,43 @@ HOOK
     echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
   fi
 
+  # case 7 — #11369/#11368: the older build is safe when the newer PR changes a disjoint pin.
+  out="$(run "$P" 11369 "$OLD" "$(printf '11368\t%s%s' "$P" "$NEW")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -q 'changed files are disjoint'; then
+    echo "SELF-TEST FAIL case 7: older disjoint PR was blocked; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 7 OK (older but disjoint image pins -> no rollback block)"
+  fi
+
+  # case 8 — separate services in the same manifest are still disjoint image pins.
+  out="$(run "$P" 11401 "$OLD" "$(printf '11402\t%s%s' "$P" "$NEW")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -q 'image pins are disjoint'; then
+    echo "SELF-TEST FAIL case 8: separate image pins in one file were blocked; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 8 OK (same manifest, different image pins -> no rollback block)"
+  fi
+
+  # case 9 — a newer source commit changing the SAME image pin must block the stale PR.
+  out="$(run "$P" 11401 "$OLD" "$(printf '11403\t%s%s' "$P" "$NEW")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || ! printf '%s' "$out" | grep -q '::error::supersede:'; then
+    echo "SELF-TEST FAIL case 9: overlapping stale image pin was not blocked; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 9 OK (same image pin, older source -> rollback blocked)"
+  fi
+
+  # case 10 — ancestry plus file coverage must not close a different service sharing a manifest.
+  out="$(run "$P" 11402 "$NEW" "$(printf '11401\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close #11401'; then
+    echo "SELF-TEST FAIL case 10: disjoint image pin was closed; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 10 OK (same file, different image pins -> older PR preserved)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 6 cases OK"
+  echo "self-test: all 10 cases OK"
   return 0
 }
 
