@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.11.0
+  version: 1.12.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
     lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
@@ -29,7 +29,10 @@ paths:
         Idempotent replay: when the Berlin Group `tppTransactionId` body property or the
         `X-Request-ID` header is supplied, a retry returns the cached response with
         `X-Idempotency-Replayed: true` and creates nothing a second time (ADR-0293). Both are
-        optional today — requests without either are accepted but not deduplicated.
+        optional today — requests without either are accepted but not deduplicated. The key is
+        bound to a fingerprint of the request (method, path, canonical body); reusing it with a
+        different body is refused with 409 IDEMPOTENCY_KEY_REUSED, and a retry arriving while the
+        first request is still executing is refused with 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
       operationId: createConsent
       parameters:
         - name: X-Request-ID
@@ -53,6 +56,15 @@ paths:
                 $ref: '#/components/schemas/ConsentResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            IDEMPOTENCY_KEY_REUSED — the tppTransactionId / X-Request-ID was already used for a
+            different request body; or IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still
+            being processed under this key. Nothing is created in either case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/consents/{id}:
     get:

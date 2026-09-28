@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -25,6 +25,9 @@ paths:
       description: >-
         Idempotent (ADR-0296): a retry carrying the same Idempotency-Key (or X-Request-ID)
         replays the cached 201 with X-Idempotency-Replayed: true — no second challenge is minted.
+        The key is bound to a fingerprint of the request (method, path, canonical body); reusing it
+        with a different body is refused with 409 IDEMPOTENCY_KEY_REUSED, and a retry arriving while
+        the first request is still executing is refused with 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
       operationId: initiateScaChallenge
       parameters:
         - name: Idempotency-Key
@@ -55,6 +58,15 @@ paths:
                 $ref: '#/components/schemas/ScaChallengeResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            IDEMPOTENCY_KEY_REUSED — the Idempotency-Key (or X-Request-ID) was already used for a
+            different request body; or IDEMPOTENCY_REQUEST_IN_PROGRESS — the same request is still
+            being processed under this key. Nothing is minted in either case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/sca/challenges/{id}:
     get:

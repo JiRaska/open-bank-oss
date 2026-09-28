@@ -65,7 +65,7 @@ spec:
 # `dataFrom.extract` copies every key of the source secret verbatim, preserving the BINARY
 # PKCS#12 (`user.p12`) byte-for-byte. deletionPolicy: Retain so a transient store/RBAC blip
 # never deletes a live keystore out from under a running pod.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

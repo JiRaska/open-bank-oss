@@ -9,8 +9,9 @@ import com.openbank.interest.infrastructure.persistence.entity.CatalogInterestEv
 import com.openbank.interest.infrastructure.persistence.entity.CatalogInterestRateSnapshotEntity
 import com.openbank.interest.infrastructure.persistence.entity.CatalogInterestSyncStateEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
-import com.openbank.interest.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
@@ -26,7 +27,10 @@ import java.util.UUID
 
 /** Proves the local acknowledgement boundary with the real PostgreSQL schema. */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_interest_it")],
+)
 internal class CatalogInterestSyncRepositoryIT {
     @Inject
     lateinit var repository: CatalogInterestSyncRepository

@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -49,7 +50,10 @@ class TreasuryDealApiIT {
     @Inject
     lateinit var ledger: FakeLedger
 
-    private val today: LocalDate = LocalDate.now()
+    // The service decides settlement/maturity eligibility off its injected Clock, which is
+    // Clock.systemUTC() (DefaultClockProducer) — derive "today" the same way, not from local time,
+    // or this drifts a day out of step with the service between local midnight and UTC midnight.
+    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
 
     private fun draftBody(principal: String, counterparty: String = "SIMBK-A", product: String = "MM_PLACEMENT") = """
         {"product":"$product","counterpartyId":"$counterparty","currency":"CZK",
@@ -218,6 +222,22 @@ class TreasuryDealApiIT {
             .body("limitOverride.reason", equalTo("ALCO-approved temporary excess"))
         action(breachId, "approve").then().statusCode(403) // a senior cannot book (RBAC)
         assertThat(state(breachId)).isEqualTo("PENDING_APPROVAL")
+        given().`when`().get("/api/v1/treasury/limits/utilisation").then().statusCode(200)
+            .body("limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.breached", equalTo(true))
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.activeOverrides",
+                equalTo(1),
+            )
+            // Keyed per (counterparty, LIMIT currency): the override sits on SIMBK-C's CZK line only —
+            // not on its EUR line, and not on another counterparty's CZK line (#10896).
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'EUR' }.activeOverrides",
+                equalTo(0),
+            )
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-A' && it.currency == 'CZK' }.activeOverrides",
+                equalTo(0),
+            )
     }
 
     @Test
@@ -229,6 +249,58 @@ class TreasuryDealApiIT {
         action(breachId, "approve").then().statusCode(200)
             .body("state", equalTo("BOOKED"))
             .body("limitOverride.by", equalTo("sara.senior"))
+        // booking moves the deal off PENDING_APPROVAL: the override is no longer "active", but the
+        // deal still consumes the limit (BOOKED is on-book), so utilisation stays breached.
+        given().`when`().get("/api/v1/treasury/limits/utilisation").then().statusCode(200)
+            .body("limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.breached", equalTo(true))
+            .body(
+                "limits.find { it.counterpartyId == 'SIMBK-C' && it.currency == 'CZK' }.activeOverrides",
+                equalTo(0),
+            )
+    }
+
+    // --- #10896: ČNB lombard (marginal lending) facility ---
+
+    private fun lombardBody(currency: String = "CZK", counterparty: String = "CNB", rate: String = "5.75") = """
+        {"product":"CNB_LOMBARD","counterpartyId":"$counterparty","currency":"$currency",
+         "principal":2500000.00,"rate":$rate,"valueDate":"$today","maturityDate":"${today.plusDays(30)}"}
+    """.trimIndent()
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `13 - a dealer drafts an overnight ČNB lombard borrowing, off-product terms are 400`() {
+        for (bad in listOf(
+            lombardBody(currency = "EUR"),
+            lombardBody(counterparty = "SIMBK-A"),
+            lombardBody(rate = "0"),
+        )) {
+            given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+                .body(bad).`when`().post("/api/v1/treasury/deals").then().statusCode(400)
+        }
+        lombardId = draft(lombardBody())
+        given().`when`().get("/api/v1/treasury/deals/$lombardId").then().statusCode(200)
+            .body("product", equalTo("CNB_LOMBARD"))
+            .body(
+                "maturityDate",
+                equalTo(com.openbank.treasury.domain.model.DayCount.nextBusinessDay(today).toString()),
+            )
+        action(lombardId, "submit").then().statusCode(200)
+            .body("state", equalTo("PENDING_APPROVAL"))
+            .body("limitCheck.breached", equalTo(false))
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `14 - four-eyes books the lombard, settlement credits Borrowings from CNB 2320`() {
+        action(lombardId, "approve").then().statusCode(200).body("state", equalTo("BOOKED"))
+        action(lombardId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        val settled = ledger.journals.getValue("treasury:$lombardId:settled").second
+        assertThat(settled.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+            .containsExactly("DEBIT 1001 2500000.00 CZK", "CREDIT 2320 2500000.00 CZK")
+        assertThat(outboxTypes(UUID.fromString(lombardId)))
+            .containsExactly("treasury.deal.booked.v1", "treasury.deal.settled.v1")
     }
 
     private fun state(id: String): String = jdbc { c ->
@@ -270,5 +342,6 @@ class TreasuryDealApiIT {
         lateinit var dealId: String
         lateinit var breachId: String
         lateinit var selfId: String
+        lateinit var lombardId: String
     }
 }

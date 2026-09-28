@@ -37,7 +37,7 @@ spec:
         host: "*"
 ---
 # ── ExternalSecret: fx-service keystore → fx namespace ─────────────────────
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -59,7 +59,7 @@ spec:
 ---
 # ── ExternalSecret: cluster-CA truststore → fx namespace ───────────────────
 # Shared cluster-CA truststore; same source secret as payments namespace projection.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

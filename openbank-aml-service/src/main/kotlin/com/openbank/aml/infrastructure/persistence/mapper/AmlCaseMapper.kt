@@ -30,6 +30,7 @@ fun AmlCase.toEntity() = AmlCaseEntity().also {
     it.decidedAt = decidedAt
     it.createdAt = createdAt
     it.updatedAt = updatedAt
+    it.requestHash = requestHash
 }
 
 fun AmlCaseEntity.toDomain() = AmlCase(
@@ -52,4 +53,5 @@ fun AmlCaseEntity.toDomain() = AmlCase(
     decidedAt = decidedAt,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    requestHash = requestHash,
 )

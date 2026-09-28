@@ -73,6 +73,19 @@ requests, but the irreversible action lives downstream.
 ## 6. Change log
 
 - **2026-09-26** — **Spoofing/Tampering control restored: the eIDAS TPP gate now actually runs (#10997).** `EidasMtlsFilter`, `QsealSignatureFilter` and `BespokeDeprecationFilter` matched `UriInfo.path` against prefixes with no leading slash (`v1/`, `open-banking/`), while RESTEasy Reactive supplies `/v1/...`, so none of them ever fired. Measured over real HTTP before the fix: a request with no TPP identification got the resource's own `CERTIFICATE_MISSING` (fail-closed, no filter text), an unauthorised `X-TPP-ID` was never checked against tpp-registry, an authorised one was still refused 401 because `tppId` was never set, QSEAL verification (advisory by default) never evaluated, and no bespoke response carried `Deprecation`/`Sunset`. The effect was denial of every TPP call rather than a bypass, since each resource fails closed on a missing `tppId`. Each filter now normalises the path once (`removePrefix("/")`) and accepts both forms; `Psd2FilterPathGatingIT` drives the filters over real HTTP (filter rejection, registry rejection, authorised pass-through, deprecation headers) and fails with the normalisation reverted.
+
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
 - **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or PSD2-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
@@ -123,3 +136,15 @@ requests, but the irreversible action lives downstream.
 - **2026-06-15 (ADR-0090 P1)** — Berlin **AIS + consent** surface (`/v1/consents`, `/v1/accounts`).
   Read-only + consent reuse, no money path. Extended `EidasMtlsFilter` to gate `v1/`. Risk class =
   **confidentiality**, mitigated by per-consent scoping.
+
+- **2026-09-26** — **`sanitizeForLog` de-duplication (#10937), no behavior change.** `StubClients.kt`
+  (outbound client edge), `EidasMtlsFilter.kt` and `QsealSignatureFilter.kt` (inbound REST surface)
+  drop their locally-copied `String?.sanitizeForLog()` helper for the single shared implementation in
+  `openbank-libs-domain`. The function only replaces CR/LF with `_` (log-forging / CWE-117
+  mitigation) — there is no length cap in either the shared function or the copies it replaces; an
+  earlier version of this entry claimed one that does not exist. Behavior is otherwise
+  byte-for-byte identical to the 14 copies it replaces fleet-wide — verified by the shared helper's
+  own unit tests plus this service's existing filter tests. **Risk class:** none — this
+  changes which class DEFINES the log-sanitization function, not what it does; the eIDAS mTLS
+  certificate check and QSeal signature verification logic in both filters are untouched. Rollback:
+  restore the service-local `sanitizeForLog` copy.
