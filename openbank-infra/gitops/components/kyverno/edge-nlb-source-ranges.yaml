@@ -20,8 +20,17 @@
 #   - at admission (rule `inject-on-admission`): every CREATE/UPDATE, whoever sends it —
 #     the ArgoCD sync of ingress-nginx, the Envoy Gateway controller reconciling the
 #     proxy Service, or a new LoadBalancer Service nobody planned for;
-#   - on existing Services (rule `inject-into-existing`): whenever the Secret changes, so
-#     editing the KV value re-locks both NLBs without touching either app.
+#   - on existing Services, via whoever writes them next: ArgoCD's server-side diff runs
+#     this webhook (ingress-nginx app: IncludeMutationWebhook), so a changed list shows as
+#     OutOfSync and selfHeal applies it. The Envoy proxy Service is written by the Envoy
+#     Gateway controller, not ArgoCD, so after changing the KV value touch it once — any
+#     UPDATE passes this webhook:
+#       kubectl -n envoy-gateway-system annotate svc \
+#         -l gateway.envoyproxy.io/owning-gateway-name=edge \
+#         openbank.io/source-ranges-rev="$(date +%s)" --overwrite
+# There is deliberately no mutate-existing rule: it would need Kyverno's background
+# controller to hold cluster-wide Service write (Trivy KSV-0056), a standing privilege
+# to fix a one-off, twice-a-year event.
 #
 # FAIL CLOSED. If the Secret is missing or empty the admission rule cannot resolve its
 # context and, with failurePolicy Fail, the Service write is REJECTED (a loud ArgoCD
@@ -55,20 +64,6 @@ spec:
       remoteRef:
         key: platform/edge-nlb
         property: source_ranges
----
-# The background controller patches EXISTING Services (rule `inject-into-existing`);
-# the chart grants it no Service write. Aggregated into its ClusterRole by label.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: kyverno-background-edge-nlb-source-ranges
-  labels:
-    rbac.kyverno.io/aggregate-to-background-controller: "true"
-    app.kubernetes.io/part-of: kyverno-policies
-rules:
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "update", "patch"]
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -106,41 +101,6 @@ spec:
             urlPath: /api/v1/namespaces/kyverno/secrets/edge-nlb-source-ranges
             jmesPath: "split(base64_decode(data.cidrs), ',')"
       mutate:
-        patchStrategicMerge:
-          spec:
-            loadBalancerSourceRanges: "{{ sourceranges }}"
-    - name: inject-into-existing
-      match:
-        any:
-          - resources:
-              kinds: [Secret]
-              namespaces: [kyverno]
-              names: [edge-nlb-source-ranges]
-      context:
-        - name: sourceranges
-          variable:
-            jmesPath: "split(base64_decode(request.object.data.cidrs), ',')"
-      mutate:
-        mutateExistingOnPolicyUpdate: true
-        targets:
-          - apiVersion: v1
-            kind: Service
-            namespace: ingress-nginx
-            name: "*"
-            preconditions:
-              all:
-                - key: "{{ target.spec.type || '' }}"
-                  operator: Equals
-                  value: LoadBalancer
-          - apiVersion: v1
-            kind: Service
-            namespace: envoy-gateway-system
-            name: "*"
-            preconditions:
-              all:
-                - key: "{{ target.spec.type || '' }}"
-                  operator: Equals
-                  value: LoadBalancer
         patchStrategicMerge:
           spec:
             loadBalancerSourceRanges: "{{ sourceranges }}"
