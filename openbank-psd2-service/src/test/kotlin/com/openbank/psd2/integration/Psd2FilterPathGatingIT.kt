@@ -4,7 +4,9 @@
 
 package com.openbank.psd2.integration
 
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.restassured.module.kotlin.extensions.Given
@@ -29,7 +31,10 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @TestProfile(Psd2MissingHeaderStatusIT.AuthzOffProfile::class)
-@QuarkusTestResource(com.openbank.psd2.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_psd2_it")],
+)
 class Psd2FilterPathGatingIT {
 
     private val consentPath = "/v1/consents/00000000-0000-0000-0000-000000000000/status"
