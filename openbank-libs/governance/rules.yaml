@@ -1800,12 +1800,21 @@ architecture:
   # ENFORCED by .github/scripts/check-domain-purity.py (Validate manifests job):
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
-  # the whole openbank-libs-domain module; openbank-libs-runtime is module-exempt
+  # the whole openbank-libs-domain module and its ADR-0317 context modules
+  # (openbank-libs-lending); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
   # in a libs-domain package the old `*/domain/*` scope never opened.
   ci_producer: ".github/scripts/check-domain-purity.py"
+  # ADR-0317: bounded-context packages (lending, decision, iso20022, ...) live in
+  # openbank-libs-<context> modules, never back in openbank-libs-domain; core never depends on
+  # a context module; every runtime libs module is listed in libs-change-dependents.sh
+  # LIBS_MODULES. Advisory through phases 1-3, enforced once phase 4 lands.
+  libs_core_purity:
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0317 phase 4
+    ci_producer: ".github/scripts/check-libs-core-purity.py"
 
 # ---------------------------------------------------------------------------------------
 # OPA bundle sync (issue #1184). Keep terse: this file is embedded verbatim into every
@@ -3575,6 +3584,24 @@ matrix_sa_excluded_action_grants:
 # Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
 # realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
 # third, unreviewed answer to "what does the shared client hold".
+field_protection:
+  # ADR-0320 P3. Reversible field encryption and deterministic tokenization go through
+  # com.openbank.libs.security.FieldProtector (libs-domain port; OpenBaoTransitFieldProtector
+  # in libs-runtime, a plain class, no CDI bean; the test-only LocalAesGcmFieldProtector lives in
+  # openbank-libs-testing so no src/main can produce it). tokenize
+  # delegates to the ADR-0189/ADR-0072 BlindIndex — no second HMAC scheme.
+  detect: ["<service>/src/main/**/*.kt", "<service>/src/main/**/*.java", "<service>/src/main/**/*.sql"]
+  require:
+    - "no javax.crypto Cipher/Mac/SecretKeySpec/KeyGenerator, BouncyCastle, Tink, X-Vault-Token or OpenBao Transit path, and no pgp_sym_encrypt in SQL, in a service's src/main outside the shrink-only baseline"
+    - "ciphertext keeps the Transit `vault:v<N>:` envelope; every failure throws FieldProtectionException (fail closed)"
+  gate: field-crypto-in-libs
+  baseline: ".github/scripts/field-crypto-in-libs-baseline.txt"
+  # ADVISORY until card-issuance (first consumer, ADR-0262) migrates, per ADR-0320's
+  # advisory-first convention for P1/P3 gates.
+  enforced: advisory
+  target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
+  ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
