@@ -45,7 +45,7 @@ spec:
           # curl is sufficient: ClickHouse's HTTP interface accepts a raw SQL script as the
           # POST body on /?database=... — no clickhouse-client binary needed, one fewer image
           # to pin and patch.
-          image: docker.io/curlimages/curl:8.7.1
+          image: docker.io/curlimages/curl:8.19.0
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
