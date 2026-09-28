@@ -9,6 +9,7 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
+import java.util.UUID
 
 /**
  * Isolated PostgreSQL + Valkey containers for consent-service integration tests.
@@ -27,9 +28,9 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         valkey = GenericContainer(DockerImageName.parse(VALKEY_IMAGE))
             .withExposedPorts(6379)
         postgres.start()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", RESOURCE_SCOPE_ID)
         valkey.start()
-        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started", RESOURCE_SCOPE_ID)
         val pgHost = postgres.host
         val pgPort = postgres.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         val db = postgres.databaseName
@@ -46,12 +47,13 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         valkey.stop()
-        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped", RESOURCE_SCOPE_ID)
         postgres.stop()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", RESOURCE_SCOPE_ID)
     }
 
     private companion object {
+        val RESOURCE_SCOPE_ID = UUID.randomUUID().toString()
         const val POSTGRES_IMAGE = "postgres:18.6-alpine"
         const val VALKEY_IMAGE = "docker.io/valkey/valkey:8-alpine"
     }
