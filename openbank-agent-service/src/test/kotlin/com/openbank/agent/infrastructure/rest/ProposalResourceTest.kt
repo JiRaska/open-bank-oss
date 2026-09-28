@@ -6,6 +6,8 @@
 package com.openbank.agent.infrastructure.rest
 
 import com.openbank.agent.application.port.`in`.DecideProposalUseCase
+import com.openbank.agent.domain.proposal.AgentProposal
+import com.openbank.agent.domain.proposal.ProposalState
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -13,6 +15,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.security.Principal
+import java.time.Instant
 import java.util.UUID
 
 class ProposalResourceTest {
@@ -64,6 +67,39 @@ class ProposalResourceTest {
 
         assertThat(response.status).isEqualTo(404)
         verify(exactly = 1) { decisions.decide(proposalId, false, "reviewer", "insufficient evidence") }
+    }
+
+    @Test
+    fun `successful decision returns the persisted audit identity`() {
+        val (resource, decisions) = resource("reviewer")
+        val decidedAt = Instant.parse("2026-09-28T12:00:00Z")
+        val updated = AgentProposal(
+            id = proposalId,
+            title = "proposal",
+            rationale = "rationale",
+            suggestedAction = "action",
+            proposedBy = "maker-agent",
+            proposedAt = decidedAt.minusSeconds(60),
+            state = ProposalState.APPROVED,
+            decidedBy = "reviewer",
+            decidedAt = decidedAt,
+            decisionReason = "verified",
+            modelId = null,
+            correlationId = null,
+        )
+        every { decisions.decide(proposalId, true, "reviewer", "verified") } returns updated
+
+        val response = resource.decide(
+            proposalId.toString(),
+            ProposalResource.DecisionRequest(true, "forged", "verified"),
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity).isInstanceOf(ProposalResource.ProposalDto::class.java)
+        val dto = response.entity as ProposalResource.ProposalDto
+        assertThat(dto.proposedBy).isEqualTo("maker-agent")
+        assertThat(dto.decidedBy).isEqualTo("reviewer")
+        assertThat(dto.decidedAt).isEqualTo(decidedAt)
     }
 
     @Test
