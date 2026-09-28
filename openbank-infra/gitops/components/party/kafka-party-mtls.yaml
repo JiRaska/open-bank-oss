@@ -97,7 +97,7 @@ spec:
 # Keystore for party-service projected from `messaging` into `party`.
 # Source: Strimzi User Operator secret `party-service` in namespace `messaging`.
 # `dataFrom.extract` preserves binary PKCS#12 (`user.p12`) byte-for-byte.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -120,7 +120,7 @@ spec:
 ---
 # Shared cluster-CA truststore projected from `messaging` into `party`.
 # Source: Strimzi Cluster Operator secret `openbank-cluster-cluster-ca-cert`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

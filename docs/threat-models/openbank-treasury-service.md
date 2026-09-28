@@ -2,14 +2,15 @@
 # Threat model — openbank-treasury-service
 
 - **Status:** MVP (ADR-0315 D1–D6, D9), sandbox only — money-market deals against a SYNTHETIC counterparty set
-- **Last reviewed:** 2026-09-25
+- **Last reviewed:** 2026-09-26
 - **Owner:** treasury-service CODEOWNERS
 - **Related ADRs:** ADR-0003, ADR-0030, ADR-0031, ADR-0034, ADR-0313, ADR-0314, ADR-0315
 
 ## Scope and assets
 
 The bank's own money-market book: MM placements with other banks (`MM_PLACEMENT`), MM borrowings
-from other banks (`MM_BORROWING`) and the ČNB overnight deposit facility (`CNB_DEPOSIT_FACILITY`).
+from other banks (`MM_BORROWING`), the ČNB overnight deposit facility (`CNB_DEPOSIT_FACILITY`) and
+overnight borrowing from the ČNB marginal lending (lombard) facility (`CNB_LOMBARD`).
 A deal moves `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before
 booking) or `REVERSED` (after). Every settlement, maturity and reversal of a settled deal posts a
 balanced journal to the ledger through its public API. **Money-path** (`rules.yaml:
@@ -27,6 +28,12 @@ Counterparties are banks and the central bank — no natural persons, no custome
    `ROLE_TREASURY_DEALER` drafts, submits and cancels; `ROLE_TREASURY_APPROVER` approves, rejects,
    settles, matures and reverses. RBAC (`TreasuryResource`), then OPA (`treasury_rest_ext.rego`,
    human principals only, every service-account excluded), then the domain (`Deal`).
+   `GET /limits/utilisation` (#10896) is read-only and gated by the SAME `treasury.counterparty.read`
+   action/roles as `GET /counterparties` — no new rego rule. Its `utilised`/`breached` fields are
+   never computed independently: both it and the booking-time limit check read
+   `DealRepository.exposure`, whose state/product filter derives from the single
+   `Deal.LIMIT_CONSUMING_STATES` constant, so the view cannot silently diverge from what actually
+   blocks booking.
 2. The service posts journals to ledger-service's private-CA mTLS listener (8443, client
    certificate `treasury-internal-tls`) with its OWN machine identity: the named oidc-client `m2m`
    = Keycloak client `openbank-treasury`, ROLE_API only (`LedgerRestClient`,
@@ -49,6 +56,7 @@ accounts; the ČNB facility is CZK only. Seeded by ledger migration
 | `MM_PLACEMENT` | Dr 1500/1501 placements · Cr nostro 1001/1002 — P | Dr nostro P+I · Cr 1500/1501 P · Cr 4200/4201 MM interest income I |
 | `CNB_DEPOSIT_FACILITY` | Dr 1510 deposit facility at ČNB · Cr 1001 — P | Dr 1001 P+I · Cr 1510 P · Cr 4200 I |
 | `MM_BORROWING` | Dr nostro · Cr 2300/2301 borrowings — P | Dr 2300/2301 P · Dr 5200/5201 MM interest expense I · Cr nostro P+I |
+| `CNB_LOMBARD` | Dr 1001 · Cr 2320 borrowings from ČNB — P | Dr 2320 P · Dr 5200 I · Cr 1001 P+I |
 
 `BOOKED` posts nothing (no off-balance commitment in the MVP). `REVERSED` from `SETTLED` posts the
 settlement journal with every side flipped under key `...:reversed`; from `BOOKED` it posts
@@ -85,3 +93,4 @@ Senior-approver limit override (ADR-0315 D4), product and ADR-0313 risk limits, 
 postings to 1520/1521/2310/2311, a holiday calendar, the agent charter (D10), nostro
 reconciliation (D7), minimum reserves (D8), and real market connectivity (D9).
 - **2026-09-26** — **Senior override of a counterparty-limit breach (ADR-0315 D4).** `POST /api/v1/treasury/deals/{id}/override-limit` (required `Idempotency-Key`, `reason` body) records an override on a PENDING_APPROVAL deal whose limit check is breached. It needs a new realm role, `ROLE_TREASURY_SENIOR_APPROVER`, and its own OPA action, `treasury.deal.override-limit`, granted only to that role for a HUMAN principal that is not a `service-account-`. A senior gets read, and neither drafts nor books. The domain enforces the rest, not OPA alone. The override is human-only, carries a non-blank reason and exists only for a breached check. The overrider is never the deal's creator or submitter, and the senior who overrode may not also book the deal, so a breach booking involves three people. The override is bounded to the exposure it was granted for (`coversExposureUpTo`): if exposure grows before booking, approval refuses again. A rejection drops it. **STRIDE-E:** closed by the separate role and action, the service-account and agent exclusions (`opa test`: dealer, approver, admin, a machine and an agent holding the senior role are all denied), and the domain four-eyes rules. **STRIDE-R:** who, why, when, the exposure covered and the limit are persisted (V4, complete-or-absent CHECK) and written to the deal timeline. Rollback: remove the endpoint and the rego rule; V4 columns are nullable.
+- **2026-09-27** — **ČNB lombard (marginal lending) borrowing, `CNB_LOMBARD` (#10896).** A new product on the existing deal lifecycle, no new endpoint, role or OPA action: it is drafted, four-eyes booked, settled, matured and reversed by exactly the `MM_BORROWING` code paths. The domain pins its terms (`Deal` init): CZK only, counterparty `CNB` (and no interbank product may face `CNB`), maturity forced to the next business day whatever the request says, and a rate strictly > 0 (the dealer enters the ČNB lombard rate; nothing fetches it). It posts to a new CZK-only liability, 2320 "Borrowings from CNB (lombard)", seeded by ledger migration `V30` with the V29 fixed-id convention; accrual and maturity use the MM expense and accrued-payable accounts. **Limits:** as a borrowing it consumes no credit limit (`LimitCheck` deal amount 0); the `CNB` counterparty row and its limit are the deposit facility's, unchanged. **STRIDE-T (wrong GL account):** the ledger refuses a 2320 line in EUR (422, `TreasuryAccountsPostingIT`); `PostingRulesTest` asserts the settlement, maturity, accrual and reversal rows. **Residual / not modelled:** the collateral pledge that backs a real lombard loan (eligible securities, haircuts, the pledge itself) is NOT modelled — a lombard deal here is unsecured on the books; the lombard rate is not validated against the ČNB's published rate; there is still no holiday calendar, so a Friday deal matures Monday and a pre-holiday deal matures on the holiday. Rollback: treasury `V7` and ledger `V30` carry their rollback notes (only while no `CNB_LOMBARD` deal / 2320 line exists).
