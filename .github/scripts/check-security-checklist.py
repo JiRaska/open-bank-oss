@@ -57,7 +57,19 @@ INERT is a closed, positive list: `src/test/`, `src/testFixtures/`, `src/integra
 application.yaml, a migration, openapi.yaml, a Dockerfile, build.gradle.kts, and any path
 this list does not name — is UNKNOWN, and every judgement item stays human (fail closed):
 in a money-path service, production code IS payment code. A box the classifier does not
-recognise stays required too. The gate writes its evidence for each auto-answered item to
+recognise stays required too.
+
+DECLARED SENSITIVE PATHS (#11301). Production code in a money-path service is no longer
+automatically "everything sensitive" when that service declares, in
+`rules.yaml: security_sensitive_paths`, which of its paths are auth/crypto/payment, PII and
+cardholder code. For a declared service the auth/PII/cardholder boxes auto-pass iff no changed
+production file matches that category's globs (and no non-money-path file matches the path
+patterns above); the secrets box auto-passes iff additionally no declared PII path, no
+application config and no added log statement is in the diff. Undeclared services stay fail
+closed. A diff that changes the declaration itself makes all three judgement boxes human, so
+the list cannot be narrowed silently. `--coverage` keeps it honest: a strong signal (crypto/JWT/
+TLS import, the shared approval library, a PII-/card-named field or column) outside its
+category's globs is a finding. The gate writes its evidence for each auto-answered item to
 the job log and $GITHUB_STEP_SUMMARY, so the answer is reviewable, not silent.
 
 Usage:  check-security-checklist.py --body-file <file> [--base origin/main]
@@ -148,18 +160,37 @@ def added_lines(base: str) -> list[tuple[str, str]]:
     return res
 
 
-def decide(files: list[str], touched: list[str], added: list[tuple[str, str]]) -> dict[str, str | None]:
+def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
+           decls: dict[str, dict[str, list[str]]] | None = None,
+           decl_changed: bool = False) -> dict[str, str | None]:
     """item -> evidence string when the diff answers it (auto-pass), or None when a human must.
     The None branches are the default; an item is auto-answered only by positive evidence."""
+    decls = decls or {}
     unknown = [f for f in touched if not is_inert(f)]
-    code = [f for f in files if not is_inert(f)]
+    touched_set = set(touched)
+    other_code = [f for f in files if not is_inert(f) and f not in touched_set]
+    undeclared = [f for f in unknown if f.split("/", 1)[0] not in decls]
+    declared = [f for f in unknown if f.split("/", 1)[0] in decls]
+
+    def cat_hits(cat: str) -> list[str]:
+        return [f for f in declared if matches(f.split("/", 1)[1], decls[f.split("/", 1)[0]][cat])]
+
     ans: dict[str, str | None] = {k: None for k, _ in ITEMS}
     inert_note = (f"all {len(touched)} money-path file(s) are tests/docs "
                   f"(src/test, e2e, docs, *.md): " + ", ".join(sorted(touched)[:8])
                   + (" …" if len(touched) > 8 else ""))
+    decl_note = (f"{len(declared)} production file(s) in declared service(s) "
+                 f"({', '.join(sorted({f.split('/', 1)[0] for f in declared}))}) checked against "
+                 f"rules.yaml: {DECL_KEY}")
     if not unknown:
         ans["secrets"] = (inert_note + "; no production code/config/log statement changed on the "
                           "money path, and secrets across the whole diff are scanned by the gitleaks gate")
+    elif not undeclared and not decl_changed:
+        cfg = [f for f in unknown if CONFIG_FILE.search("/" + f)]
+        logs = [f"{f}: {t.strip()[:60]}" for f, t in added if f in declared and LOG_CALL.search(t)]
+        if not cfg and not logs and not cat_hits("pii"):
+            ans["secrets"] = (decl_note + "; none is a declared PII path, no application config changed, "
+                              "no log statement added — secrets across the diff are scanned by the gitleaks gate")
     sup = [f"{f}: {t.strip()[:80]}" for f, t in added if SUPPRESSION.search(t)]
     if not sup:
         ans["suppressions"] = (f"no added line in the diff ({len(added)} added) contains "
@@ -170,10 +201,140 @@ def decide(files: list[str], touched: list[str], added: list[tuple[str, str]]) -
                              "verification-metadata.xml, package*.json, lockfiles, Dockerfile)")
     for key, rx, what in (("auth", AUTH_CRYPTO, "auth/crypto"), ("pii", PII, "PII"),
                           ("cardholder", CARDHOLDER, "cardholder-data")):
-        hits = [f for f in code if rx.search(f)]
-        if not unknown and not hits:
-            ans[key] = (inert_note + f"; no non-test file anywhere in the diff matches a {what} path pattern")
+        if decl_changed:
+            continue  # the declaration itself changed: a human answers every judgement item
+        if [f for f in other_code if rx.search(f)] or undeclared:
+            continue
+        if not unknown:
+            ans[key] = inert_note + f"; no non-test file anywhere in the diff matches a {what} path pattern"
+            continue
+        cat = dict(CATEGORIES)[key]
+        if not cat_hits(cat):
+            ans[key] = (decl_note + f"; none matches the service's `{cat}` globs, and no non-money-path "
+                        f"file in the diff matches a {what} path pattern")
     return ans
+
+
+# ── declarative sensitive-path classification (#11301) ───────────────────────────────────────
+# `rules.yaml: security_sensitive_paths` maps a money-path service to, per judgement category,
+# the path globs (relative to the service directory) that hold that category's code. A service
+# WITH a declaration gets the three judgement items answered per category: the item auto-passes
+# iff no changed production file of that service matches the category's globs. A service
+# WITHOUT one stays fail-closed. Editing the declaration itself is governance: it can only be
+# NARROWED by a PR that also makes a human tick all three items, so it cannot shrink silently.
+DECL_KEY = "security_sensitive_paths"
+CATEGORIES = (("auth", "auth_crypto_payment"), ("pii", "pii"), ("cardholder", "cardholder"))
+CONFIG_FILE = re.compile(r"/src/main/resources/application[^/]*\.(ya?ml|properties)$")
+LOG_CALL = re.compile(r"\b(log|logger|LOG|LOGGER|Log)\s*\.\s*(trace|debug|info|warn|warning|error|infof|warnf|errorf|debugf)\b")
+
+# Coverage-guard signals. Deliberately STRONG signals only (a crypto/JWT import, a PII- or
+# card-named property or column, the shared four-eyes library): every hit must sit under that
+# service's globs for the category, or the declaration is lying by omission. Not every sensitive
+# file carries one — payment execution/posting has no mechanical signature — which is why the
+# declaration is reviewed code, and the guard is a floor under it, not the classifier.
+SIGNALS: dict[str, list[re.Pattern[str]]] = {
+    "auth_crypto_payment": [
+        re.compile(r"^\s*import\s+(javax\.crypto|java\.security|javax\.net\.ssl|io\.smallrye\.jwt|"
+                   r"org\.eclipse\.microprofile\.jwt|org\.jose4j|com\.nimbusds|org\.bouncycastle|"
+                   r"io\.quarkus\.oidc|com\.openbank\.libs\.approval)\b", re.M),
+    ],
+    "pii": [
+        re.compile(r"\b(val|var)\s+(email|emailAddress|dateOfBirth|birthDate|birthNumber|nationalId|"
+                   r"personalId|firstName|lastName|fullName|givenName|familyName|phone|phoneNumber|"
+                   r"passportNumber|taxId|postalAddress|residentialAddress)\s*:"),
+        re.compile(r"^\s*(\"?)(email|date_of_birth|birth_date|birth_number|national_id|first_name|"
+                   r"last_name|full_name|given_name|family_name|phone|phone_number|passport_number|"
+                   r"tax_id|postal_address|residential_address)\1\s+[A-Za-z]", re.M | re.I),
+        re.compile(r"@(Pii|PersonalData|Sensitive)\b"),
+    ],
+    "cardholder": [
+        re.compile(r"\b(val|var)\s+(pan|maskedPan|cvv|cvc|cardNumber|primaryAccountNumber|track2)\s*:"),
+        re.compile(r"^\s*(\"?)(pan|masked_pan|cvv|cvc|card_number|primary_account_number)\1\s+[A-Za-z]",
+                   re.M | re.I),
+    ],
+}
+
+
+def glob_rx(glob: str) -> re.Pattern[str]:
+    """`**/` = zero or more directories, `*` = within one segment, `?` = one char."""
+    out, i = "", 0
+    while i < len(glob):
+        if glob.startswith("**/", i):
+            out += "(?:.*/)?"; i += 3
+        elif glob.startswith("**", i):
+            out += ".*"; i += 2
+        elif glob[i] == "*":
+            out += "[^/]*"; i += 1
+        elif glob[i] == "?":
+            out += "[^/]"; i += 1
+        else:
+            out += re.escape(glob[i]); i += 1
+    return re.compile(out + r"\Z")
+
+
+def declarations_from_text(text: str) -> dict[str, dict[str, list[str]]] | None:
+    """Parse the declaration block. None = unreadable (the caller fails closed)."""
+    try:
+        import yaml  # noqa: PLC0415 — only this path needs it
+        data = yaml.safe_load(text) or {}
+    except Exception:  # noqa: BLE001 — any parse problem is fail-closed, never a pass
+        return None
+    raw = data.get(DECL_KEY) or {}
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, dict[str, list[str]]] = {}
+    for svc, cats in raw.items():
+        if not isinstance(cats, dict) or any(c not in cats for _, c in CATEGORIES):
+            continue  # an incomplete declaration is no declaration: fail closed for that service
+        if not all(isinstance(cats[c], list) for _, c in CATEGORIES):
+            continue
+        out[str(svc)] = {c: [str(g) for g in cats[c]] for _, c in CATEGORIES}
+    return out
+
+
+def load_declarations(root: Path) -> dict[str, dict[str, list[str]]]:
+    d = declarations_from_text((root / RULES).read_text())
+    if d is None:
+        print(f"::warning::{DECL_KEY} unreadable — every money-path service treated as undeclared (fail closed)")
+        return {}
+    return d
+
+
+def declaration_changed(base: str) -> bool:
+    """True when the diff changes the declaration block (or it cannot be compared)."""
+    try:
+        old = subprocess.run(["git", "show", f"{base}:{RULES}"], capture_output=True, text=True,
+                             check=True).stdout
+    except subprocess.CalledProcessError:
+        return False  # no rules.yaml at base: nothing to narrow
+    new = RULES.read_text() if RULES.exists() else ""
+    a, b = declarations_from_text(old), declarations_from_text(new)
+    return a is None or b is None or a != b
+
+
+def matches(rel: str, globs: list[str]) -> bool:
+    return any(glob_rx(g).match(rel) for g in globs)
+
+
+def coverage_findings(root: Path, decls: dict[str, dict[str, list[str]]]) -> list[str]:
+    """Files under a declared service's production tree that carry a strong signal for a
+    category but are not covered by that category's globs."""
+    bad: list[str] = []
+    for svc, cats in sorted(decls.items()):
+        main = root / svc / "src" / "main"
+        if not main.is_dir():
+            bad.append(f"{svc}: declared but has no src/main — stale declaration")
+            continue
+        for f in sorted(main.rglob("*")):
+            if f.suffix not in (".kt", ".java", ".sql") or not f.is_file():
+                continue
+            rel = f.relative_to(root / svc).as_posix()
+            text = f.read_text(encoding="utf-8", errors="replace")
+            for cat, rxs in SIGNALS.items():
+                hit = next((m.group(0).strip() for rx in rxs for m in [rx.search(text)] if m), None)
+                if hit and not matches(rel, cats[cat]):
+                    bad.append(f"{svc}/{rel}: `{hit[:60]}` is a {cat} signal but no {cat} glob covers it")
+    return bad
 
 
 def money_path_dirs(root: Path) -> list[str]:
@@ -224,7 +385,11 @@ def run(root: Path, body: str, base: str, enforce: bool,
     in_money_path = [f for f in files if any(f == d or f.startswith(d + "/") for d in dirs)]
     touched = [f for f in in_money_path if not is_release_derived(f)]
     derived = len(in_money_path) - len(touched)
-    if not touched:
+    decl_changed = declaration_changed(base)
+    if decl_changed:
+        print(f"security-checklist: rules.yaml `{DECL_KEY}` changed — governance change, the auth, PII "
+              "and cardholder items need a human tick regardless of which files moved")
+    if not touched and not decl_changed:
         if derived:
             # Say it out loud. A gate that narrows its own scope silently is how a control becomes
             # a no-op nobody notices, so the release-only case reports what it skipped and why.
@@ -239,7 +404,11 @@ def run(root: Path, body: str, base: str, enforce: bool,
     print(f"security-checklist: {len(touched)} money-path file(s) touched "
           f"({', '.join(sorted({t.split('/')[0] for t in touched}))})")
 
-    answers = decide(files, touched, added_lines(base))
+    decls = load_declarations(root)
+    for svc in sorted({t.split("/")[0] for t in touched if not is_inert(t)}):
+        print(f"security-checklist: {svc}: " + (f"declared in {DECL_KEY}" if svc in decls
+              else f"NOT declared in {DECL_KEY} — judgement items fail closed"))
+    answers = decide(files, touched, added_lines(base), decls, decl_changed)
     auto = {k: v for k, v in answers.items() if v is not None}
     human = [k for k, v in answers.items() if v is None]
     summary = ["### security-checklist-money-path", ""]
@@ -259,12 +428,15 @@ def run(root: Path, body: str, base: str, enforce: bool,
             body = current
     res = unticked(body)
     why = {
-        "secrets": "money-path production code/config changed — only a human can say no PII reaches logs/config",
+        "secrets": "production code in an undeclared service, a declared PII path, app config or an added log statement changed — only a human can say no PII reaches logs/config",
         "suppressions": "the diff ADDS a suppression or `as Any` — state the justification in the PR",
         "dependency": "a dependency/build manifest changed — attach the dependency review",
-        "auth": "non-test money-path code or an auth/crypto path changed — decide on `security-review-required`",
-        "pii": "non-test money-path code or a PII-pattern path changed — decide on `gdpr-review-required`",
-        "cardholder": "non-test money-path code or a cardholder-pattern path changed — decide on `pci-review-required`",
+        "auth": ("a declared auth/crypto/payment path, an undeclared money-path service, an auth/crypto path "
+                 f"elsewhere, or {DECL_KEY} itself changed — decide on `security-review-required`"),
+        "pii": ("a declared PII path, an undeclared money-path service, a PII-pattern path elsewhere, "
+                f"or {DECL_KEY} itself changed — decide on `gdpr-review-required`"),
+        "cardholder": ("a declared cardholder path, an undeclared money-path service, a cardholder-pattern "
+                       f"path elsewhere, or {DECL_KEY} itself changed — decide on `pci-review-required`"),
     }
     need_lines = [f"  - {k}: {why[k]}" for k in human]
     summary += ["", "Items that need a human for this diff:"] + [ln.strip() for ln in need_lines]
@@ -450,8 +622,110 @@ def self_test() -> int:
     if r_tpl is None or any(item_of(t) is None for t in r_tpl[1]):
         print("self-test FAIL: a template checklist line maps to no classified item"); bad += 1
 
+
+    # ── declarative sensitive paths (#11301) — each failing case proven to fail ─────────────────
+    decl_rules = ("money_path_services:\n  - " + svc + "\n" + DECL_KEY + ":\n  " + svc + ":\n"
+                  "    auth_crypto_payment:\n      - \"src/main/kotlin/**/security/**\"\n"
+                  "    pii:\n      - \"src/main/kotlin/**/*Customer*.kt\"\n    cardholder: []\n")
+
+    def dfixture(rules_head: str, paths: dict[str, str], body: str, rules_base: str = decl_rules) -> int:
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ.get("PATH", "")}
+            def git(*a):
+                _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env)
+            (root / RULES).parent.mkdir(parents=True)
+            (root / RULES).write_text(rules_base, encoding="utf-8")
+            git("init", "-q", "-b", "base"); git("add", "-A"); git("commit", "-q", "-m", "base")
+            git("checkout", "-q", "-b", "head")
+            (root / RULES).write_text(rules_head, encoding="utf-8")
+            for rel, content in paths.items():
+                f = root / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(content, encoding="utf-8")
+            git("add", "-A"); git("commit", "-q", "-m", "head")
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                return run(root, body, "base", enforce=True)
+            finally:
+                os.chdir(cwd)
+
+    refactor = {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": "class Money(val amount: Long)\n"}
+    # (g) refactor outside every sensitive glob, declared service → passes with NO checklist.
+    if dfixture(decl_rules, refactor, no_checklist) != 0:
+        print("self-test FAIL (g): declared-service refactor outside sensitive globs still demanded ticks"); bad += 1
+    # (h) change inside the auth glob → fails without the tick.
+    if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/security/Guard.kt": "x\n"}, no_checklist) == 0:
+        print("self-test FAIL (h): change inside a declared auth glob passed without a tick"); bad += 1
+    # (h2) inside the PII glob → fails too, and an added log line makes the secrets item human.
+    if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/CustomerView.kt": "x\n"}, no_checklist) == 0:
+        print("self-test FAIL (h2): change inside a declared PII glob passed without a tick"); bad += 1
+    if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": 'log.info("amount")\n'},
+                no_checklist) == 0:
+        print("self-test FAIL (h3): an added log statement passed the secrets item without a tick"); bad += 1
+    # (i) the same refactor in an UNDECLARED service → fails (fail closed).
+    undeclared_rules = "money_path_services:\n  - " + svc + "\n"
+    if dfixture(undeclared_rules, refactor, no_checklist, rules_base=undeclared_rules) == 0:
+        print("self-test FAIL (i): undeclared money-path service auto-passed"); bad += 1
+    # (j) narrowing the declaration → fails, even in the same PR as a harmless refactor, and even
+    #     when no money-path file moved at all (a rules.yaml-only PR).
+    narrowed = decl_rules.replace('      - \"src/main/kotlin/**/security/**\"\n', "").replace(
+        "auth_crypto_payment:\n", "auth_crypto_payment: []\n")
+    if declarations_from_text(narrowed) == declarations_from_text(decl_rules):
+        print("self-test FAIL (j0): fixture did not narrow the declaration"); bad += 1
+    if dfixture(narrowed, refactor, no_checklist) == 0:
+        print("self-test FAIL (j): narrowing security_sensitive_paths passed without a tick"); bad += 1
+    if dfixture(narrowed, {}, no_checklist) == 0:
+        print("self-test FAIL (j2): a rules.yaml-only edit of security_sensitive_paths passed"); bad += 1
+    if dfixture(narrowed, refactor, ticked) != 0:
+        print("self-test FAIL (j3): ticked declaration change did not pass"); bad += 1
+    # (k) coverage guard: an uncovered crypto import is caught; covered one is not.
+    with _tf.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / RULES).parent.mkdir(parents=True)
+        (root / RULES).write_text(decl_rules, encoding="utf-8")
+        f = root / svc / "src/main/kotlin/com/x/domain/Hasher.kt"
+        f.parent.mkdir(parents=True)
+        f.write_text("import javax.crypto.Mac\nclass Hasher\n", encoding="utf-8")
+        if run_coverage(root) == 0:
+            print("self-test FAIL (k): uncovered javax.crypto import not caught by coverage guard"); bad += 1
+        f.rename(root / svc / "src/main/kotlin/com/x/security_moved.kt")
+        g = root / svc / "src/main/kotlin/com/x/security/Hasher.kt"
+        g.parent.mkdir(parents=True)
+        g.write_text("import javax.crypto.Mac\n", encoding="utf-8")
+        (root / svc / "src/main/kotlin/com/x/security_moved.kt").unlink()
+        if run_coverage(root) != 0:
+            print("self-test FAIL (k2): covered crypto import still flagged"); bad += 1
+        (root / svc / "src/main/kotlin/com/x/Card.kt").write_text("data class Card(val pan: String)\n")
+        if run_coverage(root) == 0:
+            print("self-test FAIL (k3): uncovered PAN field not caught"); bad += 1
+
     print("security-checklist self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
+
+
+def run_coverage(root: Path) -> int:
+    decls = declarations_from_text((root / RULES).read_text())
+    if decls is None:
+        print(f"::error::{DECL_KEY} unreadable"); return 1
+    money = set(money_path_dirs(root))
+    stray = sorted(set(decls) - money)
+    bad = coverage_findings(root, decls)
+    print(f"SUBJECTS={len(decls)}")
+    for svc in stray:
+        bad.append(f"{svc}: declared in {DECL_KEY} but not a money_path_services entry")
+    print(f"sensitive-paths coverage: {len(decls)} declared, {len(money - set(decls))} money-path "
+          f"service(s) undeclared (fail closed): {', '.join(sorted(money - set(decls))) or '-'}")
+    for b in bad:
+        print(f"::error::{b}")
+    if bad:
+        print(f"{len(bad)} finding(s): add a glob to that service's category in rules.yaml: {DECL_KEY} "
+              "(a governance change — the PR then needs the human checklist tick).")
+        return 1
+    print("sensitive-paths coverage: clean")
+    return 0
 
 
 def main() -> int:
@@ -464,9 +738,13 @@ def main() -> int:
     ap.add_argument("--live-body", action="store_true",
                     help="Read the current PR body only if money-path files were changed")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--coverage", action="store_true",
+                    help=f"fail when a strong sensitive-code signal sits outside {DECL_KEY}")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
+    if args.coverage:
+        return run_coverage(Path(args.root))
     body = Path(args.body_file).read_text() if args.body_file else args.body
     if body is None:
         ap.error("--body-file or --body is required outside --self-test")
