@@ -327,6 +327,22 @@ resource "aws_eks_addon" "ebs_csi" {
   resolve_conflicts_on_update = "OVERWRITE"
   tags                        = var.tags
 
+  # Nitro instances share one attachment budget between EBS volumes, ENIs and NVMe
+  # instance store. The driver's heuristic counts the ENIs present when ebs-csi-node
+  # STARTS; VPC CNI attaches more ENIs later as pods land, so CSINode keeps advertising
+  # slots that no longer exist. The scheduler then places a volume pod the node cannot
+  # take and it sits in Init with "ResourceExhausted: Attachment limit exceeded".
+  # Measured 2026-09-28 on m6g.2xlarge: CSINode allocatable 26, EC2 refused at 24; four
+  # single-instance databases lost their primary to it after a spot interruption.
+  # Reserve the fleet's worst case (Graviton xlarge/2xlarge): root (1) + max ENIs (4) +
+  # instance store on *gd variants (1) = 6. Costs a few volume slots per node; buys a
+  # scheduler that never overcommits EBS.
+  configuration_values = jsonencode({
+    node = {
+      reservedVolumeAttachments = 6
+    }
+  })
+
   pod_identity_association {
     role_arn        = aws_iam_role.ebs_csi.arn
     service_account = "ebs-csi-controller-sa"
