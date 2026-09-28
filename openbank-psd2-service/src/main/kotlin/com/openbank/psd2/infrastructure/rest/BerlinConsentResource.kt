@@ -7,6 +7,7 @@ package com.openbank.psd2.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
 import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
@@ -55,32 +56,42 @@ class BerlinConsentResource(
         val tppName = ctx.getHeaderString("TPP-Name") ?: tppId
 
         val idempotencyKey = "psd2:v1:consent:$tppId:$xRequestId"
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Request-ID", xRequestId)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
-        }
-
-        val consent = consentMgmt.createConsent(
-            CreateConsentCommand(
-                tppId = tppId,
-                tppName = tppName,
-                request = request,
-                redirectUri = redirectUri,
-                tppTransactionId = xRequestId,
-                ipAddress = psuIp,
-            ),
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/v1/consents",
+            mapOf("request" to request, "redirectUri" to redirectUri, "psuIpAddress" to psuIp),
         )
-        val body = BerlinXs2aMappers.consentCreated(consent)
-        idempotencyStore.save(idempotencyKey, Response.Status.CREATED.statusCode, objectMapper.writeValueAsString(body))
-        return Response.status(Response.Status.CREATED)
-            .header("X-Request-ID", xRequestId)
-            .header("Location", "/v1/consents/${consent.consentId}")
-            .entity(body)
-            .build()
+        return Psd2Idempotency.execute(
+            idempotencyStore,
+            idempotencyKey,
+            requestHash,
+            replay = { cached -> Response.status(cached.statusCode).header("X-Request-ID", xRequestId) },
+            conflict = { code, text ->
+                Psd2Idempotency.conflictResponse(code, text).header("X-Request-ID", xRequestId)
+            },
+        ) {
+            val consent = consentMgmt.createConsent(
+                CreateConsentCommand(
+                    tppId = tppId,
+                    tppName = tppName,
+                    request = request,
+                    redirectUri = redirectUri,
+                    tppTransactionId = xRequestId,
+                    ipAddress = psuIp,
+                ),
+            )
+            val body = BerlinXs2aMappers.consentCreated(consent)
+            Psd2Idempotency.Completed(
+                Response.status(Response.Status.CREATED)
+                    .header("X-Request-ID", xRequestId)
+                    .header("Location", "/v1/consents/${consent.consentId}")
+                    .entity(body)
+                    .build(),
+                Response.Status.CREATED.statusCode,
+                objectMapper.writeValueAsString(body),
+            )
+        }
     }
 
     @GET
