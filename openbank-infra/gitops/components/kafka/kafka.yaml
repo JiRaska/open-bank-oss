@@ -1,8 +1,8 @@
 # Single-broker KRaft Kafka for the sandbox. Strimzi 0.46+ is KRaft-only and
 # requires KafkaNodePools (both annotations below). One dual-role node
 # (controller+broker) for FinOps; prod should split roles and raise replicas to
-# 3 with matching replication factors. Kafka version is intentionally omitted so
-# the operator pins its own supported default. Bootstrap Service for clients:
+# 3 with matching replication factors. Kafka version and KRaft metadataVersion
+# are pinned explicitly on the Kafka CR below (see the comment there). Bootstrap Service for clients:
 # `openbank-cluster-kafka-bootstrap.messaging.svc:9093` (internal mTLS — the only
 # listener; the plaintext :9092 one was removed in #3393).
 apiVersion: kafka.strimzi.io/v1
@@ -56,6 +56,20 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
+    # Pinned broker version. This used to be omitted "so the operator pins its own
+    # supported default" — which silently coupled every broker upgrade to an
+    # operator chart bump: the operator rolls the broker onto ITS default the
+    # moment it is upgraded, and an operator that drops the running version
+    # refuses to reconcile at all. Pinned, the operator upgrade and the broker
+    # upgrade are two separate, reviewable changes (Strimzi's documented order:
+    # operator first, with a version BOTH operators support, then the broker).
+    # 4.2.0 / 4.2-IV1 is what operator 1.0.0 ran by default and what the live
+    # cluster reported in status.kafkaVersion / status.kafkaMetadataVersion when
+    # this was pinned, so pinning it changed nothing on the running broker.
+    # Bump metadataVersion only after the broker version is rolled and healthy —
+    # a KRaft metadata version cannot be downgraded.
+    version: 4.2.0
+    metadataVersion: 4.2-IV1
     # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013;
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
     # controller listener and are unaffected by SimpleAuthorizer.

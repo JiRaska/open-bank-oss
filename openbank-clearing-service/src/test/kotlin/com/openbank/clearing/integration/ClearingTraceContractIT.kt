@@ -4,10 +4,11 @@
 
 package com.openbank.clearing.integration
 
-import com.openbank.clearing.it.PostgresRedpandaRedisTestResource
 import com.openbank.clearing.it.TraceContractProfile
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -33,7 +34,10 @@ import java.util.UUID
  * 201, is invisible to every assertion this module already had, and lands in a trace of its own.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_clearing_it")],
+)
 @TestProfile(TraceContractProfile::class)
 class ClearingTraceContractIT {
 

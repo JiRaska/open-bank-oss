@@ -9,6 +9,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 class OutboxDispatchTest {
 
@@ -255,5 +258,133 @@ class OutboxDispatchTest {
         assertThat(result.outcomes).isEmpty()
         assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
         assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
+    }
+
+    // ── claimProcessable failure path (previously PIT NO_COVERAGE: no test ever threw here) ──
+
+    @Test
+    fun `a claimProcessable failure returns an empty result with no outcomes and marks nothing`() {
+        val repo = object : OutboxRepository {
+            override suspend fun listProcessable(limit: Int) = emptyList<OutboxEntry>()
+            override suspend fun claimProcessable(limit: Int, staleAfter: java.time.Duration): List<OutboxEntry> =
+                error("db unavailable")
+            override suspend fun markSent(eventId: UUID, sentAt: Instant) =
+                error("must not be called: nothing was claimed")
+            override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
+                error("must not be called: nothing was claimed")
+        }
+
+        lateinit var result: OutboxDispatchResult
+        val records = captureLog(OutboxDispatch::class.java.name) {
+            result = runBlocking { OutboxDispatch.dispatchOnce(repo) { error("must not be called") } }
+        }
+
+        // Falsifying assertion: a mutant that swallows the exception and returns null, or that
+        // rethrows instead of degrading gracefully, both fail this - the batch must come back
+        // empty rather than crashing the scheduler tick.
+        assertThat(result.outcomes).isEmpty()
+        // The claim failure must actually be logged, not silently absorbed by a no-op onFailure.
+        assertThat(records.map { it.message }).anyMatch { it.contains("outbox.claimProcessable failed") }
+    }
+
+    @Test
+    fun `TRANSPORT_UNAVAILABLE_EXCEPTIONS names exactly the two fault-tolerance short-circuit types`() {
+        assertThat(OutboxDispatch.TRANSPORT_UNAVAILABLE_EXCEPTIONS).containsExactlyInAnyOrder(
+            "org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException",
+            "org.eclipse.microprofile.faulttolerance.exceptions.BulkheadException",
+        )
+    }
+
+    // ── isTransportUnavailable's MAX_CAUSE_DEPTH guard (previously SURVIVED: boundary + increment) ──
+
+    /** Builds a chain of [depth] wrapper exceptions with [root] at the bottom of the `cause` chain. */
+    private fun wrapChain(depth: Int, root: Throwable): Throwable {
+        var current = root
+        repeat(depth) { current = RuntimeException("wrapper", current) }
+        return current
+    }
+
+    @Test
+    fun `a transport-unavailable cause more than MAX_CAUSE_DEPTH hops down is not found`() {
+        // 10 wrapper hops puts the real cause exactly one hop past the guard's depth-10 cutoff:
+        // the outermost wrapper is examined at depth 0, so the root lands at depth 10, and the
+        // loop's `depth < MAX_CAUSE_DEPTH` (10) guard must already have stopped one iteration
+        // earlier. A boundary off-by-one (`<=`) would run exactly one more iteration and find it,
+        // wrongly answering true.
+        val deeplyBuried = wrapChain(depth = 10, root = breakerOpen())
+
+        assertThat(OutboxDispatch.isTransportUnavailable(deeplyBuried)).isFalse()
+    }
+
+    @Test
+    fun `a transport-unavailable cause exactly at the depth cutoff is still found`() {
+        // 9 wrapper hops: root is examined at depth 0, each wrapper bumps depth by one on the way
+        // down, so the root is reached at depth 9 - inside the < 10 guard - and must be found.
+        val justInBounds = wrapChain(depth = 9, root = breakerOpen())
+
+        assertThat(OutboxDispatch.isTransportUnavailable(justInBounds)).isTrue()
+    }
+
+    // ── Abandoned-batch log content (previously SURVIVED: arithmetic on the log message + the
+    // log call itself) — captured via the JUL logger the JDK System.Logger bridges to by default. ──
+
+    private fun captureLog(loggerName: String, block: () -> Unit): List<LogRecord> {
+        val records = mutableListOf<LogRecord>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                records += record
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val julLogger = JulLogger.getLogger(loggerName)
+        val previousLevel = julLogger.level
+        julLogger.addHandler(handler)
+        julLogger.level = java.util.logging.Level.ALL
+        try {
+            block()
+        } finally {
+            julLogger.removeHandler(handler)
+            julLogger.level = previousLevel
+        }
+        return records
+    }
+
+    @Test
+    fun `an abandoned batch logs exactly how many rows were left for the next tick`() {
+        val rows = listOf(entry("a"), entry("b"), entry("c"))
+        val repo = FakeRepo(rows)
+
+        val records = captureLog(OutboxDispatch::class.java.name) {
+            runBlocking { OutboxDispatch.dispatchOnce(repo) { throw breakerOpen() } }
+        }
+
+        // 3 claimed, index 0 is where the breaker fires -> claimed.size - index = 3 - 0 = 3 left
+        // (the aborted row itself is included: it was never actually offered to the publisher).
+        // A flipped +/- on the remaining-count arithmetic, or a removed log call entirely, both
+        // fail this.
+        val message = records.joinToString("\n") { it.message }
+        assertThat(message).contains("3 row(s) left")
+    }
+
+    @Test
+    fun `an abandoned batch's remaining count reflects how many rows were already attempted`() {
+        val rows = listOf(entry("a"), entry("b"), entry("c"), entry("d"))
+        val repo = FakeRepo(rows)
+        var calls = 0
+
+        val records = captureLog(OutboxDispatch::class.java.name) {
+            runBlocking {
+                OutboxDispatch.dispatchOnce(repo) { e ->
+                    calls++
+                    if (e.eventType == "b") throw breakerOpen()
+                }
+            }
+        }
+
+        // a, b claimed/attempted (a sent, b trips the breaker at index 1) -> 4 - 1 = 3 left.
+        val message = records.joinToString("\n") { it.message }
+        assertThat(message).contains("3 row(s) left")
+        assertThat(calls).isEqualTo(2)
     }
 }

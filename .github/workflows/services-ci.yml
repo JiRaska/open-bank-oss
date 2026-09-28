@@ -212,6 +212,11 @@ jobs:
                      && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
                     CHANGED="$CHANGED openbank-simulation"
                   fi
+                  # Generated-client edge (ADR-0319) — same as the PR path.
+                  if grep -qE '(^| )openbank-product-catalog( |$)' <<< " $CHANGED " \
+                     && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
+                    CHANGED="$CHANGED openbank-client-product-catalog"
+                  fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
                      && grep -qE '^\.github/workflows/(services-ci|_service-ci)\.yml' <<< "$FILES"; then
@@ -346,6 +351,11 @@ jobs:
                  && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
                 echo "Decision: money-path change -> add openbank-simulation (DST harness, ADR-0115/#267)."
                 CHANGED="$CHANGED openbank-simulation"
+              fi
+              # Generated-client edge (ADR-0319): the client's input is the provider's openapi.yaml.
+              if grep -qE '(^| )openbank-product-catalog( |$)' <<< " $CHANGED " \
+                 && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
+                CHANGED="$CHANGED openbank-client-product-catalog"
               fi
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a

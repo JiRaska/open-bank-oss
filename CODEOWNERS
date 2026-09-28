@@ -55,6 +55,7 @@
 /openbank-libs-domain/                  @JiRaska
 /openbank-libs-lending/                 @JiRaska
 /openbank-libs-runtime/                 @JiRaska
+/openbank-client-product-catalog/       @JiRaska
 
 # --- CI / security tooling ---
 /.github/                               @JiRaska

@@ -138,6 +138,11 @@ openbank:
       # market connectivity sets OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED=false.
       enabled: ${OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED:true}
       interval: 60s
+    accrual:
+      # ADR-0315 D5: daily accrual of interest on SETTLED deals into the accrued-interest accounts.
+      # Hourly and idempotent per day, so a missed pass is caught up by the next one.
+      enabled: ${OPENBANK_TREASURY_ACCRUAL_ENABLED:true}
+      interval: 1h
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -201,4 +206,6 @@ authz:
   openbank:
     treasury:
       simulated-market:
+        enabled: false
+      accrual:
         enabled: false

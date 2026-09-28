@@ -13,7 +13,11 @@ import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
 import com.openbank.aml.infrastructure.rest.dto.UpdateAmlDecisionRequest
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -30,10 +34,15 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.net.URI
 import java.util.UUID
+
+private val log = Logger.getLogger(AmlCaseResource::class.java)
 
 @Path("/api/v1/aml/cases")
 @Produces(MediaType.APPLICATION_JSON)
@@ -70,17 +79,44 @@ class AmlCaseResource(
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
 
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
+        // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
+        // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
+        // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", CASES_PATH, request)
+        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
                 .header("X-Idempotency-Replayed", "true")
                 .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
         }
 
-        val amlCase = amlCaseUseCase.createCase(request.toCommand(idempotencyKey))
+        var created = false
+        val amlCase = try {
+            amlCaseUseCase.createCase(request.toCommand(idempotencyKey, requestHash)).also { created = true }
+        } finally {
+            // Any failure (the exception propagates unchanged) frees the in-flight marker so a
+            // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
+            // Shielded from cancellation and never rethrows: a release failure must not mask the
+            // original exception that made release necessary, and a cancelled caller must not
+            // abandon the release mid-flight and leave the key stuck IN_PROGRESS for its full TTL.
+            if (!created) {
+                withContext(NonCancellable) {
+                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                        .onFailure { log.warn("Failed to release idempotency key after create failure", it) }
+                }
+            }
+        }
         val responseBody = amlCase.toResponse()
-        idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
+        idempotencyStore.save(
+            idempotencyKey,
+            requestHash = requestHash,
+            statusCode = 201,
+            responseBody = objectMapper.writeValueAsString(responseBody),
+        )
 
         return Response.created(URI.create("/api/v1/aml/cases/${amlCase.id}"))
             .entity(responseBody)
@@ -125,6 +161,10 @@ class AmlCaseResource(
     @Operation(summary = "Update AML case decision")
     suspend fun updateDecision(@PathParam("caseId") caseId: UUID, request: UpdateAmlDecisionRequest): Response =
         Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
+
+    private companion object {
+        const val CASES_PATH = "/api/v1/aml/cases"
+    }
 }
 
 /** Staff roles `createCase` admitted before #10486; a caller holding one needs no identity check. */
