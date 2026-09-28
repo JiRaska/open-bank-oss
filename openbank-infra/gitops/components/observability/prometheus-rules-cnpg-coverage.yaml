@@ -466,7 +466,7 @@ spec:
             namespace: ai-platform
             cluster: litellm-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: aml
             cluster: aml-db
@@ -476,12 +476,12 @@ spec:
             namespace: anacredit
             cluster: anacredit-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: audit
             cluster: audit-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: authz-policy-auditor
             cluster: authzaudit-db
@@ -501,7 +501,7 @@ spec:
             namespace: campaign
             cluster: campaign-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: communication
             cluster: communication-db
@@ -511,7 +511,7 @@ spec:
             namespace: consent
             cluster: consent-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: context
             cluster: context-db
@@ -531,7 +531,7 @@ spec:
             namespace: devops-agent
             cluster: devops-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: dispute
             cluster: dispute-db
@@ -546,12 +546,12 @@ spec:
             namespace: documents
             cluster: document-service-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: engagement
             cluster: engagement-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: finops-agent
             cluster: finops-db
@@ -701,17 +701,17 @@ spec:
             namespace: pid
             cluster: pid-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: platform
             cluster: agent-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: platform
             cluster: case-coordinator-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: platform
             cluster: copilot-db
