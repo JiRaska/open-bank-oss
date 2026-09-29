@@ -33,6 +33,7 @@ export function ExplorerGuide({ eyebrow = 'OpenBank Explorer', title, children, 
           src={mascot === 'lioness' ? '/brand/explorer-prague-lioness.webp' : '/brand/openbank-explorer.webp'}
           alt=""
           fill
+          unoptimized
           loading={priority || !compact ? 'eager' : 'lazy'}
           fetchPriority={priority ? 'high' : 'auto'}
           sizes={compact ? '160px' : '(max-width: 720px) 180px, 260px'}

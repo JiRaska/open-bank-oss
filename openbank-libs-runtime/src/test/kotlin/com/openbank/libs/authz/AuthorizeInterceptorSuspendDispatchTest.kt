@@ -10,6 +10,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.interceptor.InvocationContext
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.core.SecurityContext
 import kotlinx.coroutines.CompletableDeferred
 import org.assertj.core.api.Assertions.assertThat
@@ -18,6 +19,7 @@ import java.lang.reflect.Method
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.Continuation
@@ -83,10 +85,10 @@ class AuthorizeInterceptorSuspendDispatchTest {
         }
     }
 
-    private fun suspendCtx(): Pair<InvocationContext, Continuation<Any?>> {
+    private fun suspendCtx(onResult: (Result<Any?>) -> Unit = {}): Pair<InvocationContext, Continuation<Any?>> {
         val caller = object : Continuation<Any?> {
             override val context: CoroutineContext = EmptyCoroutineContext
-            override fun resumeWith(result: Result<Any?>) = Unit
+            override fun resumeWith(result: Result<Any?>) = onResult(result)
         }
         val params = arrayOf<Any?>(1L, caller)
         val ctx = mockk<InvocationContext>()
@@ -149,5 +151,54 @@ class AuthorizeInterceptorSuspendDispatchTest {
         } finally {
             pool.shutdownNow()
         }
+    }
+
+    @Test
+    fun `an asynchronous allow proceeds exactly once and resumes the caller with the target result`() {
+        val pdp = NeverAnsweringPdp()
+        val sut = interceptor(pdp)
+        val resumed = CountDownLatch(1)
+        var completion: Result<Any?>? = null
+        val (ctx, _) = suspendCtx {
+            completion = it
+            resumed.countDown()
+        }
+        var proceeds = 0
+        every { ctx.proceed() } answers {
+            proceeds++
+            "executed"
+        }
+
+        assertThat(sut.authorize(ctx)).isSameAs(COROUTINE_SUSPENDED)
+        assertThat(proceeds).isZero()
+        pdp.gate.complete(AuthzDecision(allow = true, reason = "approved"))
+
+        assertThat(resumed.await(2, TimeUnit.SECONDS)).isTrue()
+        assertThat(requireNotNull(completion).getOrThrow()).isEqualTo("executed")
+        assertThat(proceeds).isEqualTo(1)
+    }
+
+    @Test
+    fun `an asynchronous deny fails closed without invoking the target`() {
+        val pdp = NeverAnsweringPdp()
+        val sut = interceptor(pdp)
+        val resumed = CountDownLatch(1)
+        var completion: Result<Any?>? = null
+        val (ctx, _) = suspendCtx {
+            completion = it
+            resumed.countDown()
+        }
+        var proceeds = 0
+        every { ctx.proceed() } answers {
+            proceeds++
+            "must-not-run"
+        }
+
+        assertThat(sut.authorize(ctx)).isSameAs(COROUTINE_SUSPENDED)
+        pdp.gate.complete(AuthzDecision(allow = false, reason = "denied"))
+
+        assertThat(resumed.await(2, TimeUnit.SECONDS)).isTrue()
+        assertThat(requireNotNull(completion).exceptionOrNull()).isInstanceOf(ForbiddenException::class.java)
+        assertThat(proceeds).isZero()
     }
 }

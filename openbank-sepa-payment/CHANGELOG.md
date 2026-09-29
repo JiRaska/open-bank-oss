@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.15.0...sepa-payment-v0.15.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.4...sepa-payment-v0.15.0) (2026-09-28)
 
 

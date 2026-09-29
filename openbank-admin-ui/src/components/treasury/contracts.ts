@@ -10,13 +10,16 @@ import { z } from 'zod'
 const decimal = z.union([z.number(), z.string()]).transform(Number).pipe(z.number().finite())
 const timestamp = z.string().min(1)
 
-export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY'] as const
+export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD'] as const
 export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
 export const CURRENCIES = ['CZK', 'EUR'] as const
 /** The central bank's counterparty id (Deal.CNB_COUNTERPARTY_ID). */
 export const CNB_COUNTERPARTY_ID = 'CNB'
 
 export const productSchema = z.enum(PRODUCTS)
+// Draft creation offers only products this UI knows how to book. The response contract is
+// extensible: a newer backend product must not make the entire deal list unavailable.
+export const responseProductSchema = z.string().min(1)
 export const dealStateSchema = z.enum(DEAL_STATES)
 
 export const limitCheckSchema = z.object({
@@ -40,7 +43,7 @@ export const limitOverrideSchema = z.object({
 
 export const dealSchema = z.object({
   dealId: z.string(),
-  product: productSchema,
+  product: responseProductSchema,
   counterpartyId: z.string(),
   currency: z.string(),
   principal: decimal,

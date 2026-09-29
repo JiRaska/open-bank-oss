@@ -21,6 +21,7 @@ import overview from '@/components/brand/DomainOverview.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
+import { RequestedByBadge } from '@/components/balance-sheet/RequestedByBadge'
 import { getJson, riskUrl, sendJson } from '@/components/balance-sheet/api'
 import { snapshotListSchema, snapshotRunSchema, type SnapshotSummary } from '@/components/balance-sheet/contracts'
 import { isIsoDate } from '@/components/balance-sheet/model'
@@ -165,6 +166,7 @@ function Snapshots() {
                 <th scope="col" style={{ textAlign: 'right' }}>{t('Pozice', 'Positions')}</th>
                 <th scope="col" style={{ textAlign: 'right' }}>{t('Rozdíly', 'Mismatches')}</th>
                 <th scope="col" style={{ textAlign: 'left' }}>{t('Zaznamenáno', 'Recorded')}</th>
+                <th scope="col" style={{ textAlign: 'left' }}>{t('Spustil', 'Requested by')}</th>
               </tr>
             </thead>
             <tbody>
@@ -182,6 +184,7 @@ function Snapshots() {
                   <td style={{ textAlign: 'right' }}>{run.positionCount.toLocaleString(locale)}</td>
                   <td style={{ textAlign: 'right' }}>{run.mismatchCount.toLocaleString(locale)}</td>
                   <td>{new Date(run.recordedAt).toLocaleString(locale)}</td>
+                  <td><RequestedByBadge requestedBy={run.requestedBy} /></td>
                 </tr>
               ))}
             </tbody>

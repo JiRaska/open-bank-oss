@@ -3457,8 +3457,9 @@ shared_m2m_write_prohibition:
 #
 # The gate derives its role scope from every Keycloak realm JSON in the tree, so it does not
 # need to be told which roles matter. Worth knowing while reading this: the three realms do
-# NOT agree today — the deployed gitops template gives `service-account-openbank-services`
-# only ROLE_API, while the docker and CI realms also give it ROLE_OPERATOR, and
+# NOT agree today — the deployed gitops template and the docker realm give
+# `service-account-openbank-services` only ROLE_API (docker dropped ROLE_OPERATOR with #10486's
+# final step), while the CI realm, the api-fuzz harness identity, still gives it ROLE_OPERATOR, and
 # `service-account-openbank-edge` carries ROLE_OPERATOR in the deployed template. The union
 # is used, because a role assignment that exists in any environment is an exposure there.
 shared_m2m_matrix_write_grants:

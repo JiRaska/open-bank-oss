@@ -6,6 +6,7 @@
 // without rendering, and so every page agrees on who may do what.
 import type { Tone } from '@/components/ui/tone'
 import { hasPermission } from '@/lib/auth/roles'
+import { isIsoDate } from '@/components/balance-sheet/model'
 import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealState, type MatchType, type Product } from './contracts'
 import type { WriteResult } from './api'
 
@@ -16,11 +17,13 @@ export const STATE_TONE: Record<DealState, Tone> = {
   MATURED: 'success', CANCELLED: 'neutral', REVERSED: 'danger',
 }
 
-export function productLabel(p: Product, t: T): string {
+export function productLabel(p: string, t: T): string {
   switch (p) {
     case 'MM_PLACEMENT': return t('Umístění na peněžním trhu', 'MM placement')
     case 'MM_BORROWING': return t('Přijetí na peněžním trhu', 'MM borrowing')
     case 'CNB_DEPOSIT_FACILITY': return t('Depozitní facilita ČNB', 'ČNB deposit facility')
+    case 'CNB_LOMBARD': return t('ČNB lombardní úvěr', 'ČNB lombard borrowing')
+    default: return p
   }
 }
 
@@ -36,12 +39,30 @@ export function stateLabel(s: DealState, t: T): string {
   }
 }
 
-/** Assets consume the counterparty's credit limit (ProductType.isAsset); borrowing does not. */
-export const isAssetProduct = (p: Product) => p !== 'MM_BORROWING'
+/** Assets consume the counterparty's credit limit (ProductType.isAsset); borrowing does not —
+ * MM_BORROWING and the ČNB lombard facility are both liabilities (Deal.kt ProductType.isAsset). */
+export const isAssetProduct = (p: Product) => p !== 'MM_BORROWING' && p !== 'CNB_LOMBARD'
 
-/** Counterparties eligible for a product: ČNB only for the facility, banks otherwise. */
+/** Products fixed to CZK, counterparty ČNB, and an overnight (next-business-day) maturity
+ * (Deal.kt ProductType.isCnbFacility). */
+export const isCnbFacility = (p: Product) => p === 'CNB_DEPOSIT_FACILITY' || p === 'CNB_LOMBARD'
+
+/** Counterparties eligible for a product: ČNB only for a ČNB facility, banks otherwise. */
 export function eligibleCounterparties(all: Counterparty[], product: Product): Counterparty[] {
-  return all.filter(c => (product === 'CNB_DEPOSIT_FACILITY' ? c.counterpartyId === CNB_COUNTERPARTY_ID : c.kind === 'BANK'))
+  return all.filter(c => (isCnbFacility(product) ? c.counterpartyId === CNB_COUNTERPARTY_ID : c.kind === 'BANK'))
+}
+
+/**
+ * The next business day after `valueDate` (Monday-Friday; no holiday calendar), mirroring the
+ * backend's `DayCount.nextBusinessDay` (treasury `Deal.kt`) — a Friday value date matures the
+ * following Monday. Returns '' for an invalid/empty input rather than a bogus date.
+ */
+export function nextBusinessDay(valueDate: string): string {
+  if (!isIsoDate(valueDate)) return ''
+  const d = new Date(`${valueDate}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
 }
 
 /** The distinct counterparties (the API returns one row per counterparty and currency). */
