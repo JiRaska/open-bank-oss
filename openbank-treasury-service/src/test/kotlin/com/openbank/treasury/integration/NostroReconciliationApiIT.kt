@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.DriverManager
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -44,8 +45,8 @@ class NostroReconciliationApiIT {
         ledger.reset()
         statements.reset()
         NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
-        ledger.balances["1001" to NostroFixtures.DATE.minusDays(1)] = BigDecimal("1000000.00")
-        ledger.balances["1001" to NostroFixtures.DATE] = BigDecimal("1149958.00")
+        ledger.balances[Triple("1001", "CZK", NostroFixtures.DATE.minusDays(1))] = BigDecimal("1000000.00")
+        ledger.balances[Triple("1001", "CZK", NostroFixtures.DATE)] = BigDecimal("1149958.00")
     }
 
     private fun upload(xml: ByteArray, key: String? = UUID.randomUUID().toString()) = given()
@@ -81,7 +82,7 @@ class NostroReconciliationApiIT {
 
         assertThat(
             ledger.queries,
-        ).contains("lines:1001:2026-09-25..2026-09-25", "balance:1001:2026-09-24", "balance:1001:2026-09-25")
+        ).contains("lines:1001:2026-09-25..2026-09-25", "balance:1001:CZK:2026-09-24", "balance:1001:CZK:2026-09-25")
         assertThat(entryRows(id)).isEqualTo(3)
     }
 
@@ -137,22 +138,57 @@ class NostroReconciliationApiIT {
 
     @Test
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `a EUR statement is matched but its balances are not stated - reconciled is null`() {
+    fun `a EUR statement is reconciled on native EUR ledger balances`() {
         ledger.lines.clear()
         NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-23"))] = BigDecimal("50000.00")
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal("57500.00")
         val id: String = upload(NostroFixtures.eurXml("SYNTH-IT-EUR-${UUID.randomUUID()}".take(40)))
             .then().statusCode(201).body("glCode", equalTo("1002")).extract().path("id")
 
         given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
             .then().statusCode(200)
             .body("matches", hasSize<Any>(2))
+            .body("ledgerOpeningBalance", equalTo(50000.00f))
+            .body("ledgerClosingBalance", equalTo(57500.00f))
+            .body("openingDifference", equalTo(0.00f))
+            .body("closingDifference", equalTo(0.00f))
+            .body("balanceNotStated", nullValue())
+            .body("reconciled", equalTo(true))
+        assertThat(ledger.queries).containsExactly(
+            "lines:1002:2026-09-24..2026-09-25",
+            "balance:1002:EUR:2026-09-23",
+            "balance:1002:EUR:2026-09-25",
+        )
+    }
+
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a GL the ledger does not hold leaves balances unstated with the reason - reconciled is null`() {
+        ledger.lines.clear()
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.unknownAccounts += "1002"
+        val id: String = upload(NostroFixtures.eurXml("SYNTH-IT-EUR-${UUID.randomUUID()}".take(40)))
+            .then().statusCode(201).extract().path("id")
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(200)
             .body("ledgerOpeningBalance", nullValue())
-            .body("ledgerClosingBalance", nullValue())
-            .body("openingDifference", nullValue())
             .body("closingDifference", nullValue())
-            .body("balanceNotStated", containsString("base-currency (CZK)"))
+            .body("balanceNotStated", containsString("does not hold GL account 1002"))
             .body("reconciled", nullValue())
-        assertThat(ledger.queries).containsExactly("lines:1002:2026-09-24..2026-09-25")
+    }
+
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a ledger that cannot answer the balance read is a 502, never balances blanked with a false reason`() {
+        ledger.unavailableAccounts += "1001"
+        val id: String = upload(fixture("SYNTH-IT-502-${UUID.randomUUID()}".take(40)))
+            .then().statusCode(201).extract().path("id")
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(502)
+            .body("error", equalTo("LEDGER_UNAVAILABLE"))
     }
 
     @Test
@@ -180,6 +216,45 @@ class NostroReconciliationApiIT {
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
     fun `a dealer may not upload a statement`() {
         upload(fixture("SYNTH-IT-DEALER")).then().statusCode(403)
+    }
+
+    /**
+     * A statement stored under #11052's rules may carry an entry dated after its CLBD date. The
+     * period check is an UPLOAD rule: reading such a row must still reconcile (200), with the entry
+     * unmatched and flagged in outOfPeriodEntries — never a 400/500 on a statement already accepted.
+     */
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a stored statement with an entry after its closing date still reconciles, the entry flagged`() {
+        val id: String = upload(fixture("SYNTH-IT-LEGACY-${UUID.randomUUID()}".take(40)))
+            .then().statusCode(201).extract().path("id")
+        // What a pre-V8-rule upload could have stored: entry 1 booked the day after CLBD.
+        jdbc { c ->
+            c.prepareStatement(
+                "update nostro_statement_entries set booking_date = ? where statement_uuid = ?::uuid and sequence = 1",
+            ).use { ps ->
+                ps.setObject(1, NostroFixtures.DATE.plusDays(1))
+                ps.setString(2, id)
+                check(ps.executeUpdate() == 1)
+            }
+        }
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(200)
+            .body("outOfPeriodEntries", hasSize<Any>(1))
+            .body("outOfPeriodEntries[0].sequence", equalTo(1))
+            .body("outOfPeriodEntries[0].bookingDate", equalTo(NostroFixtures.DATE.plusDays(1).toString()))
+            .body("unmatchedStatementEntries.sequence", org.hamcrest.Matchers.hasItem(1))
+            .body("reconciled", equalTo(false))
+    }
+
+    private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
+        val cfg = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            cfg.getValue("quarkus.datasource.username", String::class.java),
+            cfg.getValue("quarkus.datasource.password", String::class.java),
+        ).use(block)
     }
 
     private fun entryRows(id: String): Int {
