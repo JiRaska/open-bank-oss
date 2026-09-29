@@ -6,7 +6,8 @@
 # its removal in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
 #
 # STAGE 1 OF 2 — AUDIT ONLY, except where a document says it has reached stage 2
-# (today: deny-nginx-snippet-annotations-cel, #11437). Each other ValidatingPolicy
+# (today: deny-nginx-snippet-annotations-cel and
+# require-gated-or-declared-tool-ingress-cel, #11437). Each other ValidatingPolicy
 # below runs NEXT TO its v1 original, which stays in Enforce and remains the only
 # thing that can deny:
 #   validationActions: [Audit]   reports, never denies
@@ -118,7 +119,17 @@ spec:
         `denylist-source-range` to block paths, and the controller's
         modsecurity.conf for WAF policy."
 ---
-# Shadow of require-gated-or-declared-tool-ingress (tool-ingress-gate-policy.yaml).
+# STAGE 2 (#11437): enforcing. The v1 original tool-ingress-gate-policy.yaml was
+# deleted in the same PR, so this is the only policy requiring an observability
+# Ingress to be gated (auth-url, ADR-0234) or declared (ungated-machine-callers).
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. Scope as in v1:
+# observability only, CREATE/UPDATE only. The -cel suffix is kept so metrics and
+# PolicyReports stay continuous with stage 1. The precondition lives in the cluster,
+# not in git; re-check it before touching this document:
+#   kubectl -n observability get ingress -o custom-columns=\
+#   'NAME:.metadata.name,GATE:.metadata.annotations.nginx\.ingress\.kubernetes\.io/auth-url,\
+#   DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
+# Every row must have a non-empty GATE or DECLARED.
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -127,12 +138,12 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234) — CEL shadow
+    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234) — CEL
     policies.kyverno.io/category: Access Control
     policies.kyverno.io/severity: high
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false
