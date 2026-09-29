@@ -95,14 +95,15 @@ class BorrowerCreditClient(
 
     @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
     @Timeout(CALL_TIMEOUT_MS)
-    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money, description: String): Uni<Unit> = post(
-        reference,
-        type = "DEBIT",
-        targetAccountId = null,
-        sourceAccountId = borrowerAccountId,
-        amount = amount,
-        description = description,
-    )
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money, description: String): Uni<Unit> =
+        post(
+            reference,
+            type = "DEBIT",
+            targetAccountId = null,
+            sourceAccountId = borrowerAccountId,
+            amount = amount,
+            description = description,
+        )
 
     private fun post(
         reference: String,
