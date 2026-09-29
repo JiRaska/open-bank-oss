@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "38967e9e6f58147a"
+    openbank.tech/policy-checksum: "8d682c27d7618d1e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1172,6 +1172,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

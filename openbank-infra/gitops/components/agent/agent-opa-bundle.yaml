@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "cc40271e576b141c"
+    openbank.tech/policy-checksum: "52acc25b166356eb"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -356,6 +356,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

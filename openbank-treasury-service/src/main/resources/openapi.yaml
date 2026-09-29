@@ -19,16 +19,23 @@ info:
   #        built from, required with `rationale` when an agent drafts (ADR-0315 D10). 1.9.0 is
   #        claimed by the still-open #11113 against this same spec, so this PR takes the next free
   #        slot above both live main (1.8.0) and that open claim.
-  version: 1.10.0
+  # 1.12.0: additive — POST /deals/{id}/confirm and DealState CONFIRMED (ADR-0315 D2): the
+  #        counterparty's confirmation of a BOOKED deal; settlement requires it unless
+  #        openbank.treasury.confirmation.required is false. 1.11.0 is claimed by the still-open
+  #        #11113 against this same spec, so this takes the next free slot above both.
+  version: 1.12.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
-    `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
-    `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason on its
-    timeline.
+    `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
+    booking) or `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason
+    on its timeline. `CONFIRMED` records that the counterparty confirmed the booked terms (a
+    back-office person, never the deal's creator or submitter; in the sandbox the simulated
+    counterparty set). Settlement requires `CONFIRMED`; a deployment with
+    `openbank.treasury.confirmation.required=false` may also settle straight from `BOOKED`.
 
     **Four-eyes is enforced in the domain**: the approver must be neither the deal's creator nor
     its submitter (422 `FOUR_EYES_VIOLATION`), and only a human may submit, approve, reject,
-    cancel, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
+    cancel, confirm, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
     refused with 403 `ACTOR_NOT_PERMITTED`. An AI agent may draft, and must then supply a
     `rationale` and the `inputs` it used (ADR-0315 D10); its draft consumes no limit, and only a
     human dealer can submit it.
@@ -229,11 +236,43 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
 
+  /api/v1/treasury/deals/{id}/confirm:
+    post:
+      tags: [Treasury]
+      operationId: confirmDeal
+      summary: Record the counterparty's confirmation of a BOOKED deal (CONFIRMED); posts nothing
+      description: |
+        ADR-0315 D2. ROLE_TREASURY_APPROVER (the back office). The confirmer must be neither the
+        deal's creator nor its submitter (422 `FOUR_EYES_VIOLATION`); an AI agent or a service
+        account is refused (403). Emits `treasury.deal.confirmed.v1`.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: FOUR_EYES_VIOLATION (the creator or submitter may not confirm the deal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/treasury/deals/{id}/settle:
     post:
       tags: [Treasury]
       operationId: settleDeal
-      summary: Settle a BOOKED deal on or after its value date; posts the settlement journal
+      summary: Settle a CONFIRMED deal on or after its value date; posts the settlement journal
+      description: |
+        A BOOKED deal answers 409 until confirmed, unless the deployment sets
+        `openbank.treasury.confirmation.required=false`.
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -259,7 +298,7 @@ paths:
     post:
       tags: [Treasury]
       operationId: reverseDeal
-      summary: Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal
+      summary: Reverse a BOOKED, CONFIRMED or SETTLED deal; a settled one gets an offsetting journal
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -468,7 +507,7 @@ components:
       enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
     DealState:
       type: string
-      enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
+      enum: [DRAFT, PENDING_APPROVAL, BOOKED, CONFIRMED, SETTLED, MATURED, CANCELLED, REVERSED]
     Error:
       type: object
       required: [error]
@@ -520,6 +559,13 @@ components:
             The data an AI agent built the draft from (quote, curve point, headroom, position), as a
             JSON object. Required with `rationale` when an AI agent drafts (ADR-0315 D10); optional
             for a human dealer. Stored and returned verbatim.
+    ConfirmRequest:
+      type: object
+      properties:
+        reference:
+          type: [string, 'null']
+          maxLength: 200
+          description: The counterparty's confirmation reference, recorded on the deal's timeline.
     ReasonRequest:
       type: object
       required: [reason]

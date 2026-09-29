@@ -132,6 +132,12 @@ openbank:
     # treasury_outbox: no error, attempt_count stays 0, the audit trail stays empty.
     dispatch-enabled: true
   treasury:
+    confirmation:
+      # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
+      # simulated market confirms every BOOKED deal first, so the sandbox lifecycle is unchanged.
+      # false = settle straight from BOOKED, the pre-CONFIRMED behaviour, for a deployment with no
+      # confirmation step. Deals already BOOKED are NOT migrated: with true they wait for a confirm.
+      required: ${OPENBANK_TREASURY_CONFIRMATION_REQUIRED:true}
     simulated-market:
       # ADR-0315 D9: SYNTHETIC counterparties that settle and mature booked deals in the sandbox.
       # On by default because the sandbox is the only environment; an environment with real

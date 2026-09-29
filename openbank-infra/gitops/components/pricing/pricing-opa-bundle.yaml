@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pricing-service
     app.kubernetes.io/part-of: pricing
   annotations:
-    openbank.tech/policy-checksum: "c36888d97560f63d"
+    openbank.tech/policy-checksum: "4026cfdee320c69a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1000,6 +1000,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

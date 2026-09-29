@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "d17232949c016aa4"
+    openbank.tech/policy-checksum: "0bcd22aaa706965a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -977,6 +977,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

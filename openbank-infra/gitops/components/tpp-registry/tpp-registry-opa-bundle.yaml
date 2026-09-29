@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tpp-registry-service
     app.kubernetes.io/part-of: tpp-registry
   annotations:
-    openbank.tech/policy-checksum: "c41ff16e3f09f31a"
+    openbank.tech/policy-checksum: "3d40256199ea01cf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -974,6 +974,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

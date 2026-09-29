@@ -30,7 +30,14 @@ reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position
 
 dealer_writes := {"treasury.deal.draft", "treasury.deal.submit"}
 
-approver_writes := {"treasury.deal.approve", "treasury.deal.reject", "treasury.deal.settle", "treasury.deal.mature", "treasury.deal.reverse"}
+approver_writes := {
+	"treasury.deal.approve",
+	"treasury.deal.reject",
+	"treasury.deal.confirm",
+	"treasury.deal.settle",
+	"treasury.deal.mature",
+	"treasury.deal.reverse",
+}
 
 all_writes := (dealer_writes | approver_writes) | {"treasury.deal.cancel"}
 
@@ -131,6 +138,18 @@ chartered_agent := {
 test_chartered_agent_may_not_approve_settle_override_or_upload if {
 	every a in {"treasury.deal.approve", "treasury.deal.settle", "treasury.deal.override-limit", "treasury.nostro.upload", "treasury.deal.submit"} {
 		not allowed(chartered_agent, a)
+	}
+}
+
+# ADR-0315 D2/D3: counterparty confirmation is a back-office step. Must-ALLOW the approver; must-DENY
+# the dealer, the senior (who overrides limits, not confirms), an admin, the shared service-account
+# holding every treasury role, and an AI agent holding every treasury role. Drop "treasury.deal.confirm"
+# from the approver rule and the first assertion goes red; grant it to any other principal and one
+# of the rest does.
+test_only_a_human_approver_may_confirm if {
+	allowed(approver, "treasury.deal.confirm")
+	every p in [dealer, senior, admin, nobody, shared_sa, agent, chartered_agent] {
+		not allowed(p, "treasury.deal.confirm")
 	}
 }
 

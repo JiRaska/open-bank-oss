@@ -60,8 +60,11 @@ interface DealRepository {
 
     suspend fun list(state: DealState?): List<Deal>
 
-    /** Deals due for the simulated market: BOOKED with valueDate <= today, SETTLED with maturity <= today. */
-    suspend fun dueForSettlement(today: LocalDate): List<Deal>
+    /**
+     * Deals due for the simulated market: in one of [states] (see [Deal.settleableStates]) with
+     * valueDate <= today; SETTLED with maturity <= today.
+     */
+    suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>): List<Deal>
 
     suspend fun dueForMaturity(today: LocalDate): List<Deal>
 

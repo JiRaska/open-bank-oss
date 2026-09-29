@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
   annotations:
-    openbank.tech/policy-checksum: "822bdb9a342a0e8e"
+    openbank.tech/policy-checksum: "e3b7fff211cc3264"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1615,6 +1615,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

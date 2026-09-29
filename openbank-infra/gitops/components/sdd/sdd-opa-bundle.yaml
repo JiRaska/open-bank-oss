@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "c9d150c9fa511d4a"
+    openbank.tech/policy-checksum: "93da834addee38ee"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1051,6 +1051,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

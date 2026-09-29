@@ -47,6 +47,9 @@ data class DraftDealRequest(
 
 data class ReasonRequest(val reason: String? = null)
 
+/** Optional body of `POST /deals/{id}/confirm`: the counterparty's confirmation reference, if any. */
+data class ConfirmRequest(val reference: String? = null)
+
 data class LimitCheckResponse(
     val currency: String,
     val limit: BigDecimal,

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "3f29a80ccd8b6ded"
+    openbank.tech/policy-checksum: "397bbc5ad4970518"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1002,6 +1002,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

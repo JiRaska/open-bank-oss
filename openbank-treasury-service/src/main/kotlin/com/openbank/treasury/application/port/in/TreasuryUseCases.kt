@@ -100,6 +100,9 @@ interface TreasuryDealUseCase {
     suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun cancel(dealId: UUID, actor: Actor, key: String? = null): Deal
+
+    /** ADR-0315 D2: the counterparty confirmed the booked terms (BOOKED -> CONFIRMED). Posts nothing. */
+    suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String? = null): Deal
     suspend fun settle(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun mature(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun reverse(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
@@ -108,7 +111,7 @@ interface TreasuryDealUseCase {
     suspend fun counterparties(): List<CounterpartyExposure>
     suspend fun positions(asOf: LocalDate): List<CurrencyPosition>
 
-    /** One pass of the simulated market (ADR-0315 D9): settle and mature everything due. */
+    /** One pass of the simulated market (ADR-0315 D9): confirm every BOOKED deal, settle and mature everything due. */
     suspend fun runSimulatedMarket(): SimulatedMarketRun
 
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */

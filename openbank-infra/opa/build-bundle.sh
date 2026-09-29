@@ -138,7 +138,8 @@ for a in treasury.deal.draft treasury.deal.read treasury.counterparty.read treas
 	rassert "treasury agent may $a (charter allow)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" true
 done
 for a in treasury.deal.approve treasury.deal.settle treasury.deal.override-limit treasury.nostro.upload \
-	treasury.deal.submit treasury.deal.reverse treasury.deal.mature treasury.deal.cancel treasury.deal.reject; do
+	treasury.deal.submit treasury.deal.reverse treasury.deal.mature treasury.deal.cancel treasury.deal.reject \
+	treasury.deal.confirm; do
 	rassert "treasury agent may NOT $a (charter deny)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" false
 done
 rassert "another agent may not draft a treasury deal (the grant is the charter's, not the role's)" allow.allow \

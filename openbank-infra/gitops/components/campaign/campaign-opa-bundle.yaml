@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: campaign-service
     app.kubernetes.io/part-of: campaign
   annotations:
-    openbank.tech/policy-checksum: "4af12b149d8d7511"
+    openbank.tech/policy-checksum: "5b91607c2653df15"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1002,6 +1002,7 @@ data:
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
