@@ -18,6 +18,7 @@ class RiskEngineCapitalAdapterTest {
 
     private inner class FakeRisk(private val runs: List<SnapshotRunSummaryResponse>) : RiskEngineRestClient {
         val capitalCalls = mutableListOf<String>()
+        val liquidityCalls = mutableListOf<String>()
         override fun listRuns(limit: Int): Uni<SnapshotRunListResponse> =
             Uni.createFrom().item(SnapshotRunListResponse(runs))
         override fun capital(id: String): Uni<CapitalResponse> {
@@ -30,6 +31,29 @@ class RiskEngineCapitalAdapterTest {
                 )
             return Uni.createFrom().item(
                 CapitalResponse(id, asOf.toString(), "bcbs-d424-sa", "1", listOf(czk), czk, emptyList()),
+            )
+        }
+
+        override fun liquidity(id: String): Uni<LiquidityResponse> {
+            liquidityCalls += id
+            val czk = CurrencyLiquidityResponse(
+                "CZK",
+                LcrResponse(
+                    HqlaResponse(
+                        listOf(HqlaLineResponse("L1", BigDecimal("900"), BigDecimal.ZERO, BigDecimal("900"))),
+                        BigDecimal("900"),
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        adjustmentFor15Cap = BigDecimal.ZERO,
+                        adjustmentFor40Cap = BigDecimal("1"),
+                        stock = BigDecimal("899"),
+                    ),
+                    netOutflows = BigDecimal("100"),
+                    ratio = BigDecimal("8.990000"),
+                ),
+            )
+            return Uni.createFrom().item(
+                LiquidityResponse(id, asOf.toString(), "bcbs-d238-d295", "2", listOf(czk), czk, emptyList()),
             )
         }
     }
@@ -68,5 +92,41 @@ class RiskEngineCapitalAdapterTest {
         val lookup = runBlocking { RiskEngineCapitalAdapter(risk, enabled = false).capitalAt(asOf) }
         assertThat(lookup.unavailableReason).contains("not enabled")
         assertThat(risk.capitalCalls).isEmpty()
+    }
+
+    @Test
+    fun `C 72_00 reads the same run C 02_00 would, by the same rule`() {
+        val risk = FakeRisk(
+            listOf(
+                run("older", asOf, "TIED_OUT", "2026-10-01T08:00:00Z"),
+                run("newer", asOf, "TIED_OUT", "2026-10-02T08:00:00Z"),
+                run("untied", asOf, "UNTIED", "2026-10-03T08:00:00Z"),
+                run("other-date", asOf.minusDays(1), "TIED_OUT", "2026-10-04T08:00:00Z"),
+            ),
+        )
+        val adapter = RiskEngineCapitalAdapter(risk, enabled = true)
+        val lookup = runBlocking { adapter.liquidityAt(asOf) }
+        runBlocking { adapter.capitalAt(asOf) }
+        assertThat(risk.liquidityCalls).containsExactly("newer")
+        assertThat(risk.capitalCalls).containsExactly("newer")
+        assertThat(lookup.result!!.level1).isEqualByComparingTo("900")
+        assertThat(lookup.result!!.lines.single().level).isEqualTo("L1")
+        // C 76.00 fields are carried through, not merely parsed.
+        assertThat(lookup.result!!.level2bCapAdjustment).isEqualByComparingTo("0")
+        assertThat(lookup.result!!.level2CapAdjustment).isEqualByComparingTo("1")
+        assertThat(lookup.result!!.hqlaStock).isEqualByComparingTo("899")
+        assertThat(lookup.result!!.netOutflows).isEqualByComparingTo("100")
+        assertThat(lookup.result!!.lcrRatio).isEqualByComparingTo("8.99")
+    }
+
+    @Test
+    fun `C 72_00 with no tied run, or switched off, is a stated gap and reads no liquidity`() {
+        val untied = FakeRisk(listOf(run("untied", asOf, "UNTIED", "2026-10-03T08:00:00Z")))
+        assertThat(runBlocking { RiskEngineCapitalAdapter(untied, enabled = true).liquidityAt(asOf) }.unavailableReason)
+            .contains("TIED_OUT")
+        val off = FakeRisk(listOf(run("r", asOf, "TIED_OUT", "2026-10-01T08:00:00Z")))
+        assertThat(runBlocking { RiskEngineCapitalAdapter(off, enabled = false).liquidityAt(asOf) }.unavailableReason)
+            .contains("not enabled")
+        assertThat(untied.liquidityCalls + off.liquidityCalls).isEmpty()
     }
 }

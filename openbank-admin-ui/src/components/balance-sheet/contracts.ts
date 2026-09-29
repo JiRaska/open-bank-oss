@@ -15,6 +15,9 @@ const timestamp = z.string().min(1)
 export const snapshotSummarySchema = z.object({
   id: z.string(), asOf: z.iso.date(), recordedAt: timestamp, provenance, status: tieOutStatus,
   positionCount: z.number().int(), mismatchCount: z.number().int(),
+  // Added in risk-engine openapi 1.14.0 (#11016); optional+nullable so an older backend that omits
+  // the field entirely, or a historic run recorded before it existed, both parse. Never guessed.
+  requestedBy: z.string().nullable().optional(),
 })
 export const snapshotListSchema = z.object({ runs: z.array(snapshotSummarySchema) })
 
@@ -249,6 +252,47 @@ export const capitalSchema = z.object({
 
 export type Capital = z.infer<typeof capitalSchema>
 export type CurrencyCapital = z.infer<typeof currencyCapitalSchema>
+
+// ČNB minimum reserve requirement (risk-engine GET /snapshots/{id}/min-reserves, ADR-0313/ADR-0315).
+export const reserveLineSchema = z.object({
+  label: z.string(), glAccountCode: z.string().nullable().optional(), amount: money, reserveClass: z.string(),
+})
+export const reserveBaseSchema = z.object({
+  currency: z.string(), lines: z.array(reserveLineSchema), rate: money,
+  /** Null (with requirementNotStated) while a LIABILITY in this currency is unclassified: never a partial sum. */
+  base: money.nullable(), requirement: money.nullable(),
+  requirementNotStated: z.string().nullable().optional(),
+})
+const reserveMappingSchema = z.object({ key: z.string(), reserveClass: z.string(), description: z.string() })
+export const minReservesSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, parameterSetId: z.string(), parameterSetVersion: z.string(),
+  currencies: z.array(reserveBaseSchema),
+  holdingCurrency: z.string(),
+  /** Null when no GL account is mapped as the ČNB current account (see holdingsNotStated). Never a stand-in zero. */
+  holdings: z.array(reserveLineSchema).nullable(),
+  totalHoldings: money.nullable(),
+  holdingsNotStated: z.string().nullable(),
+  /** Requirement on the holding-currency book; null when that book has an unclassified liability. */
+  requirement: money.nullable(),
+  /** Holdings minus requirement; negative is a shortfall. Only for a single-currency book; null when requirement or holdings is. */
+  surplus: money.nullable(),
+  remunerationRate: money, remuneration: money,
+  excluded: z.array(z.object({
+    glAccountCode: z.string().nullable().optional(), amount: money, reserveClass: z.string(),
+  })),
+  unclassified: z.array(z.object({
+    glAccountCode: z.string().nullable().optional(), glAccountType: z.string().nullable().optional(),
+    currency: z.string(), amount: money, reason: z.string(),
+  })),
+  notes: z.array(z.string()),
+  assumptions: z.object({
+    parameterSetId: z.string(), parameterSetVersion: z.string(), source: z.string(), rate: money, remunerationRate: money,
+    holdingCurrency: z.string(), glAccounts: z.array(reserveMappingSchema), glAccountTypes: z.array(reserveMappingSchema),
+  }),
+})
+export type MinReserves = z.infer<typeof minReservesSchema>
+export type ReserveBase = z.infer<typeof reserveBaseSchema>
+export type ReserveLine = z.infer<typeof reserveLineSchema>
 
 export type Liquidity = z.infer<typeof liquiditySchema>
 export type CurrencyLiquidity = z.infer<typeof currencyLiquiditySchema>

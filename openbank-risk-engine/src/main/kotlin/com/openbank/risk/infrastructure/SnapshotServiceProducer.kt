@@ -10,8 +10,10 @@ import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
+import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
+import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotRepository
@@ -22,6 +24,7 @@ import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
 import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
+import com.openbank.risk.application.usecase.MinReservesService
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.irrbb.IrrbbParameters
@@ -42,6 +45,10 @@ import java.util.Optional
  * `openbank.risk.provenance` defaults to `synthetic` (ADR-0313 D13): a run is labelled
  * production only when an environment says so, never by omission.
  */
+// One producer per read the risk engine serves (ADR-0313); splitting it across classes to satisfy
+// a count would make "what wires this snapshot analysis" harder to read, not easier — same
+// reasoning as RiskResource's own TooManyFunctions suppression.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class SnapshotServiceProducer {
 
@@ -125,8 +132,11 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun liquidityUseCase(snapshots: SnapshotUseCase, config: LiquidityConfig): LiquidityUseCase =
-        LiquidityService(snapshots, config.toParameters())
+    fun liquidityUseCase(
+        snapshots: SnapshotUseCase,
+        config: LiquidityConfig,
+        fixings: FxFixingRepository,
+    ): LiquidityUseCase = LiquidityService(snapshots, config.toParameters(), fixings)
 
     /**
      * Liquidity survival forecast: the cash-flow projection's model and the LCR's parameter set,
@@ -158,12 +168,30 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun capitalUseCase(snapshots: SnapshotUseCase, config: CapitalConfig): CapitalUseCase =
-        CapitalService(snapshots, config.toParameters())
+    fun capitalUseCase(
+        snapshots: SnapshotUseCase,
+        config: CapitalConfig,
+        fixings: FxFixingRepository,
+    ): CapitalUseCase = CapitalService(snapshots, config.toParameters(), fixings)
 
     /** Same reason as [validateLiquidityParameters]: a bad risk weight must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call
     fun validateCapitalParameters(@Observes event: StartupEvent, config: CapitalConfig) {
+        config.toParameters()
+    }
+
+    /**
+     * ČNB minimum reserves (ADR-0313 treasury gap, ADR-0315): the versioned parameter set in
+     * `openbank.risk.min-reserves.*` ([MinReservesConfig]).
+     */
+    @Produces
+    @ApplicationScoped
+    fun minReservesUseCase(snapshots: SnapshotUseCase, config: MinReservesConfig): MinReservesUseCase =
+        MinReservesService(snapshots, config.toParameters())
+
+    /** Same reason as [validateLiquidityParameters]: a bad rate must fail the deploy, not a request. */
+    @Suppress("UnusedParameter") // the event only schedules the call
+    fun validateMinReservesParameters(@Observes event: StartupEvent, config: MinReservesConfig) {
         config.toParameters()
     }
 

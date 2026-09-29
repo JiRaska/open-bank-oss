@@ -37,7 +37,9 @@ import java.time.LocalDate
  * not compute: reporting the credit-risk sum there would understate TREA and overstate every ratio.
  * A class the engine does not model is a gap, not a zero, because an exposure of that class could
  * exist and be classified elsewhere. The credit-risk rows are gaps too when the engine left balances
- * unclassified (they carry no RWEA) or the book is multi-currency (no reporting-currency total).
+ * unclassified (they carry no RWEA), or the engine states no total. The engine's total is the whole
+ * book in CZK at the ČNB fixing for the snapshot date (risk-engine API 1.11.0), so a multi-currency
+ * book is reported from it; a total in any currency other than CZK is a gap, never relabelled.
  * Unverified: whether framework 4.2 (the version finrep's XBRL-CSV preflight pins) changed any CA2
  * row code relative to 4.0.
  */
@@ -94,12 +96,15 @@ object C0200Mapper {
         "The risk engine does not model this exposure class; an exposure of it could exist and be classified elsewhere."
     const val NOT_COMPUTED_REASON = "Not computed by the risk engine (credit risk only, ADR-0313 phase 2)."
 
+    /** The reporting currency of this bank's COREP submission. */
+    const val REPORTING_CURRENCY = "CZK"
+
     fun map(lookup: RiskCapitalLookup, asOf: LocalDate): CorepTemplate {
         val result = lookup.result
         val creditGap = lookup.unavailableReason ?: creditGapReason(checkNotNull(result))
         val rwaByRow = if (creditGap == null) rwaByRow(checkNotNull(result)) else emptyMap()
         val sa = rwaByRow.values.fold(BigDecimal.ZERO, BigDecimal::add)
-        val currency = result?.currency ?: "CZK"
+        val currency = REPORTING_CURRENCY
 
         fun cell(row: String, label: String, value: BigDecimal?, gap: String?) =
             CorepCell(row, COL, label, value ?: BigDecimal.ZERO, currency, gap != null, gap)
@@ -124,9 +129,12 @@ object C0200Mapper {
     }
 
     private fun creditGapReason(result: RiskCapitalResult): String? = when {
-        result.currencyCount > 1 || result.totalRwa == null ->
-            "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
-                "total can be stated (snapshot ${result.runId})."
+        result.totalRwa == null ->
+            "The risk engine states no total for snapshot ${result.runId}: " +
+                (result.totalNotStated ?: "no reason given") + "."
+        result.currency != REPORTING_CURRENCY ->
+            "The risk engine's total for snapshot ${result.runId} is in ${result.currency}, not the reporting " +
+                "currency $REPORTING_CURRENCY."
         result.unclassifiedBalances > 0 ->
             "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
                 "they carry no RWEA, so the credit-risk total would be understated."
@@ -139,7 +147,9 @@ object C0200Mapper {
                 ?: error("risk-engine exposure class '${c.exposureClass}' has no C 02.00 row; add it to C0200Mapper")
         }.mapValues { (_, cs) -> cs.fold(BigDecimal.ZERO) { acc, c -> acc.add(c.rwa) } }
         val total = byRow.values.fold(BigDecimal.ZERO, BigDecimal::add)
-        check(total.compareTo(checkNotNull(result.totalRwa)) == 0) {
+        // Each class and the total are rounded to the cent independently by the engine (and a
+        // converted currency makes that visible), so they must tie within that rounding, not exactly.
+        check(RiskEngineFigures.tiesWithinRounding(total, checkNotNull(result.totalRwa), result.classes.size)) {
             "risk-engine classes sum to $total, but its total RWA is ${result.totalRwa} (snapshot ${result.runId})"
         }
         return byRow

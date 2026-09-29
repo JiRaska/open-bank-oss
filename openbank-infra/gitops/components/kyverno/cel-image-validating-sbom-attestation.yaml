@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CEL (policies.kyverno.io/v1 ImageValidatingPolicy) SHADOW of
+# verify-openbank-image-sbom-attestation (verify-sbom-attestation-policy.yaml) —
+# kyverno.io/v1 ClusterPolicy is deprecated in Kyverno 1.19 and planned for removal in
+# 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
+#
+# READ BEFORE TOUCHING. This is the policy class that has taken the fleet down: the
+# July Audit->Enforce flip (#887, #1197: five workloads down four days) and the
+# September SLSA deadlock (#9805). So stage 1 is built to be unable to deny anything:
+#   validationActions: [Audit]   reports only; the v1 Enforce policy keeps denying
+#   failurePolicy: Ignore        as v1
+#   mutateDigest: false          CRITICAL — the CRD DEFAULT IS TRUE. Left out, this
+#                                "audit" policy would rewrite every openbank-* Pod
+#                                image to a digest at admission. v1 had false.
+#   verifyDigest: false          CRD default true; v1 had false
+#   required: true               as v1
+# Per-policy verdicts: the reason v1 had to fold the signature into ONE verifyImages
+# entry was Kyverno 1.12.5's single per-image status, last writer wins (#9805 item 4).
+# 1.19 scopes it per policy (kyverno/kyverno#16800); stage 2 must still re-probe that
+# an Audit/failed shadow never turns into a denial before trusting it (see PR body).
+#
+# Semantics kept from v1: same image glob, same KMS public key (sha256), signature
+# verified AND a CycloneDX (https://cyclonedx.org/bom) attestation signed by the same
+# key whose predicate has bomFormat == "CycloneDX"; containers, initContainers and
+# ephemeralContainers (v1 verifyImages covered all three); background: false;
+# webhook timeout 30s; default Pod-controller autogen (v1 had autogen- rules, which
+# is what the pricing exception names). Rotate the key together with the v1 file.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-openbank-image-sbom-attestation-cel
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Verify OpenBank image signature + SBOM attestation (ADR-0030 D4) — CEL shadow
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  webhookConfiguration:
+    timeoutSeconds: 30
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchImageReferences:
+    - glob: "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*"
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: false
+    required: true
+  attestors:
+    - name: kms
+      cosign:
+        key:
+          hashAlgorithm: sha256
+          data: |-
+            -----BEGIN PUBLIC KEY-----
+            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEASBZ76uZt2fJEJp0RiQx1hnJgbGV
+            M2Uw+35xUGfcZpBvpA+4nTW5zy2VVZ2JxT++6Gt0wPuUyL7aJpOAvqDvJw==
+            -----END PUBLIC KEY-----
+  attestations:
+    - name: cyclonedx
+      intoto:
+        type: https://cyclonedx.org/bom
+  variables:
+    # Every matched image in the Pod — v1 verifyImages covered containers,
+    # initContainers and ephemeralContainers alike; images.containers alone does not.
+    - name: all
+      expression: >-
+        images.?containers.orValue([]) + images.?initContainers.orValue([]) +
+        images.?ephemeralContainers.orValue([])
+  validations:
+    - expression: >-
+        variables.all.all(image, verifyImageSignatures(image, [attestors.kms]) > 0)
+      message: image signature verification against the KMS key failed
+    - expression: >-
+        variables.all.all(image, verifyAttestationSignatures(image, attestations.cyclonedx, [attestors.kms]) > 0)
+      message: CycloneDX SBOM attestation signed by the KMS key is missing or invalid
+    # extractPayload returns the in-toto STATEMENT; v1 saw the predicate bare.
+    - expression: >-
+        variables.all.all(image, extractPayload(image, attestations.cyclonedx).?predicate.bomFormat.orValue('') == 'CycloneDX')
+      message: the attested predicate is not a CycloneDX BOM (bomFormat != CycloneDX)
