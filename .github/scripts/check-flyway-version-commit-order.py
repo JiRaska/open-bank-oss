@@ -163,6 +163,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
     #
     # A mainline shorter than the corpus it must order cannot order it. That is checkable, so
     # it is checked, rather than trusted.
+    fetched = False
     if subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO,
                       capture_output=True, text=True, check=False).stdout.strip() == "true":
         # Deepen in place rather than requiring fetch-depth: 0 on the shard — 60 other gates
@@ -170,10 +171,17 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
         for args in (["--unshallow"], ["--depth=2147483647"]):
             if subprocess.run(["git", "fetch", "--quiet", *args, "origin", "main"], cwd=REPO,
                               capture_output=True, text=True, check=False).returncode == 0:
+                fetched = True
                 break
     else:
-        subprocess.run(["git", "fetch", "--quiet", "origin", "main"],
-                       cwd=REPO, capture_output=True, text=True, check=False)
+        fetched = subprocess.run(
+            ["git", "fetch", "--quiet", "origin", "main"],
+            cwd=REPO, capture_output=True, text=True, check=False,
+        ).returncode == 0
+    if not fetched:
+        # A stale origin/main or FETCH_HEAD can look complete and pass every ordering
+        # assertion while omitting a sibling PR that merged after the last fetch.
+        return {}, "main fetch failed; local refs may be stale", "unresolved"
 
     # Every candidate is evaluated and the LONGEST wins, never the first that answers: a
     # truncated FETCH_HEAD is a plausible-looking answer that silently changes the question.
