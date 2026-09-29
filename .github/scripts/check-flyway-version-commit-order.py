@@ -22,7 +22,7 @@ API-contract versions and the release manifest; Flyway versions had no equivalen
 WHAT IT CHECKS
 --------------
 For each `openbank-*/src/main/resources/db/migration/V<N>__*.sql`, find the commit that FIRST
-added that file to `origin/main`'s history (`git log --diff-filter=A`). Sort each service's
+added that file to freshly fetched `main` history (`git log --diff-filter=A`). Sort each service's
 migrations by that commit's position in main's history (earliest first). The version numbers in
 that order must be strictly increasing — a migration that reached main later must never carry a
 version number lower than one that reached main earlier.
@@ -126,7 +126,7 @@ def duplicate_versions(files_by_service: dict[str, list[tuple[pathlib.Path, int]
 
 
 def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, int], str, str]:
-    """{path: position in origin/main's history, lower = earlier} for the commit that first
+    """{path: position in fetched main's history, lower = earlier} for the commit that first
     ADDED each path (git log --diff-filter=A, oldest add if a path was ever removed+re-added).
 
     One `git log --name-status` pass over the whole migration-file pathspec, not one subprocess
@@ -134,8 +134,8 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
     same job in a couple of seconds.
     """
     order: dict[pathlib.Path, int] = {}
-    # Resolve the mainline through several candidates, because CI does not have the one a
-    # developer's checkout does. `actions/checkout` fetches with a narrow refspec, so
+    # Fetch main explicitly because CI does not have the ref a developer's checkout does.
+    # `actions/checkout` fetches with a narrow refspec, so
     # `refs/remotes/origin/main` frequently does NOT exist on a PR run even at fetch-depth: 0 --
     # `git fetch origin main` there updates FETCH_HEAD and nothing else. The first version of this
     # function caught the resulting CalledProcessError and returned an EMPTY map, which made the
@@ -143,7 +143,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
     # therefore green. It was only visible because the KNOWN_VIOLATIONS both-ways check then
     # reported every baseline entry as stale -- the ratchet catching the checker, which is the
     # single reason that idiom is worth its cost.
-    # HEAD is never a candidate: on a PR run it is the merge commit, so `rev-list HEAD`
+    # HEAD is never the source: on a PR run it is the merge commit, so `rev-list HEAD`
     # includes the branch's own commits and the gate stops measuring "order on main" and
     # starts measuring "order including this PR" -- a different question, answered
     # confidently.
@@ -183,23 +183,24 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
         # assertion while omitting a sibling PR that merged after the last fetch.
         return {}, "main fetch failed; local refs may be stale", "unresolved"
 
-    # Every candidate is evaluated and the LONGEST wins, never the first that answers: a
-    # truncated FETCH_HEAD is a plausible-looking answer that silently changes the question.
-    revs: list[str] = []
-    mainline = "unresolved"
-    for ref in ("FETCH_HEAD", "origin/main", "main"):
-        try:
-            candidate = subprocess.run(
-                ["git", "rev-list", "--reverse", ref],
-                cwd=REPO, capture_output=True, text=True, check=True,
-            ).stdout.splitlines()
-        except subprocess.CalledProcessError:
-            continue
-        if len(candidate) > len(revs):
-            revs, mainline = candidate, ref
+    # FETCH_HEAD is the main just fetched above. A local main or origin/main may be
+    # longer because it contains unrelated local commits or stale pre-rewrite history;
+    # choosing by length would then order the wrong branch. Never fall back to them.
+    if subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=REPO, capture_output=True, text=True, check=False,
+    ).stdout.strip() != "false":
+        return {}, "fetched main is still shallow", "unresolved"
+    mainline = "FETCH_HEAD"
+    try:
+        revs = subprocess.run(
+            ["git", "rev-list", "--reverse", mainline],
+            cwd=REPO, capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+    except subprocess.CalledProcessError:
+        return {}, "fetched main could not be traversed", "unresolved"
     position = {sha: i for i, sha in enumerate(revs)}
-    if revs:
-        provenance = f"{mainline}@{revs[-1][:9]} ({len(revs)} commits)"
+    provenance = f"{mainline}@{revs[-1][:9]} ({len(revs)} commits)" if revs else "fetched main is empty"
 
     # The depth guard. A history with fewer commits than there are migrations cannot have
     # introduced them one at a time, so it is truncated whatever it claims to be.
