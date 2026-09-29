@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.5...document-service-v0.16.0) (2026-09-29)
+
+
+### Features
+
+* **delegation:** add OTP-gated external disclosure boundary ([#9237](https://github.com/JiRaska/open-bank-oss/issues/9237)) ([b6288a2](https://github.com/JiRaska/open-bank-oss/commit/b6288a2985121121ba5739682db74118f9ba884a))
+
 ## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.15.4...document-service-v0.15.5) (2026-09-29)
 
 
