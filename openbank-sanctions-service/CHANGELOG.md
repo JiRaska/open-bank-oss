@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.14.1...sanctions-service-v0.15.0) (2026-09-29)
+
+
+### Features
+
+* **sanctions:** publish SANCTIONS_LIST_CHANGED event with content-level diff ([#4468](https://github.com/JiRaska/open-bank-oss/issues/4468)) ([f76d9cf](https://github.com/JiRaska/open-bank-oss/commit/f76d9cffee95820397d212d877988b5d9b37f681))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.14.0...sanctions-service-v0.14.1) (2026-09-26)
 
 
