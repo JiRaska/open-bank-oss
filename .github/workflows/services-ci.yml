@@ -125,6 +125,21 @@ jobs:
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
 
+          # Shared-library test sources are compiled only in their own module: no
+          # consumer receives src/test on its compile or test classpath. Keep them
+          # in FILES_CODE for the module fan-out, but exclude them from the
+          # code-global full-fleet trigger. Build scripts and src/testFixtures
+          # remain global because they can change consumer test inputs.
+          SHARED_TEST_RE='^openbank-libs(-domain|-runtime|-testing|-lending|-iso20022)?/src/test/'
+          grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-domain/src/test/kotlin/ExampleTest.kt' \
+            || { echo "selector self-test: shared test must be local" >&2; exit 1; }
+          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-domain/src/main/kotlin/Example.kt' \
+            || { echo "selector self-test: shared source must stay global" >&2; exit 1; }
+          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-testing/src/testFixtures/kotlin/Example.kt' \
+            || { echo "selector self-test: shared test fixture must stay global" >&2; exit 1; }
+          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-domain/build.gradle.kts' \
+            || { echo "selector self-test: shared build script must stay global" >&2; exit 1; }
+
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
@@ -167,7 +182,7 @@ jobs:
               # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
               # the Pact graph.
               #   - code-global input (openbank-libs*, gradle, build-logic) -> full-fleet (any
-              #     service's compile/test inputs may change).
+              #     service's compile/test inputs may change); shared src/test stays local.
               #   - pacts/<consumer>-<provider>.json changed -> build BOTH: the consumer republishes
               #     the pact, the provider re-verifies against it (the exact completeness reason
               #     main-push used to full-fleet for). Delimiter is the single '-openbank-'.
@@ -176,7 +191,8 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+              FILES_GLOBAL=$(grep -vE "$SHARED_TEST_RE" <<< "$FILES_CODE" || true)
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -250,8 +266,8 @@ jobs:
 
             # Code-global inputs every module compiles/tests against -> rebuild all.
             # (openbank-libs*, version catalog, root build, gradle.properties,
-            # build-logic.) A change here can alter any service's compile or test
-            # inputs, so the whole fleet must rebuild.
+            # build-logic.) Shared src/test is local to its module; other changes here
+            # can alter service compile or test inputs, so the fleet must rebuild.
             # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`.
             # Under `set -o pipefail`, `grep -q` exits on first match and closes
             # the pipe, so the upstream `echo` gets SIGPIPE (exit 141) and the
@@ -294,7 +310,8 @@ jobs:
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+            FILES_GLOBAL=$(grep -vE "$SHARED_TEST_RE" <<< "$FILES_CODE" || true)
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
