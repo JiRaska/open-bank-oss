@@ -28,6 +28,7 @@ vi.mock('recharts', () => {
 })
 
 import LedgerBackfillPage from '@/app/balance-sheet/ledger-backfill/page'
+import LedgerBackfillVoidPage from '@/app/balance-sheet/ledger-backfill/voids/page'
 import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
 import SnapshotCapitalPage from '@/app/balance-sheet/snapshots/[id]/capital/page'
 import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
@@ -111,6 +112,77 @@ describe('ledger backfill — four-eyes in the console', () => {
     fireEvent.click(post)
     await screen.findByText(/Backfill complete|Doúčtování dokončeno/)
     expect(calls.find(c => c.url.includes('/execute'))!.url).toContain('/requests/appr-1/execute?execute=true')
+  })
+})
+
+describe('ledger backfill void — four-eyes in the console (#10969, #11487)', () => {
+  const SOURCE = { ...REQUEST, id: 'src-1', state: 'EXECUTED', proposedBy: 'petr.finance', executedBy: 'petr.finance', executedAt: '2026-09-26T07:48:34Z' }
+  const VOID = {
+    sourceRequestId: 'src-1', voidDate: '2026-09-30', planHash: 'v', loanCount: 44, legCount: 352,
+    decidedBy: null, decisionReason: null, executedBy: null, lastResult: null, proposedAt: '2026-09-30T08:00:00Z',
+  }
+  const V_OWN = { ...VOID, id: 'v-own', state: 'PROPOSED', proposedBy: 'jana.finance' }
+  const V_OTHER = { ...VOID, id: 'v-other', state: 'PROPOSED', proposedBy: 'petr.finance' }
+  const V_APPROVED = { ...VOID, id: 'v-appr', state: 'APPROVED', proposedBy: 'petr.finance', decidedBy: 'jana.finance' }
+  const PLAN = {
+    plan: { cutoverDate: '2026-09-30', planHash: 'v', tieOut: [], loans: [{ loanId: 'l1', currency: 'CZK', status: 'ACTIVE', unpaidPrincipal: 1, legs: [] }] },
+    executable: true, journalCount: 352, glTotals: [{ code: '1200', currency: 'CZK', debit: 1, credit: 0, net: 1 }],
+  }
+  beforeEach(() => {
+    router = (url, init) => {
+      if (url.includes('/voids/plan')) return json(PLAN)
+      if (url.includes('/voids/v-other/decide')) return json({ error: 'Maker and checker must differ' }, 422)
+      if (url.includes('/voids/v-appr/execute')) {
+        return json({ execution: { requestId: 'v-appr', executed: true, complete: true, loans: [{ loanId: 'l1', status: 'VOIDED', legs: [] }] }, offsetGlTotals: [] })
+      }
+      if (url.endsWith('/ledger-backfill/voids') && init?.method === 'POST') return json({ ...V_OWN }, 201)
+      if (url.includes('/ledger-backfill/voids') && !init?.method) return json({ requests: [V_OWN, V_OTHER, V_APPROVED] })
+      if (url.includes('/ledger-backfill/requests') && !init?.method) return json({ requests: [SOURCE, APPROVED] })
+      return json({}, 404)
+    }
+  })
+
+  it('lists voids through the lending BFF and offers only EXECUTED backfills as sources', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByText('petr.finance')
+    expect(calls.some(c => c.url === '/api/svc/lending-service/api/v1/lending/ledger-backfill/voids?limit=25')).toBe(true)
+    const options = screen.getAllByRole('option').map(o => (o as HTMLOptionElement).value)
+    expect(options).toEqual(['src-1'])
+  })
+
+  it('dry-runs the chosen source and proposes with an Idempotency-Key', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByRole('option')
+    fireEvent.click(screen.getByRole('button', { name: /Spočítat plán|Compute plan/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Navrhnout storno|Propose void/ }))
+    await screen.findByText(/Void proposal recorded|Návrh storna zaznamenán/)
+    expect(calls.find(c => c.url.includes('/voids/plan'))!.url).toContain('sourceRequestId=src-1')
+    const post = calls.find(c => c.url.endsWith('/ledger-backfill/voids') && c.init?.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ sourceRequestId: 'src-1' })
+    expect((post.init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+  })
+
+  it('hides approve from the proposer and shows the backend 422 on a refused decision', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findByText(/You proposed this|Tento návrh je váš/)
+    const approve = screen.getAllByRole('button', { name: /^(Schválit|Approve)$/ })
+    expect(approve).toHaveLength(1)
+    fireEvent.click(approve[0])
+    await screen.findByText(/Maker and checker must differ/)
+    const decide = calls.find(c => c.url.includes('/voids/v-other/decide'))!
+    expect((decide.init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+  })
+
+  it('executes only after explicit confirmation, with execute=true', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Provést|Execute/ }))
+    const run = screen.getByRole('button', { name: /^(Stornovat|Void loans)$/ }) as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(calls.some(c => c.url.includes('/execute'))).toBe(false)
+    fireEvent.click(screen.getAllByRole('checkbox')[0])
+    fireEvent.click(run)
+    await screen.findByText(/Void complete|Storno dokončeno/)
+    expect(calls.find(c => c.url.includes('/execute'))!.url).toContain('/voids/v-appr/execute?execute=true')
   })
 })
 
