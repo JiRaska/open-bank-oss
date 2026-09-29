@@ -15,6 +15,8 @@ import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.IrrbbResult
+import com.openbank.risk.domain.limits.LimitEvaluation
+import com.openbank.risk.domain.limits.LimitSet
 import com.openbank.risk.domain.liquidity.LiquidityForecastResult
 import com.openbank.risk.domain.liquidity.LiquidityParameters
 import com.openbank.risk.domain.liquidity.LiquidityResult
@@ -126,4 +128,21 @@ data class MinReservesAnalysis(
 interface MinReservesUseCase {
     /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
     suspend fun analyse(runId: UUID): MinReservesAnalysis
+}
+
+/**
+ * The declarative risk limits (ADR-0313 D9) evaluated on one run: derived on request from the same
+ * reads as /liquidity, /capital and /irrbb, never stored. [curveSetId] is the curve set the IRRBB
+ * limit was priced on (the latest one recorded for the run's as-of date), or null when none exists.
+ */
+data class LimitAnalysis(
+    val run: SnapshotRun,
+    val set: LimitSet,
+    val evaluations: List<LimitEvaluation>,
+    val curveSetId: UUID?,
+)
+
+interface LimitUseCase {
+    /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
+    suspend fun evaluate(runId: UUID): LimitAnalysis
 }
