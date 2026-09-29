@@ -30,7 +30,9 @@ info:
   # 1.12.0 -> 1.13.0: additive — the liquidity total combines all currencies in CZK at the ČNB
   #        fixing in effect on asOf (EU 2015/61 Art. 4(5)); Liquidity.fxRates lists every rate used,
   #        Liquidity.totalNotStated says why a total is absent. Per-currency results unchanged.
-  version: 1.13.0
+  # 1.13.0 -> 1.14.0: additive — SnapshotRun and SnapshotRunSummary state requestedBy, preserving
+  #        the original requester on a replay; a scheduled run names its system requester.
+  version: 1.14.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -561,6 +563,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Mismatch'
+        requestedBy:
+          type: [string, 'null']
+          description: |
+            The caller's principal name. Null means the run was recorded before this field
+            existed. A value of the form `system:<job>` means a scheduled job requested the
+            run (e.g. `system:risk-engine-eod-snapshot` for the nightly EOD snapshot). A POST
+            that replays an existing run (idempotent replay) returns the ORIGINAL requester,
+            not the caller of the replaying request.
 
     SnapshotRunSummary:
       type: object
@@ -585,6 +595,14 @@ components:
           type: integer
         mismatchCount:
           type: integer
+        requestedBy:
+          type: [string, 'null']
+          description: |
+            The caller's principal name. Null means the run was recorded before this field
+            existed. A value of the form `system:<job>` means a scheduled job requested the
+            run (e.g. `system:risk-engine-eod-snapshot` for the nightly EOD snapshot). A POST
+            that replays an existing run (idempotent replay) returns the ORIGINAL requester,
+            not the caller of the replaying request.
 
     SnapshotRunList:
       type: object

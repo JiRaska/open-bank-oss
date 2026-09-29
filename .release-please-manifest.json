@@ -24,7 +24,7 @@
   "openbank-domestic-payment": "0.21.4",
   "openbank-engagement-service": "0.14.2",
   "openbank-finops-agent": "0.6.2",
-  "openbank-finrep-service": "0.14.0",
+  "openbank-finrep-service": "0.15.0",
   "openbank-flaky-test-hunter": "0.14.4",
   "openbank-fraud-service": "0.15.3",
   "openbank-fx-service": "0.16.1",
@@ -64,6 +64,6 @@
   "openbank-loyalty-service": "0.3.0",
   "openbank-wealth-service": "0.2.0",
   "openbank-context-service": "0.3.0",
-  "openbank-risk-engine": "0.17.0",
+  "openbank-risk-engine": "0.18.0",
   "openbank-treasury-service": "0.5.0"
 }
