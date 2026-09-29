@@ -430,7 +430,7 @@ class ScaService(
             challenge = verifyDecoupled(challenge, now)
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
-        val authorised = linkingAuthorises(challenge.dynamicLinkingData, command)
+        val authorised = linkingAuthorises(challenge.dynamicLinkingData, command, challenge.purpose)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
             throw ScaChallengeAlreadyConsumedException(command.challengeId)
@@ -445,23 +445,28 @@ class ScaService(
      * operation exactly (RTS Art. 5 dynamic linking, extended to documents by ADR-0169 D2, to card
      * management, and to business approvals by #10281).
      */
-    private fun linkingAuthorises(linking: DynamicLinkingData?, command: ConsumeScaCommand): Boolean =
-        linking?.authorises(
-            command.amount,
-            command.currency,
-            command.creditor,
-            command.documentSha256,
-            command.ceremonyId,
-            command.cardId,
-            command.cardAction,
-            command.approvalRequestId,
-            command.payloadSha256,
-        ) ?: (
-            command.amount == null &&
-                command.documentSha256 == null &&
-                command.cardId == null &&
-                command.approvalRequestId == null
-            )
+    private fun linkingAuthorises(
+        linking: DynamicLinkingData?,
+        command: ConsumeScaCommand,
+        purpose: ScaPurpose,
+    ): Boolean = linking?.authorises(
+        command.amount,
+        command.currency,
+        command.creditor,
+        command.documentSha256,
+        command.ceremonyId,
+        command.cardId,
+        command.cardAction,
+        command.approvalRequestId,
+        command.payloadSha256,
+        reference = command.reference,
+        purpose = purpose,
+    ) ?: (
+        command.amount == null &&
+            command.documentSha256 == null &&
+            command.cardId == null &&
+            command.approvalRequestId == null
+        )
 
     private fun buildPushMessage(purpose: ScaPurpose, data: DynamicLinkingData?): String = when (purpose) {
         ScaPurpose.PAYMENT_INITIATION ->

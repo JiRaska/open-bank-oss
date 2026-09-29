@@ -178,21 +178,19 @@ data class DynamicLinkingData(
         amount: String?,
         currency: String?,
         creditor: String?,
-        reference: String? = null,
         documentSha256: String? = null,
         ceremonyId: String? = null,
         cardId: String? = null,
         cardAction: String? = null,
         approvalRequestId: String? = null,
         payloadSha256: String? = null,
+        reference: String? = null,
+        purpose: ScaPurpose? = null,
     ): Boolean {
         if (!amountEq(this.amount, amount)) return false
         if (!normEq(this.currency, currency)) return false
         if (this.creditorIban != null && !normEq(this.creditorIban, creditor)) return false
-        // `reference` historically carries an informational payment remittance reference and
-        // existing payment consumers do not restate it. New operation-bound consumers opt into
-        // exact comparison by supplying it; approval-group management always does.
-        if (reference != null && this.reference != reference) return false
+        if (!referenceMatches(reference, purpose)) return false
         if (!normEq(this.documentSha256, documentSha256)) return false
         if (this.ceremonyId != ceremonyId) return false
         if (!normEq(this.cardId, cardId)) return false
@@ -200,6 +198,29 @@ data class DynamicLinkingData(
         if (this.approvalRequestId != approvalRequestId) return false
         if (!normEq(this.payloadSha256, payloadSha256)) return false
         return true
+    }
+
+    /**
+     * Opt-in reference binding (#9430). A challenge created WITHOUT a reference is legacy: it binds
+     * exactly as before the reference existed, so a consumer that now supplies one is accepted —
+     * today's app creates DELEGATION_GRANT challenges this way and must keep working. A challenge
+     * created WITH a reference for an operation-bound purpose is strict: a differing or absent
+     * supplied reference is refused. For other purposes `reference` is an informational payment
+     * remittance reference that payment consumers do not restate, so it is compared only when
+     * supplied.
+     */
+    private fun referenceMatches(supplied: String?, purpose: ScaPurpose?): Boolean = when {
+        this.reference == null -> true
+        purpose in REFERENCE_BOUND_PURPOSES -> supplied == this.reference
+        else -> supplied == null || supplied == this.reference
+    }
+
+    companion object {
+        val REFERENCE_BOUND_PURPOSES: Set<ScaPurpose> = setOf(
+            ScaPurpose.DELEGATION_GRANT,
+            ScaPurpose.DELEGATION_APPROVAL_GROUP,
+            ScaPurpose.SAVINGS_WITHDRAW_APPROVAL,
+        )
     }
 }
 

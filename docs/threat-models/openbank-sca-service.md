@@ -95,8 +95,15 @@ is the **authentication assurance gate** for payments and consent — defeating 
   the one-shot transition to `COMPLETED`; a mismatch fails closed and leaves the challenge
   unconsumed. The reference is a SHA-256 fingerprint over operation, owner, roster, threshold and,
   for revisions, group id plus expected revision, so a completed ceremony cannot authorise altered
-  authority. Compatibility is deliberate: older payment/document consumers that never created a
-  reference may omit it, while a challenge carrying one cannot be consumed without the exact value.
+  authority. Compatibility is deliberate, in both directions. A challenge created WITHOUT a reference is
+  legacy and binds exactly as before: a consumer that supplies one is still accepted, so today's
+  app, which creates DELEGATION_GRANT challenges without the preview `scaReference`, keeps working
+  while delegation-service starts sending it. A challenge created WITH a reference for an
+  operation-bound purpose (DELEGATION_GRANT, DELEGATION_APPROVAL_GROUP, SAVINGS_WITHDRAW_APPROVAL)
+  is strict: a differing or absent supplied reference is refused. For every other purpose the
+  field is an informational payment remittance reference that payment consumers do not restate, so
+  it is compared only when supplied. The binding therefore strengthens per challenge as clients
+  opt in, never regresses an existing one (`ScaChallengeReferenceBindingTest`).
   Risk class = **tampering / elevation of privilege**. Verified by SCA service tests and the
   delegation→SCA Pact contract. Rollback: revert the optional field after delegation callers stop
   sending it; no schema or stored-data migration is involved.
