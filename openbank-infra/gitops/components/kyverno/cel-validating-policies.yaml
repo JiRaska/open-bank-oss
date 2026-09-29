@@ -6,14 +6,17 @@
 # its removal in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
 #
 # STAGE 1 OF 2 — AUDIT ONLY, except where a document says it has reached stage 2
-# (today: deny-nginx-snippet-annotations-cel, #11437). Each other ValidatingPolicy
+# (today: deny-nginx-snippet-annotations-cel,
+# require-gated-or-declared-tool-ingress-cel and openbank-dr-sa-pin-cel, #11437).
+# Each other ValidatingPolicy
 # below runs NEXT TO its v1 original, which stays in Enforce and remains the only
 # thing that can deny:
 #   validationActions: [Audit]   reports, never denies
 #   failurePolicy: Ignore        a webhook error on the shadow cannot block admission
 # Both are deliberate deviations from the v1 originals (Enforce / default Fail) and
 # are restored in stage 2, which flips each to [Deny] + Fail and deletes the v1
-# policy in the same PR. Names carry a -cel suffix so kyverno_policy_results_total
+# policy in the same PR (except openbank-dr-sa-pin, whose v1 lives in another Argo
+# app; see its document). Names carry a -cel suffix so kyverno_policy_results_total
 # and PolicyReports keep the two engines apart while both run: a shadow failing a
 # resource its v1 original admits fires KyvernoAuditPolicyFailingBeforeEnforce,
 # which is the parity signal stage 2 must see silent first.
@@ -118,7 +121,17 @@ spec:
         `denylist-source-range` to block paths, and the controller's
         modsecurity.conf for WAF policy."
 ---
-# Shadow of require-gated-or-declared-tool-ingress (tool-ingress-gate-policy.yaml).
+# STAGE 2 (#11437): enforcing. The v1 original tool-ingress-gate-policy.yaml was
+# deleted in the same PR, so this is the only policy requiring an observability
+# Ingress to be gated (auth-url, ADR-0234) or declared (ungated-machine-callers).
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. Scope as in v1:
+# observability only, CREATE/UPDATE only. The -cel suffix is kept so metrics and
+# PolicyReports stay continuous with stage 1. The precondition lives in the cluster,
+# not in git; re-check it before touching this document:
+#   kubectl -n observability get ingress -o custom-columns=\
+#   'NAME:.metadata.name,GATE:.metadata.annotations.nginx\.ingress\.kubernetes\.io/auth-url,\
+#   DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
+# Every row must have a non-empty GATE or DECLARED.
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -127,12 +140,12 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234) — CEL shadow
+    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234) — CEL
     policies.kyverno.io/category: Access Control
     policies.kyverno.io/severity: high
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false
@@ -161,9 +174,19 @@ spec:
         'openbank.io/ungated-machine-callers: \"<why, and which paths>\"' and keep its
         path list narrowed to those endpoints."
 ---
-# Shadow of openbank-dr-sa-pin (platform/dr-runner-rbac.yaml, ADR-0277). The v1
-# exclude of namespace arc-runners becomes a NotIn namespaceSelector. Pod-controller
-# autogen stays at the default, as the v1 policy's autogen rules did.
+# STAGE 2 (#11437): enforcing. Pins the openbank-dr SA (ADR-0277) to the
+# arc-runners namespace. [Deny] + Fail restore v1's Enforce / default failurePolicy.
+# Unlike the other stage-2 policies, the v1 original lives in a DIFFERENT Argo app
+# (`platform`, components/platform/dr-runner-rbac.yaml), so the two cannot be swapped
+# in one sync: PruneLast only orders a prune within one app. The flip therefore
+# lands first and runs NEXT TO the still-enforcing v1 (both deny the same resources,
+# parity harness); the v1 document is removed by a follow-up PR once this one has
+# synced. The v1 exclude of namespace arc-runners is a NotIn namespaceSelector.
+# Pod-controller autogen stays at the default, as the v1 policy's autogen rules did.
+# The -cel suffix is kept so metrics and PolicyReports stay continuous with stage 1.
+# The precondition lives in the cluster, not in git; re-check it before touching
+# this document (must print nothing):
+#   kubectl get pods -A -o jsonpath='{range .items[?(@.spec.serviceAccountName=="openbank-dr")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | grep -v '^arc-runners/'
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -172,8 +195,8 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false
