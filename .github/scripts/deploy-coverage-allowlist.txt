@@ -16,9 +16,3 @@
 # full Next.js build, bakes the CI evidence bundles, and pushes via build-push-admin-ui.sh.
 # It is intentionally outside the ~34-service Quarkus fan-out.
 openbank-admin-ui
-
-# pricing-service and pricing-console are built, signed and pushed by the separate pricing
-# repository's own pipeline; this monorepo holds only their gitops manifests. They surfaced
-# when the sandbox-tag widening of the subject set was restored (it had been lost in #4637).
-openbank-pricing-console
-openbank-pricing-service

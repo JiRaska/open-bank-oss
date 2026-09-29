@@ -1,6 +1,6 @@
 # Known-debt BASELINE for .github/scripts/check-deploy-coverage.sh — SHRINK-ONLY.
 #
-# Released components that ArgoCD deploys but nothing builds. These are NOT acceptable;
+# Workloads that ArgoCD deploys but no CI image producer builds. These are NOT acceptable;
 # they are the debt that existed when the guard was written. The guard exists to stop the
 # NEXT one, not to bless these.
 #
@@ -46,3 +46,10 @@
 # Dockerfile (SELF_BUILT_SERVICES in auto-deploy.yml) and then signs, CVE-gates, SBOM-attests
 # and gitops-deploys it through the same steps as the rest of the fleet.
 openbank-developer-portal
+
+# The pricing service and console are deployed under GitOps with sandbox tags, but their
+# separate repository's default branch has no image-building workflow. The images were
+# published manually. Keep this visible as coverage debt until both have a signed CI
+# producer with exact deployed-digest evidence; then delete these lines (Refs #11455).
+openbank-pricing-console
+openbank-pricing-service
