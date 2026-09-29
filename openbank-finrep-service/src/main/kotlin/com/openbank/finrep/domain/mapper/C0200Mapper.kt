@@ -40,6 +40,12 @@ import java.time.LocalDate
  * unclassified (they carry no RWEA), or the engine states no total. The engine's total is the whole
  * book in CZK at the ČNB fixing for the snapshot date (risk-engine API 1.11.0), so a multi-currency
  * book is reported from it; a total in any currency other than CZK is a gap, never relabelled.
+ * Checked before any of that: the parameter set the capital was computed under. COREP C 02.00 reports
+ * Pillar 1 own funds requirements under EU CRR; risk-engine's default set is `eu-crr3-sa` (post-CRR3),
+ * but BCBS `bcbs-d424-sa` remains selectable (PR #11496). Every credit-risk row is a gap, naming the
+ * set actually used, when [RiskCapitalResult.parameterSetId] does not start with
+ * [RiskEngineFigures.EU_CRR_CAPITAL_PARAMETER_SET_PREFIX] — same pattern as the LCR mappers' EU
+ * liquidity-set gap ([RiskEngineFigures.parameterSetGap]).
  * Unverified: whether framework 4.2 (the version finrep's XBRL-CSV preflight pins) changed any CA2
  * row code relative to 4.0.
  */
@@ -129,6 +135,8 @@ object C0200Mapper {
     }
 
     private fun creditGapReason(result: RiskCapitalResult): String? = when {
+        RiskEngineFigures.capitalParameterSetGap(result.parameterSetId, result.runId) != null ->
+            RiskEngineFigures.capitalParameterSetGap(result.parameterSetId, result.runId)
         result.totalRwa == null ->
             "The risk engine states no total for snapshot ${result.runId}: " +
                 (result.totalNotStated ?: "no reason given") + "."
