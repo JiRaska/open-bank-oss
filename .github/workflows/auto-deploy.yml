@@ -1508,7 +1508,7 @@ jobs:
           FAILED_SERVICES: ${{ needs.build-push.outputs.failed_services }}
           PUSHED_SERVICES: ${{ needs.build-push.outputs.pushed_services }}
           CVE_BLOCKED: ${{ needs.build-push.outputs.cve_blocked_services }}
-          DEPLOYABLE: ${{ needs.build-push.outputs.deployable_services }}
+          IMAGE_GATE_PASSED: ${{ needs.build-push.outputs.deployable_services }}
         run: |
           set -uo pipefail
           {
@@ -1517,7 +1517,7 @@ jobs:
             echo "Push failed: \`${FAILED_SERVICES:-[]}\`"
             echo "Blocked by fixable CRITICAL CVEs: \`${CVE_BLOCKED:-[]}\`"
             echo "Pushed: \`${PUSHED_SERVICES:-[]}\`"
-            echo "Deployed: \`${DEPLOYABLE:-[]}\`"
+            echo "Passed push and CVE gates: \`${IMAGE_GATE_PASSED:-[]}\`"
             echo
             echo "These services are running whatever image they ran before this commit."
             echo "A missing ECR repository is the recurring cause — the repository set is"
