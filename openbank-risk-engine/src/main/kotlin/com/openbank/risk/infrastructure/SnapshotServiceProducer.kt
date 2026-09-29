@@ -8,6 +8,7 @@ import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
@@ -21,6 +22,7 @@ import com.openbank.risk.application.usecase.CapitalService
 import com.openbank.risk.application.usecase.CashFlowService
 import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
+import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
 import com.openbank.risk.application.usecase.MinReservesService
 import com.openbank.risk.application.usecase.SnapshotService
@@ -43,6 +45,10 @@ import java.util.Optional
  * `openbank.risk.provenance` defaults to `synthetic` (ADR-0313 D13): a run is labelled
  * production only when an environment says so, never by omission.
  */
+// One producer per read the risk engine serves (ADR-0313); splitting it across classes to satisfy
+// a count would make "what wires this snapshot analysis" harder to read, not easier — same
+// reasoning as RiskResource's own TooManyFunctions suppression.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class SnapshotServiceProducer {
 
@@ -131,6 +137,19 @@ class SnapshotServiceProducer {
         config: LiquidityConfig,
         fixings: FxFixingRepository,
     ): LiquidityUseCase = LiquidityService(snapshots, config.toParameters(), fixings)
+
+    /**
+     * Liquidity survival forecast: the cash-flow projection's model and the LCR's parameter set,
+     * never parameters of its own — so it cannot disagree with either read.
+     */
+    @Produces
+    @ApplicationScoped
+    fun liquidityForecastUseCase(
+        snapshots: SnapshotUseCase,
+        curveSets: CurveSetUseCase,
+        config: LiquidityConfig,
+    ): LiquidityForecastUseCase =
+        LiquidityForecastService(snapshots, curveSets, BehaviouralModel.NMD_PHASE0, config.toParameters())
 
     /**
      * The mapping's presence check runs at boot, but the range / unknown-key checks live in the
