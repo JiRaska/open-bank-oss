@@ -438,6 +438,7 @@ CODEISH = (".kt", ".java", ".py", ".rego", ".sql", ".ts", ".tsx", ".sh", ".yaml"
            ".json", ".gradle", ".kts", ".xml", ".properties", ".tf", ".conf")
 
 STUB_WINDOW = 8  # lines of a declaration's body inspected for a stub marker
+DECLARATION = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+([A-Za-z][A-Za-z0-9]*)\b")
 STUB_MARK = re.compile(r"\bstub\b\s*:|\bTODO\b|\bFIXME\b|not implemented|NotImplemented",
                        re.IGNORECASE)
 
@@ -515,6 +516,7 @@ class Corpus:
         # Stub detection anchors on DEPLOYED source only: a stubbed test helper is not the
         # defect this gate is about.
         self.main = {f: b for f, b in self.blobs.items() if is_deployed(f) and "/src/main/" in f}
+        self.stub_sites = self.index_stub_sites(self.main)
         # A COMMENT-ONLY view is not evidence a thing exists. Measured 2026-09-03: the sole
         # occurrence of `BalanceResourceSecurityTest` anywhere in the tree is the KDoc line
         # `* locked by BalanceResourceSecurityTest.` in `BalanceResource.kt`, and the sole
@@ -617,6 +619,19 @@ class Corpus:
         self._memo[sym] = hit
         return hit
 
+    @staticmethod
+    def index_stub_sites(main: dict[str, str]) -> dict[str, str]:
+        """Read each deployed declaration once instead of rescanning it for every citation."""
+        sites: dict[str, str] = {}
+        for f, blob in main.items():
+            lines = blob.splitlines()
+            for n, line in enumerate(lines):
+                for match in DECLARATION.finditer(line):
+                    sym = match.group(1)
+                    if sym not in sites and STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
+                        sites[sym] = f"{f}:{n + 1}"
+        return sites
+
     def stub_site(self, sym: str) -> str | None:
         """A cited symbol whose own DECLARATION opens with a stub marker.
 
@@ -626,17 +641,7 @@ class Corpus:
         """
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
             return None
-        decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
-        for f, b in self.main.items():
-            if sym not in b:
-                continue
-            lines = b.splitlines()
-            for n, line in enumerate(lines):
-                if not decl.search(line):
-                    continue
-                if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    return f"{f}:{n + 1}"
-        return None
+        return self.stub_sites.get(sym)
 
 
 # ---------------------------------------------------------------- self-reference
@@ -757,7 +762,7 @@ def audit(root: pathlib.Path):
     return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
 
 
-def audit_models(root: pathlib.Path, services: list[str], corpus: "Corpus"):
+def audit_models(root: pathlib.Path, services: list[str], corpus: Corpus):
     findings: list[tuple[str, str, str, str]] = []
     used: set[str] = set()
     subjects = n_claims = n_uncited = n_disclaimed = 0
@@ -953,6 +958,18 @@ def self_test() -> int:
     sub = _FakeCorpus({"openbank-x/src/test/kotlin/B.kt": "class BalanceSecurityContractTest {"})
     case("a SUFFIX of a real class does not resolve", sub.resolve("SecurityContractTest"), False)
     case("the real class still resolves", sub.resolve("BalanceSecurityContractTest"), True)
+
+    stub_sites = Corpus.index_stub_sites({
+        "openbank-x/src/main/kotlin/A.kt":
+            "class PaymentAdapter {\n  TODO: wire payment\n}\nclass ReadyAdapter {\n  return value\n}\n",
+        "openbank-x/src/main/kotlin/B.kt":
+            "class PaymentAdapter {\n  return value\n}\nclass PaymentAdapterV2 {\n  FIXME\n}\n",
+    })
+    case("stub index keeps the first declaring site", stub_sites.get("PaymentAdapter"),
+         "openbank-x/src/main/kotlin/A.kt:1")
+    case("ready declaration is not a stub", stub_sites.get("ReadyAdapter"), None)
+    case("declaration suffix is a distinct symbol", stub_sites.get("PaymentAdapterV2"),
+         "openbank-x/src/main/kotlin/B.kt:4")
 
     # (3b) EMBEDDED .rego. A `gen-*opa-bundle*.sh` generator writes its source `.rego` blob into
     #      a ConfigMap under a `<name>.rego: |` key instead of checking it in as its own file
