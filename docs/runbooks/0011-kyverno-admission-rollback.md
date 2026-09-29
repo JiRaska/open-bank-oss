@@ -205,8 +205,16 @@ of both are pinned in the parity harness. `openbank-dr-sa-pin` — enforcing as 
 flip had synced — two apps sync independently and `PruneLast` cannot order across them. The RBAC
 documents in that file stay; the ClusterPolicy document is gone. Its v1 verdicts are pinned in the harness too (reverting the
 removal PR re-creates it). For those policies the rollback targets the `-cel`
-document, and reverting the stage-2 PR re-creates the v1 original. All other policies are still at
-stage 1.
+document, and reverting the stage-2 PR re-creates the v1 original.
+`block-deployment-if-rollout-exists` — enforcing as `block-deployment-if-rollout-exists-cel`
+(`[Deny]`, `failurePolicy: Fail`), v1 file `rollout-bypass-prevention.yaml` deleted; its v1 verdicts
+were measured live and are pinned in `V1_ROLLOUT`. It is the one stage-2 policy that calls the API
+server (`resource.List` over `argoproj.io` Rollouts), so under `Fail` a List error — Rollout CRD gone,
+or the `kyverno-admission-controller` SA losing `list rollouts` — denies every Deployment CREATE/UPDATE
+in its 13 money-path namespaces (v1 had the same exposure). Symptom: Deployment applies there fail
+with a Kyverno webhook error naming that policy and a List/forbidden/not-found cause. Fix the CRD or
+RBAC; if that cannot be quick, set that document's `failurePolicy: Ignore` by PR (it then admits on
+error, keeping Deny when the List succeeds). All other policies are still at stage 1.
 Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
 
 ## 5. Related
