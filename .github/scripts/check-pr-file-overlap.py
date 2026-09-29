@@ -133,7 +133,7 @@ def _gh(args):
     cmd = ["gh"] + args
     if args and args[0] != "api":
         cmd += ["-R", REPO]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed (rc={proc.returncode}): {proc.stderr.strip()}")
     try:
@@ -395,15 +395,14 @@ def self_test():
 
     # 7. Exit codes must distinguish the three verdicts. In particular an enumeration
     #    failure is 2, never 0 — a permission-shaped absence must not read as clean.
-    devnull = open(os.devnull, "w")
-    real_stdout, sys.stdout = sys.stdout, devnull  # report() prints; the verdict is the assertion
-    try:
-        clean_rc = report(1, [], [])
-        divergent_rc = report(1, [{"path": "p", "pr": 9, "title": "t",
-                                   "serialized": False, "openapi": False}], [])
-    finally:
-        sys.stdout = real_stdout
-        devnull.close()
+    with open(os.devnull, "w") as devnull:
+        real_stdout, sys.stdout = sys.stdout, devnull  # report() prints; verdict is the assertion
+        try:
+            clean_rc = report(1, [], [])
+            divergent_rc = report(1, [{"path": "p", "pr": 9, "title": "t",
+                                       "serialized": False, "openapi": False}], [])
+        finally:
+            sys.stdout = real_stdout
     check("clean verdict is not 0", clean_rc == 0)
     check("divergent verdict is not 1", divergent_rc == 1)
 
