@@ -123,6 +123,11 @@ kafka:
   # The edge strips the /customer prefix and forwards to the matching service.
 # Customer edge upstream service endpoints + UpstreamClient singleton timeouts.
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   edge:
     account-service-url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
     balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}
@@ -150,6 +155,11 @@ openbank:
     # that API is deployed would stop every business payment. Flip per environment in GitOps.
     business-approvals:
       enforce: ${BUSINESS_APPROVALS_ENFORCE:false}
+    # Client-visible feature flags, published as X-Edge-Features (#10281). standingorders-replace lets an
+    # edit name replacesStandingOrderId; turn it on only after standing-order-service (which does the
+    # atomic swap) is rolled out — an older one would create a second order and cancel nothing.
+    features:
+      standingorders-replace: ${EDGE_FEATURE_STANDINGORDERS_REPLACE:false}
     bank-bic: ${OPENBANK_BANK_BIC:OPENCZPPXXX}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
     party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}

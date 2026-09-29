@@ -84,7 +84,7 @@ spec:
 # `platform`. `dataFrom.extract` copies every key verbatim, preserving the
 # binary PKCS#12 payload byte-for-byte. deletionPolicy: Retain so a transient
 # store/RBAC blip never deletes a live keystore out from under a running pod.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -110,7 +110,7 @@ spec:
 # second service needing this same truststore, this ExternalSecret should be
 # shared rather than duplicated (none exists yet — agent-service is the first
 # Kafka mTLS client in this namespace).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

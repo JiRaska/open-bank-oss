@@ -138,6 +138,20 @@ def _render(chart_dir: str, values: dict) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
+def _pull_ref(chart: str, repo_url: str) -> list[str]:
+    """The `helm pull` reference for an Argo CD Helm source.
+
+    Argo CD reads a scheme-less repoURL (`docker.io/envoyproxy`) as an OCI registry, and
+    `helm pull <chart> --repo <that>` cannot fetch it — the source would be reported
+    unreachable and skipped, i.e. never checked. Pull such a source by its OCI reference.
+    """
+    if repo_url.startswith("oci://"):
+        return ["helm", "pull", f"{repo_url.rstrip('/')}/{chart}"]
+    if "://" not in repo_url:
+        return ["helm", "pull", f"oci://{repo_url.rstrip('/')}/{chart}"]
+    return ["helm", "pull", chart, "--repo", repo_url]
+
+
 def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Path,
                  attempts: int = PULL_RETRY_ATTEMPTS,
                  backoff_seconds: float = PULL_RETRY_BACKOFF_SECONDS) -> str | None:
@@ -149,7 +163,7 @@ def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Pat
     last_stderr = ""
     for attempt in range(1, attempts + 1):
         pull = subprocess.run(
-            ["helm", "pull", chart, "--repo", repo_url, "--version", version,
+            [*_pull_ref(chart, repo_url), "--version", version,
              "--untar", "--untardir", str(chart_root)],
             capture_output=True, text=True,
         )
@@ -416,6 +430,20 @@ def self_test() -> int:
     if shutil.which("helm") is None:
         print("FAIL self-test: `helm` is not on PATH", file=sys.stderr)
         return 1
+
+    oci_cases = {
+        ("gateway-helm", "docker.io/envoyproxy"):
+            ["helm", "pull", "oci://docker.io/envoyproxy/gateway-helm"],
+        ("gateway-helm", "oci://docker.io/envoyproxy/"):
+            ["helm", "pull", "oci://docker.io/envoyproxy/gateway-helm"],
+        ("loki", "https://grafana.github.io/helm-charts"):
+            ["helm", "pull", "loki", "--repo", "https://grafana.github.io/helm-charts"],
+    }
+    for (chart_name, repo), want in oci_cases.items():
+        got = _pull_ref(chart_name, repo)
+        if got != want:
+            print(f"FAIL self-test (pull ref): {repo!r} -> {got}, want {want}", file=sys.stderr)
+            return 1
 
     retry_error = _self_test_pull_retry()
     if retry_error is not None:

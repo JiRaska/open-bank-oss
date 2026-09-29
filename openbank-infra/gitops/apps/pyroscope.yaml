@@ -22,7 +22,9 @@ spec:
   source:
     repoURL: https://grafana.github.io/helm-charts
     chart: pyroscope
-    targetRevision: 1.13.4
+    # 1.21.0 (app 1.21.0) fixes GHSA-m9hq-h476-h2g8 (>= 1.15.2). Last 1.x:
+    # v1 storage stays the default, so no data migration.
+    targetRevision: 1.21.0
     helm:
       releaseName: pyroscope
       valuesObject:

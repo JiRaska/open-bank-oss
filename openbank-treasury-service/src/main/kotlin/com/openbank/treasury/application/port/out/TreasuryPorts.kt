@@ -68,7 +68,17 @@ interface DealRepository {
     /** Outstanding placed principal with [counterpartyId] in [currency], excluding [excludeDealId]. */
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
 
+    /**
+     * Every PENDING_APPROVAL deal carrying a senior limit override, across all counterparties and
+     * currencies. Deliberately NOT grouped by currency here: which limit line an override sits on
+     * is [Deal.limitCurrency], a domain rule the caller applies via [Deal.holdsActiveLimitOverride].
+     */
+    suspend fun pendingLimitOverrides(): List<Deal>
+
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
+
+    /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
+    suspend fun recordJournal(journal: LedgerJournalRef)
 }
 
 interface CounterpartyRepository {

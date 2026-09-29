@@ -5,6 +5,8 @@
 package com.openbank.productcatalog.application
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
@@ -24,11 +26,18 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
-class CatalogNotFoundException(message: String) : RuntimeException(message)
+// #10911 phase 2: extends the libs-domain base so libs-runtime's ResourceNotFoundExceptionMapper
+// handles the 404 with the same "CATALOG_NOT_FOUND" code the deleted local
+// CatalogNotFoundExceptionMapper used. See ProductCatalogExceptionMapperEquivalenceTest.
+class CatalogNotFoundException(message: String) : ResourceNotFoundException(message, code = "CATALOG_NOT_FOUND")
 class CatalogValidationException(val violations: List<SchemaViolation>) : RuntimeException("catalog content is invalid")
 class CatalogPreconditionFailedException(message: String) : RuntimeException(message)
 class CatalogPreconditionRequiredException(message: String) : RuntimeException(message)
-class CatalogConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+// #10911 phase 2: extends the libs-domain base, mapped 409 by ResourceConflictExceptionMapper with
+// the same "CATALOG_CONFLICT" code the deleted local CatalogConflictExceptionMapper used.
+class CatalogConflictException(message: String, cause: Throwable? = null) :
+    ResourceConflictException(message, code = "CATALOG_CONFLICT", cause = cause)
 class CatalogForbiddenException(message: String) : RuntimeException(message)
 
 @ApplicationScoped

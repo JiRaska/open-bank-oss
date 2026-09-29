@@ -116,6 +116,11 @@ mcp:
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`
 # in openbank-libs/governance/agents.yaml, which nothing read before this landed.
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   mcp:
     rate-limit:
       enabled: ${MCP_RATE_LIMIT_ENABLED:true}

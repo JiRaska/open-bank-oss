@@ -10,13 +10,10 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.flags.FeatureDisabledException
 import com.openbank.party.application.port.`in`.PartyMandateRejectedException
 import com.openbank.party.application.port.out.GdprAggregationAuthException
-import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
-import com.openbank.party.application.usecase.PartyNotFoundException
 import com.openbank.party.domain.model.AmlProfileNotApplicableException
 import io.quarkus.security.AuthenticationFailedException
 import io.quarkus.security.ForbiddenException
-import io.quarkus.security.UnauthorizedException
 import io.vertx.pgclient.PgException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -24,33 +21,9 @@ import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import java.time.Instant
 
-@Provider
-class PartyNotFoundMapper : ExceptionMapper<PartyNotFoundException> {
-    override fun toResponse(e: PartyNotFoundException) = Response.status(404)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                404,
-                ErrorCode.NOT_FOUND.code,
-                e.message ?: "Not found",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
-
-@Provider
-class PartyAlreadyExistsMapper : ExceptionMapper<PartyAlreadyExistsException> {
-    override fun toResponse(e: PartyAlreadyExistsException) = Response.status(409)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                409,
-                ErrorCode.CONFLICT.code,
-                e.message ?: "Conflict",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
+// PartyNotFoundException / PartyAlreadyExistsException: mapped by libs-runtime's
+// Resource{NotFound,Conflict}ExceptionMapper since #10911 phase 2 (the exceptions now extend the
+// libs-domain bases) -- see PartyExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 /**
  * ADR-0179: a merge precondition failed (already merged, chain, or the duplicate still owns an
@@ -164,20 +137,9 @@ class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> 
 // @Provider naming an `io.quarkus.security` type would be loaded by ArC in every consumer,
 // including services without quarkus-security on the classpath — the #6240 boot-failure
 // class, enforced by the provider-type-classpath gate.
-@Provider
-class QuarkusUnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
-    override fun toResponse(exception: UnauthorizedException): Response = Response.status(Response.Status.UNAUTHORIZED)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                Response.Status.UNAUTHORIZED.statusCode,
-                "UNAUTHORIZED",
-                "Unauthorized",
-                timestamp = Instant.now(),
-            ),
-        ).build()
-}
-
+// UnauthorizedException -> 401 is libs-runtime's UnauthorizedExceptionMapper (#8993); a local
+// copy for the same type is the #526 non-deterministic collision; removed here to close #10911. The two
+// below have no libs-runtime equivalent yet.
 @Provider
 class QuarkusAuthenticationFailedExceptionMapper : ExceptionMapper<AuthenticationFailedException> {
     override fun toResponse(exception: AuthenticationFailedException): Response =

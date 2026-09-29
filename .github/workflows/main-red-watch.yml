@@ -73,6 +73,9 @@ on:
       # workflow exists to end is back, with nothing else reporting it.
       - "Derived artefact autoheal"
       - "ADR registry"
+      # Builds, signs and pushes the IdP and LLM-gateway images (#11265). A red run on main
+      # means a merged Dockerfile fix (a CVE bump) is not in the registry and not deployed.
+      - "Platform images"
       - "Agent charter registry"
       - "AI governance snapshot"
       - "API contract post-merge guard"

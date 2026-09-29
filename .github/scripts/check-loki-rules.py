@@ -23,7 +23,7 @@ which is exactly the class of failure these rules exist to catch, so relying on 
 
 Structural validation cannot substitute: the failure is in the LogQL *expression*, and only a LogQL
 parser can judge it. Loki ships no `lokitool` in its container image (verified against
-grafana/loki:3.6.7 — `usr/bin/loki` is the only binary), so the parser we can reach is the ruler
+grafana/loki:3.7.8 — `usr/bin/loki` is the only binary), so the parser we can reach is the ruler
 itself.
 
 Usage:
@@ -56,7 +56,7 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
-LOKI_IMAGE = "grafana/loki:3.6.7"
+LOKI_IMAGE = "grafana/loki:3.7.8"
 PORT = 13199
 CONTAINER = "openbank-loki-rule-check"
 
