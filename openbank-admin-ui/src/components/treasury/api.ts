@@ -9,6 +9,7 @@
 import type { z } from 'zod'
 import { svcUrl } from '@/lib/services/bff'
 import { getJson, type Loaded } from '@/components/balance-sheet/api'
+import { nostroStatementSchema, type NostroStatement as NostroStatementOut } from '@/components/treasury/contracts'
 
 export const TREASURY = 'treasury-service'
 export const TREASURY_BASE = '/api/v1/treasury'
@@ -71,3 +72,38 @@ export type DealAction = 'submit' | 'approve' | 'reject' | 'cancel' | 'settle' |
 /** POST /deals/{id}/{action}; reject, reverse and override-limit carry `{reason}`. */
 export const dealActionUrl = (dealId: string, action: DealAction) =>
   treasuryUrl(`/deals/${encodeURIComponent(dealId)}/${action}`)
+
+/** POST /nostro/statements, GET /nostro/statements/{id}/reconciliation (#10896). */
+export const nostroStatementsUrl = () => treasuryUrl('/nostro/statements')
+export const nostroReconciliationUrl = (id: string) => treasuryUrl(`/nostro/statements/${encodeURIComponent(id)}/reconciliation`)
+
+/**
+ * POST a camt.053 XML body with the required Idempotency-Key (400 without it, same as every other
+ * treasury write). Unlike {@link postJson} the body is bytes, not JSON, so this sends its own
+ * content-type instead of `application/json` — the BFF proxy forwards both unchanged (FORWARD_HEADERS).
+ */
+export async function postNostroStatement(xml: ArrayBuffer, idempotencyKey: string = newIdempotencyKey()): Promise<WriteResult<NostroStatementOut>> {
+  try {
+    const res = await fetch(nostroStatementsUrl(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/xml', 'idempotency-key': idempotencyKey },
+      body: xml,
+    })
+    if (res.ok) {
+      const parsed = nostroStatementSchema.safeParse(await res.json().catch(() => null))
+      return parsed.success
+        ? { ok: true, data: parsed.data }
+        : { ok: false, status: res.status, kind: 'unavailable', code: null, message: null }
+    }
+    const payload = await res.json().catch(() => null) as { error?: unknown; message?: unknown } | null
+    const code = typeof payload?.error === 'string' ? payload.error : null
+    const message = typeof payload?.message === 'string' ? payload.message : null
+    if (res.status === 401 || res.status === 403) return { ok: false, status: res.status, kind: 'forbidden', code: null, message: null }
+    if (res.status === 400 || res.status === 409) {
+      return { ok: false, status: res.status, kind: 'refused', code, message: message ?? (code && code.includes(' ') ? code : null) }
+    }
+    return { ok: false, status: res.status, kind: 'unavailable', code: null, message: null }
+  } catch {
+    return { ok: false, status: 0, kind: 'unavailable', code: null, message: null }
+  }
+}

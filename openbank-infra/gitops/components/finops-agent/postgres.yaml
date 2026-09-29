@@ -36,6 +36,19 @@ spec:
   # operator has no standby and restarts either way, so this is free there.
   primaryUpdateMethod: switchover
   primaryUpdateStrategy: unsupervised
+  # ADR-0325 fleet wave: required anti-affinity + zone spread. Changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: finops-db
   # ECR pull-through instead of ghcr.io (issue #1290). CNPG instance pods are (correctly) excluded
   # from the Kyverno ecr-pull-through-rewrite policy — the operator reconciles the pod image against
   # spec.imageName, so a mutating webhook would make the pod permanently drift. Setting the ref here

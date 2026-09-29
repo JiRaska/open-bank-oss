@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # M2M client for the outbound account/transaction/balance reads done during period close +
   # reconciliation (those upstreams are role-gated; without a bearer they 401). client_credentials
   # on openbank-services (ROLE_OPERATOR), attached by OidcClientRequestReactiveFilter on the clients.
@@ -57,8 +55,6 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
-    tls:
-      verification: none
     # #10486 batch 7: the booked-entries search (transaction.search) no longer rides the shared
     # openbank-services principal. TransactionRestClient selects this NAMED client (@OidcClientFilter("m2m")),
     # so its principal is service-account-openbank-statement (ROLE_API only), granted by identity in
@@ -116,11 +112,16 @@ quarkus:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:

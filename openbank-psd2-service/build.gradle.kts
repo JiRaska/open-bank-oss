@@ -54,7 +54,6 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
-
     testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract test (ADR-0063, issue #2255 dimension C3): psd2 is a real consumer of
     // tpp-registry's eIDAS licence gate, GET /api/v1/tpp-registry/check.
@@ -84,3 +83,11 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Forked test JVM heap. With PisIdempotencyFingerprintIT's profile this module boots Quarkus once
+// more, and the default 512m test heap then dies with OutOfMemoryError mid-suite (locally, and in CI
+// as a hung executor cancelled at the job timeout). Same per-module override as account-service;
+// see its comment for why this is not a fleet default.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}

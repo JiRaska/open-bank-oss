@@ -39,6 +39,7 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.rest.assured.kotlin)
     // @TestSecurity: SddOutboxAtomicityIT (#8353) drives POST /mandates and POST /mandates/{id}/suspend,

@@ -209,6 +209,24 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  money_rounding_inline_construction:
+    detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
+    require:
+      - "rounding goes through com.openbank.libs.domain.money.RoundingPolicy (ADR-0318: a named, registered policy instead of an inline mode)"
+      - "no new inline site; the per-service baseline only shrinks"
+    gate: money-rounding-inline-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
+    ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  raw_http_client_construction:
+    detect: ["java.net.http.HttpClient.newBuilder() / HttpClient.newHttpClient() in any openbank-*/src/main outside openbank-libs-*"]
+    require:
+      - "outbound HTTP goes through com.openbank.libs.security.SafeHttpClient (ADR-0320 P1: host allowlist, resolved-address check, pinned connection, no redirects)"
+      - "no new raw construction site; the per-file baseline only shrinks"
+    gate: raw-http-client-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0320: enforce once P1 has one migrated consumer
+    ci_producer: ".github/scripts/check-raw-http-client.py"
   resilience_profile_declaration:
     detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
     require:
@@ -1800,12 +1818,21 @@ architecture:
   # ENFORCED by .github/scripts/check-domain-purity.py (Validate manifests job):
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
-  # the whole openbank-libs-domain module; openbank-libs-runtime is module-exempt
+  # the whole openbank-libs-domain module and its ADR-0317 context modules
+  # (openbank-libs-lending, openbank-libs-iso20022); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
   # in a libs-domain package the old `*/domain/*` scope never opened.
   ci_producer: ".github/scripts/check-domain-purity.py"
+  # ADR-0317: bounded-context packages (lending, decision, iso20022, ...) live in
+  # openbank-libs-<context> modules, never back in openbank-libs-domain; core never depends on
+  # a context module; every runtime libs module is listed in libs-change-dependents.sh
+  # LIBS_MODULES. Advisory through phases 1-3, enforced once phase 4 lands.
+  libs_core_purity:
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0317 phase 4
+    ci_producer: ".github/scripts/check-libs-core-purity.py"
 
 # ---------------------------------------------------------------------------------------
 # OPA bundle sync (issue #1184). Keep terse: this file is embedded verbatim into every
@@ -3430,8 +3457,9 @@ shared_m2m_write_prohibition:
 #
 # The gate derives its role scope from every Keycloak realm JSON in the tree, so it does not
 # need to be told which roles matter. Worth knowing while reading this: the three realms do
-# NOT agree today — the deployed gitops template gives `service-account-openbank-services`
-# only ROLE_API, while the docker and CI realms also give it ROLE_OPERATOR, and
+# NOT agree today — the deployed gitops template and the docker realm give
+# `service-account-openbank-services` only ROLE_API (docker dropped ROLE_OPERATOR with #10486's
+# final step), while the CI realm, the api-fuzz harness identity, still gives it ROLE_OPERATOR, and
 # `service-account-openbank-edge` carries ROLE_OPERATOR in the deployed template. The union
 # is used, because a role assignment that exists in any environment is an exposure there.
 shared_m2m_matrix_write_grants:
@@ -3439,85 +3467,11 @@ shared_m2m_matrix_write_grants:
   enforced: enforced
   ci_producer: ".github/scripts/check-matrix-write-grants.py"
   adr: ADR-0223
-  declared:
-    - account.approval.decide
-    - account.authorize
-    - account.close
-    - account.create
-    - account.freeze
-    - account.search
-    - account.unfreeze
-    - account.update
-    - balance.approval.decide
-    - balance.credit
-    - balance.debit
-    - balance.hold
-    - balance.holdRelease
-    - balance.initialize
-    - balance.reconciliation.run
-    - billing.approval.decide
-    - billing.post
-    - billing.reverse
-    - clearingBatch.approval.decide
-    - clearingBatch.reconcile
-    - clearingBatch.settle
-    - clearingBatch.submit
-    - clearingBatch.triggerCycle
-    - fraud.score
-    - fx.convert
-    - identity.case.decide
-    - identity.case.reopen
-    - identity.eudi.issue
-    - identity.eudi.poll
-    - identity.eudi.request
-    - identity.eudi.revoke
-    - identity.eudi.verify
-    - identity.link
-    - identity.register
-    - identity.resolve
-    - interest.create
-    - interest.delete
-    - interest.trigger
-    - kyb.case.reject
-    - kyb.case.review.resolve
-    - kyb.lookup
-    - ledger.create
-    - ledger.replay
-    - ledger.reverse
-    - ledger.trigger
-    - lending.approve
-    - lending.collateralDecide
-    - lending.collateralRegister
-    - lending.create
-    - lending.disburse
-    - lending.repay
-    - lending.reschedule
-    - lending.writeoff
-    - merchant.delete
-    - merchant.update
-    - opsmessage.approval.decide
-    - opsmessage.compose
-    - party.approval.decide
-    - party.consent.update
-    - party.mandate.grant
-    - party.mandate.revoke
-    - party.merge
-    - party.update
-    - sanctions.approval.decide
-    - sanctions.clear
-    - sanctions.create
-    - sanctions.trigger
-    - sanctions.update
-    - sctInstPayment.approval.decide
-    - sctInstPayment.create
-    - sepaPayment.approval.decide
-    - sepaPayment.create
-    - sepaPayment.handleReturn
-    - sepaPayment.transitionStatus
-    - settlement.create
-    - swift.approval.decide
-    - transaction.create
-    - transaction.reverse
+  # #3765: EMPTY by construction. rest.rego's matrix-allows now excludes every
+  # service-account principal (ADR-0223), so no write is M2M-reachable through the matrix and
+  # check-matrix-write-grants.py reports any entry here as stale. If that exclusion is ever
+  # removed, the gate demands a declaration per reachable write again.
+  declared: []
 
 # Docker-dev and CI Keycloak realm JSONs vs the deployed gitops template (issue #2540
 # An action whose OWN allow rule in rest.rego excludes service-account principals
@@ -3549,22 +3503,10 @@ matrix_sa_excluded_action_grants:
   enforced: enforced
   ci_producer: ".github/scripts/check-matrix-excluded-actions.py"
   adr: ADR-0176                          # both entries are that ADR's operator-messaging actions
-  declared:
-    - action: opsmessage.compose
-      roles: [ROLE_OPERATOR, ROLE_ADMIN]   # ROLE_ADMIN reaches it through the single inherits hop
-      rule: operator-compose-message
-      reason: >
-        ADR-0176 D5 wrote the exclusion so a machine cannot compose customer messages, and the
-        matrix grant predates the measurement that showed matrix-allows bypasses it. Unresolved:
-        needs a decision on whether operator messaging keeps a machine-reachable path at all.
-      issue: 3765
-    - action: opsmessage.approval.decide
-      roles: [ROLE_OPERATOR, ROLE_ADMIN]
-      rule: operator-decide-message-approval
-      reason: >
-        Checker half of the same four-eyes flow, same cause. Sharper than its sibling: this is the
-        approval decision, so a machine-reachable path here is a machine that can approve.
-      issue: 3765
+  # #3765: EMPTY. matrix-allows itself now excludes service-account principals, so the matrix
+  # can no longer defeat a rule's `not startswith(..., "service-account-")`; the two opsmessage
+  # contradictions this register recorded are resolved in favour of the rego rules.
+  declared: []
 
 # gate-scope follow-up). check-roles-allowed-realm.py, check-realm-role-parity.py,
 # check-realm-user-role-parity.py and check-realm-template-importable.py all glob only
@@ -3575,6 +3517,24 @@ matrix_sa_excluded_action_grants:
 # Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
 # realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
 # third, unreviewed answer to "what does the shared client hold".
+field_protection:
+  # ADR-0320 P3. Reversible field encryption and deterministic tokenization go through
+  # com.openbank.libs.security.FieldProtector (libs-domain port; OpenBaoTransitFieldProtector
+  # in libs-runtime, a plain class, no CDI bean; the test-only LocalAesGcmFieldProtector lives in
+  # openbank-libs-testing so no src/main can produce it). tokenize
+  # delegates to the ADR-0189/ADR-0072 BlindIndex — no second HMAC scheme.
+  detect: ["<service>/src/main/**/*.kt", "<service>/src/main/**/*.java", "<service>/src/main/**/*.sql"]
+  require:
+    - "no javax.crypto Cipher/Mac/SecretKeySpec/KeyGenerator, BouncyCastle, Tink, X-Vault-Token or OpenBao Transit path, and no pgp_sym_encrypt in SQL, in a service's src/main outside the shrink-only baseline"
+    - "ciphertext keeps the Transit `vault:v<N>:` envelope; every failure throws FieldProtectionException (fail closed)"
+  gate: field-crypto-in-libs
+  baseline: ".github/scripts/field-crypto-in-libs-baseline.txt"
+  # ADVISORY until card-issuance (first consumer, ADR-0262) migrates, per ADR-0320's
+  # advisory-first convention for P1/P3 gates.
+  enforced: advisory
+  target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
+  ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
@@ -4198,6 +4158,7 @@ security_sensitive_paths:
     cardholder: []
   openbank-sanctions-service:
     auth_crypto_payment:
+      - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsChangePublisherImpl.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
@@ -4291,6 +4252,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*SchemeAccepted*.kt"
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/nostro/**"
+      - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
     pii:

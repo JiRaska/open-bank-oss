@@ -64,6 +64,10 @@ class ConsentEventsTest {
         val node = objectMapper.readTree(objectMapper.writeValueAsString(event))
         assertThat(node.get("eventType").asText()).isEqualTo("ConsentGranted")
         assertThat(node.get("sourceService").asText()).isEqualTo("consent-service")
+        assertThat(node.get("aggregateType").asText()).isEqualTo("Consent")
+        assertThat(node.get("version").asLong()).isEqualTo(1)
+        assertThat(node.get("granteeId").asText()).isEqualTo("tpp-1")
+        assertThat(node.get("scopes").map { it.asText() }).containsExactly("ACCOUNTS_READ")
     }
 
     @Test
@@ -80,6 +84,32 @@ class ConsentEventsTest {
         val node = objectMapper.readTree(objectMapper.writeValueAsString(event))
         assertThat(node.get("eventType").asText()).isEqualTo("ConsentRevoked")
         assertThat(node.get("sourceService").asText()).isEqualTo("consent-service")
+        assertThat(node.get("aggregateType").asText()).isEqualTo("Consent")
+        assertThat(node.get("version").asLong()).isEqualTo(1)
+        assertThat(node.get("granteeId").asText()).isEqualTo("tpp-1")
+        assertThat(node.get("scopes").map { it.asText() }).containsExactly("ACCOUNTS_READ")
+    }
+
+    @Test
+    fun `ConsentSuperseded names the replacement without disguising it as revoked access`() {
+        val replacementId = UUID.randomUUID()
+        val event = ConsentSuperseded(
+            aggregateId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            granteeId = "tpp-1",
+            scopes = setOf(ConsentScope.ACCOUNTS_READ),
+            supersededBy = replacementId,
+            occurredAt = now,
+        )
+
+        val node = objectMapper.readTree(objectMapper.writeValueAsString(event))
+        assertThat(node.get("eventType").asText()).isEqualTo("ConsentSuperseded")
+        assertThat(node.get("sourceService").asText()).isEqualTo("consent-service")
+        assertThat(node.get("aggregateType").asText()).isEqualTo("Consent")
+        assertThat(node.get("version").asLong()).isEqualTo(1)
+        assertThat(node.get("granteeId").asText()).isEqualTo("tpp-1")
+        assertThat(node.get("scopes").map { it.asText() }).containsExactly("ACCOUNTS_READ")
+        assertThat(node.get("supersededBy").asText()).isEqualTo(replacementId.toString())
     }
 
     @Test

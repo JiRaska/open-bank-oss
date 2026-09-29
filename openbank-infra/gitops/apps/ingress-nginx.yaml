@@ -44,17 +44,26 @@ spec:
             # Strip the framework fingerprint (Next.js, Express) from every upstream
             # response — what k8s/base's `more_clear_headers` snippet did per host.
             hide-headers: "X-Powered-By"
-            allow-snippet-annotations: "true"
-            # Since ingress-nginx v1.12 (post CVE-2023-5043/5044), snippet
-            # annotations are classified "Critical" risk and are REJECTED unless
-            # the risk level is raised — even with allow-snippet-annotations=true.
-            # Without this, controller v1.15.1 drops every Ingress carrying a
-            # configuration-snippet/server-snippet (admin-ui security headers, the
-            # Keycloak /admin block) from nginx.conf, so those hosts fall back to
-            # the fake default cert ("Kubernetes Ingress Controller Fake
-            # Certificate"). Critical is acceptable on this single-tenant cluster;
-            # re-evaluate for multi-tenant prod (prefer dropping snippets there).
-            annotations-risk-level: "Critical"
+            # ── Snippets OFF, annotation risk at the controller default (ADR-0324) ──
+            # A snippet annotation is raw nginx (or ModSecurity) config injected by
+            # whoever can write an Ingress, into a controller that can list every
+            # Secret in the cluster — the CVE-2021-25742 / CVE-2023-5043 class. This
+            # controller is also archived upstream and gets no more fixes. Every
+            # former snippet now has a typed replacement: HSTS/nosniff/hide-headers
+            # above, per-host headers via `custom-headers` (Medium), the Keycloak
+            # admin block via `denylist-source-range` (Medium), the WAF policy via
+            # the mounted modsecurity.conf. Every annotation still in the repo is at
+            # most High (auth-url, auth-signin), so High admits all of them.
+            # Both values are the controller defaults, spelled out so they cannot
+            # drift back quietly.
+            # FAILURE MODE TO KNOW: the admission webhook is off (below), so an
+            # Ingress carrying a Critical annotation is not rejected at apply — the
+            # controller silently DROPS the whole Ingress from nginx.conf and the
+            # host falls back to the fake default certificate. The Kyverno policy
+            # components/kyverno/deny-nginx-snippet-annotations.yaml turns that into a
+            # loud admission denial (ArgoCD SyncFailed) instead.
+            allow-snippet-annotations: "false"
+            annotations-risk-level: "High"
           # Headers that are correct on EVERY response of every host, API or UI:
           # rendered once at http{} level (more_set_headers, inherited by every
           # location and appended to a location's own custom-headers).
@@ -146,19 +155,18 @@ spec:
           # multi-tenant and validation matters.
           admissionWebhooks:
             enabled: false
-          # Allow configuration-snippet and server-snippet annotations on Ingress
-          # objects — required for security headers (more_set_headers) and the
-          # Keycloak admin path block (location ~* ^/admin { return 403 }).
-          # Safe for this single-tenant cluster; re-evaluate for multi-tenant prod.
-          allowSnippetAnnotations: true
+          # Chart-level switch for the same thing as allow-snippet-annotations
+          # above. When true the chart renders its own `allow-snippet-annotations:
+          # "true"` next to the one in `config`; false renders nothing, leaving the
+          # explicit "false" above as the single source.
+          allowSnippetAnnotations: false
           service:
             type: LoadBalancer
             # Local: the NLB delivers only to nodes running a controller replica
             # (health-checked on healthCheckNodePort) and there is no kube-proxy SNAT,
-            # so nginx sees the real client IP. Required by the per-host source
-            # allow-list on internal Ingresses (ADR-0324 mixed edge,
-            # edge-internal-host-allowlist); with Cluster every request arrived from a
-            # node IP. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
+            # so nginx sees the real client IP (rate limits, access logs); with Cluster
+            # every request arrived from a node IP. The sandbox edge is deliberately
+            # public (owner decision 2026-09-29): no source allow-list is applied. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
             # stays off (inter-AZ data cost): the NLB drops an AZ with no healthy
             # target from its DNS answers. Hostnames come from external-dns, so nothing
             # pins a single NLB IP any more (the old sslip.io reason for Cluster).

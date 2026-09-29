@@ -25,6 +25,9 @@ test('finance sees the snapshot list with the synthetic provenance label', async
   await expect(main.getByText('2026-09-30')).toBeVisible({ timeout: 20_000 })
   await expect(main.getByText(/Syntetická data|Synthetic data/)).toBeVisible()
   await expect(main.getByRole('button', { name: /Sestavit snímek|Build snapshot/ })).toHaveCount(0)
+  await expect(main.getByRole('heading', { name: /Riziko začíná|Risk starts/ })).toBeVisible()
+  await expect(main.getByRole('link', { name: /Výnosové křivky|Curve sets/ })).toBeVisible()
+  await expect(main.getByLabel(/Přehled rizika|Risk overview/).getByText('1', { exact: true })).toBeVisible()
 })
 
 test('ledger backfill lists requests and offers approve on a PROPOSED request only', async ({ page }) => {

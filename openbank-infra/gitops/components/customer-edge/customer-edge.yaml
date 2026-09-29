@@ -65,7 +65,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8d6fca40a84c3a9f"
+        openbank.tech/policy-checksum: "9675477528ddf19d"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -81,7 +81,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-f6316599
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-7ccd9bde
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -184,6 +184,11 @@ spec:
             # cannot be evaluated refuses the payment); on now that delegation-service serves
             # /api/v1/entities/{id}/signing/* in this environment.
             - name: BUSINESS_APPROVALS_ENFORCE
+              value: "true"
+            # #10281 standing-order edit-by-replace, published to clients as X-Edge-Features. Turn on only
+            # once standing-order-service runs an image containing the atomic replace (#10543): an
+            # older one ignores replacesStandingOrderId and would create a second order.
+            - name: EDGE_FEATURE_STANDINGORDERS_REPLACE
               value: "true"
             # ADR-0284: business onboarding proxy + the profile-switch mandate check (via party-service).
             - name: KYB_SERVICE_URL

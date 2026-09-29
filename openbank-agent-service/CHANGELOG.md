@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.27.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.1...agent-service-v1.27.2) (2026-09-29)
+
+
+### Security
+
+* **agent:** own M2M identities for the reads that still needed ROLE_OPERATOR ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 8) ([#11454](https://github.com/JiRaska/open-bank-oss/issues/11454)) ([9d20502](https://github.com/JiRaska/open-bank-oss/commit/9d205029f5f71b15427134a8e7140201f63ec13d))
+
+## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.0...agent-service-v1.27.1) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.2...agent-service-v1.27.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** verify unified approval inbox identity and audit context ([#11400](https://github.com/JiRaska/open-bank-oss/issues/11400)) ([a12d9be](https://github.com/JiRaska/open-bank-oss/commit/a12d9be97efa1af05460899e39d5c3baa0b965b0))
+
 ## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.1...agent-service-v1.26.2) (2026-09-23)
 
 

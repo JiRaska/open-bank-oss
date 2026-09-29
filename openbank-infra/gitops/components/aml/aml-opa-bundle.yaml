@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "35d0391212c64b6d"
+    openbank.tech/policy-checksum: "a4b7808cee661637"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -667,6 +676,15 @@ data:
     		"service-account-openbank-fx",
     	}
     	input.action == "amlCase.create"
+    }
+
+    # #10486 batch 8: agent-service's aml_list_cases / aml_get_case tools (AmlServiceClient, query.compliance.readonly, held by the compliance-officer charter only; the agent gate refuses every other agent before the call). It used to reach these reads on the shared
+    # service-account-openbank-services principal's ROLE_OPERATOR; it now presents its own identity
+    # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
+    allowed_reasons contains "service-agent-aml-case-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-agent"
+    	input.action in {"amlCase.list", "amlCase.read"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

@@ -22,7 +22,7 @@ import {
 } from '@/components/treasury/contracts'
 import {
   distinctCounterparties, eligibleCounterparties, exceedsHeadroom, headroomFor, isAssetProduct,
-  productLabel, refusalText, STATE_TONE, stateLabel,
+  isCnbFacility, nextBusinessDay, productLabel, refusalText, STATE_TONE, stateLabel,
 } from '@/components/treasury/model'
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
 import { bankToday, isIsoDate } from '@/components/balance-sheet/model'
@@ -64,11 +64,12 @@ function NewDeal() {
     })()
   }, [])
 
-  const facility = product === 'CNB_DEPOSIT_FACILITY'
+  const facility = isCnbFacility(product)
+  const lombard = product === 'CNB_LOMBARD'
   const options = useMemo(() => (rows ? distinctCounterparties(eligibleCounterparties(rows, product)) : []), [rows, product])
 
-  // Keep the form consistent with the product's rules (Deal.kt): the facility is CZK against ČNB,
-  // always overnight; interbank products never face the central bank.
+  // Keep the form consistent with the product's rules (Deal.kt): a ČNB facility is CZK against
+  // ČNB, always overnight; interbank products never face the central bank.
   useEffect(() => {
     if (facility) { setCurrency('CZK'); setCounterpartyId(CNB_COUNTERPARTY_ID); setMaturityDate('') }
     else setCounterpartyId(prev => (prev === CNB_COUNTERPARTY_ID ? '' : prev))
@@ -79,9 +80,10 @@ function NewDeal() {
   const headroomRow = rows && counterpartyId ? headroomFor(rows, counterpartyId, currency) : null
   const overHeadroom = exceedsHeadroom(product, principalValue, headroomRow)
   const selected = options.find(c => c.counterpartyId === counterpartyId)
+  const previewMaturity = facility ? nextBusinessDay(valueDate) : ''
 
   const valid = counterpartyId !== '' && principal !== '' && Number.isFinite(principalValue) && principalValue > 0
-    && rate !== '' && Number.isFinite(rateValue) && rateValue >= 0 && isIsoDate(valueDate)
+    && rate !== '' && Number.isFinite(rateValue) && (lombard ? rateValue > 0 : rateValue >= 0) && isIsoDate(valueDate)
     && (facility || maturityDate === '' || (isIsoDate(maturityDate) && maturityDate > valueDate))
 
   const create = async () => {
@@ -162,8 +164,8 @@ function NewDeal() {
             <input className="input" type="number" min="0" step="0.01" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} aria-label={t('Jistina', 'Principal')} disabled={draft !== null} />
           </label>
           <label style={field}>
-            {t('Sazba % p.a. (ACT/360)', 'Rate % p.a. (ACT/360)')}
-            <input className="input" type="number" min="0" step="0.0001" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} aria-label={t('Roční sazba v procentech', 'Annual rate in percent')} disabled={draft !== null} />
+            {lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Sazba % p.a. (ACT/360)', 'Rate % p.a. (ACT/360)')}
+            <input className="input" type="number" min={lombard ? '0.0001' : '0'} step="0.0001" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} aria-label={lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Roční sazba v procentech', 'Annual rate in percent')} disabled={draft !== null} />
           </label>
           <label style={field}>
             {t('Datum valuty', 'Value date')}
@@ -177,8 +179,13 @@ function NewDeal() {
             </label>
           )}
           {facility && (
-            <p style={{ fontSize: 12, color: 'var(--text-secondary)', alignSelf: 'end' }}>
-              {t('Depozitní facilita je vždy přes noc a pouze v CZK.', 'The deposit facility is always overnight and CZK only.')}
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', alignSelf: 'end' }} data-testid="facility-maturity-preview">
+              {lombard
+                ? t('Lombardní úvěr ČNB je vždy přes noc a pouze v CZK.', 'The ČNB lombard facility is always overnight and CZK only.')
+                : t('Depozitní facilita je vždy přes noc a pouze v CZK.', 'The deposit facility is always overnight and CZK only.')}
+              {previewMaturity && (
+                <> {t(`Splatnost (další pracovní den): ${previewMaturity}.`, `Maturity (next business day): ${previewMaturity}.`)}</>
+              )}
             </p>
           )}
         </div>
