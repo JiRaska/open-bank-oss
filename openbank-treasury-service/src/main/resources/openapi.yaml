@@ -15,7 +15,10 @@ info:
   #        ROLE_TREASURY_APPROVER) and GET /nostro/statements/{id}/reconciliation.
   # 1.8.0: additive — DraftDealRequest.inputs / Deal.inputs: the JSON object an AI agent's draft was
   #        built from, required with `rationale` when an agent drafts (ADR-0315 D10).
-  version: 1.8.0
+  # 1.10.0: version bump only — 1.8.0/1.9.0 are claimed by other open PRs against this spec
+  #        (#11048, #11041 at 1.8.0; #11113 at 1.9.0); this PR takes the next free slot above
+  #        live main (1.7.0) and every open PR's claimed version.
+  version: 1.10.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
