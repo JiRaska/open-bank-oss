@@ -11,16 +11,20 @@ import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import io.vertx.mutiny.pgclient.PgPool
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
@@ -32,6 +36,7 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** Exercise the migration-installed trigger through the same independent PgPool used by imports. */
@@ -43,6 +48,9 @@ class SanctionsChangeJournalIT {
 
     @Inject
     lateinit var publisher: SanctionsChangePublisher
+
+    @Inject
+    lateinit var publicationFence: SanctionsImportPublicationFence
 
     @Inject
     lateinit var outbox: SanctionsOutboxRepository
@@ -95,6 +103,14 @@ class SanctionsChangeJournalIT {
                 .awaitSuspending().iterator().next().getString("primary_name")
         }
         assertThat(name).isEqualTo("Example Person")
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `refresh service resolves its JDBC fence through CDI`() {
+        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/FATF_HIGH_RISK/refresh")
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.jsonPath().getString("listType")).isEqualTo(SanctionsListType.FATF_HIGH_RISK.name)
     }
 
     @Test
@@ -197,6 +213,136 @@ class SanctionsChangeJournalIT {
         assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.WITHHELD)
         assertThat(journalCount()).isEqualTo(1)
         assertThat(eventCount("SANCTIONS_LIST_CHANGE_STORM")).isEqualTo(1)
+    }
+
+    @Test
+    fun `publisher defers between committed import batches and guards their complete diff`() {
+        seedPopulation()
+        val listId = onEventLoop { listId(SanctionsListType.PEP_GLOBAL) }
+        val outcomes = runBlocking {
+            publicationFence.duringRefresh(SanctionsListType.PEP_GLOBAL) { permit ->
+                changeRange(1, 400, "Changed A")
+                val midImport = publish()
+                changeRange(401, 800, "Changed B")
+                midImport to onEventLoop {
+                    publisher.publishFenced(listId, SanctionsListType.PEP_GLOBAL, permit)
+                }
+            }
+        }
+        assertThat(outcomes.first).isEqualTo(SanctionsPublicationOutcome.DEFERRED)
+        assertThat(outcomes.second).isEqualTo(SanctionsPublicationOutcome.WITHHELD)
+        assertThat(journalCount()).isEqualTo(800)
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isZero()
+        assertThat(eventCount("SANCTIONS_LIST_CHANGE_STORM")).isEqualTo(1)
+        assertThat(payloads("SANCTIONS_LIST_CHANGE_STORM").single()["changeCount"].asLong()).isEqualTo(800)
+        assertThat(journalCount()).isEqualTo(800)
+    }
+
+    @Test
+    fun `smaller completed refresh publishes once after a mid-import attempt`() {
+        seedPopulation()
+        val listId = onEventLoop { listId(SanctionsListType.PEP_GLOBAL) }
+        val outcomes = runBlocking {
+            publicationFence.duringRefresh(SanctionsListType.PEP_GLOBAL) { permit ->
+                changeRange(1, 200, "Changed A")
+                val midImport = publish()
+                changeRange(201, 400, "Changed B")
+                midImport to onEventLoop {
+                    publisher.publishFenced(listId, SanctionsListType.PEP_GLOBAL, permit)
+                }
+            }
+        }
+        assertThat(outcomes.first).isEqualTo(SanctionsPublicationOutcome.DEFERRED)
+        assertThat(outcomes.second).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isPositive()
+        assertThat(payloads("SANCTIONS_LIST_CHANGED").sumOf { it["changeCount"].asInt() }).isEqualTo(400)
+        assertThat(eventCount("SANCTIONS_LIST_CHANGE_STORM")).isZero()
+        assertThat(journalCount()).isZero()
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.NO_CHANGES)
+    }
+
+    @Test
+    fun `two queued refreshes publish their separate subthreshold diffs`() {
+        seedPopulation()
+        val type = SanctionsListType.PEP_GLOBAL
+        val listId = onEventLoop { listId(type) }
+        val secondStarted = CountDownLatch(1)
+        lateinit var second: CompletableFuture<SanctionsPublicationOutcome>
+        val first = runBlocking {
+            publicationFence.duringRefresh(type) { permit ->
+                changeRange(1, 400, "First refresh")
+                second = CompletableFuture.supplyAsync {
+                    secondStarted.countDown()
+                    runBlocking {
+                        publicationFence.duringRefresh(type) { nextPermit ->
+                            changeRange(401, 800, "Second refresh")
+                            onEventLoop { publisher.publishFenced(listId, type, nextPermit) }
+                        }
+                    }
+                }
+                assertThat(secondStarted.await(5, TimeUnit.SECONDS)).isTrue()
+                assertThat(awaitAdvisoryWait()).isTrue()
+                assertThat(journalCount()).isEqualTo(400)
+                onEventLoop { publisher.publishFenced(listId, type, permit) }
+            }
+        }
+        assertThat(first).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(second.get(15, TimeUnit.SECONDS)).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(eventCount("SANCTIONS_LIST_CHANGE_STORM")).isZero()
+        assertThat(payloads("SANCTIONS_LIST_CHANGED").sumOf { it["changeCount"].asInt() }).isEqualTo(800)
+        assertThat(journalCount()).isZero()
+    }
+
+    @Test
+    fun `failed import releases the fence without losing committed journal evidence`() {
+        seedPopulation()
+        assertThatThrownBy {
+            runBlocking {
+                publicationFence.duringRefresh(SanctionsListType.PEP_GLOBAL) {
+                    changeRange(1, 200, "Committed before failure")
+                    error("feed ended early")
+                }
+            }
+        }.hasMessageContaining("feed ended early")
+        assertThat(journalCount()).isEqualTo(200)
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(journalCount()).isZero()
+    }
+
+    private suspend fun listId(listType: SanctionsListType): UUID =
+        pool.preparedQuery("SELECT id FROM sanctions_lists WHERE list_type = $1")
+            .execute(io.vertx.mutiny.sqlclient.Tuple.of(listType.name))
+            .awaitSuspending().iterator().next().getUUID("id")
+
+    private fun seedPopulation() {
+        execute(
+            "INSERT INTO sanctions_entries (list_type, external_id, primary_name) " +
+                "SELECT 'PEP_GLOBAL', 'source-' || n, 'Baseline ' || n FROM generate_series(1, 1000) n",
+        )
+        execute("DELETE FROM sanctions_change_journal")
+    }
+
+    private fun changeRange(first: Int, last: Int, name: String) {
+        execute(
+            "UPDATE sanctions_entries SET primary_name = '$name' WHERE external_id IN " +
+                "(SELECT 'source-' || n FROM generate_series($first, $last) n)",
+        )
+    }
+
+    private fun awaitAdvisoryWait(): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            val waiting = onEventLoop {
+                pool.query(
+                    "SELECT EXISTS(SELECT 1 FROM pg_stat_activity " +
+                        "WHERE datname = current_database() AND wait_event_type = 'Lock' " +
+                        "AND wait_event = 'advisory') AS waiting",
+                ).execute().awaitSuspending().iterator().next().getBoolean("waiting")
+            }
+            if (waiting) return true
+            Thread.sleep(20)
+        }
+        return false
     }
 
     @Test

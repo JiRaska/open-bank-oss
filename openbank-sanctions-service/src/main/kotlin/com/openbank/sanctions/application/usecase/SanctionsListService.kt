@@ -9,6 +9,7 @@ import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
@@ -25,6 +26,7 @@ class SanctionsListService(
     private val importer: SanctionsImportService,
     private val clock: Clock,
     private val publisher: SanctionsChangePublisher,
+    private val publicationFence: SanctionsImportPublicationFence? = null,
 ) {
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
@@ -34,7 +36,8 @@ class SanctionsListService(
         repo: SanctionsListRepositoryImpl,
         importer: SanctionsImportService,
         publisher: SanctionsChangePublisher,
-    ) : this(repo, importer, Clock.systemUTC(), publisher)
+        publicationFence: SanctionsImportPublicationFence,
+    ) : this(repo, importer, Clock.systemUTC(), publisher, publicationFence)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -59,10 +62,20 @@ class SanctionsListService(
         val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
         val count = if (enumType != null) {
-            val result = importer.importList(enumType, list.sourceUrl)
-            // Failed imports may already have committed earlier batches. Publish what actually
-            // committed, including retained evidence from previous attempts, regardless of outcome.
-            publisher.publishPending(list.id, enumType)
+            // Keep the import and its final publication under one cross-pod fence. Failed imports
+            // may have committed batches; their durable evidence is still published or withheld.
+            val result = if (publicationFence != null) {
+                publicationFence.duringRefresh(enumType) { permit ->
+                    importer.importList(enumType, list.sourceUrl).also {
+                        publisher.publishFenced(list.id, enumType, permit)
+                    }
+                }
+            } else {
+                // Unit-test constructor exercises the same orchestration with a mocked publisher.
+                importer.importList(enumType, list.sourceUrl).also {
+                    publisher.publishPending(list.id, enumType)
+                }
+            }
             // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
             // the usable feed count is known. Other outcomes cannot establish a new population,
             // so retain the prior reported count; committed partial changes are journaled separately.

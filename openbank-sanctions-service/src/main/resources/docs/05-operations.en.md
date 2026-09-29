@@ -93,6 +93,13 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 3. Trigger a manual refresh via API: `POST /api/v1/sanctions/lists/{listType}/refresh`
 4. If source URL is unreachable, update it via `PUT /api/v1/sanctions/lists/{id}` with a new `sourceUrl`.
 
+An active refresh holds a PostgreSQL advisory fence for its list from before the first import batch
+through its final publication. Other publisher attempts during that interval are deferred without changing the
+journal. The fence is released after the final publication or when its database connection closes, including
+on pod restart. Committed batches from a failed or interrupted import remain in the journal; the
+next publisher evaluates them together against the current list population. A storm withholds the
+change event and retains the journal for investigation.
+
 ### Large backlog of POTENTIAL_HIT reviews
 
 1. Check the pending queue: `GET /api/v1/sanctions/pending`
