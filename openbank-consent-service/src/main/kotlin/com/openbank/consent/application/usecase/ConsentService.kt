@@ -23,6 +23,8 @@ import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
 import com.openbank.consent.domain.model.ConsentValidationResult
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -30,10 +32,15 @@ import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
 
-class ConsentNotFoundException(id: UUID) : RuntimeException("Consent not found: $id")
+// #10911 phase 2: extends the libs-domain base so libs-runtime's Resource{NotFound,Conflict}
+// ExceptionMapper handles the response; default codes NOT_FOUND/CONFLICT match the deleted local
+// mappers' ErrorCode.NOT_FOUND.code / ErrorCode.CONFLICT.code byte for byte (see
+// ConsentExceptionMapperEquivalenceTest). ConsentScaChallengeNotFoundException is left alone -- it
+// maps to 422 VALIDATION_ERROR, not 404, so migrating it would be a response change.
+class ConsentNotFoundException(id: UUID) : ResourceNotFoundException("Consent not found: $id")
 class ConsentNotOwnedByPartyException(id: UUID, partyId: UUID) :
     RuntimeException("Consent $id does not belong to party $partyId")
-class ConsentAlreadyActiveException(id: UUID) : RuntimeException("Consent $id is already active")
+class ConsentAlreadyActiveException(id: UUID) : ResourceConflictException("Consent $id is already active")
 class ConsentScaChallengeNotFoundException(id: UUID, scaSessionId: UUID) :
     RuntimeException("SCA challenge $scaSessionId not found for consent $id")
 class ConsentScaVerificationUnavailableException(id: UUID, scaSessionId: UUID) :

@@ -1,0 +1,14 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:Amortization.kt$Amortization$12</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$12L</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$3</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$4</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$6</ID>
+    <ID>MagicNumber:Delinquency.kt$Delinquency$30</ID>
+    <ID>MagicNumber:Delinquency.kt$Delinquency$60</ID>
+    <ID>MagicNumber:Delinquency.kt$Delinquency$90</ID>
+  </CurrentIssues>
+</SmellBaseline>

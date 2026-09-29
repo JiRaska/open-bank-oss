@@ -22,6 +22,7 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import os
 import re
 import sys
 import tempfile
@@ -43,6 +44,29 @@ def read(p: Path) -> str:
         return p.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return ""
+
+
+def write_runbook(out: Path, content: str) -> bool:
+    """Avoid needless rewrites and expose only complete documents to parallel gates."""
+    if out.exists() and out.read_text(encoding="utf-8") == content:
+        return False
+    # The readiness collectors run alongside the drift gate and read these files.
+    # write_text() truncates the destination first, so a reader can score an empty
+    # or partial runbook even when the final generated document is unchanged.
+    staged: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=out.parent,
+            prefix=f".{out.name}.", suffix=".tmp", delete=False,
+        ) as temporary:
+            staged = Path(temporary.name)
+            temporary.write(content)
+        os.chmod(staged, out.stat().st_mode & 0o777 if out.exists() else 0o644)
+        os.replace(staged, out)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+    return True
 
 
 def gov_facts(short: str) -> dict:
@@ -503,7 +527,7 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
 
 def runtime_sections(short: str, ns: str) -> str:
     """Render operational commands only for a workload that is intended to run."""
-    readiness, liveness = declared_probes(short)
+    readiness, liveness = declared_probes(short, GITOPS)
     if zero_replica_workload(short):
         return (
             "## Runtime operations — DEFERRED\n"
@@ -657,6 +681,8 @@ def self_test() -> int:
     nothing to lose" for a service holding credentials, or a backup-restore procedure for a
     service with no backup.
     """
+    global GITOPS
+
     fails: list[str] = []
     cases = 0
 
@@ -668,6 +694,21 @@ def self_test() -> int:
         cases += 1
         if not ok:
             fails.append(label)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        output = Path(tmp) / "svc-example.md"
+        output.write_text("## Disaster recovery\n", encoding="utf-8")
+        os.utime(output, ns=(1_000_000_000, 1_000_000_000))
+        original_inode = output.stat().st_ino
+        case("identical force regeneration leaves the readable file untouched",
+             not write_runbook(output, "## Disaster recovery\n")
+             and output.stat().st_ino == original_inode
+             and output.stat().st_mtime_ns == 1_000_000_000)
+        case("changed regeneration replaces a complete file and cleans staging",
+             write_runbook(output, "## Disaster recovery\nRestore steps.\n")
+             and output.stat().st_ino != original_inode
+             and output.read_text(encoding="utf-8") == "## Disaster recovery\nRestore steps.\n"
+             and not list(Path(tmp).glob(".svc-example.md.*.tmp")))
 
     tcp = {"ports": [{"name": "http", "containerPort": 3000}],
            "readinessProbe": {"tcpSocket": {"port": "http"}},
@@ -798,6 +839,48 @@ def self_test() -> int:
             "  syncPolicy:\n"
             "    syncOptions: [ServerSideApply=true]\n"
         )
+        # Component Deployments for the same two fixtures, so `deployment_status()`,
+        # `runtime_sections()` and `management_port()` — which read the workload, not the
+        # Application — are falsified against a hermetic fixture too, never a named real service
+        # whose rollout state (like `incentive`'s, #10783) can drift out from under the assertion.
+        (fixture_gitops / "components" / "manual-sync-fixture").mkdir(parents=True)
+        (fixture_gitops / "components" / "manual-sync-fixture" / "manual-sync-fixture-service.yaml").write_text(
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "metadata:\n"
+            "  name: manual-sync-fixture-service\n"
+            "  namespace: manual-sync-fixture\n"
+            "spec:\n"
+            "  replicas: 1\n"
+            "  template:\n"
+            "    spec:\n"
+            "      containers:\n"
+            "        - name: manual-sync-fixture-service\n"
+            "          image: registry.example/openbank-manual-sync-fixture-service:v1\n"
+            "          ports:\n"
+            "            - name: management\n"
+            "              containerPort: 8087\n",
+            encoding="utf-8",
+        )
+        (fixture_gitops / "components" / "flow-sync-fixture").mkdir(parents=True)
+        (fixture_gitops / "components" / "flow-sync-fixture" / "flow-sync-fixture-service.yaml").write_text(
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "metadata:\n"
+            "  name: flow-sync-fixture-service\n"
+            "  namespace: flow-sync-fixture\n"
+            "spec:\n"
+            "  replicas: 1\n"
+            "  template:\n"
+            "    spec:\n"
+            "      containers:\n"
+            "        - name: flow-sync-fixture-service\n"
+            "          image: registry.example/openbank-flow-sync-fixture-service:v1\n"
+            "          ports:\n"
+            "            - name: management\n"
+            "              containerPort: 8090\n",
+            encoding="utf-8",
+        )
         global GITOPS
         real_gitops = GITOPS
         GITOPS = fixture_gitops
@@ -810,6 +893,29 @@ def self_test() -> int:
                  application_automated("manual-sync-fixture") is False)
             case("a component path owned by no Application resolves to unknown, not manual",
                  application_automated("no-such-fixture") is None)
+
+            manual_status = deployment_status("manual-sync-fixture")
+            manual_runtime = runtime_sections("manual-sync-fixture", "manual-sync-fixture")
+            case(
+                "a manual-sync workload is explicitly live-unverified",
+                workload_live_unverified("manual-sync-fixture")
+                and says(manual_status, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync")
+                and "live scrape status is unverified" in manual_runtime,
+            )
+            case(
+                "the fixture workload supplies the management health port",
+                management_port("manual-sync-fixture") == "8087",
+            )
+
+            automatic_status = deployment_status("flow-sync-fixture")
+            automatic_runtime = runtime_sections("flow-sync-fixture", "flow-sync-fixture")
+            case(
+                "an automated-sync workload is presented as live",
+                not workload_live_unverified("flow-sync-fixture")
+                and automatic_status == ""
+                and "scraped by the fleet PodMonitor" in automatic_runtime
+                and "live scrape status is unverified" not in automatic_runtime,
+            )
         finally:
             GITOPS = real_gitops
 
@@ -913,8 +1019,10 @@ def main():
         if out.exists() and not args.force:
             skipped += 1
             continue
-        out.write_text(render(short), encoding="utf-8")
-        created += 1
+        if write_runbook(out, render(short)):
+            created += 1
+        else:
+            skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:

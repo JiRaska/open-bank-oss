@@ -45,8 +45,8 @@ data class LimitCheck(
         /** A borrowing consumes no credit limit, so its check carries a zero deal amount. */
         fun of(counterparty: Counterparty, deal: Deal, exposureBefore: BigDecimal) = LimitCheck(
             counterpartyId = counterparty.id,
-            currency = deal.currency,
-            limit = counterparty.limitFor(deal.currency),
+            currency = deal.limitCurrency,
+            limit = counterparty.limitFor(deal.limitCurrency),
             exposureBefore = exposureBefore,
             dealAmount = if (deal.product.isAsset) deal.principal else BigDecimal.ZERO,
         )

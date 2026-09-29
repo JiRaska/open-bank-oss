@@ -8,7 +8,7 @@
 #   #3246 measured that the realm JSON Keycloak imports is a stale ancestor of the committed
 #   template (4 roles / 2 clients against 14 / 10). Reconciling the two is an owner-gated Vault
 #   write (runbook 0009). While preparing that write, the templates were run against the real
-#   Keycloak the cluster deploys — quay.io/keycloak/keycloak:26.6.3 — and the CUSTOMERS template
+#   Keycloak the cluster deployed at the time (quay.io/keycloak/keycloak:26.6.3) and the CUSTOMERS template
 #   did not import at all:
 #
 #     ERROR: Failed to run import

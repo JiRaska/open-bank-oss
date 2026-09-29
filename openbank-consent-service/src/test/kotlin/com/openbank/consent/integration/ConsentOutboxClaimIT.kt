@@ -11,6 +11,8 @@ import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -32,8 +34,17 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
+@TestProfile(ConsentOutboxClaimIT.NoDispatchProfile::class)
 @QuarkusTestResource(PostgresTestResource::class)
 class ConsentOutboxClaimIT {
+
+    // This test owns the first claim. The production dispatcher runs on its own schedule and
+    // would otherwise race it for the seeded row, making the first-claim assertion flaky.
+    class NoDispatchProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.outbox.dispatch-enabled" to "false",
+        )
+    }
 
     @Inject
     lateinit var repository: ConsentOutboxRepositoryImpl

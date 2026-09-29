@@ -74,6 +74,8 @@ data class RiskCapitalResult(
     val totalRwa: BigDecimal?,
     val currencyCount: Int,
     val unclassifiedBalances: Int,
+    /** The engine's own reason when it states no total (a missing ČNB fixing); null when it does. */
+    val totalNotStated: String? = null,
 )
 
 /**

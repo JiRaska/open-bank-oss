@@ -29,13 +29,15 @@ class C0200MapperTest {
         total: String? = "6095896.08",
         currencies: Int = 1,
         unclassified: Int = 0,
+        currency: String? = "CZK",
+        totalNotStated: String? = null,
     ) = RiskCapitalLookup.found(
         RiskCapitalResult(
-            "run-1", asOf, "bcbs-d424-sa", "1", "CZK", classes,
+            "run-1", asOf, "bcbs-d424-sa", "1", currency, classes,
             total?.let(
                 ::BigDecimal,
             ),
-            currencies, unclassified,
+            currencies, unclassified, totalNotStated,
         ),
     )
 
@@ -78,9 +80,37 @@ class C0200MapperTest {
     }
 
     @Test
-    fun `unclassified balances or a multi-currency book make the credit-risk rows gaps`() {
+    fun `unclassified balances or an unstated engine total make the credit-risk rows gaps`() {
         assertThat(cells(result(unclassified = 2)).getValue("r0040").gapReason).contains("unclassified")
-        assertThat(cells(result(currencies = 2, total = null)).getValue("r0040").gapReason).contains("multi-currency")
+        val noFixing = "no ČNB fixing in effect on 2026-09-30 for EUR"
+        val gap = cells(result(currencies = 2, total = null, totalNotStated = noFixing)).getValue("r0040")
+        assertThat(gap.isDataGap).isTrue()
+        assertThat(gap.gapReason).contains(noFixing)
+    }
+
+    @Test
+    fun `a multi-currency book is reported from the engine's CZK total`() {
+        val c = cells(result(currencies = 2))
+        listOf("r0040", "r0050", "r0060", "r0070", "r0120", "r0140", "r0211").forEach {
+            assertThat(c.getValue(it).isDataGap).describedAs(it).isFalse()
+            assertThat(c.getValue(it).currency).describedAs(it).isEqualTo("CZK")
+        }
+        assertThat(c.getValue("r0040").value).isEqualByComparingTo("6095896.08")
+    }
+
+    @Test
+    fun `a total in a currency other than CZK is a gap, never relabelled`() {
+        val c = cells(result(currency = "EUR"))
+        assertThat(c.getValue("r0040").isDataGap).isTrue()
+        assertThat(c.getValue("r0040").gapReason).contains("EUR").contains("CZK")
+        assertThat(c.getValue("r0040").currency).isEqualTo("CZK")
+    }
+
+    @Test
+    fun `classes tie to the total within independent cent rounding, and not beyond it`() {
+        // 5 classes: tolerance (5 + 1) × 0.005 = 0.03
+        assertThat(cells(result(total = "6095896.11")).getValue("r0040").isDataGap).isFalse()
+        assertThatThrownBy { cells(result(total = "6095896.12")) }.hasMessageContaining("total RWA")
     }
 
     @Test

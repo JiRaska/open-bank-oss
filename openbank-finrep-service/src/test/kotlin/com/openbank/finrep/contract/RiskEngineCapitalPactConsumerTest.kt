@@ -100,7 +100,10 @@ class RiskEngineCapitalPactConsumerTest {
                 o.stringType("parameterSetId", "bcbs-d424-sa")
                 o.stringType("parameterSetVersion", "1")
                 o.eachLike("currencies") { c -> currency(c) }
-                o.`object`("total") { t -> currency(t) }
+                // The engine's total is the whole book in CZK (risk-engine API 1.11.0): C 02.00 renders it
+                // only in CZK, so the currency is pinned, not merely typed.
+                o.`object`("total") { t -> currency(t, pinCzk = true) }
+                o.nullValue("totalNotStated")
                 o.minArrayLike("unclassified", 0, 1) { u -> u.stringType("glAccountCode", "9999") }
             }.build(),
         )
@@ -148,8 +151,8 @@ class RiskEngineCapitalPactConsumerTest {
         .status(HTTP_UNAUTHORIZED)
         .toPact()
 
-    private fun currency(c: au.com.dius.pact.consumer.dsl.LambdaDslObject) {
-        c.stringType("currency", "CZK")
+    private fun currency(c: au.com.dius.pact.consumer.dsl.LambdaDslObject, pinCzk: Boolean = false) {
+        if (pinCzk) c.stringValue("currency", "CZK") else c.stringType("currency", "CZK")
         c.eachLike("classes") { k ->
             k.stringType("exposureClass", "cash")
             k.decimalType("ead", 1500.00)
@@ -236,10 +239,12 @@ class RiskEngineCapitalPactConsumerTest {
                     totalRwa = total.totalRwa,
                     currencyCount = c.currencies.size,
                     unclassifiedBalances = c.unclassified.size,
+                    totalNotStated = c.totalNotStated,
                 ),
             ),
             LocalDate.parse(REPORTING_DATE),
         )
+        assertThat(total.currency).isEqualTo("CZK")
         assertThat(total.classes.single().exposureClass).isEqualTo("cash")
         // The example carries one unclassified balance, so the render must refuse the credit rows
         // and say why: proves `unclassified` is read, not merely parsed.

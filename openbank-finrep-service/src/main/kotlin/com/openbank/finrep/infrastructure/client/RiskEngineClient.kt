@@ -78,8 +78,10 @@ data class CapitalResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyCapitalResponse>,
+    /** The book in CZK at the ČNB fixing (risk-engine API 1.11.0); null with [totalNotStated]. */
     val total: CurrencyCapitalResponse?,
     val unclassified: List<UnclassifiedBalanceResponse>,
+    val totalNotStated: String? = null,
 )
 
 /** One HQLA line of the risk engine's LCR (only the fields C 72.00 reads). */
@@ -160,6 +162,7 @@ class RiskEngineCapitalAdapter(
                 totalRwa = c.total?.totalRwa,
                 currencyCount = c.currencies.size,
                 unclassifiedBalances = c.unclassified.size,
+                totalNotStated = c.totalNotStated,
             ),
         )
     }
