@@ -6,35 +6,34 @@ package com.openbank.securityscanner.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.security.application.port.out.IctIncidentRepository
 import com.openbank.securityscanner.domain.IctIncident
 import com.openbank.securityscanner.domain.IncidentCategory
 import com.openbank.securityscanner.domain.IncidentSeverity
 import com.openbank.securityscanner.domain.IncidentStatus
-import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import io.mockk.verify
-import io.smallrye.reactive.messaging.kafka.Record
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.eclipse.microprofile.reactive.messaging.Emitter
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
 
 /**
  * Behaviour of the DORA ICT incident register's use cases (issue #4728): what each command writes
  * to the repository, which transitions preserve prior timestamps, and which reads raise
  * [IctIncidentNotFoundException]. Complements `IctIncidentServiceTest`, which covers only the
  * `sourceService` attribution on two of the events.
+ *
+ * `IctIncidentService`'s lifecycle event is handed to the broker through the transactional ICT
+ * incident outbox (issue #3994/#5256), not a direct Kafka `Emitter` — `repository.save` takes both
+ * the aggregate and the [OutboxMessage] to persist atomically with it.
  */
 class IctIncidentServiceBehaviourTest {
 
@@ -49,20 +48,12 @@ class IctIncidentServiceBehaviourTest {
         .findAndRegisterModules()
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     private val repository = mockk<IctIncidentRepository>()
-    private val emitter = mockk<Emitter<Record<String, String>>>()
-    private val service = IctIncidentService(emitter, objectMapper, clock, repository)
-
-    private fun captureRecord(): CapturingSlot<Record<String, String>> {
-        val slot = slot<Record<String, String>>()
-        every { emitter.send(capture(slot)) } returns CompletableFuture.completedFuture(null)
-        return slot
-    }
+    private val service = IctIncidentService(objectMapper, clock, repository)
 
     @Test
     fun `reportIncident opens the incident at the clock instant and keeps the detection time`(): Unit = runBlocking {
-        captureRecord()
         val saved = slot<IctIncident>()
-        coEvery { repository.save(capture(saved)) } answers { firstArg() }
+        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
         val detected = Instant.parse("2026-08-16T09:12:00Z")
 
         val incident = service.reportIncident(
@@ -93,8 +84,7 @@ class IctIncidentServiceBehaviourTest {
 
     @Test
     fun `two reports get distinct ids`(): Unit = runBlocking {
-        captureRecord()
-        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { repository.save(any(), any()) } answers { firstArg() }
 
         val first = service.reportIncident(command())
         val second = service.reportIncident(command())
@@ -104,7 +94,6 @@ class IctIncidentServiceBehaviourTest {
 
     @Test
     fun `updateStatus keeps existing timestamps when the command omits them`(): Unit = runBlocking {
-        captureRecord()
         val id = UUID.randomUUID()
         val existing = existing(id).copy(
             containedAt = Instant.parse("2026-08-16T09:30:00Z"),
@@ -113,7 +102,7 @@ class IctIncidentServiceBehaviourTest {
             updatedAt = Instant.parse("2026-08-16T09:30:00Z"),
         )
         coEvery { repository.findIncident(id) } returns existing
-        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { repository.save(any(), any()) } answers { firstArg() }
 
         val updated = service.updateStatus(id, IncidentStatus.RESOLVED, null, null, null, null)
 
@@ -127,10 +116,9 @@ class IctIncidentServiceBehaviourTest {
 
     @Test
     fun `updateStatus overwrites timestamps and recovery objectives when supplied`(): Unit = runBlocking {
-        captureRecord()
         val id = UUID.randomUUID()
         coEvery { repository.findIncident(id) } returns existing(id)
-        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { repository.save(any(), any()) } answers { firstArg() }
         val contained = Instant.parse("2026-08-16T09:45:00Z")
         val resolved = Instant.parse("2026-08-16T09:55:00Z")
 
@@ -153,8 +141,7 @@ class IctIncidentServiceBehaviourTest {
             .isInstanceOf(IctIncidentNotFoundException::class.java)
             .hasMessageContaining(id.toString())
 
-        coVerify(exactly = 0) { repository.save(any()) }
-        verify(exactly = 0) { emitter.send(any()) }
+        coVerify(exactly = 0) { repository.save(any(), any()) }
     }
 
     @Test
@@ -184,10 +171,10 @@ class IctIncidentServiceBehaviourTest {
 
     @Test
     fun `markReportedToRegulator flips the flag and publishes the regulator event`(): Unit = runBlocking {
-        val slot = captureRecord()
+        val eventSlot = slot<OutboxMessage>()
         val id = UUID.randomUUID()
         coEvery { repository.findIncident(id) } returns existing(id)
-        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { repository.save(any(), capture(eventSlot)) } answers { firstArg() }
 
         val updated = service.markReportedToRegulator(id, "CNB-2026-0042")
 
@@ -196,11 +183,11 @@ class IctIncidentServiceBehaviourTest {
         assertThat(updated.updatedAt).isEqualTo(now)
         assertThat(updated.status).isEqualTo(IncidentStatus.OPEN)
 
-        val payload = objectMapper.readTree(slot.captured.value())
+        val payload = objectMapper.readTree(eventSlot.captured.payload)
         assertThat(payload.get("eventType").asText()).isEqualTo("ICT_INCIDENT_REPORTED_TO_REGULATOR")
         assertThat(payload.get("occurredAt").asText()).startsWith("2026-08-16T10:00:00")
         assertThat(payload.get("incident").get("regulatoryReportId").asText()).isEqualTo("CNB-2026-0042")
-        assertThat(slot.captured.key()).isEqualTo(id.toString())
+        assertThat(eventSlot.captured.aggregateId).isEqualTo(id)
     }
 
     @Test
@@ -211,23 +198,27 @@ class IctIncidentServiceBehaviourTest {
         assertThatThrownBy { runBlocking { service.markReportedToRegulator(id, "CNB-1") } }
             .isInstanceOf(IctIncidentNotFoundException::class.java)
 
-        coVerify(exactly = 0) { repository.save(any()) }
+        coVerify(exactly = 0) { repository.save(any(), any()) }
     }
 
     @Test
-    fun `the published event carries the incident the repository returned, not the one submitted`(): Unit =
+    fun `the published event carries the incident submitted for the atomic write, not what the repository echoes back`(): Unit =
         runBlocking {
-            val slot = captureRecord()
-            // The repository is the record of truth: whatever it hands back is what goes on the wire.
-            coEvery { repository.save(any()) } answers {
+            val eventSlot = slot<OutboxMessage>()
+            // eventFor() builds the outbox payload from the incident BEFORE repository.save is
+            // called — save persists incident and event together in one transaction, so the event
+            // cannot depend on a value save has not returned yet. A repository that echoes back a
+            // different value (e.g. a store-side normalisation) must not be able to retroactively
+            // change what was already handed to save() as the event's content.
+            coEvery { repository.save(any(), capture(eventSlot)) } answers {
                 (firstArg() as IctIncident).copy(title = "normalised-by-store")
             }
 
             val incident = service.reportIncident(command())
 
             assertThat(incident.title).isEqualTo("normalised-by-store")
-            val payload = objectMapper.readTree(slot.captured.value())
-            assertThat(payload.get("incident").get("title").asText()).isEqualTo("normalised-by-store")
+            val payload = objectMapper.readTree(eventSlot.captured.payload)
+            assertThat(payload.get("incident").get("title").asText()).isEqualTo("Ledger writes failing")
             assertThat(payload.get("sourceService").asText()).isEqualTo(IctIncidentService.SOURCE_SERVICE)
         }
 

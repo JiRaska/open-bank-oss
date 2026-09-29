@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.tppregistry.application.port.`in`.BlacklistTppCommand
 import com.openbank.tppregistry.application.port.`in`.CheckTppAuthorizationQuery
 import com.openbank.tppregistry.application.port.`in`.GetTppQuery
@@ -122,21 +123,21 @@ class TppRegistryResourceTest {
 
     @Test
     fun `registerTpp answers 201 and caches under the composed idempotency key`(): Unit = runBlocking {
-        coEvery { store.get(any()) } returns null
+        coEvery { store.reserve(any(), any()) } returns ReserveResult.Reserved
         coEvery { svc.registerTpp(any()) } returns entry()
 
         val response = resource.registerTpp(registerCmd(), "key-1")
 
         assertThat(response.status).isEqualTo(201)
         assertThat(response.entity).isEqualTo(entry())
-        coVerify { store.get("tpp:register:CZ-CNB-1:key-1") }
-        coVerify { store.save("tpp:register:CZ-CNB-1:key-1", 201, any()) }
+        coVerify { store.reserve("tpp:register:CZ-CNB-1:key-1", any()) }
+        coVerify { store.save("tpp:register:CZ-CNB-1:key-1", any(), 201, any(), any()) }
     }
 
     @Test
     fun `registerTpp replays the cached response and never calls the use case`(): Unit = runBlocking {
-        coEvery { store.get("tpp:register:CZ-CNB-1:key-1") } returns
-            IdempotencyRecord("tpp:register:CZ-CNB-1:key-1", 201, "{\"tppId\":\"CZ-CNB-1\"}", now)
+        coEvery { store.reserve("tpp:register:CZ-CNB-1:key-1", any()) } returns
+            ReserveResult.Replay(IdempotencyRecord("tpp:register:CZ-CNB-1:key-1", 201, "{\"tppId\":\"CZ-CNB-1\"}", now))
 
         val response = resource.registerTpp(registerCmd(), "key-1")
 
@@ -153,8 +154,8 @@ class TppRegistryResourceTest {
         val response = resource.registerTpp(registerCmd(), "   ")
 
         assertThat(response.status).isEqualTo(201)
-        coVerify(exactly = 0) { store.get(any()) }
-        coVerify(exactly = 0) { store.save(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { store.reserve(any(), any()) }
+        coVerify(exactly = 0) { store.save(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -163,8 +164,8 @@ class TppRegistryResourceTest {
 
         resource.registerTpp(registerCmd(), null)
 
-        coVerify(exactly = 0) { store.get(any()) }
-        coVerify(exactly = 0) { store.save(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { store.reserve(any(), any()) }
+        coVerify(exactly = 0) { store.save(any(), any(), any(), any(), any()) }
     }
 
     // --- listTpps -----------------------------------------------------------
@@ -236,20 +237,20 @@ class TppRegistryResourceTest {
     @Test
     fun `blacklistTpp forwards the supplied reason and caches under its own key prefix`(): Unit = runBlocking {
         val cmd = slot<BlacklistTppCommand>()
-        coEvery { store.get(any()) } returns null
+        coEvery { store.reserve(any(), any()) } returns ReserveResult.Reserved
         coEvery { svc.blacklistTpp(capture(cmd)) } returns entry()
 
         resource.blacklistTpp("CZ-CNB-1", mapOf("reason" to "licence revoked"), "key-2")
 
         assertThat(cmd.captured.reason).isEqualTo("licence revoked")
-        coVerify { store.get("tpp:blacklist:CZ-CNB-1:key-2") }
-        coVerify { store.save("tpp:blacklist:CZ-CNB-1:key-2", 200, any()) }
+        coVerify { store.reserve("tpp:blacklist:CZ-CNB-1:key-2", any()) }
+        coVerify { store.save("tpp:blacklist:CZ-CNB-1:key-2", any(), 200, any(), any()) }
     }
 
     @Test
     fun `blacklistTpp replays the cached response and never calls the use case`(): Unit = runBlocking {
-        coEvery { store.get("tpp:blacklist:CZ-CNB-1:key-2") } returns
-            IdempotencyRecord("tpp:blacklist:CZ-CNB-1:key-2", 200, "{}", now)
+        coEvery { store.reserve("tpp:blacklist:CZ-CNB-1:key-2", any()) } returns
+            ReserveResult.Replay(IdempotencyRecord("tpp:blacklist:CZ-CNB-1:key-2", 200, "{}", now))
 
         val response = resource.blacklistTpp("CZ-CNB-1", mapOf("reason" to "x"), "key-2")
 
@@ -261,20 +262,21 @@ class TppRegistryResourceTest {
     @Test
     fun `triggerEbaSync caches with a 300 second TTL under the sync key`(): Unit = runBlocking {
         val state = EbaRegisterSyncState(now, null, 0, "not implemented")
-        coEvery { store.get(any()) } returns null
+        coEvery { store.reserve(any(), any()) } returns ReserveResult.Reserved
         coEvery { svc.triggerEbaSync() } returns state
 
         val response = resource.triggerEbaSync("key-3")
 
         assertThat(response.status).isEqualTo(200)
         assertThat(response.entity).isEqualTo(state)
-        coVerify { store.get("tpp:sync:key-3") }
-        coVerify { store.save("tpp:sync:key-3", 200, any(), 300) }
+        coVerify { store.reserve("tpp:sync:key-3", any()) }
+        coVerify { store.save("tpp:sync:key-3", any(), 200, any(), 300) }
     }
 
     @Test
     fun `triggerEbaSync replays the cached response and never calls the use case`(): Unit = runBlocking {
-        coEvery { store.get("tpp:sync:key-3") } returns IdempotencyRecord("tpp:sync:key-3", 200, "{}", now)
+        coEvery { store.reserve("tpp:sync:key-3", any()) } returns
+            ReserveResult.Replay(IdempotencyRecord("tpp:sync:key-3", 200, "{}", now))
 
         val response = resource.triggerEbaSync("key-3")
 
