@@ -51,7 +51,7 @@ What the edge actually does today, measured on `origin/main` on 2026-09-28:
   replica-proportional, as `.github/canary-rollout-realisable-baseline.txt` records.
   Nothing couples Rollouts to nginx.
 - **Coupled code.** Two artifacts depend on nginx. The Kyverno policy
-  `tool-ingress-gate-policy.yaml` keys on the `nginx.ingress.kubernetes.io/auth-url`
+  `require-gated-or-declared-tool-ingress-cel` (`cel-validating-policies.yaml`) keys on the `nginx.ingress.kubernetes.io/auth-url`
   annotation (ADR-0234). `gen-network-policies.py` derives `FROM ingress-nginx` edges
   from Ingress objects (gate `gen-network-policies-drift-gate`).
 - **CNI.** The cluster runs the AWS VPC CNI, not Cilium, whatever ADR-0010's component
@@ -185,4 +185,4 @@ git grep -l 'kind: HTTPRoute' -- openbank-infra | wc -l       # expect: >= 14
 
 - ADR-0010, ADR-0027, ADR-0062, ADR-0093, ADR-0098, ADR-0234
 - Tracking sweep: #11258
-- `openbank-infra/gitops/apps/ingress-nginx.yaml`, `openbank-infra/gitops/components/kyverno/tool-ingress-gate-policy.yaml`
+- `openbank-infra/gitops/apps/ingress-nginx.yaml`, `openbank-infra/gitops/components/kyverno/cel-validating-policies.yaml`
