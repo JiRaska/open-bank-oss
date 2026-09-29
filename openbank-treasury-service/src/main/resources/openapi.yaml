@@ -32,8 +32,8 @@ info:
 
     **Counterparty limits** cap outstanding PLACED principal per counterparty and currency
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
-    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior-approver override
-    is not built yet.
+    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior approver may record
+    a bounded override with a reason; four-eyes separation still applies at booking.
 
     **Interest** is ACT/360 simple interest at maturity (the CZK and EUR money-market
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
