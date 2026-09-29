@@ -23,7 +23,11 @@ info:
   # 1.11.0 -> 1.11.1: correction — LiquiditySnapshot.notes documents the stable machine-readable
   #        code prefix (e.g. "PLEDGED_COLLATERAL_NOT_MODELLED: ...") a note may carry; no shape
   #        change, description only.
-  version: 1.11.1
+  # 1.11.1 -> 1.13.0: additive — the liquidity total combines all currencies in CZK at the ČNB
+  #        fixing in effect on asOf (EU 2015/61 Art. 4(5)); Liquidity.fxRates lists every rate used,
+  #        Liquidity.totalNotStated says why a total is absent. Per-currency results unchanged.
+  #        1.12.0 is claimed by open PR #11015.
+  version: 1.13.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -290,7 +294,10 @@ paths:
       summary: LCR and NSFR of a TIED_OUT run
       description: |
         Liquidity Coverage Ratio (BCBS d238) and Net Stable Funding Ratio (BCBS d295) per currency,
-        with a total only for a single-currency book. Every component line carries its factor, the
+        plus a total of all currencies combined in CZK (EU 2015/61 Art. 4(5)): every amount of each
+        other currency's lines is converted at the ČNB fixing in effect on asOf (listed in `fxRates`),
+        and the HQLA caps, inflow cap and both ratios are recomputed on the converted lines. A missing
+        fixing leaves `total` null with `totalNotStated` — never a partial total. Every component line carries its factor, the
         configuration key it came from and the article / paragraph it cites. Factors and
         classification choices come from the versioned parameter set `openbank.risk.liquidity.*`,
         named on the result. The default set is `eu-2015-61-crr2` (Delegated Regulation (EU) 2015/61
@@ -1173,7 +1180,24 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/CurrencyLiquidity'}
             - {type: 'null'}
-          description: Present only for a single-currency book
+          description: >-
+            All currencies combined in CZK (currency "CZK") at the ČNB fixing for asOf, with the caps
+            and ratios recomputed on the converted lines. Null, with totalNotStated, when a currency
+            with any line has no fixing in effect.
+        fxRates:
+          type: array
+          description: Every rate the CZK total was converted with; empty for an all-CZK book or when no total is stated
+          items:
+            type: object
+            required: [currency, rate, fixingDate, source]
+            properties:
+              currency: {type: string}
+              rate: {type: number, description: CZK per ONE unit of currency (per-100 quotes normalised by fx-service)}
+              fixingDate: {type: string, format: date}
+              source: {type: string}
+        totalNotStated:
+          type: [string, 'null']
+          description: Why total is null (the missing currency and date); null when it is stated
         unclassified:
           type: array
           items:
