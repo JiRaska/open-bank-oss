@@ -201,7 +201,7 @@ STUB
     # the function, not on the grandchild process, so an inherited value would silently be the
     # default and the systemic case would prove nothing.
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
-           ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/no-such-arc.tf}" \
+           ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
            VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
            SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
@@ -249,13 +249,23 @@ STUB
   # THE ARC RUNNER IMAGE — in scope since #9805, and falsifiable here rather than only in a job
   # that needs ECR credentials. The image whose denial deadlocks every runner pool had no gitops
   # workload, so a gitops-scoped enumerator could not see it at all; these three cases pin that
-  # it is now read, that a broken pin fails CLOSED, and that the file being absent is not an
-  # error (a checkout without the terraform tree still verifies the fleet).
+  # it is now read, and that a broken, ambiguous or absent pin fails CLOSED.
   printf 'runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
     "0000000000000000000000000000000000000000000000000000000000000000" > "$tmp/arc-ok.tf"
   printf 'runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
     "1111111111111111111111111111111111111111111111111111111111111111" > "$tmp/arc-bad.tf"
   printf 'runner_image = "not-a-pinned-digest"\n' > "$tmp/arc-nopin.tf"
+  printf 'runner_image = "%s/openbank-ci-runner@sha256:%s" /* active pin */\n' "$reg" \
+    "0000000000000000000000000000000000000000000000000000000000000000" > "$tmp/arc-inline.tf"
+  {
+    printf '# runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    printf '/* runner_image = "%s/openbank-ci-runner@sha256:%s" */\n' "$reg" \
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    printf 'runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
+      "1111111111111111111111111111111111111111111111111111111111111111"
+  } > "$tmp/arc-commented.tf"
+  cat "$tmp/arc-ok.tf" "$tmp/arc-bad.tf" > "$tmp/arc-duplicate.tf"
 
   fixture_arc_tf="$tmp/arc-ok.tf" \
   run_fixture "the ARC runner pin is verified alongside gitops -> 2 subjects" 0 \
@@ -269,14 +279,30 @@ STUB
   run_fixture "a terraform file with no digest pin fails CLOSED, never silently out of scope" 1 \
     "declares no openbank-ci-runner@sha256: pin" \
     "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-commented.tf" \
+  run_fixture "a commented old digest cannot mask an unattested active runner" 1 \
+    "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-inline.tf" \
+  run_fixture "an inline HCL block comment does not hide the active pin" 0 \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-duplicate.tf" \
+  run_fixture "ambiguous active runner assignments fail closed" 1 \
+    "exactly one active runner_image assignment" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/no-such-arc.tf" \
+  run_fixture "a missing runner Terraform file fails closed" 1 \
+    "ARC runner Terraform file is missing" \
+    "openbank-fixture-ok:t"
 
   # Every declared image attested -> 0.
   run_fixture "all attested -> exit 0" 0 \
-    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t"
   # A real gap -> 1. Both fatal classes, so the summary carries each count.
   run_fixture "unattested + absent -> exit 1" 1 \
-    "1 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
+    "2 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-bare:t" "openbank-fixture-gone:t"
   # The accusing verdicts must carry the stderr they were classified FROM (#9860). Asserted on the
   # fixture above rather than as its own run: LAST_OUT holds that run's output, and the point is that
@@ -302,12 +328,12 @@ STUB
   # ONLY a probe failure -> 2, and crucially NOT 1: this is the case that used to be
   # published as a fleet gap, and the exit code is the only thing the caller reads.
   run_fixture "probe failure only -> exit 2 (not 1)" 2 \
-    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-flaky:t"
   # A REAL gap alongside a probe failure must still be 1 — "could not run" never masks a
   # verdict that was reached, or an unlucky throttle would downgrade a live outage.
   run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \
-    "0 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-bare:t" "openbank-fixture-flaky:t"
   # A TOTAL outage must short-circuit the retries rather than multiply them past the job
   # timeout — a killed job reports no exit code at all, and the caller then cannot tell a gap
@@ -347,6 +373,7 @@ STUB
     printf '# fixture allowlist\n' > "$tmp/placeholders.txt"
     for img in $allow; do printf '%s/%s\n' "$reg" "$img" >> "$tmp/placeholders.txt"; done
     out="$(GITOPS_DIR="$tmp/gitops" PLACEHOLDER_FILE="$tmp/placeholders.txt" \
+           ARC_RUNNERS_TF="$tmp/arc-ok.tf" \
            bash "$SELF" --check-placeholders 2>&1)"
     code=$?
     if [ "$code" != "$expected_exit" ]; then
@@ -552,17 +579,29 @@ done < <(grep -rhoE "$IMAGE_RE" "$GITOPS_DIR" 2>/dev/null | sort -u)
 # pin is a broken enumerator, not a pass: the file is in this repository and a rename that
 # silently drops the runner from scope is the failure being fixed.
 ARC_RUNNERS_TF="${ARC_RUNNERS_TF:-openbank-infra/aws/envs/sandbox-platform/arc-runners.tf}"
-if [ -f "$ARC_RUNNERS_TF" ]; then
-  _runner_ref="$(grep -oE 'openbank-ci-runner@sha256:[a-f0-9]{64}' "$ARC_RUNNERS_TF" | head -1)"
-  if [ -z "$_runner_ref" ]; then
-    echo "ERROR: ${ARC_RUNNERS_TF} declares no openbank-ci-runner@sha256: pin." >&2
-    echo "       The runner image is in scope for this gate; a missing pin means the" >&2
-    echo "       enumerator is broken, not that the runner is attested." >&2
-    exit 1
-  fi
-  IMAGES+=("${ECR_REGISTRY}/${_runner_ref}")
-  echo "    plus the ARC runner image pinned in $(basename "$ARC_RUNNERS_TF") (no gitops workload)"
+if [ ! -f "$ARC_RUNNERS_TF" ]; then
+  echo "ERROR: ARC runner Terraform file is missing: ${ARC_RUNNERS_TF}" >&2
+  echo "       A missing inventory source cannot silently remove the runner from attestation scope." >&2
+  exit 1
 fi
+# Drop HCL comments before examining assignments. An old pin in a comment must never be
+# chosen instead of the active runner_image value. Ambiguity also fails closed.
+_runner_line="$(sed -E 's@/\*.*\*/@@g; /^[[:space:]]*#/d; /^[[:space:]]*\/\//d; /\/\*/,/\*\//d' "$ARC_RUNNERS_TF" \
+  | grep -E '^[[:space:]]*runner_image[[:space:]]*=' || true)"
+if [ -z "$_runner_line" ] || [[ "$_runner_line" == *$'\n'* ]]; then
+  echo "ERROR: ${ARC_RUNNERS_TF} must declare exactly one active runner_image assignment." >&2
+  exit 1
+fi
+_runner_ref="$(printf '%s\n' "$_runner_line" | sed -nE \
+  's/^[[:space:]]*runner_image[[:space:]]*=[[:space:]]*"[^"]*\/(openbank-ci-runner@sha256:[a-f0-9]{64})"[[:space:]]*(#.*|\/\/.*)?$/\1/p')"
+if [ -z "$_runner_ref" ]; then
+  echo "ERROR: ${ARC_RUNNERS_TF} declares no openbank-ci-runner@sha256: pin." >&2
+  echo "       The runner image is in scope for this gate; an invalid pin means the" >&2
+  echo "       enumerator is broken, not that the runner is attested." >&2
+  exit 1
+fi
+IMAGES+=("${ECR_REGISTRY}/${_runner_ref}")
+echo "    plus the ARC runner image pinned in $(basename "$ARC_RUNNERS_TF") (no gitops workload)"
 
 if [ "${#IMAGES[@]}" -eq 0 ]; then
   echo "ERROR: no openbank-* images found under ${GITOPS_DIR} — the enumerator is broken." >&2
