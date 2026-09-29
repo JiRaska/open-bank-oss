@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.5.0...treasury-service-v0.6.0) (2026-09-29)
+
+
+### Features
+
+* **treasury:** reconcile nostro accounts against camt.053 statements ([#11052](https://github.com/JiRaska/open-bank-oss/issues/11052)) ([5aa4f37](https://github.com/JiRaska/open-bank-oss/commit/5aa4f3714104ed3815c1c9a67ae14e6972d53bed))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.4.0...treasury-service-v0.5.0) (2026-09-28)
 
 

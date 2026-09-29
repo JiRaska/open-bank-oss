@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "d583b2463a781c89"
+    openbank.tech/policy-checksum: "849f7d80b28b1990"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }

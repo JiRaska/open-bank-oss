@@ -28,6 +28,12 @@ data class CurrencyCashFlows(
     val priced: Boolean get() = presentValue != null
 }
 
+/** Flows of one currency by source: loan contracts, and deposits under the behavioural model. */
+data class SourcedFlows(val contractual: List<CashFlow>, val behavioural: List<CashFlow>) {
+    /** Deposits first, then loans — the order [SnapshotCashFlowProjection.project] has always summed in. */
+    val all: List<CashFlow> get() = behavioural + contractual
+}
+
 data class SnapshotCashFlows(
     val model: BehaviouralModel,
     val expanded: Int,
@@ -72,16 +78,12 @@ object SnapshotCashFlowProjection {
     ): SnapshotCashFlows {
         val deposits = positions.filter { it.kind == PositionKind.SUB_LEDGER }
         val loans = instruments.filter { it.kind in LOAN_KINDS }
-        val depositFlows = deposits.groupBy { it.currency }.mapValues { (currency, ps) ->
-            ps.flatMap { NonMaturityDepositCashFlows.expand(it.amount.negate(), currency, asOf, model) }
-        }
-        val loanFlows = loans.groupBy { it.currency }.mapValues { (_, ls) -> ls.flatMap { loanFlows(it, curves) } }
         val deals = instruments.filter { it.kind == InstrumentKind.MONEY_MARKET_DEAL }
-        val dealFlows = deals.groupBy { it.currency }.mapValues { (_, ds) -> ds.flatMap { moneyMarketFlows(it) } }
+        val sourced = flows(positions, asOf, curves, model, instruments)
         val counts = (deposits.map { it.currency } + loans.map { it.currency } + deals.map { it.currency })
             .groupingBy { it }.eachCount()
         val currencies = counts.keys.sorted().map { currency ->
-            val flows = depositFlows[currency].orEmpty() + loanFlows[currency].orEmpty() + dealFlows[currency].orEmpty()
+            val flows = sourced[currency]?.all.orEmpty()
             val curve = curves.discountCurveFor(currency)
             CurrencyCashFlows(
                 currency = currency,
@@ -101,6 +103,36 @@ object SnapshotCashFlowProjection {
             notExpanded = positions.size - deposits.size - contractPositions,
             currencies = currencies,
         )
+    }
+
+    /**
+     * The unbucketed flows [project] aggregates, per currency and split by where they come from:
+     * BEHAVIOURAL (non-maturity deposits under [model]) and CONTRACTUAL (loan instruments,
+     * then money-market deals). The one
+     * expansion every consumer shares — bucketed flows, PV and the liquidity forecast cannot
+     * disagree about a flow because there is only this one place that derives it.
+     */
+    fun flows(
+        positions: List<Position>,
+        asOf: LocalDate,
+        curves: CurveSet,
+        model: BehaviouralModel,
+        instruments: List<Instrument> = emptyList(),
+    ): Map<String, SourcedFlows> {
+        val depositFlows = positions.filter { it.kind == PositionKind.SUB_LEDGER }.groupBy { it.currency }
+            .mapValues { (currency, ps) ->
+                ps.flatMap { NonMaturityDepositCashFlows.expand(it.amount.negate(), currency, asOf, model) }
+            }
+        val loanFlows = instruments.filter { it.kind in LOAN_KINDS }.groupBy { it.currency }
+            .mapValues { (_, ls) -> ls.flatMap { loanFlows(it, curves) } }
+        val dealFlows = instruments.filter { it.kind == InstrumentKind.MONEY_MARKET_DEAL }.groupBy { it.currency }
+            .mapValues { (_, ds) -> ds.flatMap { moneyMarketFlows(it) } }
+        return (depositFlows.keys + loanFlows.keys + dealFlows.keys).associateWith {
+            SourcedFlows(
+                contractual = loanFlows[it].orEmpty() + dealFlows[it].orEmpty(),
+                behavioural = depositFlows[it].orEmpty(),
+            )
+        }
     }
 
     /**
