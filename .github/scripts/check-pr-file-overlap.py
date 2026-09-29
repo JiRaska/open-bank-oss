@@ -175,11 +175,17 @@ query($id:ID!,$after:String) {
 """
 
 
-def _fill_overlap_oids(prs, graphql):
+def _fill_overlap_oids(prs, graphql, focus_number=None):
     """Fetch blob oids only for paths that can affect the overlap verdict."""
+    focus = next((pr for pr in prs if pr["number"] == focus_number), None)
+    if focus_number is not None and focus is None:
+        return
+    focus_paths = set(focus["files"]) if focus is not None else None
     owners = {}
     for pr in prs:
         for path in pr["files"]:
+            if focus_paths is not None and path not in focus_paths:
+                continue
             owners.setdefault(path, []).append(pr)
     targets = [(pr, path) for path, path_prs in owners.items() if len(path_prs) > 1
                for pr in path_prs]
@@ -201,7 +207,7 @@ def _fill_overlap_oids(prs, graphql):
             pr["files"][path] = obj.get("oid", "") if isinstance(obj, dict) else ""
 
 
-def fetch_open_prs(graphql=_graphql):
+def fetch_open_prs(graphql=_graphql, focus_number=None):
     """[{number, title, files: {path: blob_sha}}] for every OPEN pull request."""
     owner, name = REPO.split("/", 1)
     out, after = [], None
@@ -220,7 +226,7 @@ def fetch_open_prs(graphql=_graphql):
         if not connection["pageInfo"]["hasNextPage"]:
             break
         after = connection["pageInfo"]["endCursor"]
-    _fill_overlap_oids(out, graphql)
+    _fill_overlap_oids(out, graphql, focus_number)
     return out
 
 
@@ -442,12 +448,34 @@ def self_test():
     check("non-overlapping paths caused blob reads", fetched[0]["files"]["only-first.txt"] == "")
     check("GraphQL snapshot used an unexpected call count", len(calls) == 4)
 
+    # 10. Foreign PRs may overlap each other on files this PR does not touch.
+    #     Their blob reads cannot change this PR's verdict, so skip them.
+    focused = [
+        {"number": 1, "headRefOid": "h1", "files": {"mine.txt": ""}},
+        {"number": 2, "headRefOid": "h2", "files": {"mine.txt": "", "foreign.txt": ""}},
+        {"number": 3, "headRefOid": "h3", "files": {"foreign.txt": ""}},
+    ]
+    oid_calls = []
+
+    def fake_oid_graphql(query, variables):
+        oid_calls.append(dict(variables))
+        return {"data": {"repository": {"f0": {"oid": "same"},
+                                        "f1": {"oid": "same"}}}}
+
+    _fill_overlap_oids(focused, fake_oid_graphql, focus_number=1)
+    check("focused overlap did not read both relevant blobs",
+          focused[0]["files"]["mine.txt"] == focused[1]["files"]["mine.txt"] == "same")
+    check("foreign-only overlap caused blob reads",
+          focused[1]["files"]["foreign.txt"] == focused[2]["files"]["foreign.txt"] == "")
+    check("focused overlap made extra blob requests",
+          len(oid_calls) == 1 and len([k for k in oid_calls[0] if k.startswith("expr")]) == 2)
+
     if failures:
         for f in failures:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(failures)} case(s))\n")
         return 1
-    print("self-test ok: overlap classifier and paginated GraphQL snapshot are falsifiable (9 cases)")
+    print("self-test ok: overlap classifier and paginated GraphQL snapshot are falsifiable (10 cases)")
     return 0
 
 
@@ -466,7 +494,7 @@ def main():
         return 0
 
     try:
-        prs = fetch_open_prs()
+        prs = fetch_open_prs(focus_number=number)
     except RuntimeError as e:
         # NOT a clean verdict. On GitHub a permission-shaped absence is byte-identical to a
         # real one, so the only honest answer is "could not check".
