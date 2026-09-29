@@ -663,7 +663,7 @@ spec:
             namespace: payments
             cluster: card-issuance-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(1)
+          expr: vector(2)
           labels:
             namespace: payments
             cluster: card-processing-db
