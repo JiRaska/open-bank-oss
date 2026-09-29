@@ -1,0 +1,29 @@
+# ArgoCD app for the stale VolumeAttachment reaper (ADR-0325 follow-up, #11304).
+# Deletes VolumeAttachments whose Node no longer exists, so a pod rescheduled
+# after a spot interruption can attach its EBS volume without a human.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: volumeattachment-reaper
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/volumeattachment-reaper
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: volumeattachment-reaper
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

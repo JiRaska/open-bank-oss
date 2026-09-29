@@ -101,6 +101,18 @@ interface JournalRepository {
     suspend fun subLedgerBalances(asOf: LocalDate, subAccountId: UUID?): List<SubLedgerBalance>
 
     /**
+     * Debit and credit totals of [glAccountId]'s booked lines whose TRANSACTION currency is
+     * [currency], in that currency's native amount, with entry date on or before [asOf] (#11107).
+     * Returns zeros when nothing matches. Scoped like the trial balance (ADR-0252).
+     */
+    suspend fun accountBalanceInCurrency(
+        glAccountId: UUID,
+        currency: String,
+        asOf: LocalDate,
+        scope: LedgerScope,
+    ): Pair<java.math.BigDecimal, java.math.BigDecimal>
+
+    /**
      * Tie-out: compares the GL aggregate balance of [controlAccountId] against the sum of all
      * per-customer sub-ledger entries for that account as of [asOf].
      *

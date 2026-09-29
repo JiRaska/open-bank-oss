@@ -24,8 +24,9 @@ data class CreateAmlCaseRequest(
     val alertDetail: String?,
     val matchedEntity: String?,
 ) {
-    fun toCommand(idempotencyKey: String) = CreateAmlCaseCommand(
+    fun toCommand(idempotencyKey: String, requestHash: String? = null) = CreateAmlCaseCommand(
         idempotencyKey = idempotencyKey,
+        requestHash = requestHash,
         partyId = partyId,
         accountId = accountId,
         transactionId = transactionId,

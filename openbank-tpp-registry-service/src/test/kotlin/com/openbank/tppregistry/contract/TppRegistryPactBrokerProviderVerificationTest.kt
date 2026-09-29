@@ -11,8 +11,10 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -46,7 +48,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  */
 @QuarkusTest
 @QuarkusTestResource(TppRegistryPactBrokerProviderVerificationTest.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.tppregistry.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-tpp-registry-service")
 @PactBroker
@@ -82,6 +87,9 @@ class TppRegistryPactBrokerProviderVerificationTest {
         // No setup: nothing registers CZ-CNB-PACT-UNREGISTERED. Declared so the state is an
         // explicit part of the contract rather than a name pact-jvm passes over silently — an
         // unhandled state is not an error, which is how #468's missing states stayed invisible.
+        // This is the negative case the pact carries for this endpoint: the committed interaction
+        // "GET check an unregistered TPP — the fail-closed refusal" asserts a 403 (FORBIDDEN)
+        // response, replayed by this same @TestTemplate — not a second happy path.
     }
 
     @State("the TPP registry has an ACTIVE AISP with an unexpired QWAC")

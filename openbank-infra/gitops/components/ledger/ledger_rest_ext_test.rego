@@ -320,7 +320,7 @@ test_treasury_may_create_via_its_identity_rule if {
 
 # Treasury reverses a deal by posting an offsetting journal, so ledger.reverse stays denied.
 test_treasury_identity_may_not_perform_any_other_ledger_action if {
-	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft", "ledger.read"} {
+	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
 		rest.allow == false with input as {"principal": treasury_m2m, "action": action}
 			with data.rules as rules_mock
 	}
@@ -333,5 +333,22 @@ test_treasury_identity_rule_admits_no_other_role_api_account if {
 	every p in [other_role_api_sa, lending_m2m, clearing_m2m, interest_m2m, services_m2m] {
 		not "service-treasury-ledger-post" in rest.allowed_reasons with input as {"principal": p, "action": "ledger.create"}
 			with data.rules as rules_mock
+	}
+}
+
+# Nostro reconciliation (#10896): treasury reads journals + trial balance, and only its own identity.
+test_treasury_may_read_the_ledger_for_nostro_reconciliation if {
+	every action in {"ledger.list", "ledger.read"} {
+		"service-treasury-ledger-read" in rest.allowed_reasons with input as {"principal": treasury_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_treasury_read_rule_admits_no_other_role_api_account if {
+	every p in [other_role_api_sa, lending_m2m, clearing_m2m, interest_m2m, services_m2m] {
+		every action in {"ledger.list", "ledger.read"} {
+			not "service-treasury-ledger-read" in rest.allowed_reasons with input as {"principal": p, "action": action}
+				with data.rules as rules_mock
+		}
 	}
 }

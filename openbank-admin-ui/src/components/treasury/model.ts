@@ -6,7 +6,8 @@
 // without rendering, and so every page agrees on who may do what.
 import type { Tone } from '@/components/ui/tone'
 import { hasPermission } from '@/lib/auth/roles'
-import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealState, type Product } from './contracts'
+import { isIsoDate } from '@/components/balance-sheet/model'
+import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealState, type MatchType, type Product } from './contracts'
 import type { WriteResult } from './api'
 
 type T = (cs: string, en: string) => string
@@ -16,11 +17,13 @@ export const STATE_TONE: Record<DealState, Tone> = {
   MATURED: 'success', CANCELLED: 'neutral', REVERSED: 'danger',
 }
 
-export function productLabel(p: Product, t: T): string {
+export function productLabel(p: string, t: T): string {
   switch (p) {
     case 'MM_PLACEMENT': return t('Umístění na peněžním trhu', 'MM placement')
     case 'MM_BORROWING': return t('Přijetí na peněžním trhu', 'MM borrowing')
     case 'CNB_DEPOSIT_FACILITY': return t('Depozitní facilita ČNB', 'ČNB deposit facility')
+    case 'CNB_LOMBARD': return t('ČNB lombardní úvěr', 'ČNB lombard borrowing')
+    default: return p
   }
 }
 
@@ -36,12 +39,30 @@ export function stateLabel(s: DealState, t: T): string {
   }
 }
 
-/** Assets consume the counterparty's credit limit (ProductType.isAsset); borrowing does not. */
-export const isAssetProduct = (p: Product) => p !== 'MM_BORROWING'
+/** Assets consume the counterparty's credit limit (ProductType.isAsset); borrowing does not —
+ * MM_BORROWING and the ČNB lombard facility are both liabilities (Deal.kt ProductType.isAsset). */
+export const isAssetProduct = (p: Product) => p !== 'MM_BORROWING' && p !== 'CNB_LOMBARD'
 
-/** Counterparties eligible for a product: ČNB only for the facility, banks otherwise. */
+/** Products fixed to CZK, counterparty ČNB, and an overnight (next-business-day) maturity
+ * (Deal.kt ProductType.isCnbFacility). */
+export const isCnbFacility = (p: Product) => p === 'CNB_DEPOSIT_FACILITY' || p === 'CNB_LOMBARD'
+
+/** Counterparties eligible for a product: ČNB only for a ČNB facility, banks otherwise. */
 export function eligibleCounterparties(all: Counterparty[], product: Product): Counterparty[] {
-  return all.filter(c => (product === 'CNB_DEPOSIT_FACILITY' ? c.counterpartyId === CNB_COUNTERPARTY_ID : c.kind === 'BANK'))
+  return all.filter(c => (isCnbFacility(product) ? c.counterpartyId === CNB_COUNTERPARTY_ID : c.kind === 'BANK'))
+}
+
+/**
+ * The next business day after `valueDate` (Monday-Friday; no holiday calendar), mirroring the
+ * backend's `DayCount.nextBusinessDay` (treasury `Deal.kt`) — a Friday value date matures the
+ * following Monday. Returns '' for an invalid/empty input rather than a bogus date.
+ */
+export function nextBusinessDay(valueDate: string): string {
+  if (!isIsoDate(valueDate)) return ''
+  const d = new Date(`${valueDate}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
 }
 
 /** The distinct counterparties (the API returns one row per counterparty and currency). */
@@ -68,6 +89,8 @@ export function utilisation(row: Pick<Counterparty, 'limit' | 'exposure'>): numb
 export type DealActions = {
   submit: boolean; cancel: boolean; approve: boolean; reject: boolean
   settle: boolean; mature: boolean; reverse: boolean
+  /** Senior override of a breached limit (ADR-0315 D4) — a role and state narrower than approve. */
+  overrideLimit: boolean
   /** Approve is withheld because the viewer created or submitted this deal (four-eyes courtesy). */
   ownDeal: boolean
 }
@@ -78,12 +101,22 @@ export type DealActions = {
  * viewer's principal name (principalNameFromToken — the claim treasury records as createdBy /
  * submittedBy) matches either — a courtesy, not the control: the server's 422 still is.
  */
-export function dealActions(deal: Pick<Deal, 'state' | 'createdBy' | 'submittedBy'>, actor: string | null, roles: string[]): DealActions {
+export function dealActions(
+  deal: Pick<Deal, 'state' | 'createdBy' | 'submittedBy'> & Partial<Pick<Deal, 'limitCheck' | 'limitOverride'>>,
+  actor: string | null,
+  roles: string[],
+): DealActions {
   const dealer = hasPermission(roles, 'treasury:deal:create')
   const approver = hasPermission(roles, 'treasury:deal:approve')
   const canCancel = hasPermission(roles, 'treasury:deal:cancel')
+  const canOverrideLimit = hasPermission(roles, 'treasury:deal:override-limit')
   const ownDeal = actor !== null && (deal.createdBy === actor || deal.submittedBy === actor)
   const pending = deal.state === 'PENDING_APPROVAL'
+  // Mirrors the domain's own guard (Deal.overrideLimit): PENDING_APPROVAL, breached, and not
+  // already overridden — an override already recorded needs a fresh submit/limit check, not a
+  // second one. Four-eyes (never the deal's own creator/submitter) is the server's 422; withheld
+  // here too as the same courtesy `approve` gets.
+  const overridable = pending && deal.limitCheck?.breached === true && !deal.limitOverride
   return {
     submit: dealer && deal.state === 'DRAFT',
     cancel: canCancel && (deal.state === 'DRAFT' || pending),
@@ -92,9 +125,31 @@ export function dealActions(deal: Pick<Deal, 'state' | 'createdBy' | 'submittedB
     settle: approver && deal.state === 'BOOKED',
     mature: approver && deal.state === 'SETTLED',
     reverse: approver && (deal.state === 'BOOKED' || deal.state === 'SETTLED'),
+    overrideLimit: canOverrideLimit && overridable && !ownDeal,
     ownDeal: pending && ownDeal,
   }
 }
+
+export const MATCH_TYPE_TONE: Record<MatchType, Tone> = { EXACT: 'success', AMOUNT_DATE: 'warning' }
+
+export function matchTypeLabel(m: MatchType, t: T): string {
+  switch (m) {
+    case 'EXACT': return t('Přesná shoda', 'Exact match')
+    case 'AMOUNT_DATE': return t('Podle částky a data', 'Amount + date')
+  }
+}
+
+/**
+ * A `null` difference is NOT a `0` — the server has not computed it, and the two must never render
+ * the same (Instant.EPOCH-style trap: a sentinel a reader agrees is "clean" is not evidence it is).
+ * Returns null so the caller renders a dash/placeholder instead of a number.
+ */
+export function formatDifference(v: number | null, money: (n: number) => string): string | null {
+  return v === null ? null : money(v)
+}
+
+/** A non-zero difference (after the null check above) is the one thing this page must highlight. */
+export const isNonZeroDifference = (v: number | null): boolean => v !== null && v !== 0
 
 /** A readable sentence for a refused write — never a bare status line (graceful-state rule). */
 export function refusalText(res: WriteResult<unknown>, action: string, t: T): string {

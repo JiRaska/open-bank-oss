@@ -8,9 +8,7 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.sepa.application.port.out.DocumentTemplateUnavailableException
-import com.openbank.sepa.application.usecase.InvalidSepaPaymentStateTransitionException
 import com.openbank.sepa.application.usecase.PaymentNotCompletedException
-import com.openbank.sepa.application.usecase.SepaPaymentNotFoundException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -19,35 +17,11 @@ import java.time.Instant
 private const val HTTP_CONFLICT = 409
 private const val HTTP_BAD_GATEWAY = 502
 
-@Provider
-class SepaPaymentNotFoundMapper : ExceptionMapper<SepaPaymentNotFoundException> {
-    override fun toResponse(exception: SepaPaymentNotFoundException): Response = Response.status(404)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                404,
-                ErrorCode.NOT_FOUND.code,
-                exception.message ?: "Not found",
-                timestamp = Instant.now(),
-            ),
-        )
-        .build()
-}
-
-@Provider
-class InvalidSepaPaymentStateTransitionMapper : ExceptionMapper<InvalidSepaPaymentStateTransitionException> {
-    override fun toResponse(exception: InvalidSepaPaymentStateTransitionException): Response = Response.status(409)
-        .entity(
-            ApiError(
-                Ids.randomId().toString(),
-                409,
-                ErrorCode.CONFLICT.code,
-                exception.message ?: "Conflict",
-                timestamp = Instant.now(),
-            ),
-        )
-        .build()
-}
+// SepaPaymentNotFoundMapper / InvalidSepaPaymentStateTransitionMapper (404/409) removed here
+// (#10911/#11059 phase 3): SepaPaymentNotFoundException/InvalidSepaPaymentStateTransitionException
+// now extend the libs-domain ResourceNotFoundException/ResourceConflictException bases, handled
+// by libs-runtime's ResourceNotFoundExceptionMapper/ResourceConflictExceptionMapper — same status,
+// code and ApiError shape. See SepaPaymentExceptionMapperEquivalenceTest.
 
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
 // openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the

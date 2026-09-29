@@ -169,6 +169,7 @@ class SanctionsImportService(
             inputStream.use { EuFsfSaxParser.parse(it) }
         }
         Log.infof("SAX-parsed %d EU FSF sanction entities", entities.size)
+        if (entities.isEmpty()) return 0
 
         var total = 0
         val seenExternalIds = mutableSetOf<String>()
@@ -337,7 +338,10 @@ class SanctionsImportService(
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: return 0
+        val headerLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: run {
+            reader.close()
+            return 0
+        }
         val headers = OpenSanctionsCsv.parseRecord(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
@@ -430,6 +434,7 @@ class SanctionsImportService(
             reader.close()
         }
 
+        if (parsed == 0) return 0
         if (batch.isNotEmpty()) total += entryRepo.upsertAll(batch)
 
         // Only reached if the loop above completed without throwing — a mid-stream failure

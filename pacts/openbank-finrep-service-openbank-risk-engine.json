@@ -1,0 +1,1015 @@
+{
+  "consumer": {
+    "name": "openbank-finrep-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the Pillar 1 credit-risk capital of a TIED_OUT run",
+      "providerStates": [
+        {
+          "name": "a TIED_OUT risk snapshot exists at the report date"
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v1/risk/snapshots/${runId}/capital",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots/0190a4c0-0000-7000-8000-00000000c020/capital"
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-06-30",
+          "currencies": [
+            {
+              "classes": [
+                {
+                  "ead": 1500.0,
+                  "exposureClass": "cash",
+                  "rwa": 0.0
+                }
+              ],
+              "currency": "CZK",
+              "totalRwa": 0.0
+            }
+          ],
+          "parameterSetId": "bcbs-d424-sa",
+          "parameterSetVersion": "1",
+          "runId": "0190a4c0-0000-7000-8000-00000000c020",
+          "total": {
+            "classes": [
+              {
+                "ead": 1500.0,
+                "exposureClass": "cash",
+                "rwa": 0.0
+              }
+            ],
+            "currency": "CZK",
+            "totalRwa": 0.0
+          },
+          "totalNotStated": null,
+          "unclassified": [
+            {
+              "glAccountCode": "9999"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.currencies": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].classes": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].classes[*].ead": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].classes[*].exposureClass": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].classes[*].rwa": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].totalRwa": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.parameterSetId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.parameterSetVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.total.classes": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.classes[*].ead": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.classes[*].exposureClass": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.classes[*].rwa": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.totalRwa": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.unclassified": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.unclassified[*].glAccountCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the most recent risk snapshot runs for a COREP report date",
+      "providerStates": [
+        {
+          "name": "a TIED_OUT risk snapshot exists at the report date"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "runs": [
+            {
+              "asOf": "2026-06-30",
+              "id": "0190a4c0-0000-7000-8000-00000000c020",
+              "recordedAt": "2026-07-01T06:00:00Z",
+              "status": "TIED_OUT"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.runs": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runs[*].asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runs[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.runs[*].recordedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runs[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the LCR liquid assets of a TIED_OUT run",
+      "providerStates": [
+        {
+          "name": "a TIED_OUT risk snapshot with an LCR result exists at the report date"
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v1/risk/snapshots/${runId}/liquidity",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots/0190a4c0-0000-7000-8000-00000000c020/liquidity"
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-06-30",
+          "currencies": [
+            {
+              "currency": "CZK",
+              "lcr": {
+                "cappedInflows": 50.0,
+                "hqla": {
+                  "adjustmentFor15Cap": 0.0,
+                  "adjustmentFor40Cap": 0.0,
+                  "level1": 1000.0,
+                  "level2a": 0.0,
+                  "level2b": 0.0,
+                  "lines": [
+                    {
+                      "afterHaircut": 1000.0,
+                      "haircut": 0,
+                      "level": "L1",
+                      "marketValue": 1000.0
+                    }
+                  ],
+                  "stock": 1000.0
+                },
+                "inflowCap": 150.0,
+                "inflowCapBinding": false,
+                "inflows": [
+                  {
+                    "amount": 100.0,
+                    "factor": 0.5,
+                    "factorKey": "lcr-retail-loan-inflow",
+                    "weighted": 50.0
+                  }
+                ],
+                "netOutflows": 150.0,
+                "outflows": [
+                  {
+                    "amount": 2000.0,
+                    "factor": 0.1,
+                    "factorKey": "lcr-retail-less-stable-runoff",
+                    "weighted": 200.0
+                  }
+                ],
+                "ratio": 6.666667,
+                "totalInflows": 50.0,
+                "totalOutflows": 200.0
+              }
+            }
+          ],
+          "notes": [
+            "PLEDGED_COLLATERAL_NOT_MODELLED: A secured central-bank borrowing (\u010CNB lombard) is outstanding, but the collateral pledged for it is not modelled: pledged assets are encumbered and would not count as HQLA."
+          ],
+          "parameterSetId": "eu-2015-61-crr2",
+          "parameterSetVersion": "2",
+          "runId": "0190a4c0-0000-7000-8000-00000000c020",
+          "total": {
+            "currency": "CZK",
+            "lcr": {
+              "cappedInflows": 50.0,
+              "hqla": {
+                "adjustmentFor15Cap": 0.0,
+                "adjustmentFor40Cap": 0.0,
+                "level1": 1000.0,
+                "level2a": 0.0,
+                "level2b": 0.0,
+                "lines": [
+                  {
+                    "afterHaircut": 1000.0,
+                    "haircut": 0,
+                    "level": "L1",
+                    "marketValue": 1000.0
+                  }
+                ],
+                "stock": 1000.0
+              },
+              "inflowCap": 150.0,
+              "inflowCapBinding": false,
+              "inflows": [
+                {
+                  "amount": 100.0,
+                  "factor": 0.5,
+                  "factorKey": "lcr-retail-loan-inflow",
+                  "weighted": 50.0
+                }
+              ],
+              "netOutflows": 150.0,
+              "outflows": [
+                {
+                  "amount": 2000.0,
+                  "factor": 0.1,
+                  "factorKey": "lcr-retail-less-stable-runoff",
+                  "weighted": 200.0
+                }
+              ],
+              "ratio": 6.666667,
+              "totalInflows": 50.0,
+              "totalOutflows": 200.0
+            }
+          },
+          "totalNotStated": null,
+          "unclassified": [
+            {
+              "glAccountCode": "9999"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.currencies": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.cappedInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.adjustmentFor15Cap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.adjustmentFor40Cap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.level1": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.level2a": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.level2b": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].afterHaircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].haircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].level": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.lines[*].marketValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.stock": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflowCap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflowCapBinding": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.netOutflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.outflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.ratio": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.totalInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.totalOutflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.notes": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.notes[*]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.parameterSetId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.parameterSetVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.total.lcr.cappedInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.adjustmentFor15Cap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.adjustmentFor40Cap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.level1": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.level2a": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.level2b": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].afterHaircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].haircut": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].level": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.lines[*].marketValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.stock": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.inflowCap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.inflowCapBinding": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.inflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.netOutflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.outflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.outflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.ratio": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.totalInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.totalOutflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.unclassified": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.unclassified[*].glAccountCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the risk snapshot runs with no identity",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-risk-engine"
+  }
+}

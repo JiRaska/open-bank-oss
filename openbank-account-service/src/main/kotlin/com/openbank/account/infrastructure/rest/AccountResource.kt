@@ -35,7 +35,11 @@ import com.openbank.account.infrastructure.rest.dto.SavingsGoalRequest
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.security.Roles
 import io.quarkus.logging.Log
 import io.quarkus.security.identity.SecurityIdentity
@@ -56,6 +60,8 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
@@ -70,6 +76,8 @@ import java.util.UUID
  * operator/admin. Roles come from [Roles] (not raw strings). Enforced by Quarkus OIDC and locked by
  * AccountSecurityContractTest.
  */
+private const val ACCOUNTS_PATH = "/api/v1/accounts"
+
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -133,30 +141,53 @@ class AccountResource(
         // non-nullable type only decided where the NPE landed — a 500 that tells the caller the
         // server broke. libs-runtime maps IllegalArgumentException to 400.
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
+        // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
+        // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
+        // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", ACCOUNTS_PATH, request)
+        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
                 .header("X-Idempotency-Replayed", "true")
                 .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
         }
 
-        val account = accountUseCase.openAccount(
-            OpenAccountCommand(
-                idempotencyKey = idempotencyKey,
-                partyId = request.partyId,
-                productId = request.productId,
-                accountType = request.accountType,
-                currency = CurrencyCode.of(request.currencyCode),
-                requestedBy = operatorId(),
-                legalName = request.legalName,
-                termsVersion = request.termsVersion,
-                termsUrl = request.termsUrl,
-                termsEffectiveFrom = request.termsEffectiveFrom,
-            ),
-        )
+        var opened = false
+        val account = try {
+            accountUseCase.openAccount(
+                OpenAccountCommand(
+                    idempotencyKey = idempotencyKey,
+                    requestHash = requestHash,
+                    partyId = request.partyId,
+                    productId = request.productId,
+                    accountType = request.accountType,
+                    currency = CurrencyCode.of(request.currencyCode),
+                    requestedBy = operatorId(),
+                    legalName = request.legalName,
+                    termsVersion = request.termsVersion,
+                    termsUrl = request.termsUrl,
+                    termsEffectiveFrom = request.termsEffectiveFrom,
+                ),
+            ).also { opened = true }
+        } finally {
+            // Any failure (the exception propagates unchanged) frees the in-flight marker so a
+            // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
+            // Shielded from cancellation and never rethrows: a release failure must not mask the
+            // original exception that made release necessary, and a cancelled caller must not
+            // abandon the release mid-flight and leave the key stuck IN_PROGRESS for its full TTL.
+            if (!opened) {
+                withContext(NonCancellable) {
+                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                        .onFailure { Log.warn("Failed to release idempotency key after create failure", it) }
+                }
+            }
+        }
         val responseBody = account.toResponse()
         val json = objectMapper.writeValueAsString(responseBody)
-        idempotencyStore.save(idempotencyKey, 201, json)
+        idempotencyStore.save(idempotencyKey, requestHash, 201, json)
 
         return Response.created(URI.create("/api/v1/accounts/${account.id}"))
             .entity(responseBody)

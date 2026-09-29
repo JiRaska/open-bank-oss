@@ -12,6 +12,8 @@ import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.FxMidRatePort
+import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
@@ -21,10 +23,12 @@ import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.Side
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -51,7 +55,28 @@ class TreasuryDealServiceTest {
         override suspend fun list() = all
     }
     private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
-    private val service get() = TreasuryDealService(deals, cps, ledger, mapper, clock)
+    private var fxMid: FxMidRatePort = FxMidRatePort.NONE
+    private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
+    private val service get() = TreasuryDealService(deals, cps, ledger, mapper, clock, fxMid, tolerance)
+
+    /** Bank buys (or sells) EUR against CZK; value date left to default (T+2). */
+    private fun fx(
+        eur: String = "10000.00",
+        rate: String = "25.000000",
+        side: FxSide = FxSide.BUY,
+        valueDate: LocalDate? = null,
+    ) = DraftDealCommand(
+        ProductType.FX_SPOT,
+        "SIMBK-A",
+        "EUR",
+        BigDecimal(eur),
+        BigDecimal(rate),
+        null,
+        valueDate,
+        null,
+        null,
+        side,
+    )
 
     private fun cmd(
         principal: String = "100000.00",
@@ -142,6 +167,52 @@ class TreasuryDealServiceTest {
         val a = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
         assertThat(a.exposure).isEqualByComparingTo("250000.00")
         assertThat(a.headroom).isEqualByComparingTo("750000.00")
+        assertThat(a.utilisationPercent).isEqualByComparingTo("25.00")
+        assertThat(a.breached).isFalse()
+        assertThat(a.activeOverrides).isEqualTo(0)
+    }
+
+    /**
+     * #10896: the limit-utilisation view (`counterparties()`) and the booking-time [LimitCheck] both
+     * read [DealRepository.exposure] — proving they cannot disagree means proving the view's
+     * `exposure` for a counterparty/currency equals what a fresh [com.openbank.treasury.domain.model.LimitCheck]
+     * computes for the NEXT deal against the same book. Both numbers come from the identical
+     * on-book deals (`Deal.LIMIT_CONSUMING_STATES`), so they must match exactly.
+     */
+    @Test
+    fun `the limit-utilisation view and the booking-time limit check agree on exposure`(): Unit = runBlocking {
+        book(cmd(principal = "250000.00"))
+        val pendingOnly = service.draft(cmd(principal = "50000.00"), DealFixtures.dealer)
+        val pending = service.submit(pendingOnly.id, DealFixtures.dealer)
+
+        val view = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
+        // the view's exposure already counts BOOKED + PENDING_APPROVAL, exactly like the check.
+        assertThat(view.exposure).isEqualByComparingTo("300000.00")
+        assertThat(pending.limitCheck!!.exposureBefore).isEqualByComparingTo("250000.00")
+        assertThat(pending.limitCheck!!.exposureAfter).isEqualByComparingTo(view.exposure)
+    }
+
+    @Test
+    fun `an active override counts while PENDING_APPROVAL, and not after booking`(): Unit = runBlocking {
+        book(cmd(principal = "700000.00"))
+        val second = service.draft(cmd(principal = "400000.00"), DealFixtures.dealer)
+        val pending = service.submit(second.id, DealFixtures.dealer)
+        assertThat(pending.limitCheck!!.breached).isTrue()
+
+        service.overrideLimit(second.id, "desk head approved, temporary excess", DealFixtures.seniorApprover)
+        val afterOverride = service.counterparties().first {
+            it.counterparty.id == "SIMBK-A" && it.currency == "CZK"
+        }
+        assertThat(afterOverride.activeOverrides).isEqualTo(1)
+        assertThat(afterOverride.breached).isTrue()
+
+        service.approve(second.id, DealFixtures.approver)
+        val afterBooking = service.counterparties().first {
+            it.counterparty.id == "SIMBK-A" && it.currency == "CZK"
+        }
+        assertThat(afterBooking.activeOverrides)
+            .describedAs("booking moves the deal off PENDING_APPROVAL; the override is no longer 'active'")
+            .isEqualTo(0)
     }
 
     @Test
@@ -214,6 +285,100 @@ class TreasuryDealServiceTest {
         assertThat(ledger.posted.filter { it.event == PostingEvent.ACCRUED }.map { it.dealId }).containsExactly(b.id)
     }
 
+    // --- #10896: FX spot ---------------------------------------------------------------------------
+
+    @Test
+    fun `an FX spot defaults to T+2 and is checked against the CZK limit by its CZK equivalent`(): Unit = runBlocking {
+        book(cmd(principal = "700000.00")) // a CZK placement: 700k of the 1M CZK limit
+        val d = service.draft(fx(eur = "10000.00", rate = "25.000000"), DealFixtures.dealer)
+        assertThat(d.valueDate).isEqualTo(monday.plusDays(2))
+        assertThat(d.maturityDate).isEqualTo(d.valueDate)
+        val pending = service.submit(d.id, DealFixtures.dealer)
+        assertThat(pending.limitCheck!!.currency).isEqualTo("CZK")
+        assertThat(pending.limitCheck!!.dealAmount).isEqualByComparingTo("250000.00")
+        assertThat(pending.limitCheck!!.exposureBefore).isEqualByComparingTo("700000.00")
+        assertThat(pending.limitCheck!!.breached).isFalse()
+        // The same EUR amount at a rate that pushes the CZK leg past the headroom breaches.
+        val big = service.draft(fx(eur = "20000.00", rate = "25.000000"), DealFixtures.dealer)
+        assertThat(service.submit(big.id, DealFixtures.dealer).limitCheck!!.breached)
+            .describedAs("500k CZK on top of 700k + 250k exceeds 1M").isTrue()
+        assertThatThrownBy { runBlocking { service.approve(big.id, DealFixtures.approver) } }
+            .isInstanceOf(LimitBreachedException::class.java)
+    }
+
+    @Test
+    fun `an FX spot drafted on a Friday values on the next Tuesday`(): Unit = runBlocking {
+        clock = Clock.fixed(DealFixtures.FRIDAY.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(DealFixtures.FRIDAY.plusDays(4))
+    }
+
+    @Test
+    fun `an FX spot settles both legs once on its value date and never matures`(): Unit = runBlocking {
+        val b = book(fx(eur = "1000.00", rate = "24.915000"))
+        assertThat(deals.events.single().payload).contains("\"fxSide\":\"BUY\"").contains("\"counterAmount\":24915.00")
+        assertThat(service.runSimulatedMarket().moved).isEqualTo(0)
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
+        val settlement = ledger.posted.single()
+        assertThat(settlement.idempotencyKey).isEqualTo("treasury:${b.id}:settled")
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+            .containsExactly(
+                "DEBIT 1002 1000.00 EUR",
+                "CREDIT 1991 1000.00 EUR",
+                "DEBIT 1990 24915.00 CZK",
+                "CREDIT 1001 24915.00 CZK",
+            )
+        clock = Clock.offset(clock, java.time.Duration.ofDays(30))
+        assertThat(
+            service.runSimulatedMarket().moved,
+        ).describedAs("a settled spot is not due for maturity").isEqualTo(0)
+        assertThat(service.accrueInterest(LocalDate.now(clock)).journals).isEqualTo(0)
+        assertThatThrownBy { runBlocking { service.mature(b.id, DealFixtures.approver) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(ledger.posted).hasSize(1)
+        val czk = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
+        assertThat(czk.exposure).describedAs("settlement releases the limit").isEqualByComparingTo("0")
+    }
+
+    @Test
+    fun `reversing a settled FX spot posts the flipped four legs`(): Unit = runBlocking {
+        val b = book(fx(side = FxSide.SELL))
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        service.runSimulatedMarket()
+        service.reverse(b.id, "wrong side", DealFixtures.approver)
+        val (settled, reversed) = ledger.posted
+        assertThat(settled.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
+        assertThat(reversed.lines.map { it.glCode to it.side }).isEqualTo(
+            settled.lines.map { it.glCode to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
+        )
+        assertThat(deals.events.last().eventType).isEqualTo("treasury.deal.reversed.v1")
+        assertThat(deals.events.last().payload).contains("\"fxSide\":\"SELL\"")
+    }
+
+    @Test
+    fun `the rate check is off by default, and when on flags - never blocks - a rate outside tolerance`(): Unit =
+        runBlocking {
+            assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).isNull()
+            tolerance = FxRateTolerance(true, BigDecimal("1.0"))
+            fxMid = FxMidRatePort { ccy, _ -> if (ccy == "EUR") BigDecimal("25.00") else null }
+            val within = service.draft(fx(rate = "25.200000"), DealFixtures.dealer)
+            assertThat(within.fx!!.rateFlag).isNull()
+            assertThat(within.fx!!.midRate).isEqualByComparingTo("25.00")
+            val off = service.draft(fx(rate = "26.000000"), DealFixtures.dealer)
+            assertThat(off.fx!!.rateFlag).contains("deviates 4.0000 %")
+            assertThat(off.history.last().note).startsWith("rate flagged:")
+            assertThat(service.submit(off.id, DealFixtures.dealer).state).isEqualTo(DealState.PENDING_APPROVAL)
+            fxMid = FxMidRatePort.NONE
+            assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).contains("mid unavailable")
+        }
+
+    @Test
+    fun `a money-market draft without a value date is refused`(): Unit = runBlocking {
+        val noDate = cmd().copy(valueDate = null)
+        assertThatThrownBy { runBlocking { service.draft(noDate, DealFixtures.dealer) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private class RecordingLedger : LedgerPostingPort {
         val posted = mutableListOf<JournalSpec>()
         var failFor: UUID? = null
@@ -250,15 +415,18 @@ class TreasuryDealServiceTest {
         override suspend fun list(state: DealState?) = rows.values.filter { state == null || it.state == state }
         override suspend fun dueForSettlement(today: LocalDate) =
             rows.values.filter { it.state == DealState.BOOKED && !it.valueDate.isAfter(today) }
-        override suspend fun dueForMaturity(today: LocalDate) =
-            rows.values.filter { it.state == DealState.SETTLED && !it.maturityDate.isAfter(today) }
+        override suspend fun dueForMaturity(today: LocalDate) = rows.values.filter {
+            it.state == DealState.SETTLED && !it.maturityDate.isAfter(today) && it.product != ProductType.FX_SPOT
+        }
         override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?) =
             rows.values.filter {
                 it.counterpartyId == counterpartyId &&
-                    it.currency == currency &&
+                    it.limitCurrency == currency &&
                     it.consumesLimit &&
                     it.id != excludeDealId
-            }.sumOf { it.principal }
+            }.sumOf { it.limitAmount }
+        override suspend fun pendingLimitOverrides() =
+            rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
         override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
         override suspend fun recordJournal(journal: LedgerJournalRef) {
             if (journals.none { it.idempotencyKey == journal.idempotencyKey }) journals += journal

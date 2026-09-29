@@ -38,6 +38,9 @@ class M2mOidcClientIdentityWiringTest {
             TransactionServiceClient::class.java,
             SepaInstantServiceClient::class.java,
             InterestServiceClient::class.java,
+            AmlServiceClient::class.java,
+            SanctionsServiceClient::class.java,
+            DisputeServiceClient::class.java,
         ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull

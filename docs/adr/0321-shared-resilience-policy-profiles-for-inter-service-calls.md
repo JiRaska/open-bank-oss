@@ -54,7 +54,7 @@ openbank-libs, and make every inter-service REST adapter declare exactly one.
 | Profile | Use for | Timeout | Retry | Circuit breaker | Bulkhead |
 |---|---|---|---|---|---|
 | `money-sync` | synchronous money-path writes and gates (sanctions, ledger posting, SCA) | 3 s | at most 1 retry, 200 ms + 100 ms jitter, **only** on connect/timeout/5xx and only when the call carries an idempotency key; never on 4xx | volume 10, ratio 0.5, delay 5 s, success 2 | 20 concurrent |
-| `read` | idempotent reads (directory, catalog, balances) | 2 s | 2 retries, 200 ms + 100 ms jitter, on connect/timeout/5xx | volume 10, ratio 0.5, delay 5 s | 50 concurrent |
+| `read` | idempotent reads (directory, catalog, balances) | 2 s | 2 retries, 200 ms + 100 ms jitter, on connect/timeout/5xx | volume 10, ratio 0.5, delay 5 s, success 2 | 50 concurrent |
 | `external-scheme` | clearing, SEPA/SWIFT, CNB, any `@SyntheticTaintExternalBoundary` client | 10 s | 2 retries, 1 s + 500 ms jitter, idempotent calls only | volume 4, ratio 0.5, delay 10 s, success 2 | 10 concurrent |
 | `batch` | scheduled and back-office calls with no user waiting | 30 s | 3 retries, 2 s + 1 s jitter | volume 10, ratio 0.5, delay 30 s | 5 concurrent |
 
@@ -64,7 +64,8 @@ adopting a profile changes behaviour for the outliers only. Jitter is mandatory 
 
 **D2 — Declaration.** A profile is a set of Kotlin constants in openbank-libs-runtime
 (`com.openbank.libs.resilience`) used as the annotation arguments, plus a marker annotation
-`@ResilienceProfile("money-sync")` on the adapter method (not yet implemented, #10930).
+`@ResilienceProfile("money-sync")` on the adapter method (catalogue, marker and the keyed-only
+classifiers below delivered in `com.openbank.libs.resilience`; no adapter adopts them yet, #10930).
 
 The `money-sync` rule "retry only when the call carries an idempotency key" is a *runtime*
 property of the call, which static annotation constants cannot express. It is implemented with
@@ -97,8 +98,8 @@ custom interceptor or SmallRye FT's programmatic `TypedGuard` API were rejected 
 move the policy out of the annotation the `resilience-profile` gate reads. Per-environment tuning uses
 MicroProfile FT's own config override (`<class>/<method>/Timeout/value`) — never a new literal.
 A deviation is allowed only as `@ResilienceProfile("custom", reason = "...")`, visible beside the
-call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation does not exist yet; it lands
-with the profile catalogue (#10930).
+call — the same review shape as `SyntheticTaintExternalBoundary`. The annotation exists in libs-runtime; the gate that reads it
+has not landed (#10930).
 
 **D3 — Metrics.** Every profiled adapter records through `ResilientCallMetrics`, which gains a
 closed `profile` tag next to `adapter` and `outcome`. Breaker state and bulkhead rejections come
@@ -140,15 +141,20 @@ against a running service, and complements ADR-0151, which injects at the infras
 - One more annotation per adapter.
 
 **Neutral**
-- Enforcement: a new checker `check-resilience-profile.py` (gate `resilience-profile`, advisory
-  first, then enforced with a baseline ratchet) requires every `@Timeout`/`@Retry`/`@CircuitBreaker`
-  method in `src/main` to carry `@ResilienceProfile`, and rejects `retryOn = [Exception::class]`
-  under `money-sync`. Until the annotation exists the gate cannot run (#10930).
+- Enforcement: `check-resilience-profile.py` (gate `resilience-profile`, **advisory**, per-file
+  baseline ratchet — landed with 146 of 147 measured sites baselined, one adopted) requires every
+  `@Timeout`/`@Retry`/`@CircuitBreaker`/`@Bulkhead` declaration in service `src/main` to carry
+  `@ResilienceProfile`, or `CUSTOM` with a non-blank `reason`. It does **not yet** reject
+  `retryOn = [Exception::class]` under `money-sync` — that check, and flipping the gate to
+  `enforced`, are follow-up work tracked by the fleet sweep.
 
 ### Delivery check
 
-- `git grep -l '@Timeout(' -- '*/src/main/*.kt' | xargs grep -L '@ResilienceProfile'` prints nothing.
-- `.github/gates/gates.yaml` has id `resilience-profile` with `mode: enforced`.
+- `git grep -l '@Timeout(' -- '*/src/main/*.kt' | xargs grep -L '@ResilienceProfile'` still prints
+  most of the fleet — expected until the sweep; the gate's own baseline is the source of truth for
+  what remains undeclared.
+- `.github/gates/gates.yaml` has id `resilience-profile` (today: `mode: advisory`; `enforced` is
+  the fleet-sweep exit criterion).
 - `git grep -l 'ResilientCallMetrics' -- '*/src/main/*.kt' | cut -d/ -f1 | sort -u | wc -l` is at
   least 40 (today: one service outside the libs).
 
