@@ -143,6 +143,16 @@ data class RiskLiquidityResult(
     val notes: List<String> = emptyList(),
     /** The engine's own reason when it states no combined total (e.g. a missing ČNB fixing); null when it does. */
     val totalNotStated: String? = null,
+    /** The engine's Art. 17 adjustment for the 15 % Level 2B cap (Annex I ¶5), null when not reported (C 76.00). */
+    val level2bCapAdjustment: BigDecimal? = null,
+    /** The engine's Art. 17 adjustment for the 40 % Level 2 cap (Annex I ¶5), null when not reported (C 76.00). */
+    val level2CapAdjustment: BigDecimal? = null,
+    /** The engine's liquidity buffer: after haircuts AND after both Level 2 caps (C 76.00). */
+    val hqlaStock: BigDecimal? = null,
+    /** The engine's net liquidity outflows: [totalOutflows] − [cappedInflows] (C 76.00). */
+    val netOutflows: BigDecimal? = null,
+    /** The engine's LCR as a fraction ([hqlaStock] / [netOutflows], 6 dp); null when net outflows ≤ 0. */
+    val lcrRatio: BigDecimal? = null,
 )
 
 /**
@@ -182,7 +192,7 @@ data class RiskLiquidityLookup(val result: RiskLiquidityResult?, val unavailable
 
 /**
  * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows, C 74.00
- * inflows). The run is selected
+ * inflows, C 76.00 calculation). The run is selected
  * exactly as [RiskCapitalPort] selects it, so C 02.00 and C 72.00 of one date read the same snapshot.
  */
 interface RiskLiquidityPort {

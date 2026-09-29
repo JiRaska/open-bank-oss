@@ -35,7 +35,7 @@ import java.time.LocalDate
  *   r0200 Monies due from central banks           [row code UNVERIFIED] — DATA GAP (not modelled)
  *
  * The 75 % cap (Art. 33(1)): r0010 is the engine's UNCAPPED `totalInflows`. The capped inflow is not a
- * C 74.00 row — it belongs to C 76.00 (LCR calculation, not yet mapped), so no row is emitted for it.
+ * C 74.00 row — it belongs to C 76.00 (LCR calculation, [C7600Mapper]), so no row is emitted for it.
  * The engine's cap is still validated: a `cappedInflows` that is not min(`totalInflows`, `inflowCap`)
  * fails the render, since it would mean the engine's inflow figures disagree with each other.
  *
@@ -69,6 +69,7 @@ object C7400Mapper {
     private const val UNVERIFIED = " [row code UNVERIFIED]"
     private const val COL_UNVERIFIED = " [column code UNVERIFIED]"
     private val CENT = BigDecimal("0.01")
+    private val EU_INFLOW_CAP = BigDecimal("0.75")
 
     const val NON_FINANCIAL = "lcr-retail-loan-inflow"
     const val FINANCIAL = "lcr-fi-inflow"
@@ -179,11 +180,22 @@ object C7400Mapper {
             else -> null
         }
 
-    /** The engine's capped inflows must be min(uncapped, cap); C 76.00 will report them, C 74.00 does not. */
-    private fun checkCap(result: RiskLiquidityResult) {
+    /**
+     * The engine's capped inflows must be min(uncapped, cap), and under the EU 2015/61 set its cap must be
+     * 75 % of total outflows (Art. 33(1)). Shared with C 76.00, which reports the capped figure.
+     */
+    internal fun checkCap(result: RiskLiquidityResult) {
         val cap = result.inflowCap ?: return
         val capped = result.cappedInflows ?: return
         val uncapped = checkNotNull(result.totalInflows)
+        val outflows = result.totalOutflows
+        if (outflows != null && result.parameterSetId == RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET) {
+            val expected = outflows.multiply(EU_INFLOW_CAP)
+            check(cap.subtract(expected).abs() <= CENT) {
+                "risk-engine inflow cap is $cap, but 75 % of total outflows $outflows is $expected " +
+                    "(snapshot ${result.runId})"
+            }
+        }
         check(capped.subtract(uncapped.min(cap)).abs() <= CENT) {
             "risk-engine capped inflows are $capped, but min(total inflows $uncapped, cap $cap) is not " +
                 "(snapshot ${result.runId})"

@@ -98,6 +98,10 @@ data class HqlaResponse(
     val level1: BigDecimal,
     val level2a: BigDecimal,
     val level2b: BigDecimal,
+    /** C 76.00: the Level 2B (15 %) and Level 2 (40 %) cap adjustments and the capped stock. */
+    val adjustmentFor15Cap: BigDecimal? = null,
+    val adjustmentFor40Cap: BigDecimal? = null,
+    val stock: BigDecimal? = null,
 )
 
 /** One LCR outflow line (only the fields C 73.00 reads); `factorKey` names the run-off rate applied. */
@@ -117,6 +121,9 @@ data class LcrResponse(
     val inflowCap: BigDecimal? = null,
     val cappedInflows: BigDecimal? = null,
     val inflowCapBinding: Boolean? = null,
+    /** C 76.00: net outflows and the ratio (a fraction, null when net outflows are not positive). */
+    val netOutflows: BigDecimal? = null,
+    val ratio: BigDecimal? = null,
 )
 
 data class CurrencyLiquidityResponse(val currency: String, val lcr: LcrResponse)
@@ -203,6 +210,11 @@ class RiskEngineCapitalAdapter(
                 inflowCapBinding = lcr?.inflowCapBinding,
                 notes = l.notes,
                 totalNotStated = l.totalNotStated,
+                level2bCapAdjustment = hqla?.adjustmentFor15Cap,
+                level2CapAdjustment = hqla?.adjustmentFor40Cap,
+                hqlaStock = hqla?.stock,
+                netOutflows = lcr?.netOutflows,
+                lcrRatio = lcr?.ratio,
             ),
         )
     }

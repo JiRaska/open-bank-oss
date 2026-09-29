@@ -24,7 +24,7 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.12.0
+  version: 1.13.0
 tags:
   - name: FINREP
   - name: COREP
@@ -166,8 +166,15 @@ paths:
         are not emitted; a capped figure that is not min(uncapped, cap) fails the render); secured lending (r0260) and central
         bank claims (r0200) are always `isDataGap: true`, the inflow column of a component whose
         engine factor is not the 2015/61 rate is a gap, every row is a gap under the same conditions
-        as `C_72.00`, and unverified row codes carry `[row code UNVERIFIED]`. Any other template id
-        is rejected.
+        as `C_72.00`, and unverified row codes carry `[row code UNVERIFIED]`. `C_76.00` (LCR
+        calculation, Delegated Regulation (EU) 2015/61 Arts. 4, 17 and 33; column c0010) is read from
+        the same LCR result: the liquidity buffer after haircuts and the Level 2 caps (a gap when the
+        engine does not report it after the caps), net liquidity outflows, the LCR in percent (unit
+        `%`, 2 dp; a gap when net outflows are not positive), total outflows, inflows subject to the
+        75 % cap and the capped reduction; fully exempt and 90 %-cap rows are always `isDataGap: true`.
+        The render fails when buffer, net outflows, ratio or the capped inflows do not tie to the
+        engine's own figures. Every row code is unverified and labelled `[row code UNVERIFIED]`. Any
+        other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
         never plugs capital as assets minus liabilities. With no recognised capital source every
@@ -181,7 +188,7 @@ paths:
           in: path
           required: true
           description: EBA COREP template identifier
-          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00, C_73.00, C_74.00] }
+          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00, C_73.00, C_74.00, C_76.00] }
         - name: asOf
           in: query
           required: false
