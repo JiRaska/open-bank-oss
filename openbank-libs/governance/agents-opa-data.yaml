@@ -157,6 +157,7 @@ agents:
     - treasury.deal.read
     - treasury.counterparty.read
     - treasury.position.read
+    - treasury.quote.read
     - treasury.deal.draft
     deny:
     - treasury.deal.submit

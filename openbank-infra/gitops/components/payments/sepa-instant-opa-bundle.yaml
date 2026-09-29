@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-instant
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "1ee4e8398ebf2f41"
+    openbank.tech/policy-checksum: "a3a669a7c3c2bcb7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -992,6 +992,7 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit

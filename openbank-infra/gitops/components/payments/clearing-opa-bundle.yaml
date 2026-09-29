@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "7780e8070cd88669"
+    openbank.tech/policy-checksum: "0461f196b84d808a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1019,6 +1019,7 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit

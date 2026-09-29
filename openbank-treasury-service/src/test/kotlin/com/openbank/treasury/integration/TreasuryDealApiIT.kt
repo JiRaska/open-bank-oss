@@ -440,6 +440,14 @@ class TreasuryDealApiIT {
         assertThat(refused.exceptionOrNull()).hasMessageContaining("deals_fx_terms")
     }
 
+    @Test
+    @Order(17)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `17 - with the simulated market off there are no quotes (409), never an invented price`() {
+        given().`when`().get("/api/v1/treasury/quotes?product=MM_PLACEMENT&currency=CZK&tenorDays=30")
+            .then().statusCode(409).body("error", equalTo("INVALID_STATE"))
+    }
+
     private fun state(id: String): String = jdbc { c ->
         c.prepareStatement("select state from deals where deal_id = ?").use { ps ->
             ps.setObject(1, UUID.fromString(id))

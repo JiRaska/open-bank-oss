@@ -134,7 +134,7 @@ rassert "REST bridge forwards attributes: unchartered skill denied via rest.allo
 # agent's only treasury grant is this charter (treasury_rest_ext.rego grants an agent nothing), so
 # these are the must-ALLOW and must-DENY for "the agent drafts, never books" at the policy layer.
 TRS_AGENT='{"id":"agent:treasury-dealing-assistant","type":"AI_AGENT","roles":["ROLE_TREASURY_DEALER","ROLE_TREASURY_APPROVER","ROLE_TREASURY_SENIOR_APPROVER"]}'
-for a in treasury.deal.draft treasury.deal.read treasury.counterparty.read treasury.position.read; do
+for a in treasury.deal.draft treasury.deal.read treasury.counterparty.read treasury.position.read treasury.quote.read; do
 	rassert "treasury agent may $a (charter allow)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" true
 done
 for a in treasury.deal.approve treasury.deal.settle treasury.deal.override-limit treasury.nostro.upload \

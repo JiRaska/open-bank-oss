@@ -10,6 +10,7 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
+import com.openbank.treasury.application.port.out.CurveSetPort
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
@@ -17,17 +18,22 @@ import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
+import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
+import com.openbank.treasury.domain.model.CurvePillar
+import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitBreachedException
+import com.openbank.treasury.domain.model.MarketCurve
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.Side
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -58,8 +64,25 @@ class TreasuryDealServiceTest {
     private var fxMid: FxMidRatePort = FxMidRatePort.NONE
     private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
     private var confirmationRequired = true
+    private var curveSet: CurveSetView? = null
+    private var curvesDown = false
+    private val curvePort = CurveSetPort {
+        if (curvesDown) throw QuoteUnavailableException("risk engine unreachable") else curveSet
+    }
+    private var quotes: SimulatedQuoteService? = null
     private val service get() =
-        TreasuryDealService(deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired)
+        TreasuryDealService(deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes)
+
+    /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
+    private fun quotesOn() {
+        curveSet = CurveSetView(
+            UUID.fromString("0191c0de-0000-7000-8000-00000000c5e7"),
+            monday,
+            "synthetic",
+            listOf(MarketCurve("CZEONIA", "CZK", listOf(CurvePillar(monday.plusDays(1), BigDecimal("0.035"))))),
+        )
+        quotes = SimulatedQuoteService(curvePort, cps, mapOf("SIMBK-A" to 5), enabled = true)
+    }
 
     /** Bank buys (or sells) EUR against CZK; value date left to default (T+2). */
     private fun fx(
@@ -436,6 +459,85 @@ class TreasuryDealServiceTest {
             .isInstanceOf(com.openbank.treasury.domain.model.ActorNotPermittedException::class.java)
         assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.BOOKED)
         assertThat(deals.events.map { it.eventType }).doesNotContain("treasury.deal.confirmed.v1")
+    }
+
+    // --- ADR-0315 D9: simulated counterparties quote, and confirm only at their quote -------------
+
+    private fun mm(rate: String, product: ProductType = ProductType.MM_PLACEMENT, cp: String = "SIMBK-A") =
+        DraftDealCommand(
+            product, cp, "CZK",
+            BigDecimal(
+                "1000.00",
+            ),
+            BigDecimal(rate), null, monday, monday.plusDays(30), null,
+        )
+
+    @Test
+    fun `the quote board lists synthetic banks with a spread, off the latest curve set`(): Unit = runBlocking {
+        quotesOn()
+        val board = quotes!!.quotes(ProductType.MM_PLACEMENT, "CZK", 30)
+        assertThat(
+            board.quotes.map {
+                it.counterpartyId
+            },
+        ).describedAs("the central bank never quotes").containsExactly("SIMBK-A")
+        val q = board.quotes.single()
+        assertThat(q.bid).isEqualByComparingTo("3.4070")
+        assertThat(q.ask).isEqualByComparingTo("3.5070")
+        assertThat(q.synthetic).isTrue()
+    }
+
+    @Test
+    fun `quotes are refused while off, for an unquoted product, and unavailable without a curve set`(): Unit =
+        runBlocking {
+            val off = SimulatedQuoteService(curvePort, cps, mapOf("SIMBK-A" to 5), enabled = false)
+            assertThatThrownBy { runBlocking { off.quotes(ProductType.MM_PLACEMENT, "CZK", 30) } }
+                .isInstanceOf(IllegalStateException::class.java)
+            quotesOn()
+            assertThatThrownBy { runBlocking { quotes!!.quotes(ProductType.FX_SPOT, "CZK", 30) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { runBlocking { quotes!!.quotes(ProductType.MM_PLACEMENT, "CZK", 366) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            curveSet = null
+            assertThatThrownBy { runBlocking { quotes!!.quotes(ProductType.MM_PLACEMENT, "CZK", 30) } }
+                .isInstanceOf(QuoteUnavailableException::class.java)
+        }
+
+    @Test
+    fun `the simulated counterparty confirms a deal struck at its quote and declines one struck off it`(): Unit =
+        runBlocking {
+            quotesOn()
+            val atBid = book(mm("3.40"))
+            val overBid = book(mm("3.60"))
+            val borrowAtAsk = book(mm("3.51", product = ProductType.MM_BORROWING))
+            val run = service.runSimulatedMarket()
+            assertThat(run.declined).isEqualTo(1)
+            assertThat(run.failures).isEmpty()
+            assertThat(deals.findById(atBid.id)!!.state).isEqualTo(DealState.SETTLED)
+            assertThat(deals.findById(borrowAtAsk.id)!!.state).isEqualTo(DealState.SETTLED)
+            assertThat(deals.findById(overBid.id)!!.state).describedAs("left for a person").isEqualTo(DealState.BOOKED)
+            val note = deals.findById(atBid.id)!!.history.single { it.to == DealState.CONFIRMED }.note
+            assertThat(note).contains("synthetic quote bid 3.4070 / ask 3.5070").contains("CZEONIA")
+            assertThat(ledger.posted.map { it.dealId }).doesNotContain(overBid.id)
+        }
+
+    @Test
+    fun `an unquoted deal - the central bank - is confirmed as before quotes existed`(): Unit = runBlocking {
+        quotesOn()
+        val cnb =
+            book(cmd(principal = "5000.00", product = ProductType.CNB_DEPOSIT_FACILITY, cp = "CNB", maturity = null))
+        service.runSimulatedMarket()
+        assertThat(deals.findById(cnb.id)!!.state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
+    fun `an unreadable curve is a reported failure, never a silent confirmation`(): Unit = runBlocking {
+        quotesOn()
+        val b = book(mm("3.40"))
+        curvesDown = true
+        val run = service.runSimulatedMarket()
+        assertThat(run.failures.single()).isInstanceOf(QuoteUnavailableException::class.java)
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.BOOKED)
     }
 
     @Test

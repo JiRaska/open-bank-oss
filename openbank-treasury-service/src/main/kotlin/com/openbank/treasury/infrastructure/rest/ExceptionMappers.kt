@@ -9,6 +9,7 @@ import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LimitBreachedException
+import com.openbank.treasury.domain.model.QuoteUnavailableException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -33,6 +34,11 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun conflict(e: IllegalStateException): Response =
         error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+
+    /** ADR-0315 D9: no quote can be priced (no curve set / curve, risk engine unreachable or refusing). */
+    @ServerExceptionMapper
+    fun quoteUnavailable(e: QuoteUnavailableException): Response =
+        error(Response.Status.SERVICE_UNAVAILABLE.statusCode, "QUOTE_UNAVAILABLE", e.message)
 
     @ServerExceptionMapper
     fun fourEyes(e: FourEyesViolationException): Response = error(UNPROCESSABLE, "FOUR_EYES_VIOLATION", e.message)

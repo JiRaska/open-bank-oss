@@ -610,6 +610,7 @@ agents:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read             # ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes
         - treasury.deal.draft
       deny:
         - treasury.deal.submit

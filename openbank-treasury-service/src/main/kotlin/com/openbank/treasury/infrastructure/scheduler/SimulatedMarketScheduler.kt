@@ -55,6 +55,9 @@ class SimulatedMarketScheduler(
                 r.failures.forEach { log.error("simulated market could not move a deal", it) }
                 if (r.failures.isEmpty()) liveness?.recordSuccess()
                 if (r.moved > 0) log.infof("simulated market moved %d deal(s)", r.moved)
+                if (r.declined > 0) {
+                    log.infof("simulated counterparties declined %d deal(s) struck off their quote", r.declined)
+                }
             }
             .onFailure { log.error("simulated market pass failed", it) }
     }

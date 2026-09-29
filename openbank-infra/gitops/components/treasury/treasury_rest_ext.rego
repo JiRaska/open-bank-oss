@@ -4,7 +4,7 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (TreasuryResource):
-#   treasury.deal.read, treasury.counterparty.read, treasury.position.read
+#   treasury.deal.read, treasury.counterparty.read, treasury.position.read, treasury.quote.read
 #       — treasury dealers, approvers and admins (operators/admins also reach every *.read through
 #         the base rest.rego `operator-read-any` rule; this file cannot veto that)
 #   treasury.deal.draft, treasury.deal.submit — ROLE_TREASURY_DEALER
@@ -27,7 +27,7 @@
 # to a machine by mistake would open booking to it.
 #
 # AI_AGENT principals get NOTHING from this file, deliberately. ADR-0315 D10's agent grant lives in
-# ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the three reads
+# ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the four reads
 # + treasury.deal.draft; tools.deny: every other treasury.deal.* action — confirm included — and
 # treasury.nostro.*) —
 # and reaches this bundle through base rest.rego's `agent-charter-allows`, which hands the REST
@@ -56,7 +56,14 @@ allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
 	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action in {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
+	input.action in {
+		"treasury.deal.read",
+		"treasury.counterparty.read",
+		"treasury.position.read",
+		"treasury.nostro.read",
+		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
+		"treasury.quote.read",
+	}
 }
 
 allowed_reasons contains "treasury-dealer-write" if {

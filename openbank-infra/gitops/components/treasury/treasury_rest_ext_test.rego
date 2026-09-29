@@ -26,7 +26,7 @@ shared_sa := {
 
 agent := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
 
-reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
+reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read", "treasury.quote.read"}
 
 dealer_writes := {"treasury.deal.draft", "treasury.deal.submit"}
 

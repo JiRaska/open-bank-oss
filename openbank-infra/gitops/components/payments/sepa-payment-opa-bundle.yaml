@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "c993a969ae692b62"
+    openbank.tech/policy-checksum: "7b59c3241f0f3da4"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1035,6 +1035,7 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit

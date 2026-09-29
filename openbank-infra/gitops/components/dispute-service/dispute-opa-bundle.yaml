@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "42b841b767643452"
+    openbank.tech/policy-checksum: "7024cc2834be8cd3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1110,6 +1110,7 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit

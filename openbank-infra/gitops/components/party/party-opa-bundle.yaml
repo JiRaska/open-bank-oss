@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "3365a00220f026e4"
+    openbank.tech/policy-checksum: "5dbf3b5868cff444"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1035,6 +1035,7 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit

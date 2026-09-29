@@ -7,6 +7,7 @@ package com.openbank.treasury.application.port.out
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
@@ -121,6 +122,15 @@ data class FxRateTolerance(val enabled: Boolean, val tolerancePercent: BigDecima
     companion object {
         val DISABLED = FxRateTolerance(false, BigDecimal("2.0"))
     }
+}
+
+/**
+ * The risk engine's latest curve set (ADR-0315 D9, ADR-0313 D4), read as treasury's own identity.
+ * Null = the engine holds no curve set yet. Throws `QuoteUnavailableException` when the engine
+ * cannot be read.
+ */
+fun interface CurveSetPort {
+    suspend fun latest(): CurveSetView?
 }
 
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */

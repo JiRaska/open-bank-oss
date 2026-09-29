@@ -16,6 +16,7 @@ import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.SimulatedQuote
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -80,7 +81,25 @@ data class CurrencyPosition(
     val net: BigDecimal get() = placed + atCnb - borrowed
 }
 
-data class SimulatedMarketRun(val moved: Int, val failures: List<Throwable>)
+/**
+ * One simulated-market pass. [declined] counts BOOKED deals a simulated counterparty did NOT
+ * confirm because they were struck off its quote (ADR-0315 D9) — a counterparty decision, not a
+ * failure: the deal waits for a person to confirm or reverse it.
+ */
+data class SimulatedMarketRun(val moved: Int, val failures: List<Throwable>, val declined: Int = 0)
+
+/** The simulated counterparties' quotes for one product, currency and tenor, off one curve set. */
+data class QuoteBoard(
+    val product: ProductType,
+    val currency: String,
+    val tenorDays: Int,
+    val quotes: List<SimulatedQuote>,
+)
+
+/** ADR-0315 D9: SYNTHETIC two-way quotes of the simulated counterparty set. */
+fun interface TreasuryQuoteUseCase {
+    suspend fun quotes(product: ProductType, currency: String, tenorDays: Int): QuoteBoard
+}
 
 /** One daily-accrual pass (ADR-0315 D5): journals posted and per-deal failures, none swallowed. */
 data class AccrualRun(val journals: Int, val failures: List<Throwable>)

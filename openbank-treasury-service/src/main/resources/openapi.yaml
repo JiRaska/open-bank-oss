@@ -23,7 +23,9 @@ info:
   #        counterparty's confirmation of a BOOKED deal; settlement requires it unless
   #        openbank.treasury.confirmation.required is false. 1.11.0 is claimed by the still-open
   #        #11113 against this same spec, so this takes the next free slot above both.
-  version: 1.12.0
+  # 1.13.0: additive — GET /quotes (ADR-0315 D9): SYNTHETIC bid/ask of the simulated
+  #        counterparties off the risk engine's latest curve set plus a configured spread.
+  version: 1.13.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -370,6 +372,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/Positions'
 
+  /api/v1/treasury/quotes:
+    get:
+      tags: [Treasury]
+      operationId: getSimulatedQuotes
+      summary: SYNTHETIC bid/ask of the simulated counterparties for a product, currency and tenor
+      description: |
+        ADR-0315 D9, sandbox only. Each SYNTHETIC bank counterparty with a configured half-spread
+        quotes the risk engine's latest curve set (CZK → CZEONIA, EUR → ESTR; linear on zero rates,
+        flat outside the pillars) converted to ACT/360 simple percent, ± its spread. `bid` is what
+        the counterparty pays for a deposit (a placement is struck at the bid), `ask` what it charges
+        to lend (a borrowing is struck at the ask). `synthetic` is always true. With the simulated
+        market or its quotes switched off the endpoint answers 409; when no quote can be priced (no
+        curve set or curve, risk engine unreachable or refusing) 503 `QUOTE_UNAVAILABLE`.
+      parameters:
+        - name: product
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [MM_PLACEMENT, MM_BORROWING]
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [CZK, EUR]
+        - name: tenorDays
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+      responses:
+        '200':
+          description: The quote board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteBoard'
+        '400':
+          description: Missing or invalid product, currency or tenorDays
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '503':
+          description: QUOTE_UNAVAILABLE — no curve set or curve, or the risk engine unreachable or refusing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/treasury/nostro/statements:
     post:
       tags: [Nostro reconciliation]
@@ -559,6 +616,33 @@ components:
             The data an AI agent built the draft from (quote, curve point, headroom, position), as a
             JSON object. Required with `rationale` when an AI agent drafts (ADR-0315 D10); optional
             for a human dealer. Stored and returned verbatim.
+    QuoteBoard:
+      type: object
+      required: [product, currency, tenorDays, synthetic, quotes]
+      properties:
+        product: { type: string, enum: [MM_PLACEMENT, MM_BORROWING] }
+        currency: { type: string }
+        tenorDays: { type: integer }
+        synthetic: { type: boolean, const: true, description: Always true — invented counterparties, never a dealable market price. }
+        quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatedQuote'
+    SimulatedQuote:
+      type: object
+      required: [counterpartyId, synthetic, bid, ask, dealRate, mid, spreadBp, curveSetId, curveAsOf, curveIndex, curveProvenance]
+      properties:
+        counterpartyId: { type: string }
+        synthetic: { type: boolean, const: true }
+        bid: { type: number, description: 'Annual %, ACT/360 simple; what the counterparty pays for a deposit (floored at 0).' }
+        ask: { type: number, description: 'Annual %, ACT/360 simple; what the counterparty charges to lend.' }
+        dealRate: { type: number, description: 'The side a deal of the requested product is struck at: bid for MM_PLACEMENT, ask for MM_BORROWING.' }
+        mid: { type: number, description: The curve mid for the tenor. }
+        spreadBp: { type: integer, description: The counterparty's configured half-spread in basis points. }
+        curveSetId: { type: string, format: uuid }
+        curveAsOf: { type: string, format: date }
+        curveIndex: { type: string }
+        curveProvenance: { type: string, description: "The risk engine's label for the curve's market data (synthetic / production)." }
     ConfirmRequest:
       type: object
       properties:

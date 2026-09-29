@@ -55,7 +55,9 @@ import java.util.UUID
  * settlement needs a CONFIRMED deal. False keeps the pre-CONFIRMED behaviour (settle straight from
  * BOOKED) for a deployment that has no confirmation step yet; there is no data migration either way.
  */
-@Suppress("TooManyFunctions")
+// LongParameterList: a plain application class wired by one CDI producer; every parameter is a
+// collaborator or a deployment decision, and bundling them would only hide which is which.
+@Suppress("TooManyFunctions", "LongParameterList")
 class TreasuryDealService(
     private val deals: DealRepository,
     private val counterparties: CounterpartyRepository,
@@ -65,6 +67,8 @@ class TreasuryDealService(
     private val fxMid: FxMidRatePort = FxMidRatePort.NONE,
     private val fxTolerance: FxRateTolerance = FxRateTolerance.DISABLED,
     private val confirmationRequired: Boolean = true,
+    /** ADR-0315 D9: when set and enabled, a simulated counterparty confirms only deals struck at its quote. */
+    private val simulatedQuotes: SimulatedQuoteService? = null,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
@@ -307,19 +311,31 @@ class TreasuryDealService(
      */
     override suspend fun runSimulatedMarket(): SimulatedMarketRun {
         val today = LocalDate.now(clock)
-        // ADR-0315 D9: the simulated counterparty confirms every BOOKED deal first (a SYNTHETIC
-        // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
-        // the settlement pass below finds it CONFIRMED whatever `confirmationRequired` says.
         val market = Actor.SIMULATED_MARKET
-        val confirmed = deals.list(DealState.BOOKED).map { d -> runCatching { confirm(d.id, null, market) } }
+        // ADR-0315 D9: the simulated counterparty confirms BOOKED deals first (a SYNTHETIC
+        // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
+        // the settlement pass below finds them CONFIRMED whatever `confirmationRequired` says. A
+        // quoted deal struck off the counterparty's quote is DECLINED: it stays BOOKED for a person.
+        val confirmations = deals.list(DealState.BOOKED).map { d -> runCatching { simulatedConfirm(d, market) } }
         val settleable = Deal.settleableStates(confirmationRequired)
-        val outcomes = confirmed +
-            deals.dueForSettlement(today, settleable).map { d -> runCatching { settle(d.id, market) } } +
+        val moves = deals.dueForSettlement(today, settleable).map { d -> runCatching { settle(d.id, market) } } +
             deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, market) } }
         return SimulatedMarketRun(
-            moved = outcomes.count { it.isSuccess },
-            failures = outcomes.mapNotNull { it.exceptionOrNull() },
+            moved = confirmations.count { it.getOrNull() == true } + moves.count { it.isSuccess },
+            failures = confirmations.mapNotNull { it.exceptionOrNull() } + moves.mapNotNull { it.exceptionOrNull() },
+            declined = confirmations.count { it.getOrNull() == false },
         )
+    }
+
+    /** True = confirmed; false = the simulated counterparty declined (struck off its quote). */
+    private suspend fun simulatedConfirm(deal: Deal, market: Actor): Boolean {
+        val quote = simulatedQuotes?.quoteFor(deal)
+        if (quote != null && !quote.accepts(deal)) return false
+        val reference = quote?.let {
+            "synthetic quote bid ${it.bid} / ask ${it.ask} % (${it.curveIndex}, curve set ${it.curveSetId})"
+        }
+        confirm(deal.id, reference, market)
+        return true
     }
 
     /**

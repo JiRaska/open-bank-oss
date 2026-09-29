@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "321e6900a37b6536"
+    openbank.tech/policy-checksum: "32fd42fef13fe15f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1093,6 +1093,7 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
