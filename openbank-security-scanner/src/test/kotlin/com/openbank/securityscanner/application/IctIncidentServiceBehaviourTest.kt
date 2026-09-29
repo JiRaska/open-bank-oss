@@ -202,25 +202,24 @@ class IctIncidentServiceBehaviourTest {
     }
 
     @Test
-    fun `the published event carries the incident submitted for the atomic write, not what the repository echoes back`(): Unit =
-        runBlocking {
-            val eventSlot = slot<OutboxMessage>()
-            // eventFor() builds the outbox payload from the incident BEFORE repository.save is
-            // called — save persists incident and event together in one transaction, so the event
-            // cannot depend on a value save has not returned yet. A repository that echoes back a
-            // different value (e.g. a store-side normalisation) must not be able to retroactively
-            // change what was already handed to save() as the event's content.
-            coEvery { repository.save(any(), capture(eventSlot)) } answers {
-                (firstArg() as IctIncident).copy(title = "normalised-by-store")
-            }
-
-            val incident = service.reportIncident(command())
-
-            assertThat(incident.title).isEqualTo("normalised-by-store")
-            val payload = objectMapper.readTree(eventSlot.captured.payload)
-            assertThat(payload.get("incident").get("title").asText()).isEqualTo("Ledger writes failing")
-            assertThat(payload.get("sourceService").asText()).isEqualTo(IctIncidentService.SOURCE_SERVICE)
+    fun `published event uses submitted incident, not repository echo`(): Unit = runBlocking {
+        val eventSlot = slot<OutboxMessage>()
+        // eventFor() builds the outbox payload from the incident BEFORE repository.save is
+        // called — save persists incident and event together in one transaction, so the event
+        // cannot depend on a value save has not returned yet. A repository that echoes back a
+        // different value (e.g. a store-side normalisation) must not be able to retroactively
+        // change what was already handed to save() as the event's content.
+        coEvery { repository.save(any(), capture(eventSlot)) } answers {
+            (firstArg() as IctIncident).copy(title = "normalised-by-store")
         }
+
+        val incident = service.reportIncident(command())
+
+        assertThat(incident.title).isEqualTo("normalised-by-store")
+        val payload = objectMapper.readTree(eventSlot.captured.payload)
+        assertThat(payload.get("incident").get("title").asText()).isEqualTo("Ledger writes failing")
+        assertThat(payload.get("sourceService").asText()).isEqualTo(IctIncidentService.SOURCE_SERVICE)
+    }
 
     private fun command() = ReportIncidentCommand(
         title = "Ledger writes failing",
