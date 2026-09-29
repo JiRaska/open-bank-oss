@@ -6,13 +6,12 @@
 #   - dry-run unless you pass --merge
 #   - NEVER uses --admin / any branch-protection bypass (plain squash merge)
 #   - refuses to merge a PR whose CI is failing OR still pending
-#   - refuses to merge a PR with < 2 approvals UNLESS you also pass
-#     --allow-missing-approvals (so the governance gap is a conscious choice)
+#   - refuses to merge a PR with < 2 approvals, even if GitHub's live ruleset
+#     currently permits it
 #
 # Usage:
 #   ./merge-money-path.sh                              # list candidates + status (no writes)
 #   ./merge-money-path.sh --merge                      # squash-merge the green, 2-approved ones
-#   ./merge-money-path.sh --merge --allow-missing-approvals   # also merge < 2 approvals (CI still must be green)
 #   REPO=/path/to/open-bank-oss ./merge-money-path.sh  # override repo dir
 set -euo pipefail
 
@@ -20,11 +19,9 @@ set -euo pipefail
 REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 RULES="$REPO/openbank-libs/governance/rules.yaml"
 DO_MERGE=0
-ALLOW_MISSING=0
 for a in "$@"; do
   case "$a" in
     --merge) DO_MERGE=1 ;;
-    --allow-missing-approvals) ALLOW_MISSING=1 ;;
     *) echo "unknown arg: $a" >&2; exit 2 ;;
   esac
 done
@@ -107,8 +104,8 @@ while IFS= read -r pr; do
     skipped=$((skipped+1)); continue
   fi
   if [ "$ci" != "green" ]; then echo "        SKIP: CI $ci"; skipped=$((skipped+1)); continue; fi
-  if [ "$appr" -lt 2 ] && [ "$ALLOW_MISSING" -ne 1 ]; then
-    echo "        SKIP: only $appr/2 approvals (pass --allow-missing-approvals to override)"
+  if [ "$appr" -lt 2 ]; then
+    echo "        SKIP: only $appr/2 approvals"
     skipped=$((skipped+1)); continue
   fi
 
