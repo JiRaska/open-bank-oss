@@ -177,6 +177,8 @@ data class ReconciliationResponse(
     val matches: List<MatchResponse>,
     val unmatchedStatementEntries: List<StatementEntryResponse>,
     val unmatchedLedgerLines: List<LedgerLineResponse>,
+    /** Subset of [unmatchedStatementEntries] booked outside the statement's own period (legacy rows). */
+    val outOfPeriodEntries: List<StatementEntryResponse>,
 ) {
     companion object {
         fun from(id: UUID, r: NostroReconciliation) = ReconciliationResponse(
@@ -197,6 +199,7 @@ data class ReconciliationResponse(
             matches = r.matches.map(MatchResponse::from),
             unmatchedStatementEntries = r.unmatchedStatementEntries.map(StatementEntryResponse::from),
             unmatchedLedgerLines = r.unmatchedLedgerLines.map(LedgerLineResponse::from),
+            outOfPeriodEntries = r.outOfPeriodEntries.map(StatementEntryResponse::from),
         )
     }
 }

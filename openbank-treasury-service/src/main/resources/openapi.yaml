@@ -16,13 +16,12 @@ info:
   # 1.8.0: additive — FX_SPOT deal terms, settlement and response fields (#10896).
   #        Invalid rates and rounded-to-zero counter amounts return 400.
   # 1.10.0: additive — DraftDealRequest.inputs / Deal.inputs: the JSON object an AI agent's draft was
-  #        built from, required with `rationale` when an agent drafts (ADR-0315 D10). 1.9.0 is
-  #        claimed by the still-open #11113 against this same spec, so this PR takes the next free
-  #        slot above both live main (1.8.0) and that open claim.
+  #         built from, required with `rationale` when an agent drafts (ADR-0315 D10).
+  # 1.11.0: additive — native-currency nostro balance reconciliation; unknown GL remains explicitly
+  #         unstated, and an unavailable ledger balance is a 502.
   # 1.12.0: additive — POST /deals/{id}/confirm and DealState CONFIRMED (ADR-0315 D2): the
   #        counterparty's confirmation of a BOOKED deal; settlement requires it unless
-  #        openbank.treasury.confirmation.required is false. 1.11.0 is claimed by the still-open
-  #        #11113 against this same spec, so this takes the next free slot above both.
+  #        openbank.treasury.confirmation.required is false.
   version: 1.12.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
@@ -42,8 +41,8 @@ info:
 
     **Counterparty limits** cap outstanding PLACED principal per counterparty and currency
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
-    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior-approver override
-    is not built yet.
+    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior approver may record
+    a bounded override with a reason; four-eyes separation still applies at booking.
 
     **Interest** is ACT/360 simple interest at maturity (the CZK and EUR money-market
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
@@ -443,6 +442,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '502':
+          description: |
+            ledger-service answered the balance read with something that is neither a balance nor
+            its unknown-account 404 (e.g. a ledger that does not serve the route yet) — the
+            reconciliation cannot be computed (`LEDGER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
 components:
   securitySchemes:
@@ -758,20 +766,22 @@ components:
         ledgerOpeningBalance:
           type: [number, 'null']
           description: >
-            Ledger GL net as of the day before the statement's earliest date. NULL when the ledger
-            cannot state it in the statement currency (see balanceNotStated).
+            Ledger GL net (debit − credit of native amounts in the statement currency) as of the
+            opening (OPBD) balance's date. NULL only when the ledger does not hold the
+            GL account (see balanceNotStated).
         openingDifference: {type: [number, 'null'], description: NULL whenever ledgerOpeningBalance is}
         statementClosingBalance: {type: number}
         ledgerClosingBalance:
           type: [number, 'null']
-          description: Ledger GL net as of the statement's latest date. NULL as ledgerOpeningBalance.
+          description: Ledger GL net in the statement currency as of the closing (CLBD) balance's date. NULL as ledgerOpeningBalance.
         closingDifference: {type: [number, 'null'], description: NULL whenever ledgerClosingBalance is}
         balanceNotStated:
           type: [string, 'null']
           description: >
-            Why the ledger balances are NULL — the ledger exposes only base-currency (CZK)
-            balances, so a nostro in any other currency has no comparable figure. NULL when the
-            balances are stated.
+            Why the ledger balances are NULL. Balances are read in the statement currency for every
+            nostro (CZK and foreign alike), so this is set only when the ledger answers that it
+            does not hold the GL account (404) — a chart not yet migrated in that environment. NULL
+            whenever the balances are stated.
         reconciled:
           type: [boolean, 'null']
           description: >
@@ -787,3 +797,10 @@ components:
         unmatchedLedgerLines:
           type: array
           items: {$ref: '#/components/schemas/NostroLedgerLine'}
+        outOfPeriodEntries:
+          type: array
+          description: >
+            Statement entries booked outside the period its balances describe (after the OPBD date,
+            up to the CLBD date). Refused at upload today; a statement stored before that rule still
+            reconciles, and each such entry is listed here AND in unmatchedStatementEntries.
+          items: {$ref: '#/components/schemas/NostroStatementEntry'}
