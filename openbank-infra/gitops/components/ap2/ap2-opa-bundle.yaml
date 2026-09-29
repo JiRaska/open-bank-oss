@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "c221eaac017f0c39"
+    openbank.tech/policy-checksum: "ceb4efdd17f6eb7c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1607,6 +1607,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

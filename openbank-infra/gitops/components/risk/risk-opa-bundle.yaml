@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "1fbda532dfaea375"
+    openbank.tech/policy-checksum: "ff3051cfdf9e6310"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1667,6 +1667,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

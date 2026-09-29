@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "059d4f519affb44d"
+    openbank.tech/policy-checksum: "cc49e11ee19e2e17"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1676,6 +1676,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

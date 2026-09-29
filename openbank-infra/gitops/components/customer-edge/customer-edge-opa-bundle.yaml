@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "9675477528ddf19d"
+    openbank.tech/policy-checksum: "4c4f8b0bcdd502cd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1262,6 +1262,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
