@@ -146,6 +146,42 @@ class TreasuryAccountsPostingIT {
         )
     }
 
+    /**
+     * #10896: treasury's FX spot settlement is ONE journal in two currencies, routed through the V5
+     * FX position accounts (1990 CZK, 1991 EUR) by their fixed ids, balanced within each currency.
+     */
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `an FX spot settlement posts both legs through the FX position accounts`() {
+        post(
+            journal(
+                "treasury:it-fx-buy:settled",
+                line("1002", "DEBIT", "1000.00", "EUR"),
+                line("1991", "CREDIT", "1000.00", "EUR"),
+                line("1990", "DEBIT", "25100.00", "CZK"),
+                line("1001", "CREDIT", "25100.00", "CZK"),
+            ),
+            201,
+        )
+        // Negative control: the same legs unbalanced in CZK are refused, so the 201 above is not vacuous.
+        Given {
+            contentType("application/json")
+            body(
+                journal(
+                    "treasury:it-fx-unbalanced:settled",
+                    line("1002", "DEBIT", "1000.00", "EUR"),
+                    line("1991", "CREDIT", "1000.00", "EUR"),
+                    line("1990", "DEBIT", "25100.00", "CZK"),
+                    line("1001", "CREDIT", "25000.00", "CZK"),
+                ),
+            )
+        } When {
+            post("/api/v1/journals")
+        } Then {
+            statusCode(org.hamcrest.Matchers.greaterThanOrEqualTo(400))
+        }
+    }
+
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `the ČNB facility account is CZK only`() {

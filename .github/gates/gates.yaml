@@ -1333,6 +1333,21 @@ gates:
       # had no enforcement behind it.
       .github/scripts/check-fleet-attestations.sh --check-placeholders
 
+  - id: no-handrolled-cosign
+    name: "workflows sign through the shared cosign library (issue #9805, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 15  # local YAML inventory completes under one second; initial CI margin
+    # 81 workflows measured 2026-09-13; half, so the estate can shrink without a false red.
+    min_subjects: 40
+    rationale: "A workflow that signs and attests by hand emits whatever predicates its author knew about, so a new admission policy silently outruns it. That is how runner-image.yml shipped an SBOM with no SLSA provenance and deadlocked every ARC runner pool twice in two months (#9805, #887/#8847) — with the rule already written in root CLAUDE.md the whole time."
+    review_after: "2027-03-13"
+    selftest_inputs: [".github/scripts/check-no-handrolled-cosign.py"]
+    selftest: python3 .github/scripts/check-no-handrolled-cosign.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-no-handrolled-cosign.py
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
@@ -2975,6 +2990,26 @@ gates:
     selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
     run: |
       python3 .github/scripts/check-money-rounding-inline.py --root .
+  # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
+  # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
+  # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
+  # HttpClient.newBuilder()/newHttpClient() in a service's src/main fails; the 29 sites measured on
+  # 2026-09-26 are baselined per file (count, so a second site in a baselined file still fails),
+  # and a healed entry is reported stale. Advisory per ADR-0320 until P1 has a migrated consumer.
+  - id: raw-http-client-ratchet
+    name: "raw java.net.http.HttpClient construction in services does not grow (ADR-0320 P1, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 29 raw sites in 29 service files; advisory until SafeHttpClient has one migrated consumer (ADR-0320)"
+    budget_seconds: 20   # 0.4s locally; generous for a slower runner
+    rationale: "Every raw HttpClient is an outbound path with no SSRF allowlist or resolved-address check; this forbids new ones while the existing 29 migrate to SafeHttpClient."
+    review_after: "2027-03-31"
+    min_subjects: 1000   # 2319 service src/main files scanned 2026-09-26; findings may reach zero
+    selftest: python3 .github/scripts/check-raw-http-client.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-raw-http-client.py", ".github/scripts/raw-http-client-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-raw-http-client.py --root .
 
   # #10997: RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash, so a
   # prefix check written without one (`path.startsWith("v1/")`) is always false and the gate it
@@ -4781,6 +4816,22 @@ gates:
     selftest_inputs: [".github/scripts/check-oidc-client-configured.py"]
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
+  # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
+  # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
+  # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  - id: oidc-tls-verification-profile-scoped
+    name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
+    group: security
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A top-level `tls.verification: none` silently switches off certificate validation in production the moment any environment moves the Keycloak leg to https; it spreads by copying a template application.yaml, so only a gate stops the next service reintroducing it."
+    review_after: "2027-03-25"
+    min_subjects: 400   # 884 files today (application yaml/properties + gitops manifests, 2026-09-25)
+    selftest: python3 .github/scripts/check-oidc-tls-verification-profile.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-oidc-tls-verification-profile.py"]
+    run: |
+      python3 .github/scripts/check-oidc-tls-verification-profile.py
   - id: pr-build-cloud-credentials
     name: "reusable PR build lane carries no cloud credentials (enforced)"
     group: security
@@ -4819,6 +4870,22 @@ gates:
     selftest_inputs: [".github/scripts/check-realm-template-importable.py"]
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # Importability alone does not reject an operator client with a password grant,
+  # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
+  - id: ops-cli-client-contract
+    name: "Operator CLI client stays loopback-only and PKCE-gated (issue #10905)"
+    group: security
+    mode: enforced
+    rationale: "Realm import accepts insecure grants and redirects; this gate rejects an operator CLI client that weakens loopback, PKCE, token or scope restrictions."
+    review_after: "2027-03-29"
+    budget_seconds: 5
+    min_subjects: 1  # exactly one named operator client must be present
+    selftest_inputs: ["openbank-infra/e2e/ops_cli_client.test.py"]
+    selftest: python3 openbank-infra/e2e/ops_cli_client.test.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/e2e/ops_cli_client.test.py
 
   # Keycloak docker-dev / CI realm JSONs vs the deployed gitops template (issue #2540 gate-scope
   # follow-up). The four checks above — this one included until now — all glob only

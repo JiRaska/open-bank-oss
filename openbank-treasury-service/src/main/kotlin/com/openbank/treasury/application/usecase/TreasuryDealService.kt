@@ -18,11 +18,14 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.FxMidRatePort
+import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
 import com.openbank.treasury.domain.model.DealMatured
@@ -54,6 +57,8 @@ class TreasuryDealService(
     private val ledger: LedgerPostingPort,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val fxMid: FxMidRatePort = FxMidRatePort.NONE,
+    private val fxTolerance: FxRateTolerance = FxRateTolerance.DISABLED,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
@@ -61,20 +66,30 @@ class TreasuryDealService(
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
         val today = LocalDate.now(clock)
-        val deal = Deal.draft(
+        val tradeDate = command.tradeDate ?: today
+        val valueDate = command.valueDate
+            ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
+        val drafted = Deal.draft(
             id = Ids.newId(),
             product = command.product,
             counterpartyId = command.counterpartyId,
             currency = command.currency,
             principal = command.principal,
             rate = command.rate,
-            tradeDate = command.tradeDate ?: today,
-            valueDate = command.valueDate,
+            tradeDate = tradeDate,
+            valueDate = requireNotNull(valueDate) { "valueDate is required" },
             maturityDate = command.maturityDate,
             actor = actor,
             at = now,
             rationale = command.rationale,
+            fxSide = command.fxSide,
         )
+        // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
+        val deal = if (fxTolerance.enabled) {
+            drafted.checkRate(fxMid.mid(drafted.currency, tradeDate), fxTolerance.tolerancePercent, now)
+        } else {
+            drafted
+        }
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }
 
@@ -104,6 +119,8 @@ class TreasuryDealService(
                     createdBy = booked.createdBy.id,
                     approvedBy = actor.id,
                     occurredAt = booked.updatedAt,
+                    fxSide = booked.fx?.side,
+                    counterAmount = booked.fx?.counterAmount,
                 ),
             ),
         )
@@ -146,6 +163,8 @@ class TreasuryDealService(
                     maturityDate = settled.maturityDate,
                     ledgerJournalId = ref.journalId,
                     occurredAt = settled.updatedAt,
+                    fxSide = settled.fx?.side,
+                    counterAmount = settled.fx?.counterAmount,
                 ),
             ),
         )
@@ -203,6 +222,8 @@ class TreasuryDealService(
                     reason = reason,
                     ledgerJournalId = ref?.journalId,
                     occurredAt = reversed.updatedAt,
+                    fxSide = reversed.fx?.side,
+                    counterAmount = reversed.fx?.counterAmount,
                 ),
             ),
         )
@@ -310,7 +331,8 @@ class TreasuryDealService(
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
-        val exposure = if (deal.product.isAsset) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
+        val consumes = deal.product.isAsset || deal.product == ProductType.FX_SPOT
+        val exposure = if (consumes) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
         return LimitCheck.of(cp, deal, exposure)
     }
 

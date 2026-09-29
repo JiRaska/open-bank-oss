@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.17.0...standing-order-service-v0.17.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.5...standing-order-service-v0.17.0) (2026-09-26)
 
 

@@ -149,7 +149,16 @@
         "kind": { "enum": ["performance", "mutation", "synthetic", "trace"] },
         "state": { "enum": ["passed", "failed", "skipped", "not-run", "blocked", "unknown"] },
         "source": { "type": "string", "minLength": 1 },
-        "detail": { "type": "string" }
+        "detail": { "type": "string" },
+        "thresholdResults": {
+          "type": "object",
+          "required": ["evaluated", "breached"],
+          "properties": {
+            "evaluated": { "type": "integer", "minimum": 1 },
+            "breached": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

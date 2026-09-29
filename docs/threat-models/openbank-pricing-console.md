@@ -12,9 +12,9 @@ and adopted under GitOps on 2026-09-28 (JiRaska/openbank-pricing#1). Code lives 
 
 ## Trust boundaries
 1. The internet reaches ingress-nginx, which reaches the console on :3100.
-   - The Ingress is annotated `openbank.io/edge-exposure: internal`, so the Kyverno policy
-     `edge-internal-host-allowlist` restricts it to the operator source allow-list (ADR-0324
-     mixed edge).
+   - The host is public: the sandbox edge applies no source-IP allow-list (owner decision
+     2026-09-29). The console requires a Keycloak login (unauthenticated requests are redirected
+     to `/login`), which is the control at this boundary.
    - The NetworkPolicy admits only ingress-nginx, admin-ui and same-namespace pods.
 2. The console calls `pricing-service` (:8150) and `product-catalog` inside the cluster.
 3. The browser authenticates against Keycloak (`kc.open-bank.tech`).

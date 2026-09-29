@@ -120,6 +120,12 @@ function DealDetail({ id }: { id: string }) {
         actions={back}
       />
 
+      {deal.product === 'CNB_LOMBARD' && (
+        <p role="note" style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+          {t('Zástava není v systému evidována.', 'The collateral pledge is not modelled in this system.')}
+        </p>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
         <StatCard label={t('Stav', 'State')} value={stateLabel(deal.state, t)} tone={STATE_TONE[deal.state] === 'danger' ? 'danger' : undefined} />
         <StatCard label={t('Úrok', 'Interest')} value={`${money(deal.interest)} ${deal.currency}`} />

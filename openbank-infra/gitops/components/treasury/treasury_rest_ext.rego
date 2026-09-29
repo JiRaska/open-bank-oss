@@ -11,6 +11,9 @@
 #   treasury.deal.cancel                      — ROLE_TREASURY_DEALER or ROLE_TREASURY_APPROVER
 #   treasury.deal.approve, .reject, .settle, .mature, .reverse — ROLE_TREASURY_APPROVER
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
+#   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
+#   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
+#                                               balance; it is still back-office evidence, #10896)
 #
 # Four-eyes (approver != creator) is enforced in the domain (ADR-0315 D3); these rules decide only
 # WHO may attempt each step. Dealer and approver are separate roles on purpose: a dealer cannot
@@ -43,7 +46,7 @@ allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
 	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action in {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read"}
+	input.action in {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
 }
 
 allowed_reasons contains "treasury-dealer-write" if {
@@ -78,4 +81,14 @@ allowed_reasons contains "treasury-senior-override" if {
 	treasury_staff
 	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
 	input.action == "treasury.deal.override-limit"
+}
+
+# Nostro reconciliation (#10896): uploading a correspondent's camt.053 posts nothing (unmatched
+# items are listed, never auto-posted), but the statement is the evidence the reconciliation is
+# judged against, so only a back-office approver may supply it — not the dealer whose deals it
+# reconciles.
+allowed_reasons contains "treasury-nostro-upload" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.nostro.upload"
 }

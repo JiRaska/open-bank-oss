@@ -72,3 +72,24 @@ test_viewer_may_not_create_party if {
 test_edge_keeps_consent_update if {
 	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}
 }
+
+# #10486 batch 8
+b8deleg_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+
+test_b8deleg_own_identity_reads if {
+	every action in {"party.mandate.read"} {
+		"service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-delegation"), "action": action}
+	}
+}
+
+test_b8deleg_own_identity_never_writes if {
+	every action in {"party.mandate.create", "party.update"} {
+		not "service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-delegation"), "action": action}
+	}
+}
+
+test_b8deleg_other_api_identity_gets_nothing if {
+	every action in {"party.mandate.read"} {
+		not "service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-services"), "action": action}
+	}
+}

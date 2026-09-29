@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.4...sepa-instant-v0.10.5) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.3...sepa-instant-v0.10.4) (2026-09-26)
 
 

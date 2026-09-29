@@ -46,6 +46,15 @@ class OpaPolicyDecisionPointProducerTest {
             opaPath = "/v1/data/openbank/psd2/allow"
             opaTimeoutMs = 250L as java.lang.Long
         }
-        assertThat(producer.policyDecisionPoint()).isInstanceOf(OpaSidecarPolicyDecisionPoint::class.java)
+        val pdp = producer.policyDecisionPoint()
+        assertThat(pdp).isInstanceOf(OpaSidecarPolicyDecisionPoint::class.java)
+        fun configuredField(name: String): Any? = OpaSidecarPolicyDecisionPoint::class.java
+            .getDeclaredField(name)
+            .apply { isAccessible = true }
+            .get(pdp)
+
+        assertThat(configuredField("baseUrl")).isEqualTo("http://opa.example:9191")
+        assertThat(configuredField("queryPath")).isEqualTo("/v1/data/openbank/psd2/allow")
+        assertThat(configuredField("timeout")).isEqualTo(Duration.ofMillis(250))
     }
 }

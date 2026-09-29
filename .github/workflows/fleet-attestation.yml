@@ -24,6 +24,7 @@ on:
   pull_request:
     paths:
       - "openbank-infra/gitops/**"
+      - "openbank-infra/aws/envs/sandbox-platform/arc-runners.tf"
       - "openbank-infra/scripts/build-push-*.sh"
       - "openbank-infra/scripts/lib/cosign-attest.sh"
       - ".github/scripts/check-fleet-attestations.sh"
