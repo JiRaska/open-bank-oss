@@ -279,7 +279,7 @@ export default function ServiceConfigPage() {
         alignItems: 'flex-start',
       }}>
         <Info size={14} style={{ color: 'var(--info)', flexShrink: 0, marginTop: '1px' }} />
-        <p style={{ fontSize: '13px', color: 'var(--info)', lineHeight: 1.6 }}>
+        <p style={{ fontSize: '13px', color: 'var(--info-text)', lineHeight: 1.6 }}>
           {t('Hodnoty jsou načítány', 'Values are fetched')} <strong>{t('živě', 'live')}</strong> {t('z endpointu', 'from each service\'s')}{' '}
           <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', background: 'var(--info-bg)', padding: '1px 5px', borderRadius: '3px' }}>/api/v1/config</code>{' '}
           {t('každé služby. Pro změnu hodnot aktualizujte', 'endpoint. To change values, update')}{' '}

@@ -12,7 +12,9 @@ The predicate is consumed two ways:
 
   1. cosign attest --type slsaprovenance --predicate <file> (cosign-attest.sh), and
   2. kyverno's verify-openbank-image-slsa-provenance ClusterPolicy, which reads the predicate via
-     JMESPath at admission and pins invocation.configSource.uri / buildType.
+     JMESPath at admission and pins invocation.configSource.uri / buildType. That policy is
+     REMOVED from admission until Kyverno scopes image verdicts per policy (#9805 item 4); its
+     last version is in git history and the conditions above are what it must be restored with.
 
 Deliberate honesty in the output (a predicate that overclaims is worse than none):
 

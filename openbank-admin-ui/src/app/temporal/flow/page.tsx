@@ -88,7 +88,7 @@ export default function TemporalFlowPage() {
             display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
             borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
             border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
-            background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
+            background: flow ? 'var(--accent-strong)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
           }}>
           {flow ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}{t('Tok', 'Flow')}
         </button>

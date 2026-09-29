@@ -95,6 +95,35 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * The grantor's review inbox. An overdue item asks the customer to keep, narrow or revoke a
+     * grant; it never auto-suspends an already-active delegation.
+     */
+    @GET
+    @Path("/recertifications")
+    @Blocking
+    fun pendingRecertifications(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$UPSTREAM/recertifications/grantor/$partyId", partyId)
+    }
+
+    /** Explicitly records a review; authority-changing alternatives keep their own routes/SCA. */
+    @POST
+    @Path("/recertifications/{id}/confirm")
+    @Blocking
+    fun confirmRecertification(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val partyId = partyId()
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/recertifications/$id/confirm?grantorPartyId=$partyId",
+            partyId,
+            "",
+            idempotencyKey,
+        )
+    }
+
+    /**
      * "What did they do with my account" — the grantor's transparency view (ADR-0232 D5,
      * #2990 AC10). Every action a delegate took under a grant the CALLER issued.
      *

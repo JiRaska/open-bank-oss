@@ -3,7 +3,7 @@
 
 import React from 'react'
 import userEvent from '@testing-library/user-event'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import IAOpsPage from '@/app/iaops/page'
 
@@ -14,7 +14,6 @@ vi.mock('@/components/agent/AgentInsightsPanel', () => ({ AgentInsightsPanel: ()
 vi.mock('@/lib/i18n/LanguageContext', () => ({
   useLanguage: () => ({ language: 'en', t: (_cs: string, en: string) => en }),
 }))
-vi.mock('next/image', () => ({ default: () => <div data-testid="mock-image" /> }))
 
 const FINOPS_AGENT = {
   id: 'finops-agent', plane: 'control', charter: 'Monitors spend.', owns: [], skills: [],
@@ -46,6 +45,22 @@ afterEach(() => {
 })
 
 describe('AIOps agent card interactions', () => {
+  it('does not mount the hero asset before governance data is available', async () => {
+    let resolve!: (value: ReturnType<typeof response>) => void
+    const pending = new Promise<ReturnType<typeof response>>(done => { resolve = done })
+    vi.stubGlobal('fetch', vi.fn(() => pending))
+
+    render(<IAOpsPage />)
+
+    expect(screen.queryByAltText('Original team of five OpenBank AI agent robots')).toBeNull()
+    await act(async () => { resolve(response(GOVERNANCE)); await pending })
+    const hero = await screen.findByAltText('Original team of five OpenBank AI agent robots')
+    expect(hero).toHaveAttribute('loading', 'lazy')
+    expect(hero).toHaveAttribute('decoding', 'async')
+    expect(hero).toHaveAttribute('width', '1200')
+    expect(hero).toHaveAttribute('height', '800')
+  })
+
   it('describes the enforced policy gate without overstating phase 2 autonomy', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
 

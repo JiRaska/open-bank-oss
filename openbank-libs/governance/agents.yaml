@@ -328,13 +328,18 @@ agents:
   - id: rca-investigator
     plane: control
     model: deepseek-ai/DeepSeek-V3.2
-    charter: "On a firing alert, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0088). Read-only oversight — emits a finding, never acts."
+    charter: "On operator request, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0091). An authorized operator may record that finding in an incident-response SHADOW case; it never mutates banking state or auto-remediates."
     data_scope:
       read: [observability, audit]             # Prometheus / Loki / Tempo / Alertmanager + cluster state
       pii: masked
     tools:
       allow: [query.observability.readonly, read.logs, read.governance, draft.ticket]
       deny:  ["money.*", "gh.pr.*", "*.write", secrets.read.raw]
+    case_capabilities:
+      # ADR-0271: bounded to incident-response SHADOW cases by the independent rules matrix.
+      # This charter claim alone grants nothing; OPA requires both declarations to match.
+      - case.join
+      - case.contribute
     requires_human:
       # The RCA is a finding for a human/on-call to act on; the investigator changes nothing.
       - every: proposal
@@ -564,6 +569,86 @@ agents:
         assembly rather than trusting it.
       dora: ICT incident evidence — a scheme deadline is a supplier-imposed operational constraint
 
+
+  # Treasury dealing assistant (ADR-0315 D10, ADR-0313 D12, issue #10896).
+  #
+  # WHY IT EXISTS: a money-market dealer's morning is spent assembling the same picture — the
+  # simulated counterparties' quotes against the curve, each counterparty's limit headroom, and the
+  # day's per-currency position — before any deal is typed. The agent assembles that picture and
+  # proposes a DRAFT deal with its rationale and the exact inputs it read.
+  #
+  # WHY IT CAN NEVER BOOK: a draft is a proposal in the literal sense. In treasury-service a DRAFT
+  # consumes no counterparty limit and posts nothing; only a human dealer can submit it
+  # (PENDING_APPROVAL), and a DIFFERENT human approver books it (four-eyes, ADR-0315 D3). Those
+  # are enforced three times: this charter (the REST bridge in rest.rego delegates every AI_AGENT
+  # call to agents.allow, which grants only the flat strings below and applies `deny`), RBAC on
+  # TreasuryResource, and the Deal aggregate's human-only transitions — the last one holds even
+  # with AUTHZ_ENFORCE off. The write/execute actions are denied EXPLICITLY, not by omission.
+  #
+  # tools.allow is written in the REST-action vocabulary (not tool_tiers) on purpose: rest.rego's
+  # agent-charter-allows passes input.action as the tool, and glob-matches it against these
+  # strings, so each line here is exactly one @Authorize action on TreasuryResource.
+  #
+  # `enabled: false`: no agent runtime holds treasury tools yet and no prompt is authored
+  # (openbank-libs/governance/prompts/registry.yaml). Flip it in the PR that wires the tools and
+  # authors the prompt, so "it runs" and "there is a prompt" become true together.
+  - id: treasury-dealing-assistant
+    plane: control
+    model: unknown                    # no runtime yet; set with the prompt when enabled
+    charter: ADR-0315
+    description: >
+      Reads treasury counterparty limits, positions and deals, and proposes a money-market deal as
+      a DRAFT carrying its rationale and the inputs it used. It drafts; a human dealer submits and
+      a different human approver books.
+    enabled: false
+    enforcement: block
+    data_scope:
+      read: [treasury]
+      pii: none                       # interbank counterparties and bank positions; no customer data
+    tools:
+      allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.deal.draft
+      deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - "money.*"
+        - "*.write"
+        - "gh.pr.*"
+        - secrets.read.raw
+    requires_human:
+      - any_deal_submission           # a human dealer submits the draft (PENDING_APPROVAL)
+      - any_deal_booking              # a different human approver books it (four-eyes, ADR-0315 D3)
+      - any_limit_override            # senior approver only (ADR-0315 D4)
+    limits:
+      tokens_per_run: 40000
+      runs_per_day: 20
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - deal_id
+        - draft_rationale
+        - draft_inputs
+    compliance:
+      eu_ai_act: >
+        Art. 13/14 — transparency and human oversight: every draft stores the rationale and the
+        inputs the agent read (treasury deals.rationale / draft_inputs), shown to the dealer who
+        submits and the approver who books; the agent cannot move a deal past DRAFT.
+      dora: ICT risk — an AI component proposing the bank's own funding and placement deals is
+        bounded to proposals; booking stays a four-eyes human decision.
 
   - id: finops-agent
     plane: control

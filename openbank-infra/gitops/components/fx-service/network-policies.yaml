@@ -50,6 +50,9 @@ spec:
               kubernetes.io/metadata.name: ledger
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
@@ -60,6 +63,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8119
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

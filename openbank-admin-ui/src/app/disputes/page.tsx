@@ -18,6 +18,8 @@ import {
   parseDisputeList,
   type DisputeRecord,
 } from '@/lib/disputes/disputePortfolio'
+import { ComplaintContextInvestigation } from '@/components/context/ComplaintContextInvestigation'
+import { ContextAssignmentAdministration } from '@/components/context/ContextAssignmentAdministration'
 
 export default function DisputesPage() {
   const { t, language } = useLanguage()
@@ -84,6 +86,9 @@ export default function DisputesPage() {
           </p>
         </div>}
 
+        <ContextAssignmentAdministration />
+        <ComplaintContextInvestigation />
+
         {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
           {t('Aktualizuji spory; poslední snapshot zůstává dostupný.', 'Refreshing disputes; the last snapshot remains available.')}
         </p>}
@@ -129,7 +134,7 @@ export default function DisputesPage() {
                 ? t('Služba běží, zatím žádné spory.', 'The service is running; no disputes yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka sporů', 'Scrollable disputes table')}>
               <table className="table">
                 <thead><tr>
                   {[t('Reference', 'Reference'), t('Typ', 'Type'), t('Transakce', 'Transaction'), t('Částka', 'Amount'), t('Status', 'Status'), t('SLA', 'SLA'), t('Vytvořeno', 'Created')].map(h => (

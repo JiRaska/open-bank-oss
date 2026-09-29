@@ -30,7 +30,7 @@ triaging an incident that starts on `account`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8100` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `accounts`); dashboards in Grafana.
 - Logs: `kubectl logs -n accounts -l app.kubernetes.io/name=account-service -f`, or Loki
   `{namespace="accounts"}`.

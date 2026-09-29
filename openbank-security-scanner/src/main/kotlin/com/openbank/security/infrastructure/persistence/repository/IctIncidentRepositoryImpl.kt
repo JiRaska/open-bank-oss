@@ -3,8 +3,11 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.security.infrastructure.persistence.repository
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.security.application.port.out.IctIncidentRepository
 import com.openbank.security.infrastructure.persistence.entity.IctIncidentEntity
+import com.openbank.security.infrastructure.persistence.entity.IctIncidentOutboxEntity
 import com.openbank.securityscanner.domain.IctIncident
 import com.openbank.securityscanner.domain.IncidentCategory
 import com.openbank.securityscanner.domain.IncidentSeverity
@@ -14,6 +17,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
 import io.quarkus.panache.common.Parameters
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.util.UUID
 
 @ApplicationScoped
@@ -25,11 +29,27 @@ class IctIncidentRepositoryImpl :
      * `merge`, never `persist`. The id is application-assigned, so a non-null id cannot tell
      * Hibernate transient from detached: `persist()` schedules an INSERT unconditionally and every
      * status transition would 500 with `duplicate key value violates "ict_incidents_pkey"` at
-     * flush. `merge` is the upsert the assigned-id case requires, and it makes the initial report
-     * and the later transitions the same code path.
+     * flush. Initial creation persists once; later transitions lock and mutate the managed row.
      */
-    override suspend fun save(incident: IctIncident): IctIncident = Panache.withTransaction {
-        Panache.getSession().flatMap { session -> session.merge(incident.toEntity()) }
+    override suspend fun save(incident: IctIncident, event: OutboxMessage): IctIncident = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            if (incident.aggregateRevision == FIRST_REVISION) {
+                val entity = incident.toEntity()
+                session.persist(entity)
+                    .flatMap { session.persist(event.toOutboxEntity(incident.aggregateRevision)) }
+                    .replaceWith(entity)
+            } else {
+                session.find(IctIncidentEntity::class.java, incident.id, LockModeType.PESSIMISTIC_WRITE)
+                    .flatMap { entity ->
+                        checkNotNull(entity) { "ICT incident vanished during update: ${incident.id}" }
+                        check(entity.aggregateRevision + 1 == incident.aggregateRevision) {
+                            "stale ICT incident revision ${incident.aggregateRevision}; current is ${entity.aggregateRevision}"
+                        }
+                        entity.applyFrom(incident)
+                        session.persist(event.toOutboxEntity(incident.aggregateRevision)).replaceWith(entity)
+                    }
+            }
+        }
     }.awaitSuspending().toDomain()
 
     override suspend fun findIncident(id: UUID): IctIncident? =
@@ -80,6 +100,7 @@ class IctIncidentRepositoryImpl :
         e.assignedTo = assignedTo
         e.createdAt = createdAt
         e.updatedAt = updatedAt
+        e.aggregateRevision = aggregateRevision
     }
 
     private fun IctIncidentEntity.toDomain(): IctIncident = IctIncident(
@@ -103,10 +124,46 @@ class IctIncidentRepositoryImpl :
         assignedTo = assignedTo,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        aggregateRevision = aggregateRevision,
     )
+
+    private fun IctIncidentEntity.applyFrom(incident: IctIncident) {
+        title = incident.title
+        description = incident.description
+        category = incident.category.name
+        severity = incident.severity.name
+        status = incident.status.name
+        affectedServices = incident.affectedServices.joinToString(SEP)
+        detectedAt = incident.detectedAt
+        reportedAt = incident.reportedAt
+        containedAt = incident.containedAt
+        resolvedAt = incident.resolvedAt
+        rtoMinutes = incident.rtoMinutes
+        rpoMinutes = incident.rpoMinutes
+        reportedToRegulator = incident.reportedToRegulator
+        regulatoryReportId = incident.regulatoryReportId
+        assignedTo = incident.assignedTo
+        createdAt = incident.createdAt
+        updatedAt = incident.updatedAt
+        aggregateRevision = incident.aggregateRevision
+    }
+
+    private fun OutboxMessage.toOutboxEntity(revision: Long) = IctIncidentOutboxEntity().also {
+        it.eventId = eventId
+        it.synthetic = synthetic
+        it.aggregateId = aggregateId
+        it.aggregateRevision = revision
+        it.eventType = eventType
+        it.payload = payload
+        it.status = OutboxStatus.PENDING.name
+        it.attemptCount = 0
+        it.createdAt = createdAt
+        it.updatedAt = createdAt
+    }
 
     private companion object {
         const val MAX_PAGE = 200
         const val SEP = ","
+        const val FIRST_REVISION = 1L
     }
 }

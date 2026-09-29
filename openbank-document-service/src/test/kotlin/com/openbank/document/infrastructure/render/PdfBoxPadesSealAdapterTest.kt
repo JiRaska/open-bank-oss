@@ -117,6 +117,27 @@ class PdfBoxPadesSealAdapterTest {
         assertThat(Loader.loadPDF(signed).use { it.signatureDictionaries }).hasSize(1)
     }
 
+    @Test
+    fun `external disclosure is institutionally sealed without inventing a signer ceremony`(): Unit = runBlocking {
+        val disclosureId = UUID.randomUUID()
+        val adapter = adapter(keystorePath = Optional.empty(), allowEphemeralSeals = true)
+
+        val sealed = adapter.sealExternalDisclosure(blankPdf(), disclosureId)
+
+        val signature = Loader.loadPDF(sealed).use { it.signatureDictionaries.single() }
+        assertThat(signature.name).isEqualTo("OpenBank")
+        assertThat(signature.reason).contains("External document disclosure").contains(disclosureId.toString())
+    }
+
+    @Test
+    fun `external disclosure seal is also refused for an ephemeral identity by default`(): Unit = runBlocking {
+        val adapter = adapter(keystorePath = Optional.empty(), allowEphemeralSeals = false)
+
+        assertThatThrownBy { runBlocking { adapter.sealExternalDisclosure(blankPdf(), UUID.randomUUID()) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("DEV-ONLY ephemeral identity")
+    }
+
     // ---- helpers ---------------------------------------------------------------------------
 
     private fun adapter(

@@ -4,6 +4,17 @@
 # alongside Apicurio; with watchAnyNamespace=false it reconciles Kafka CRs in
 # its own namespace. ServerSideApply because the Kafka CRD exceeds the
 # client-side apply annotation size limit.
+#
+# CRDs ship in the chart's `crds/` directory. ArgoCD renders Helm charts with
+# CRDs included and applies them on every sync (no `skipCrds` here), so a chart
+# bump upgrades the CRDs too — unlike a plain `helm upgrade`, which never
+# touches `crds/`. ServerSideApply is what lets the large Kafka CRD update.
+#
+# Upgrade order: the broker version is pinned in components/kafka/kafka.yaml,
+# so an operator bump never moves the broker by itself. Bump the operator only
+# while the pinned broker version is supported by BOTH the old and the new
+# operator (each release's kafka-versions.yaml), then move the broker in a
+# separate change.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -16,7 +27,7 @@ spec:
   source:
     repoURL: https://strimzi.io/charts/
     chart: strimzi-kafka-operator
-    targetRevision: 1.0.0
+    targetRevision: 1.2.0
     helm:
       valuesObject:
         watchAnyNamespace: false

@@ -51,6 +51,12 @@ data class Transaction(
     val reversalOf: UUID? = null,
     /** True iff this transaction was created as a reversal of another (#8841). */
     val isReversal: Boolean = false,
+    /**
+     * ISO 20022 creditor/debtor name. Persisted since V3 and searched on; surfaced on the domain
+     * model because it is the only stable handle on the counterparty of a NON-card transaction,
+     * and so the key a customer's own categorisation hangs off. See [CounterpartyKey].
+     */
+    val counterpartyName: String? = null,
 ) {
     fun complete(clock: Clock): Transaction {
         check(status == TransactionStatus.PENDING || status == TransactionStatus.PROCESSING) {

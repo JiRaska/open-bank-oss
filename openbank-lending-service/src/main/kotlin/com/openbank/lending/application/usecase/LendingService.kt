@@ -13,6 +13,7 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
@@ -40,6 +41,7 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanRateType
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
@@ -79,6 +81,14 @@ import java.util.UUID
  * through the outbox, and enforces the four-eyes credit-decision rule server-side. No credit math
  * lives here — it is all in libs.
  */
+private const val MAX_PROVISIONING_BATCH = 10_000
+private val CLOSED_EXPOSURE_STATES = setOf(
+    LoanStatus.CLOSED,
+    LoanStatus.WRITTEN_OFF,
+    LoanStatus.UNWOUND,
+    LoanStatus.SETTLED,
+)
+
 @ApplicationScoped
 // TooManyFunctions: this is the single application service for the whole bounded context
 // (ADR-0028), implementing eight cohesive inbound-port interfaces — splitting it would scatter
@@ -327,6 +337,8 @@ class LendingService @Inject constructor(
         require(profile.maxPrincipal == null || request.requestedAmount.amount <= profile.maxPrincipal) {
             "Requested amount exceeds the catalog maximum"
         }
+        // A catalog profile publishes a single rate and no index terms, so a catalog loan is FIXED.
+        require(request.rateTerms.rateType == LoanRateType.FIXED) { "Catalog loans carry a FIXED rate" }
         return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
     }
 
@@ -339,13 +351,23 @@ class LendingService @Inject constructor(
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
         require(request.termPeriods > 0) { "Term must be at least one period" }
         require(request.nominalAnnualRate.signum() >= 0) { "Nominal rate cannot be negative" }
+        request.rateTerms.validate(request.firstDueDate)
+        require(request.rateTerms.rateType == LoanRateType.FIXED || originationConfig.floatingRateEnabled) {
+            "FLOATING-rate origination is not enabled: no reset engine reprices a floating loan yet"
+        }
         require(proposedBy.isNotBlank()) { "Proposer identity is required" }
+        listOf(request.verifiedIncomeMonthly, request.existingDebtServiceMonthly, request.existingDebtOutstanding)
+            .filterNotNull().forEach { value ->
+                require(value.currency == request.requestedAmount.currency) { "Affordability currencies must match" }
+                require(value.isNonNegative()) { "Affordability inputs cannot be negative" }
+            }
         val now = OffsetDateTime.now(clock)
         val pack = complianceGuard.resolveOriginationPack(request.jurisdiction, request.productType)
         val application = LoanApplication(
             partyId = request.partyId,
             requestedAmount = request.requestedAmount,
             nominalAnnualRate = request.nominalAnnualRate,
+            rateTerms = request.rateTerms,
             termPeriods = request.termPeriods,
             periodsPerYear = request.periodsPerYear,
             method = request.method,
@@ -359,6 +381,7 @@ class LendingService @Inject constructor(
             packVersion = pack?.pack?.version,
             verifiedIncomeMonthly = request.verifiedIncomeMonthly,
             existingDebtServiceMonthly = request.existingDebtServiceMonthly,
+            existingDebtOutstanding = request.existingDebtOutstanding,
             ageYears = request.ageYears,
             residency = request.residency,
             employmentTenureMonths = request.employmentTenureMonths,
@@ -572,6 +595,7 @@ class LendingService @Inject constructor(
             partyId = application.partyId,
             principal = application.requestedAmount,
             nominalAnnualRate = application.nominalAnnualRate,
+            rateTerms = application.rateTerms,
             termPeriods = application.termPeriods,
             periodsPerYear = application.periodsPerYear,
             method = application.method,
@@ -671,7 +695,7 @@ class LendingService @Inject constructor(
                             )
                         } else {
                             borrowerCredit.credit(
-                                "loan:${saved.id.value}:disbursement-credit",
+                                LoanCashReferences.disbursementCredit(saved.id),
                                 accountId,
                                 saved.principal,
                             )
@@ -696,6 +720,9 @@ class LendingService @Inject constructor(
                                 payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
                                     """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
                                     """"principal":"${saved.principal}",""" +
+                                    // ADR-0314 D5: the rate terms, so the risk engine can tell a
+                                    // fixed loan from a floating one without asking lending.
+                                    saved.rateTerms.jsonFields() +
                                     """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
                                     """"sourceService":"lending"}""",
                             ),
@@ -716,7 +743,7 @@ class LendingService @Inject constructor(
     override fun listActiveLoans(limit: Int): Uni<List<Loan>> = loans.findActive(limit.coerceIn(1, MAX_LIST_LIMIT))
 
     override fun recordRepayment(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
-        loans.findById(loanId).flatMap { loan ->
+        loans.withLocked(loanId) { loan ->
             when {
                 loan == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
@@ -737,12 +764,25 @@ class LendingService @Inject constructor(
                                 "booked as recovery income, not against a derecognized asset",
                         ),
                     )
-                else -> recordRepaymentAgainst(loanId, installmentId)
+                loan.status in CLOSED_EXPOSURE_STATES ->
+                    Uni.createFrom().failure(IllegalStateException("Loan has no recognized exposure"))
+                else -> recordRepaymentAgainst(loan, installmentId).call { _ ->
+                    installments.findByLoan(loanId).flatMap { rows ->
+                        if (rows.isNotEmpty() && rows.all { it.paid }) {
+                            provisioning.releaseAllowance(loan, events, LocalDate.now(clock))
+                                .flatMap { loans.update(loan.copy(status = LoanStatus.CLOSED)) }
+                                .replaceWith(Unit)
+                        } else {
+                            Uni.createFrom().item(Unit)
+                        }
+                    }
+                }
             }
         }
 
-    private fun recordRepaymentAgainst(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
-        installments.findByLoan(loanId).flatMap { schedule ->
+    private fun recordRepaymentAgainst(loan: Loan, installmentId: UUID): Uni<LoanInstallment> {
+        val loanId = loan.id
+        return installments.findByLoan(loanId).flatMap { schedule ->
             val target = schedule.firstOrNull { it.id == installmentId }
             when {
                 target == null ->
@@ -751,7 +791,15 @@ class LendingService @Inject constructor(
                     Uni.createFrom().failure(IllegalStateException("Installment already paid"))
                 else -> {
                     val paidAt = OffsetDateTime.now(clock)
-                    installments.markPaid(installmentId, paidAt)
+                    // #11487: the repayment's customer-facing leg. The ledger journal below books the
+                    // cash as RECEIVED (Dr Funding Clearing), so the borrower's own account must be
+                    // debited for the same installment, or clearing holds cash no customer ever paid.
+                    // It runs FIRST and fails loud: no current account, or a refused debit (e.g.
+                    // insufficient funds), leaves the installment unpaid and nothing posted. The
+                    // reference is per installment, so a retried call replays instead of charging twice,
+                    // and the four-eyes cash reconstruction for historic repayments uses the same key.
+                    debitBorrower(loan, target)
+                        .flatMap { installments.markPaid(installmentId, paidAt) }
                         .flatMap {
                             // Split posting: principal repayment + the interest leg. If the scheduled pass already
                             // accrued this installment's interest income, the cash only *settles* the receivable
@@ -782,6 +830,29 @@ class LendingService @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun debitBorrower(loan: Loan, installment: LoanInstallment): Uni<Unit> {
+        val amount = installment.principal + installment.interest
+        if (amount.amount.signum() == 0) return Uni.createFrom().item(Unit)
+        return borrowerAccounts.findCurrentAccount(loan.partyId, amount.currency.code).flatMap { accountId ->
+            if (accountId == null) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Loan ${loan.id.value}: party ${loan.partyId} has no active CURRENT account in " +
+                            "${amount.currency.code} to debit installment ${installment.number}; repayment not recorded",
+                    ),
+                )
+            } else {
+                borrowerCredit.debit(
+                    LoanCashReferences.repaymentDebit(loan.id, installment.number),
+                    accountId,
+                    amount,
+                    BorrowerCreditPort.REPAYMENT,
+                )
+            }
+        }
+    }
 
     // --- Servicing posting loop: accrual-basis interest recognition ----------------------------------
 
@@ -837,62 +908,62 @@ class LendingService @Inject constructor(
 
     // --- Write-off (collections terminal step, IFRS 9 Stage 3 → derecognition) -----------------------
 
-    override fun writeOff(loanId: LoanId, request: WriteOffRequest): Uni<Loan> =
-        loans.findById(loanId).flatMap { loan ->
-            when {
-                loan == null ->
-                    Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
-                loan.status != LoanStatus.ACTIVE ->
+    override fun writeOff(loanId: LoanId, request: WriteOffRequest): Uni<Loan> = loans.withLocked(loanId) { loan ->
+        when {
+            loan == null ->
+                Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
+            loan.status in CLOSED_EXPOSURE_STATES ->
+                Uni.createFrom().failure(
+                    IllegalStateException("A derecognized loan cannot be written off: ${loan.status}"),
+                )
+            else -> installments.findByLoan(loanId).flatMap { schedule ->
+                val outstanding = outstandingBalance(loan, schedule)
+                if (!outstanding.isPositive()) {
                     Uni.createFrom().failure(
-                        IllegalStateException("Only an ACTIVE loan can be written off: ${loan.status}"),
+                        IllegalStateException("Nothing to write off: outstanding balance is zero"),
                     )
-                else -> installments.findByLoan(loanId).flatMap { schedule ->
-                    val outstanding = outstandingBalance(loan, schedule)
-                    if (!outstanding.isPositive()) {
-                        Uni.createFrom().failure(
-                            IllegalStateException("Nothing to write off: outstanding balance is zero"),
-                        )
-                    } else {
-                        // Book the loss and remove the asset from the books; we never mutate balances ourselves.
-                        // Ledger first, row mutation last (as accrueOne does — NOT recordRepayment, which
-                        // marks the row paid before posting): a crash between them leaves the loan ACTIVE and
-                        // the retry replays the same idempotency keys, which the ledger collapses.
-                        ledger.post(
-                            LedgerPosting(
-                                "loan:${loanId.value}:writeoff",
-                                loan.partyId,
-                                outstanding,
-                                PostingKind.WRITE_OFF,
-                            ),
-                        )
-                            .flatMap { derecognizeAccruedInterest(loan, schedule) }
-                            .flatMap { loans.update(loan.copy(status = LoanStatus.WRITTEN_OFF)) }
-                            .flatMap { written ->
-                                // #3914: Loan carries no writtenOffAt column, so the derecognition instant is read
-                                // from the clock at the point the write-off completes — the house convention
-                                // already used by TerminationService and OriginationDecisionService. Emitted
-                                // once into a local so payload and any future reuse cannot disagree.
-                                val writtenOffAt = clock.instant()
-                                // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                                val wPayload = """{"aggregateType":"LOAN","aggregateId":"${written.id.value}",""" +
-                                    """"loanId":"${written.id.value}",""" +
-                                    """"partyId":"${written.partyId}",""" +
-                                    """"writtenOff":"$outstanding",""" +
-                                    """"writtenOffBy":"${request.writtenOffBy}",""" +
-                                    """"occurredAt":"$writtenOffAt",""" +
-                                    """"sourceService":"lending"}"""
-                                events.emit(
-                                    LendingOutboxMessage(
-                                        aggregateId = written.id.value,
-                                        eventType = "loan.written_off",
-                                        payload = wPayload,
-                                    ),
-                                ).map { written }
-                            }
-                    }
+                } else {
+                    // Book the loss and remove the asset from the books; we never mutate balances ourselves.
+                    // Ledger first, row mutation last (as accrueOne does — NOT recordRepayment, which
+                    // marks the row paid before posting): a crash between them leaves the loan ACTIVE and
+                    // the retry replays the same idempotency keys, which the ledger collapses.
+                    ledger.post(
+                        LedgerPosting(
+                            "loan:${loanId.value}:writeoff",
+                            loan.partyId,
+                            outstanding,
+                            PostingKind.WRITE_OFF,
+                        ),
+                    )
+                        .flatMap { derecognizeAccruedInterest(loan, schedule) }
+                        .flatMap { provisioning.releaseAllowance(loan, events, LocalDate.now(clock)) }
+                        .flatMap { loans.update(loan.copy(status = LoanStatus.WRITTEN_OFF)) }
+                        .flatMap { written ->
+                            // #3914: Loan carries no writtenOffAt column, so the derecognition instant is read
+                            // from the clock at the point the write-off completes — the house convention
+                            // already used by TerminationService and OriginationDecisionService. Emitted
+                            // once into a local so payload and any future reuse cannot disagree.
+                            val writtenOffAt = clock.instant()
+                            // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
+                            val wPayload = """{"aggregateType":"LOAN","aggregateId":"${written.id.value}",""" +
+                                """"loanId":"${written.id.value}",""" +
+                                """"partyId":"${written.partyId}",""" +
+                                """"writtenOff":"$outstanding",""" +
+                                """"writtenOffBy":"${request.writtenOffBy}",""" +
+                                """"occurredAt":"$writtenOffAt",""" +
+                                """"sourceService":"lending"}"""
+                            events.emit(
+                                LendingOutboxMessage(
+                                    aggregateId = written.id.value,
+                                    eventType = "loan.written_off",
+                                    payload = wPayload,
+                                ),
+                            ).map { written }
+                        }
                 }
             }
         }
+    }
 
     /**
      * Derecognize the loan's accrued-but-unpaid interest receivable at write-off. Every unpaid
@@ -1238,7 +1309,17 @@ class LendingService @Inject constructor(
             riskParameters.parametersFor(loan, outstanding).flatMap { inputs ->
                 collateral.findByLoan(loan.id).map { registered ->
                     val adjustedInputs = applyCollateral(inputs, registered)
-                    val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = adjustedInputs)
+                    val ecl = Ifrs9.assess(
+                        daysPastDue = dpd,
+                        inputs = adjustedInputs,
+                        sicr = loan.status == LoanStatus.DELINQUENT,
+                        creditImpaired = loan.status in setOf(
+                            LoanStatus.DEFAULTED,
+                            LoanStatus.FORBEARANCE_ASSESSED,
+                            LoanStatus.TERMINATION_NOTICED,
+                            LoanStatus.ACCELERATED,
+                        ),
+                    )
                     ProvisioningSnapshot(
                         loanId = loan.id,
                         asOf = asOf,
@@ -1295,33 +1376,55 @@ class LendingService @Inject constructor(
     // --- Provisioning cycle: scheduled IFRS 9 stage/ECL re-bucketing, delta-vs-prior-period posting ---
 
     /**
-     * Re-buckets every ACTIVE loan's IFRS 9 stage/ECL for [period] and posts only the **delta** versus
+     * Re-buckets every nonterminal exposure's IFRS 9 stage/ECL for [period] and queues the **delta** versus
      * the loan's most recent earlier period to the ledger (mirrors the FX-revaluation delta pattern in
      * `openbank-ledger-service`: a signed movement, zero-delta skipped, never a full re-post). Idempotent
      * per `(loanId, period)` — a loan already provisioned for [period] is left untouched.
      */
-    override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int): Uni<ProvisioningRunOutcome> =
-        loans.findActive(limit).flatMap { active ->
-            Multi.createFrom().iterable(active)
-                .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
-                .collect().asList()
-                .map { results ->
-                    ProvisioningRunOutcome(
-                        period = period,
-                        loansAssessed = results.size,
-                        journalsPosted = results.count { it },
-                    )
-                }
+    override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int): Uni<ProvisioningRunOutcome> {
+        require(limit in 1..MAX_PROVISIONING_BATCH) { "Provisioning batch size must be between 1 and 10000" }
+        require(period == asOf.toString() || period == java.time.YearMonth.from(asOf).toString()) {
+            "Reporting key must match asOf (yyyy-MM-dd or legacy yyyy-MM)"
         }
+        return provisionBatch(period, asOf, limit, 0, 0)
+    }
 
-    /** Provisions one loan for [period]; returns whether a ledger delta was posted (for the outcome tally). */
+    private fun provisionBatch(
+        period: String,
+        asOf: LocalDate,
+        limit: Int,
+        assessed: Int,
+        posted: Int,
+    ): Uni<ProvisioningRunOutcome> = loans.findUnprovisioned(period, limit).flatMap { active ->
+        Multi.createFrom().iterable(active)
+            .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
+            .collect().asList()
+            .flatMap { results ->
+                val total = assessed + results.size
+                val journals = posted + results.count { it }
+                if (active.size < limit) {
+                    Uni.createFrom().item(ProvisioningRunOutcome(period, total, journals))
+                } else {
+                    provisionBatch(period, asOf, limit, total, journals)
+                }
+            }
+    }
+
+    /** Provisions one locked loan; returns whether its allowance changed. */
     private fun provisionOne(loan: Loan, period: String, asOf: LocalDate): Uni<Boolean> =
-        provisioning.findByLoanAndPeriod(loan.id, period).flatMap { already ->
-            if (already != null) {
-                // Idempotent re-run: this loan is already provisioned for this period — do nothing.
+        loans.withLocked(loan.id) { current ->
+            if (current == null || current.status in CLOSED_EXPOSURE_STATES) {
                 Uni.createFrom().item(false)
             } else {
-                snapshotFor(loan, asOf).flatMap { snapshot -> postProvisioningDelta(loan, period, snapshot) }
+                provisioning.findByLoanAndPeriod(current.id, period).flatMap { already ->
+                    if (already != null) {
+                        Uni.createFrom().item(false)
+                    } else {
+                        snapshotFor(current, asOf).flatMap { snapshot ->
+                            postProvisioningDelta(current, period, snapshot)
+                        }
+                    }
+                }
             }
         }
 
@@ -1332,7 +1435,10 @@ class LendingService @Inject constructor(
      * `occurredAt`, AuditConsumer records its own ingest time as the business time.
      */
     private fun postProvisioningDelta(loan: Loan, period: String, snapshot: ProvisioningSnapshot): Uni<Boolean> =
-        provisioning.findLatestBefore(loan.id, period).flatMap { prior ->
+        provisioning.findLatestByLoan(loan.id).flatMap { prior ->
+            require(prior == null || !prior.asOf.isAfter(snapshot.asOf)) {
+                "Cannot provision before the latest assessment"
+            }
             val priorEcl = prior?.expectedCreditLoss ?: Money.zero(snapshot.expectedCreditLoss.currency.code)
             val delta = snapshot.expectedCreditLoss.minus(priorEcl)
             val record = LoanProvisioningRecord(
@@ -1370,24 +1476,14 @@ class LendingService @Inject constructor(
                     // ledger. The stage-changed event (if any) has already been emitted above.
                     provisioning.save(record).map { false }
                 } else {
-                    ledger.post(
-                        LedgerPosting(
-                            "loan:${loan.id.value}:provisioning:$period",
-                            loan.partyId,
-                            delta,
-                            PostingKind.PROVISIONING,
-                        ),
+                    events.queueAllowance(
+                        loan,
+                        "loan:${loan.id.value}:provisioning:$period",
+                        delta,
+                        snapshot.asOf,
+                        provisionedPayload(loan, period, snapshot, delta, record),
                     )
                         .flatMap { provisioning.save(record) }
-                        .flatMap {
-                            events.emit(
-                                LendingOutboxMessage(
-                                    aggregateId = loan.id.value,
-                                    eventType = "loan.provisioned",
-                                    payload = provisionedPayload(loan, period, snapshot, delta, record),
-                                ),
-                            )
-                        }
                         .map { true }
                 }
             }

@@ -15,27 +15,6 @@ enum class RewardStatus { QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVE
 
 enum class LedgerOutcome { ACCEPTED, REJECTED, REVERSED }
 
-/**
- * The outcome of handing a [ReferralEvent] to the transport.
- *
- * A skipped/unwired publish MUST NOT share a signal with a real delivery. This is the
- * `PushResult.skipped()` lesson applied on a money path: a boolean `success` that is `true`
- * for "nothing left the process" makes an off-by-default adapter indistinguishable from a
- * working one, and no telemetry anywhere disagrees. Hence a distinct enum constant, and a
- * name for what can actually be established — `HANDED_TO_TRANSPORT`, never `DELIVERED`.
- */
-enum class ReferralPublishOutcome {
-    /** The event was accepted by a real transport. */
-    HANDED_TO_TRANSPORT,
-
-    /** No transport is wired in this build: the event was DROPPED and nothing was sent. */
-    TRANSPORT_NOT_WIRED,
-    ;
-
-    /** True only when something actually left this process. */
-    val isHandedOff: Boolean get() = this == HANDED_TO_TRANSPORT
-}
-
 data class ReferralProgram(
     val id: UUID,
     val name: String,
@@ -86,6 +65,18 @@ sealed class ReferralEvent {
     abstract val programId: UUID
     abstract val inviteId: UUID
 
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` (audit-service) as the
+     * strongest (EVENT-sourced) attribution — issues #5256/#6035. Serialised via
+     * `objectMapper.writeValueAsString` in `ReferralService`, so the wire key exists only as
+     * this Kotlin property name (mirrors `FxEvent.sourceService`).
+     */
+    val sourceService: String = SOURCE_SERVICE
+
+    companion object {
+        internal const val SOURCE_SERVICE = "referral-service"
+    }
+
     data class Qualified(
         override val eventId: UUID,
         override val occurredAt: Instant,
@@ -122,7 +113,47 @@ sealed class ReferralEvent {
     }
 }
 
-class ReferralConflictException(message: String) : RuntimeException(message)
+/**
+ * A referrer's own view of one invite. Carries NOTHING about the referee — no party id, no name —
+ * and not the token (stored only as a hash, and a bearer secret once issued). [status] is already
+ * time-adjusted: an ISSUED invite whose window has passed reads as EXPIRED.
+ *
+ * [createdAt] comes from the invite's `INVITE_ISSUED` audit row, the only place the issue instant
+ * is recorded; it is null if that row is missing rather than guessed from another timestamp.
+ */
+data class ReferrerInviteView(
+    val id: UUID,
+    val status: InviteStatus,
+    val createdAt: Instant?,
+    val expiresAt: Instant,
+    val attributedAt: Instant?,
+    val reward: ReferrerRewardView?,
+)
+
+/** The referrer-side projection of the latest reward on an invite. */
+data class ReferrerRewardView(
+    val status: RewardStatus,
+    val amount: BigDecimal,
+    val currency: String,
+    val requestedAt: Instant?,
+    val rewardedAt: Instant?,
+)
+
+/**
+ * Machine-readable causes for a 409, so a caller (the customer edge) can branch without matching
+ * on message text. Null for conflicts nobody has needed to distinguish yet.
+ */
+enum class ReferralConflictReason {
+    EXPIRED,
+    SELF,
+    ALREADY_ATTRIBUTED,
+    NOT_ATTRIBUTABLE,
+    IDEMPOTENCY_KEY_REUSED,
+    PROGRAM_UNAVAILABLE,
+}
+
+class ReferralConflictException(message: String, val reason: ReferralConflictReason? = null) :
+    RuntimeException(message)
 
 class ReferralNotFoundException(message: String) : RuntimeException(message)
 

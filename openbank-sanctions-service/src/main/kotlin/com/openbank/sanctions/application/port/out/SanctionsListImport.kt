@@ -10,8 +10,10 @@ package com.openbank.sanctions.application.port.out
  *
  * Every value below means something an operator must be able to alert on separately:
  *
- *  - [IMPORTED] — the feed was fetched and [ListImportResult.entriesImported] entries upserted;
- *    the stored list now reflects the upstream source as of this run.
+ *  - [IMPORTED] — the feed was fetched and all [ListImportResult.entriesImported] entries it
+ *    carried are now stored; the stored list reflects the upstream source as of this run.
+ *    [ListImportResult.entriesImported] is the size of the list, not the number of rows written —
+ *    an unchanged entry is skipped by the upsert, so the write count is a daily delta.
  *  - [EMPTY_FEED] — the feed was fetched and parsed successfully but contained zero usable
  *    entries. NOT a success: a sanctions feed that suddenly parses empty is a finding (upstream
  *    format change, wrong URL), and the stored entries were left untouched.
@@ -31,7 +33,7 @@ enum class ListImportOutcome {
     SEED_FALLBACK_NON_PRODUCTION,
 }
 
-/** The result of one import attempt: the outcome plus how many entries were upserted. */
+/** The result of one import attempt: the outcome plus how many entries the imported list holds. */
 data class ListImportResult(val outcome: ListImportOutcome, val entriesImported: Int, val detail: String? = null) {
     init {
         require(entriesImported >= 0) { "entriesImported cannot be negative: $entriesImported" }

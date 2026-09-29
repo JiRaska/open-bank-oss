@@ -8,6 +8,7 @@ import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentTemplate
 import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import java.math.BigDecimal
 import java.util.UUID
 
 /**
@@ -149,6 +150,19 @@ interface SignatureSealPort {
 }
 
 /**
+ * Institutional seal for an immutable external-disclosure copy. It deliberately has no signer or
+ * ceremony: this attests to the bank-produced artifact, never to a recipient's signature.
+ */
+interface ExternalDisclosureSealPort {
+    suspend fun sealExternalDisclosure(pdf: ByteArray, disclosureId: UUID): ByteArray
+}
+
+/** Applies visible disclosure evidence before sealing so it is part of the signed PDF byte range. */
+interface DisclosureWatermarkPort {
+    suspend fun watermark(pdf: ByteArray, recipientLabel: String, disclosureId: UUID): ByteArray
+}
+
+/**
  * SCA-bound strong-authentication check gating a SIGNED decision (ADR-0162 D4, ADR-0021). A
  * signer's decision is only accepted as a legally meaningful signature once the [evidenceRef] —
  * a completed SCA challenge/approval reference for [partyRef] — has been verified. A DECLINED
@@ -214,9 +228,31 @@ interface ProductCatalogPort {
      * omitting the clause, never to blocking the signature.
      */
     suspend fun findProduct(productId: UUID): ProductInfo?
+
+    /**
+     * The product's own fee list, for the business fee schedule (SAZEBNIK_PO). [productRef] is any
+     * reference product-catalog resolves (canonical UUID, semantic code or `prod-NNN` alias).
+     * Null when the catalogue is unreachable or does not know the product — the caller decides
+     * what that means; a fee schedule is a binding annex, so the business-agreement flow refuses
+     * to render one without real fee data rather than printing an empty table.
+     */
+    suspend fun findFeeSchedule(productRef: String): ProductFeeSchedule?
 }
 
 data class ProductInfo(val name: String?, val code: String)
+
+/** One fee line exactly as product-catalog publishes it. */
+data class ProductFee(
+    val name: String,
+    val amount: BigDecimal,
+    val currency: String,
+    val frequency: String,
+    val description: String?,
+    val waiveCondition: String?,
+)
+
+/** A product's identity plus its published fee list. */
+data class ProductFeeSchedule(val name: String?, val code: String, val currency: String?, val fees: List<ProductFee>)
 
 /**
  * Read-only lookup into `openbank-party-service`, scoped to what RAMCOVA_SMLOUVA's `{{party.*}}`

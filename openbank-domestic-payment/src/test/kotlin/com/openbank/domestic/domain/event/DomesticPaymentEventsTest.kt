@@ -75,6 +75,7 @@ class DomesticPaymentEventsTest {
         assertThat(event.priority).isEqualTo(DomesticPaymentPriority.URGENT)
         assertThat(event.endToEndId).isEqualTo("DOMU42")
         assertThat(event.occurredAt).isEqualTo(now)
+        assertThat(event.aggregateRevision).isEqualTo(payment.aggregateRevision)
         assertThat(event.initiatedByPartyId).isEqualTo(payment.initiatedByPartyId)
         // AuditConsumer attribution fields (#3994) — before these existed the audit trail
         // recorded 124 real domestic-payment rows as event_type="UNKNOWN"/source_service="unknown".
@@ -118,6 +119,7 @@ class DomesticPaymentEventsTest {
         assertThat(changed.initiatedByPartyId).isEqualTo(initiator)
         assertThat(changed.delegationId).isEqualTo(delegation)
         assertThat(changed.reservationId).isEqualTo(reservation)
+        assertThat(changed.aggregateRevision).isEqualTo(current.aggregateRevision)
     }
 
     @Test

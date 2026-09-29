@@ -20,6 +20,90 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
+  it('retains both Security Excellence browser variants as a distinct governed journey', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-security-browser-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
+journeys:
+  - id: admin-ui-security-excellence
+    title: Security Excellence auth boundary
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    falsification: unauthenticated 200 must fail
+`)
+    for (const variant of ['chromium', 'firefox']) {
+      write(repo, `openbank-admin-ui/test-run-history/security-${variant}.json`, JSON.stringify({
+        schemaVersion: 1,
+        run: { id: `security-${variant}`, attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: `https://github.com/JiRaska/open-bank-oss/actions/runs/security-${variant}`, observedAt: '2026-09-17T16:26:00Z' },
+        component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+        specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-security-excellence', variant, detail: 'auth gate and Web Vitals passed' }],
+      }))
+    }
+
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const security = report.syntheticJourneys.find(item => item.id === 'admin-ui-security-excellence')
+    expect(security?.ci).toMatchObject({
+      state: 'passed', detail: '2/2 declared browser variants passed.',
+      variants: [
+        expect.objectContaining({ browser: 'chromium', state: 'passed' }),
+        expect.objectContaining({ browser: 'firefox', state: 'passed' }),
+      ],
+    })
+  })
+
+  it('drops a build attestation whose matched verdict disagrees with its own SHAs (#7451)', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-attestation-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
+journeys:
+  - id: admin-ui-sso-boundary
+    title: Admin UI SSO boundary
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    capability: proves the public SSO hand-off
+    falsification: remove the SSO boundary
+`)
+    const envelope = (id: string, variant: string, buildAttestation: unknown) => JSON.stringify({
+      schemaVersion: 1,
+      run: { id, attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: `https://github.com/JiRaska/open-bank-oss/actions/runs/${id}`, observedAt: '2026-08-25T08:10:00Z' },
+      component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: 'checks', variant, buildAttestation }],
+    })
+    // chromium: forged — claims a match the SHAs contradict. firefox: honest mismatch.
+    write(repo, 'openbank-admin-ui/test-run-history/chromium.json', envelope('b-1', 'chromium', { requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: true }))
+    write(repo, 'openbank-admin-ui/test-run-history/firefox.json', envelope('b-2', 'firefox', { requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: false }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const variants = report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')?.ci?.variants ?? []
+    const byBrowser = Object.fromEntries(variants.map(variant => [variant.browser, variant]))
+    expect(byBrowser.chromium?.buildAttestation).toBeUndefined()
+    expect(byBrowser.firefox?.buildAttestation).toEqual({ requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: false })
+
+    // The deployed image currently exposes its short tag SHA while the dispatch can request
+    // the full commit; that valid prefix must survive the collector's independent check.
+    write(repo, 'openbank-admin-ui/test-run-history/firefox.json', envelope('b-2', 'firefox', { requestedSha: 'abc1234def5678', observedSha: 'abc1234', matched: true }))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const refreshed = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const abbreviated = refreshed.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')?.ci?.variants
+      .find(variant => variant.browser === 'firefox')
+    expect(abbreviated?.buildAttestation).toEqual({ requestedSha: 'abc1234def5678', observedSha: 'abc1234', matched: true })
+  })
+
   it('derives inventory, classifies an IT from JUnit identity, parses Kover and keeps missing evidence explicit', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-collector-'))
     dirs.push(repo)
@@ -118,7 +202,8 @@ scenarios:
       schemaVersion: 1,
       run: { id: 'browser-10', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/browser-10', observedAt: '2026-08-25T08:10:00Z' },
       component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
-      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed', variant: 'chromium' }],
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed', variant: 'chromium',
+        buildAttestation: { requestedSha: '1234567', observedSha: '123456789abc', matched: true } }],
     }))
     write(repo, 'openbank-admin-ui/test-intelligence-history/previous-snapshot.json', JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-24T06:00:00Z', totals: { components: 2 },
@@ -152,7 +237,8 @@ scenarios:
     expect(report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')).toMatchObject({
       status: 'active', executor: 'github-actions', ci: {
         state: 'passed', detail: '1/1 declared browser variants passed.',
-        variants: [expect.objectContaining({ browser: 'chromium', state: 'passed' })],
+        variants: [expect.objectContaining({ browser: 'chromium', state: 'passed',
+          buildAttestation: { requestedSha: '1234567', observedSha: '123456789abc', matched: true } })],
       },
     })
     expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
@@ -804,6 +890,97 @@ capabilities:
       component: 'openbank-simulation', state: 'stable', observations: 1,
     })])
     expect(report.totals).toMatchObject({ componentsWithExecutionEvidence: 1, missingEvidence: 0 })
+  })
+
+  it('projects only named simulation scenario JUnit results to their covered services', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-scenarios-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const mapped = [
+      ['com.openbank.simulation.DstSimulationTest', 4, ['openbank-ledger-service', 'openbank-transaction-service']],
+      ['com.openbank.simulation.scenario.SepaSettlementScenarioTest', 4, ['openbank-sepa-payment', 'openbank-settlement-service']],
+      ['com.openbank.simulation.scenario.FeeBillingScenarioTest', 6, ['openbank-billing-service']],
+      ['com.openbank.simulation.scenario.InterestAccrualScenarioTest', 4, ['openbank-interest-service']],
+      ['com.openbank.simulation.scenario.StatementCloseScenarioTest', 3, ['openbank-statement-service']],
+    ] as const
+    for (const [, , services] of mapped) for (const service of services) {
+      write(repo, `${service}/version.txt`, '1.0.0\n')
+    }
+    write(repo, 'openbank-uncovered-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-lending-service/version.txt', '1.0.0\n')
+    const run = { id: '36088992291', attempt: 1, commit: 'ce63eac12345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/36088992291', observedAt: '2026-09-25T10:00:00Z' }
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1, run, component: 'openbank-simulation',
+      suites: [{ kind: 'simulation', state: 'passed', discovered: 58, executed: 58, passed: 58, failed: 0, skipped: 0, errors: 0, durationMs: 1000 }],
+      testCases: mapped.flatMap(([classname, count]) => Array.from({ length: count }, (_, index) => ({
+        kind: 'simulation', classname, name: `case ${index}`, state: 'passed',
+      }))),
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    for (const [classname, count] of mapped) {
+      const cases = Array.from({ length: count }, (_, index) => `<testcase classname="${classname}" name="case ${index}" time="0.1"/>`).join('')
+      write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`,
+        `<testsuite name="${classname}" tests="${count}" failures="0" errors="0" skipped="0">${cases}</testsuite>`)
+    }
+    write(repo, 'openbank-simulation/build/test-results/test/TEST-com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest.xml',
+      '<testsuite name="com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest"><testcase classname="com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest" name="shared IFRS9 math"/></testsuite>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const byComponent = new Map(report.components.map(component => [component.component, component]))
+    expect(byComponent.get('openbank-simulation')?.evidence[0].counts?.passed).toBe(58)
+    for (const [classname, count, services] of mapped) for (const service of services) {
+      expect(byComponent.get(service)?.evidence).toEqual([expect.objectContaining({
+        kind: 'simulation', state: 'passed', source: `JUnit:test/TEST-${classname}.xml`,
+        counts: expect.objectContaining({ discovered: count, passed: count }),
+        detail: expect.stringContaining(classname),
+        run: expect.objectContaining({ id: run.id, commit: run.commit, url: run.url }),
+      })])
+    }
+    expect(byComponent.get('openbank-uncovered-service')?.evidence).toEqual([])
+    expect(byComponent.get('openbank-lending-service')?.evidence).toEqual([])
+    expect(report.requiredControls.every(control => control.kind !== 'simulation')).toBe(true)
+  })
+
+  it('requires matching run-envelope cases and keeps failure and skip counts local to the scenario', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-unverified-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-billing-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-interest-service/version.txt', '1.0.0\n')
+    const classname = 'com.openbank.simulation.scenario.FeeBillingScenarioTest'
+    const xml = `<testsuite name="${classname}" tests="3" failures="1" skipped="1"><testcase classname="${classname}" name="passes"/><testcase classname="${classname}" name="fails"><failure/></testcase><testcase classname="${classname}" name="skips"><skipped/></testcase></testsuite>`
+    write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`, xml)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    let report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(component => component.component === 'openbank-billing-service')?.evidence).toEqual([])
+    const run = { id: '42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42', observedAt: '2026-09-25T10:00:00Z' }
+    const envelope = {
+      schemaVersion: 1, component: 'openbank-simulation', run,
+      suites: [{ kind: 'simulation', state: 'failed', discovered: 3, executed: 2, passed: 1, failed: 1, skipped: 1, errors: 0, durationMs: 100 }],
+      testCases: [
+        { kind: 'simulation', classname, name: 'passes', state: 'passed' },
+        { kind: 'simulation', classname, name: 'fails', state: 'failed' },
+        { kind: 'simulation', classname, name: 'other name', state: 'skipped' },
+      ],
+    }
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify(envelope))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(component => component.component === 'openbank-billing-service')?.evidence).toEqual([])
+
+    envelope.testCases[2].name = 'skips'
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify(envelope))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(component => component.component === 'openbank-billing-service')?.evidence).toEqual([
+      expect.objectContaining({ kind: 'simulation', state: 'failed', run: expect.objectContaining({ id: '42' }),
+        counts: { discovered: 3, executed: 2, passed: 1, failed: 1, skipped: 1, errors: 0 } }),
+    ])
+    expect(report.components.find(component => component.component === 'openbank-interest-service')?.evidence).toEqual([])
   })
 
   it('keeps verdicts but omits outbound provenance from an untrusted run host', () => {

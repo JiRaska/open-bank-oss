@@ -65,6 +65,78 @@ class SanctionsImportServiceTest {
         return "http://127.0.0.1:${httpServer.address.port}/feed"
     }
 
+    @Test
+    fun `unchanged CSV is a successful nonempty import`(): Unit = runBlocking {
+        val url = serveOnce("id,schema,name\nfixture-1,Person,Example Person\n", "text/csv")
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("fixture-1")) } returns 0
+
+        val result = service.importList(SanctionsListType.PEP_GLOBAL, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(1)
+    }
+
+    @Test
+    fun `unchanged OFAC is a successful nonempty import`(): Unit = runBlocking {
+        val url = serveOnce(
+            "<sdnList><sdnEntry><uid>1</uid><lastName>Example</lastName></sdnEntry></sdnList>",
+            "application/xml",
+        )
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+
+        val result = service.importList(SanctionsListType.OFAC_SDN, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(1)
+    }
+
+    @Test
+    fun `unchanged FSF is a successful nonempty import`(): Unit = runBlocking {
+        val url = serveOnce(
+            """
+                <export xmlns="http://eu.europa.ec/fpi/fsd/export">
+                    <sanctionEntity logicalId="42">
+                        <subjectType code="person"/>
+                        <nameAlias wholeName="Example Person" strong="true" logicalId="1"/>
+                    </sanctionEntity>
+                </export>
+            """.trimIndent(),
+            "application/xml",
+        )
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, setOf("eu-fsf-42")) } returns 0
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(1)
+    }
+
+    @Test
+    fun `empty CSV never deactivates the existing list`(): Unit = runBlocking {
+        val url = serveOnce("id,schema,name\n", "text/csv")
+        coEvery { entryRepo.deactivateMissing(any(), any()) } returns 7
+
+        val result = service.importList(SanctionsListType.PEP_GLOBAL, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
+    @Test
+    fun `empty FSF never deactivates the existing list`(): Unit = runBlocking {
+        val url = serveOnce("<export xmlns=\"http://eu.europa.ec/fpi/fsd/export\"/>", "application/xml")
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+        coEvery { entryRepo.deactivateMissing(any(), any()) } returns 7
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
     // ──── normalizeForSearch ─────────────────────────────────────────────────
 
     @Test
@@ -85,10 +157,27 @@ class SanctionsImportServiceTest {
     }
 
     @Test
-    fun `importList skips CNB_DOMESTIC as seeded via migration`(): Unit = runBlocking {
-        val result = service.importList(SanctionsListType.CNB_DOMESTIC, "https://example.com/unused")
+    fun `importList imports the Czech national list from its OpenSanctions feed`(): Unit = runBlocking {
+        // #10757: the Czech national sanctions list (MZV, Act No. 1/2023 Coll.) used to be three
+        // Flyway demo rows behind a SKIPPED outcome, so no real designation was ever screened.
+        val csv = "id,schema,name,aliases,birth_date,countries,addresses,identifiers,sanctions," +
+            "phones,emails,program_ids,dataset,first_seen,last_seen,last_change\n" +
+            "NK-voe,LegalEntity,Voice of Europe s.r.o.,,,cz,,,,,,CZ-A1-2023COLL,cz_national_sanctions,,,\n" +
+            "NK-kc,Person,Koba CHAGUNAVA,,,ge,,,,,,,cz_national_sanctions,,,\n"
+        val url = serveOnce(csv, "text/csv")
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        // The demo seed rows (cnb-001..003) are absent from the feed, so reconciliation retires them.
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.CNB_DOMESTIC, setOf("NK-voe", "NK-kc")) } returns 3
 
-        assertThat(result.outcome).isEqualTo(ListImportOutcome.SKIPPED_NOT_ENTITY_BASED)
+        val result = service.importList(SanctionsListType.CNB_DOMESTIC, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(2)
+        val entries = entriesSlot.captured
+        assertThat(entries.first { it.externalId == "NK-voe" }.programs).containsExactly("CZ-A1-2023COLL")
+        assertThat(entries.first { it.externalId == "NK-kc" }.programs).containsExactly("CZ-NATIONAL-SANCTIONS")
+        coVerify { entryRepo.deactivateMissing(SanctionsListType.CNB_DOMESTIC, setOf("NK-voe", "NK-kc")) }
     }
 
     @Test
@@ -226,9 +315,7 @@ class SanctionsImportServiceTest {
             "os-3,Person,,,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        // Both rows are skipped (blank line, blank name) — the reconciliation sweep at the end
-        // still runs (the stream completed without error), just with an empty present set.
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.UN_CONSOLIDATED, emptySet()) } returns 0
+        // A feed with no usable rows must preserve the previously stored list.
 
         val result = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
 
@@ -417,5 +504,96 @@ class SanctionsImportServiceTest {
 
         assertThat(result.outcome).isEqualTo(ListImportOutcome.FAILED_KEPT_EXISTING)
         coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
+    // ──── entriesImported is the size of the list, not the number of rows written ─────────
+    // upsertAll skips unchanged rows (#1432) and answers how many it WROTE. A refresh of a feed
+    // that has not changed since yesterday therefore writes nothing — and must still report the
+    // whole list, or the stored count reads as "5 entries" for a list of thousands.
+
+    @Test
+    fun `an unchanged OFAC feed still reports IMPORTED with the full list size`(): Unit = runBlocking {
+        val xml = """
+            <sdnList>
+              <sdnEntry><uid>1</uid><lastName>Alpha</lastName><sdnType>Entity</sdnType></sdnEntry>
+              <sdnEntry><uid>2</uid><lastName>Beta</lastName><sdnType>Entity</sdnType></sdnEntry>
+              <sdnEntry><uid>3</uid><lastName>Gamma</lastName><sdnType>Entity</sdnType></sdnEntry>
+            </sdnList>
+        """.trimIndent()
+        val url = serveOnce(xml, "application/xml")
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+
+        val result = service.importList(SanctionsListType.OFAC_SDN, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(3)
+    }
+
+    @Test
+    fun `a partly changed OpenSanctions feed reports the list size, not the changed rows`(): Unit = runBlocking {
+        val csv = "id,schema,name\n" +
+            "os-1,Person,Alpha One\n" +
+            "os-2,Person,Beta Two\n" +
+            "os-3,Person,Gamma Three\n"
+        val url = serveOnce(csv, "text/csv")
+        coEvery { entryRepo.upsertAll(any()) } returns 1
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.UN_CONSOLIDATED, any()) } returns 0
+
+        val result = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(3)
+    }
+
+    @Test
+    fun `an unchanged EU FSF feed still reports IMPORTED with the full list size`(): Unit = runBlocking {
+        val fsfXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <export xmlns="http://eu.europa.ec/fpi/fsd/export">
+                <sanctionEntity logicalId="1">
+                    <subjectType code="enterprise" classificationCode="E"/>
+                    <nameAlias wholeName="Alpha Trading" strong="true" logicalId="1"/>
+                </sanctionEntity>
+                <sanctionEntity logicalId="2">
+                    <subjectType code="enterprise" classificationCode="E"/>
+                    <nameAlias wholeName="Beta Trading" strong="true" logicalId="2"/>
+                </sanctionEntity>
+            </export>
+        """.trimIndent()
+        val url = serveOnce(fsfXml, "application/xml")
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, any()) } returns 0
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, "https://ignored.example/seed-url")
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(2)
+    }
+
+    // ──── quoted fields spanning physical lines ─────────────────────────────
+    // gb_fcdo_sanctions carries line breaks inside the quoted `sanctions` column (1,665 of 6,283
+    // records on 2026-09-24). A line-by-line reader split each such record: the fragments were
+    // upserted as bogus entries with a text fragment as their name, and the real record lost every
+    // column after the break — program_ids included.
+
+    @Test
+    fun `a quoted field containing line breaks stays one record`(): Unit = runBlocking {
+        val csv = "id,schema,name,aliases,birth_date,countries,addresses,identifiers,sanctions," +
+            "phones,emails,program_ids,dataset,first_seen,last_seen,last_change\n" +
+            "gb-1,Person,Ivan Example,,,ru,,,\"UK Sanctions List\nRussia regime\nasset freeze\"," +
+            ",,RUS,gb_fcdo_sanctions,,,\n" +
+            "gb-2,Organization,Example Holdings,,,,,,,,,RUS,gb_fcdo_sanctions,,,\n"
+        val url = serveOnce(csv, "text/csv")
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.HM_TREASURY, setOf("gb-1", "gb-2")) } returns 0
+
+        val result = service.importList(SanctionsListType.HM_TREASURY, url)
+
+        assertThat(result.entriesImported).isEqualTo(2)
+        val entries = entriesSlot.captured
+        assertThat(entries.map { it.externalId }).containsExactly("gb-1", "gb-2")
+        assertThat(entries.first { it.externalId == "gb-1" }.programs).containsExactly("RUS")
     }
 }

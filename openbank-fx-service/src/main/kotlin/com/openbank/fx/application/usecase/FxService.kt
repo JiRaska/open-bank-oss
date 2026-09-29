@@ -64,7 +64,7 @@ class FxService(
         // #1033: FX conversions never actually reached Kafka — KafkaFxEventPublisher.publish()
         // was a no-op stub. settle() now writes to the same transactional outbox every other
         // money-path service uses (FxOutboxRepository -> fx-events-out -> openbank.fx.conversion.completed).
-        const val EVENT_FX_CONVERSION_EXECUTED = "fx.conversion.executed.v1"
+        const val EVENT_FX_CONVERSION_EXECUTED = FxConversionExecuted.EVENT_TYPE
     }
 
     override suspend fun getRate(query: GetRateQuery) =

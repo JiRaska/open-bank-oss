@@ -5,6 +5,7 @@
 package com.openbank.party.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -50,7 +51,9 @@ interface KycServiceRestClient {
  */
 @RegisterRestClient(configKey = "card-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 6: the GDPR Art. 15 card list (card.list) is minted by the NAMED oidc-client `m2m` -
+// Keycloak client `openbank-party` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1/cards")
 @Produces(MediaType.APPLICATION_JSON)
 interface CardServiceRestClient {

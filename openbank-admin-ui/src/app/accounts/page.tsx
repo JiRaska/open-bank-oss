@@ -345,7 +345,7 @@ export default function AccountsPage() {
 
         {/* Table */}
         {!unavailable && (
-          <div id="accounts-results" style={{ overflowX: 'auto' }}>
+          <div id="accounts-results" className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka účtů', 'Scrollable accounts table')}>
             <table className="data-table">
               <thead>
                 <tr>

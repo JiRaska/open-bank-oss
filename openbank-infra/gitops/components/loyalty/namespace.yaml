@@ -1,0 +1,13 @@
+# Loyalty domain (ADR-0037: domain = namespace). App plane. Holds loyalty-service plus its
+# single-owner CNPG Postgres. loyalty-service owns the Lístek ledger (ADR-0282) — earn,
+# redeem, expire — and publishes its events onto openbank.loyalty.events. Not money-path: leaves
+# are not money and nothing here posts to the general ledger.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loyalty
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

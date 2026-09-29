@@ -5,7 +5,7 @@
 package com.openbank.settlement.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -20,7 +20,9 @@ import java.util.UUID
 
 @RegisterRestClient(configKey = "balance-api")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-settlement` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/balances")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -41,9 +43,25 @@ data class MoneyMovementRequest(
     val description: String,
 )
 
-data class BalanceResponse(
-    val accountId: UUID,
-    val currency: String,
-    val availableBalance: BigDecimal,
-    val currentBalance: BigDecimal,
-)
+/**
+ * What balance-service actually puts on the wire for `POST /balances/{id}/{credit,debit}`, narrowed
+ * to what this service reads.
+ *
+ * It used to bind `availableBalance` and `currentBalance` as non-nullable [BigDecimal]. Those two
+ * names have never been on the wire: `BalanceResource.credit/debit` returns the domain `Balance`
+ * straight to Jackson, so the payload carries that class's property names — `bookedAmount`,
+ * `availableAmount`, `reservedAmount`, `pendingAmount`. A missing non-nullable Kotlin property is a
+ * deserialisation failure, so every real credit and debit failed on the way back, AFTER the money
+ * had moved (#8673).
+ *
+ * Nothing could see it. The only test coverage constructed `BalanceResponse` in Kotlin or stubbed
+ * WireMock with a body copied from this class, so both sides of the assertion came from the same
+ * wrong shape and agreed with each other — the consumer-pact trap in the repo guide, one layer
+ * down.
+ *
+ * The fields are not renamed, they are REMOVED: no code path in settlement-service reads a balance
+ * off this response, and a field that is never read is a way to fail on someone else's schema for
+ * nothing. Jackson ignores the unknown remainder, so this binds only the two values that identify
+ * the movement, and it cannot break again when balance-service adds a field.
+ */
+data class BalanceResponse(val accountId: UUID, val currency: String)

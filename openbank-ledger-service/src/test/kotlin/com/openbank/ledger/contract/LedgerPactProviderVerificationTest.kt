@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.PeriodTrialBalance
@@ -58,6 +59,13 @@ import javax.sql.DataSource
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-ledger-service")
 @PactFolder("../pacts")
+// Excludes the negative-auth state: a class-level @TestSecurity authenticates every request it
+// makes, which would turn the "no valid M2M identity" 401 interactions into 200s. Verified instead
+// by LedgerNegativeAuthPactVerificationTest, which carries no @TestSecurity at all (same split as
+// TransactionPactFolderProviderVerificationTest / TransactionNegativeAuthPactVerificationTest).
+// pact-jvm 4.7.3 matches a filter value against the state name with String.matches (a full-match
+// Java regex), so the negative lookahead holds.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class LedgerPactProviderVerificationTest {
 
@@ -165,6 +173,32 @@ class LedgerPactProviderVerificationTest {
         // 2100 deposit-control, …) with stable UUIDs into the fresh Testcontainer DB, so the
         // transaction-service postJournal contract replays against real, enabled, leaf GL accounts.
     }
+
+    /**
+     * treasury-service's nostro-reconciliation reads (ADR-0315 D5, #10896), seeded by
+     * [NostroPactSeed]: a balanced two-line journal on [NostroPactSeed.STATEMENT_DATE], Dr 1500 (MM placement, CZK) / Cr 1001 (CZK nostro, the fixed id
+     * V29__treasury_money_market_accounts.sql seeds) — the same shape treasury's own SETTLED
+     * posting for an MM_PLACEMENT deal produces (`Postings.kt`). Inserted directly against
+     * `journal_entries`/`journal_lines` (V1's schema: `side` is a single 'D'/'C' char, the table is
+     * partitioned by `entry_date`), the same direct-JDBC seeding
+     * [stateWithFrozenMonthlyTrialBalance] above already uses for this Testcontainer DB — a
+     * `LedgerUseCase.postJournal` call needs a Vert.x context this bare `@BeforeEach`/`@State`
+     * thread does not carry (`CLAUDE.md`'s reactive-repo-off-thread note).
+     */
+    @State("ledger has a nostro journal line on 1001 for the statement date")
+    fun stateWithNostroJournalLine() = NostroPactSeed.seedCzkNostroLine(dataSource)
+
+    /** treasury's native-currency balance read (#11107): EUR 10,000.00 Dr on 1002, base CZK differs. */
+    @State("ledger has a EUR journal line on 1002 for the statement date")
+    fun stateWithEurNostroJournalLine() = NostroPactSeed.seedEurNostroLine(dataSource)
+
+    /**
+     * treasury's unknown-account read (#11113): no setup — 9999 is in no chart migration, so the
+     * ledger's own GlAccountNotFoundExceptionMapper answers, and treasury reads exactly that body as
+     * "not held" (any other 404 is an upstream failure there).
+     */
+    @State("ledger does not hold GL account 9999")
+    fun stateWithUnknownGlAccount() = Unit
 
     private companion object {
         const val PERIOD_ID = "00000000-0000-0000-0000-000000009601"

@@ -79,6 +79,18 @@ allowed_reasons contains "service-sepa-payment-shared-client-m2m" if {
 	input.action == "sepaPayment.handleReturn"
 }
 
+# #10486 batch 1 — standing-order-service's OWN machine identity. Its SepaPaymentClient
+# (createPayment, the SEPA leg of a due standing order, #889) mints its bearer from the named
+# oidc-client `m2m`, Keycloak client `openbank-standing-order`, whose service account holds
+# ROLE_API only. This rule is that principal's whole grant here: sepaPayment.create, nothing
+# else. SepaPaymentResource.createPayment admits ROLE_API at the RBAC layer for it; every other
+# ROLE_API holder is denied by OPA (sepa_payment_rest_ext_test.rego).
+allowed_reasons contains "service-standing-order-sepa-payment-create" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-standing-order"
+	input.action == "sepaPayment.create"
+}
+
 # Edge prohibition (2026-08-05, #3734): veto the customer-facing edge client on every sepaPayment.*
 # write it has no identity-scoped grant for. Base rest.rego gates its allow head on
 # `not prohibited`, so this beats the matrix grant for approval.decide / handleReturn /

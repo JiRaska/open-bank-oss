@@ -119,6 +119,19 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-01** — Added an expand-first, default-OFF delegated-spend binding state machine; no REST
   endpoint or new caller is exposed in this phase. V13 creates the durable PENDING/BOUND/
   FINALIZED_ABSENT projection with full immutable party/resource/money tuple, domain-separated
@@ -460,3 +473,110 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+
+- **2026-09-13** — **Additive lifecycle evidence contract for ADR-0306.**
+  `domestic_payments.aggregate_revision` starts at 1 and every valid transition increments it while
+  holding a pessimistic row lock. The aggregate update and status event remain in the same existing
+  transaction, so the emitted revision names the committed state. Created and status-changed payloads
+  expose the additive optional `aggregateRevision`; optionality preserves retained pre-1.2 records,
+  while new writers always populate it. Context-service consumes the topic asynchronously with its own
+  group, mTLS ACL and DLQ and stores only payment id, status, event time and revision as restricted
+  evidence. It receives no account number, party name, amount or narrative in its projection model and
+  adds no synchronous payment-path dependency. Risk class is integrity and availability: the row lock
+  serializes concurrent transitions, the revision makes replay ordering explicit, and context-service
+  failure can only stale the investigative view. Rollback stops that consumer first; the additive
+  column can be dropped only before any V17 writer runs, as recorded in the migration.
+
+- **2026-09-20** — **No boundary change for this service.** Recorded because
+  `openbank-infra/gitops/components/payments/payments-services.yaml` is a shared multi-service
+  manifest and the threat-model gate attributes a Deployment/Rollout hunk in it to every money-path
+  service whose name appears in the file, not to the workload the hunk actually sits in. The change
+  in question belongs to the co-tenant **clearing-service** Rollout: a `LEDGER_SERVICE_URL` pointing
+  at ledger-service's new mTLS listener, plus the client-certificate volume it needs.
+  domestic-payment's own container spec, ports, identity, privilege, NetworkPolicy and rest-clients
+  were byte-identical to `main` as of that change; the entry below is this service's own,
+  separate outbound edge. **Risk class:** none — no surface, principal, action or data flow of
+  this service is touched. Nothing to roll back here.
+
+- **2026-09-20** — **New outbound edge: document-service over private-CA mTLS (8443).** `PaymentConfirmationRenderAdapter`
+  now reaches `document-service.documents.svc:8443` with the client certificate `domestic-payment-internal-tls`
+  (`%prod` TLS bucket `document-authority`, TLSv1.3). Previously `DOCUMENT_SERVICE_URL` was unset in
+  gitops and the client dialled `localhost:8143` inside this pod, so the render path never left the
+  process (#10383). No new inbound edge, no new principal, no money mutation: the call is a read of
+  template metadata plus a preview render. **Risk class:** confidentiality of the rendered payment
+  confirmation in transit, now protected by mutual TLS rather than plaintext. Rollback: drop
+  `DOCUMENT_SERVICE_URL` and the `document-tls` volume.
+
+- **2026-09-20** — **No boundary change for this service** (second shared-manifest attribution; see
+  the entry above for the mechanism). This PR adds transaction-service's private-CA mTLS listener
+  (8443) to the co-tenant transaction-service Rollout in
+  `openbank-infra/gitops/components/payments/payments-services.yaml`, and the regenerated
+  `network-policies.yaml` gains an `interest` + 8443 ingress rule scoped to
+  `transaction-service-ingress-allow-list`. domestic-payment's own Rollout, ports, identity,
+  privilege and rest-clients are byte-identical to `main`, and its own ingress allow-list is
+  unchanged — the policy file is shared per component directory, not per workload. **Risk class:**
+  none for this service. Nothing to roll back here.
+
+- **2026-09-20** — **No boundary change for this service** (third shared-manifest attribution; see
+  the entries above for the mechanism). This PR adds transaction-service's CLIENT certificate for
+  its outbound fx-service call — a `fx-tls` volume and mount on the co-tenant transaction-service
+  Rollout in `openbank-infra/gitops/components/payments/payments-services.yaml`, plus
+  `FX_SERVICE_URL`. domestic-payment's own Rollout, ports, identity, privilege and rest-clients are
+  byte-identical to `main`. **Risk class:** none for this service. Nothing to roll back here.
+
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution, same
+  mechanism as the entries above). #10486 batch 1 adds an `OIDC_M2M_CLIENT_SECRET` env ref to the
+  co-tenant sepa-payment, clearing-service and standing-order-service Rollouts in
+  `openbank-infra/gitops/components/payments/payments-services.yaml` and restamps the transaction
+  and sepa-payment policy checksums. domestic-payment still authenticates as the shared
+  `openbank-services` client; its Rollout, identity and rest-clients are byte-identical to `main`.
+  **Risk class:** none for this service. Nothing to roll back here.
+- **2026-09-21** — **Own machine identity for the settlement booking (#10486 batch 2).** `SettlementAdapter` now resolves the NAMED oidc-client `m2m` (`@NamedOidcClient`), Keycloak client `openbank-domestic-payment` (`ROLE_API` only); transaction-service grants it exactly `transaction.create` (`service-domestic-payment-transaction-create`). `AccountServiceClient` (the in-house creditor lookup, a read) stays on the shared client. **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/domestic-payment` (`client_secret`), projected by the `domestic-payment-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
+- **2026-09-21** — **AML case open moves to the service's own machine identity (#10486 batch 3).** `AmlServiceClient` (`POST /api/v1/aml/cases`) now mints its bearer from the NAMED oidc-client `m2m` the service already has for its money-path booking, Keycloak client `openbank-domestic-payment` (`ROLE_API` only), instead of the shared `openbank-services` client. aml-service admits it by identity: `@RolesAllowed` on `createCase` gains `ROLE_API`, `@Authorize("amlCase.create")` is added with the rego rule `service-aml-case-create-m2m`, and because aml-service runs `AUTHZ_ENFORCE=false` a Kotlin check (`requireNamedMachineCaller`) refuses any ROLE_API-only caller not on its four-principal list. **STRIDE-S/E:** no new credential; the existing `m2m` secret now also reaches `amlCase.create` and nothing else new. **Repudiation improves:** a referred case now names this service. **Availability:** unchanged path; if the named client were missing the call would fail and the screening gate's existing failure handling applies, exactly as for a shared-client outage. Rollback: revert the commit (the client returns to the shared token).
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 5 restamps the transaction-service policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding a transaction read rule for party-service. domestic-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 6 restamps the card-issuance policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding two card read rules. domestic-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
+- **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `DomesticPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only). domestic-payment grants it nothing and its RBAC is unchanged, for the same reason as sepa-payment: no charter holds `query.payment_confirmation.readonly`. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. Nothing to roll back here.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** DomesticPaymentNotFoundMapper/InvalidDomesticPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `ExceptionMappers.kt`'s detekt baseline entry, which document the deletion rather than contradict
+  it). `DomesticPaymentNotFoundException`/`InvalidDomesticPaymentStateTransitionException` now
+  extend `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`,
+  handled by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper`
+  (added, unused, by #10923). Both already used the base's default codes
+  (`NOT_FOUND`/`CONFLICT`), so status, `code` and `message` are byte-identical to the deleted
+  mappers' output — verified by `DomesticPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s
+  source changes (`Ids.randomId()` → the correlation MDC), which #10911 phase 1 established is not
+  part of the wire contract. `DomesticPaymentIdempotencyConflictMapper` (a distinct
+  `application/problem+json` body shape) and `PaymentNotSettledMapper`/
+  `PaymentConfirmationRenderMapper` are untouched. **Risk class:** none — response-plumbing
+  de-duplication only; the payment workflow, delegated-spend binding and Temporal orchestration
+  are untouched. Rollback: restore the deleted mapper classes and revert the exception base
+  classes.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site is migrated to
+  `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

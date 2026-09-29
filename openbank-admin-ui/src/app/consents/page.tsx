@@ -254,7 +254,7 @@ export default function ConsentsPage() {
       )}
 
       {rows && rows.length > 0 && (
-        <div className="card" style={{ overflowX: 'auto' }}>
+        <div className="card table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka souhlasů', 'Scrollable consents table')}>
           <table className="table">
             <thead>
               <tr>

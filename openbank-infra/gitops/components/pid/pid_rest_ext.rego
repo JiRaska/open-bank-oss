@@ -85,3 +85,15 @@ allowed_reasons contains "customer-eudi-request" if {
 	input.principal.id != ""
 	input.action in {"identity.eudi.request", "identity.eudi.poll", "identity.eudi.verify"}
 }
+
+# #10486 batch 6 — `GET /api/v1/parties/{id}` (PartyResource.getById) gained `@Authorize("party.read")`
+# and admits ROLE_API at the RBAC gate so delegation-service can check party eligibility as its OWN
+# principal (ROLE_API only) once the shared openbank-services client loses ROLE_OPERATOR. Staff keep
+# base operator-read-any (`party.read` ends in `.read`); this rule is the machine caller's whole grant
+# here, and every other ROLE_API holder is denied (pid_rest_ext_test.rego).
+#   delegation-service PidServiceRestClient.getParty GET /parties/{id} party.read
+allowed_reasons contains "service-delegation-party-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-delegation"
+	input.action == "party.read"
+}

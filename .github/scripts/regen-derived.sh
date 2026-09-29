@@ -65,6 +65,7 @@ GENERATORS=(
   "ai-governance-snapshot|python3 .github/scripts/gen-ai-governance-snapshot.py|openbank-libs/governance/agents.yaml prompts/registry.yaml"
   "adr-index|bash docs/adr/gen-index.sh|docs/adr/"
   "card-capability-matrix|python3 .github/scripts/gen-card-capability-matrix.py|openbank-libs/governance/card-capabilities.yaml"
+  "release-registry|python3 .github/scripts/gen-release-registry.py --write|version.txt"
   "bundles|__BUNDLES__|openbank-libs/governance/rules.yaml openbank-libs/governance/agents.yaml .rego"
 )
 

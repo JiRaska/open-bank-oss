@@ -47,10 +47,7 @@ describe('login experience', () => {
     expect(screen.getByText(/Your OpenBank Explorer is ready/)).toBeInTheDocument()
     expect(screen.getByText('Decisions with context')).toBeInTheDocument()
     const lionScene = screen.getByRole('button', { name: 'OpenBank Explorer over Prague' })
-    const lionessScene = screen.getByRole('button', { name: 'OpenBank Explorer lioness over Prague' })
     expect(lionScene).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(lionessScene)
-    expect(lionessScene).toHaveAttribute('aria-pressed', 'true')
     const button = screen.getByRole('button', { name: 'Continue with Keycloak SSO' })
     fireEvent.click(button)
 
@@ -71,11 +68,15 @@ describe('login experience', () => {
 
   it('rotates between the Prague Explorer scenes', () => {
     vi.useFakeTimers()
-    renderPage()
+    const { container } = renderPage()
 
+    expect(container.querySelectorAll('img')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'OpenBank Explorer lioness over Prague' })).toBeNull()
+    act(() => vi.advanceTimersByTime(1_500))
     const lionessScene = screen.getByRole('button', { name: 'OpenBank Explorer lioness over Prague' })
+    expect(container.querySelectorAll('img')).toHaveLength(2)
     expect(lionessScene).toHaveAttribute('aria-pressed', 'false')
-    act(() => vi.advanceTimersByTime(8_000))
+    act(() => vi.advanceTimersByTime(6_500))
     expect(lionessScene).toHaveAttribute('aria-pressed', 'true')
   })
 })

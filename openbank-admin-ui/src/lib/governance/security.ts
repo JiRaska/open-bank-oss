@@ -4,7 +4,7 @@
 
 // Server-side loader for the zero-trust security posture. The build derives
 // security-graph.json from the real, gitops-wired platform manifests
-// (gitops/components/*/network-policies.yaml, kyverno verify-images-policy.yaml)
+// (gitops/components/*/network-policies.yaml, kyverno verify-sbom-attestation-policy.yaml)
 // via scripts/generate-security-graph.mjs — governance-as-code (ADR-0029),
 // never a hand-drawn claim. `istio` is unconditionally unavailable: no service
 // mesh runs in the sandbox (ADR-0098; #1666/#1667/#1710), so there is no live

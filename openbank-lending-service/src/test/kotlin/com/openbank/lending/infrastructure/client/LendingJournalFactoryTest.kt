@@ -186,4 +186,28 @@ class LendingJournalFactoryTest {
 
     private fun List<JournalLineRequest>.sumOf(sel: (JournalLineRequest) -> BigDecimal): BigDecimal =
         fold(BigDecimal.ZERO) { acc, l -> acc + sel(l) }
+
+    @Test
+    fun `a live posting keeps value date equal to entry date`() {
+        val request = LendingJournalFactory.buildRequest(
+            posting(PostingKind.DISBURSEMENT, "loan:1:disbursement"),
+            accounts,
+            actor,
+            date,
+        )
+        assertThat(request.entryDate).isEqualTo("2026-05-30")
+        assertThat(request.valueDate).isEqualTo("2026-05-30")
+    }
+
+    @Test
+    fun `a backfill posting books on the cut-over date and carries the original value date (#10746)`() {
+        val backfill = posting(
+            PostingKind.DISBURSEMENT,
+            "loan:1:disbursement",
+        ).copy(valueDate = LocalDate.parse("2026-05-20"))
+        val request = LendingJournalFactory.buildRequest(backfill, accounts, actor, LocalDate.parse("2026-09-24"))
+        assertThat(request.entryDate).isEqualTo("2026-09-24")
+        assertThat(request.valueDate).isEqualTo("2026-05-20")
+        assertThat(request.idempotencyKey).isEqualTo("loan:1:disbursement")
+    }
 }

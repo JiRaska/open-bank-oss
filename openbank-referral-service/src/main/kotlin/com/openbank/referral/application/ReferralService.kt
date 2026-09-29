@@ -3,9 +3,10 @@
 
 package com.openbank.referral.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.referral.application.port.out.ReferralAuditRepository
-import com.openbank.referral.application.port.out.ReferralEventPublisher
 import com.openbank.referral.application.port.out.ReferralInviteRepository
 import com.openbank.referral.application.port.out.ReferralProgramRepository
 import com.openbank.referral.application.port.out.ReferralRewardRepository
@@ -13,13 +14,15 @@ import com.openbank.referral.domain.InviteStatus
 import com.openbank.referral.domain.LedgerOutcome
 import com.openbank.referral.domain.ProgramStatus
 import com.openbank.referral.domain.ReferralConflictException
+import com.openbank.referral.domain.ReferralConflictReason
 import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralNotFoundException
 import com.openbank.referral.domain.ReferralProgram
-import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.ReferralValidationException
+import com.openbank.referral.domain.ReferrerInviteView
+import com.openbank.referral.domain.ReferrerRewardView
 import com.openbank.referral.domain.RewardStatus
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
@@ -36,15 +39,57 @@ private const val TOKEN_BYTES = 32
 private const val DEFAULT_WINDOW_DAYS = 30L
 
 @ApplicationScoped
+// One use-case class mirrors the referral surface. The published-programme read added for the
+// catalogue (#7198) is the 11th function, and detekt's threshold FIRES AT 11 rather than above it.
+// Splitting a read that shares the repository and the clock with the rest of the surface would add
+// a class to satisfy a counter, not a boundary.
+@Suppress("TooManyFunctions")
 class ReferralService(
     private val programs: ReferralProgramRepository,
     private val invites: ReferralInviteRepository,
     private val rewards: ReferralRewardRepository,
-    private val events: ReferralEventPublisher,
     private val audit: ReferralAuditRepository,
     private val clock: Clock,
+    private val objectMapper: ObjectMapper,
 ) {
     private val random = SecureRandom()
+
+    suspend fun listPublishedPrograms(): List<ReferralProgram> = programs.listPublished()
+
+    suspend fun publishedProgram(id: UUID): ReferralProgram? =
+        programs.find(id)?.takeIf { it.status == ProgramStatus.PUBLISHED }
+
+    /**
+     * The invites [referrerPartyId] issued, newest first, as the referrer may see them: no referee
+     * identity, no token. An ISSUED invite past its window reads as EXPIRED — nothing rewrites the
+     * stored row on expiry, so without this the referrer would be told an invite is still open.
+     */
+    suspend fun listInvitesForReferrer(referrerPartyId: UUID): List<ReferrerInviteView> {
+        val own = invites.listByReferrer(referrerPartyId)
+        if (own.isEmpty()) return emptyList()
+        val ids = own.map { it.id }
+        val latestReward = rewards.listByInviteIds(ids)
+            .groupBy { it.inviteId }
+            .mapValues { (_, list) -> list.maxBy { it.createdAt } }
+        val issuedAt = audit.issuedAt(ids)
+        val now = Instant.now(clock)
+        return own.map { invite ->
+            val expired = invite.status == InviteStatus.ISSUED && !invite.expiresAt.isAfter(now)
+            ReferrerInviteView(
+                id = invite.id,
+                status = if (expired) InviteStatus.EXPIRED else invite.status,
+                createdAt = issuedAt[invite.id],
+                expiresAt = invite.expiresAt,
+                attributedAt = invite.attributedAt,
+                reward = latestReward[invite.id]?.let {
+                    ReferrerRewardView(it.status, it.amount, it.currency, it.requestedAt, it.rewardedAt)
+                },
+            )
+        }.sortedWith(
+            compareByDescending<ReferrerInviteView, Instant?>(nullsFirst()) { it.createdAt }
+                .thenByDescending { it.expiresAt },
+        )
+    }
 
     suspend fun createProgram(
         name: String,
@@ -105,12 +150,18 @@ class ReferralService(
     ): ReferralInvite {
         validate(idempotencyKey.isNotBlank(), "Idempotency-Key is required")
         if (invites.findByIdempotencyKey(idempotencyKey) != null) {
-            throw ReferralConflictException("Idempotency-Key has already been used")
+            throw ReferralConflictException(
+                "Idempotency-Key has already been used",
+                ReferralConflictReason.IDEMPOTENCY_KEY_REUSED,
+            )
         }
         val program = programs.find(programId) ?: throw ReferralNotFoundException("program $programId not found")
         val now = Instant.now(clock)
         if (program.status != ProgramStatus.PUBLISHED || !program.attributionWindowEndsAt.isAfter(now)) {
-            throw ReferralConflictException("program is not published or has expired")
+            throw ReferralConflictException(
+                "program is not published or has expired",
+                ReferralConflictReason.PROGRAM_UNAVAILABLE,
+            )
         }
         val token = randomToken()
         val invite = ReferralInvite(
@@ -142,13 +193,19 @@ class ReferralService(
         validate(idempotencyKey.isNotBlank(), "Idempotency-Key is required")
         val invite = invites.findByToken(hash(token)) ?: throw ReferralNotFoundException("invite not found")
         val now = Instant.now(clock)
-        if (!invite.expiresAt.isAfter(now)) throw ReferralConflictException("invite has expired")
-        if (invite.referrerPartyId == refereePartyId) throw ReferralConflictException("self-referral is not allowed")
+        if (!invite.expiresAt.isAfter(now)) {
+            throw ReferralConflictException("invite has expired", ReferralConflictReason.EXPIRED)
+        }
+        if (invite.referrerPartyId == refereePartyId) {
+            throw ReferralConflictException("self-referral is not allowed", ReferralConflictReason.SELF)
+        }
         if (invite.status == InviteStatus.ATTRIBUTED) {
             if (invite.refereePartyId == refereePartyId) return invite
-            throw ReferralConflictException("invite is already attributed")
+            throw ReferralConflictException("invite is already attributed", ReferralConflictReason.ALREADY_ATTRIBUTED)
         }
-        if (invite.status != InviteStatus.ISSUED) throw ReferralConflictException("invite is not attributable")
+        if (invite.status != InviteStatus.ISSUED) {
+            throw ReferralConflictException("invite is not attributable", ReferralConflictReason.NOT_ATTRIBUTABLE)
+        }
         val attributed = invites.attribute(invite.id, refereePartyId, now)
         audit.append("INVITE_ATTRIBUTED", attributed.id, actor, "referee=$refereePartyId", now)
         return attributed
@@ -173,6 +230,23 @@ class ReferralService(
         if (invite.status != InviteStatus.ATTRIBUTED || invite.refereePartyId == null) {
             throw ReferralConflictException("invite must be attributed before qualification")
         }
+        return qualifyAttributed(invite, program, eventId, actor)
+    }
+
+    /**
+     * Creates the reward for an ATTRIBUTED [invite] under [program], keyed on [eventId], and writes
+     * its `Qualified` + `RewardRequested` outbox rows in the same transaction. The caller has
+     * already decided eligibility — the operator route above by its own checks, the ADR-0310 D1
+     * paths through `QualificationRule`. A second call with the same (invite, event) returns the
+     * reward it already made.
+     */
+    suspend fun qualifyAttributed(
+        invite: ReferralInvite,
+        program: ReferralProgram,
+        eventId: String,
+        actor: String,
+    ): ReferralReward {
+        val refereePartyId = checkNotNull(invite.refereePartyId) { "invite ${invite.id} has no referee" }
         rewards.findByInviteAndEvent(invite.id, eventId)?.let { return it }
         val now = Instant.now(clock)
         val reward = ReferralReward(
@@ -180,7 +254,7 @@ class ReferralService(
             inviteId = invite.id,
             programId = program.id,
             referrerPartyId = invite.referrerPartyId,
-            refereePartyId = invite.refereePartyId,
+            refereePartyId = refereePartyId,
             qualificationEventId = eventId,
             rewardReference = "referral-${invite.id}-$eventId",
             amount = program.rewardAmount,
@@ -190,34 +264,27 @@ class ReferralService(
             requestedAt = now,
             rewardedAt = null,
         )
-        val created = rewards.create(reward)
-        publishAudited(
-            ReferralEvent.Qualified(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = program.id,
-                inviteId = invite.id,
-                referrerPartyId = invite.referrerPartyId,
-                refereePartyId = invite.refereePartyId,
-                qualificationEventId = eventId,
-            ),
-            created.id,
-            actor,
-            now,
+        val qualified = ReferralEvent.Qualified(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = program.id,
+            inviteId = invite.id,
+            referrerPartyId = invite.referrerPartyId,
+            refereePartyId = refereePartyId,
+            qualificationEventId = eventId,
         )
-        publishAudited(
-            ReferralEvent.RewardRequested(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = program.id,
-                inviteId = invite.id,
-                rewardReference = created.rewardReference,
-                amount = created.amount,
-                currency = created.currency,
-            ),
-            created.id,
-            actor,
-            now,
+        val rewardRequested = ReferralEvent.RewardRequested(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = program.id,
+            inviteId = invite.id,
+            rewardReference = reward.rewardReference,
+            amount = reward.amount,
+            currency = reward.currency,
+        )
+        val created = rewards.create(
+            reward,
+            listOf(outboxMessage(reward.id, qualified), outboxMessage(reward.id, rewardRequested)),
         )
         audit.append("REWARD_REQUESTED", created.id, actor, created.rewardReference, now)
         return created
@@ -232,41 +299,32 @@ class ReferralService(
             LedgerOutcome.REJECTED -> RewardStatus.RETRYABLE
             LedgerOutcome.REVERSED -> RewardStatus.REVERSED
         }
-        val updated = rewards.outcome(reference, next.name, now)
-        publishAudited(
-            ReferralEvent.RewardOutcome(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = reward.programId,
-                inviteId = reward.inviteId,
-                rewardReference = reference,
-                outcome = outcome,
-            ),
-            updated.id,
-            actor,
-            now,
+        val rewardOutcome = ReferralEvent.RewardOutcome(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = reward.programId,
+            inviteId = reward.inviteId,
+            rewardReference = reference,
+            outcome = outcome,
         )
+        val updated = rewards.outcome(reference, next.name, now, outboxMessage(reward.id, rewardOutcome))
         audit.append("LEDGER_${outcome.name}", updated.id, actor, reference, now)
         return updated
     }
 
     /**
-     * Publishes [event] and records the transport outcome in the audit trail when nothing left the
-     * process. An undelivered money-path event must be visible in the evidentiary record, not only
-     * in a log line — the caller cannot otherwise tell a dropped reward from a delivered one.
+     * Builds the durable outbox row for [event]. Written in the SAME transaction as the reward
+     * state change ([ReferralRewardRepository.create] / [.outcome]) — never handed to a live
+     * transport from here. See the port's KDoc for why: a hand-carried publish outside the
+     * state-changing transaction is exactly the atomicity gap #7190 replaced.
      */
-    private suspend fun publishAudited(event: ReferralEvent, aggregateId: UUID, actor: String, at: Instant) {
-        val outcome = events.publish(event)
-        if (outcome != ReferralPublishOutcome.HANDED_TO_TRANSPORT) {
-            audit.append(
-                "EVENT_NOT_PUBLISHED",
-                aggregateId,
-                actor,
-                "type=${event.eventType} eventId=${event.eventId} outcome=${outcome.name}",
-                at,
-            )
-        }
-    }
+    private fun outboxMessage(aggregateId: UUID, event: ReferralEvent) = OutboxMessage(
+        eventId = event.eventId,
+        aggregateId = aggregateId,
+        eventType = event.eventType,
+        payload = objectMapper.writeValueAsString(event),
+        createdAt = event.occurredAt,
+    )
 
     private fun randomToken(): String {
         val bytes = ByteArray(TOKEN_BYTES)

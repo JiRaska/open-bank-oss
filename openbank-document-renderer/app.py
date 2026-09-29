@@ -17,9 +17,10 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from weasyprint import HTML, default_url_fetcher
+from weasyprint import HTML
+from weasyprint.urls import URLFetcher
 
-HOST = "0.0.0.0"  # noqa: S104 - deliberate: this is a containerized sidecar, bound per-pod
+HOST = "0.0.0.0"  # deliberate: this is a containerized sidecar, bound per-pod
 PORT = 8200
 
 # Deliberate, documented bound (ADR-0162 "new template content is a new
@@ -40,18 +41,17 @@ def _log_json(**fields: object) -> None:
     print(json.dumps(fields, default=str), file=sys.stdout, flush=True)
 
 
-def restricted_url_fetcher(url: str, timeout: int = 10, ssl_context: object = None) -> dict:
+class RestrictedURLFetcher(URLFetcher):
     """SSRF/LFI mitigation for template-supplied HTML (ADR-0162 D3).
 
-    WeasyPrint's *default* url_fetcher (`weasyprint.default_url_fetcher`)
-    will happily perform outbound network I/O for any absolute http(s) URL
-    referenced by a `<link>`, `<img>`, `@import`, etc. — and will also read
-    local files for a `file://` URL. Template HTML on this platform can
-    originate from a non-engineer's WYSIWYG editor (ADR-0162 D6) and is
-    rendered server-side here, so an unrestricted fetcher is a direct
-    SSRF/LFI primitive: e.g. `<img src="http://169.254.169.254/latest/
-    meta-data/...">` against a cloud metadata endpoint, or
-    `file:///etc/passwd`.
+    WeasyPrint's *default* URL fetcher will happily perform outbound network
+    I/O for any absolute http(s) URL referenced by a `<link>`, `<img>`,
+    `@import`, etc. — and will also read local files for a `file://` URL.
+    Template HTML on this platform can originate from a non-engineer's
+    WYSIWYG editor (ADR-0162 D6) and is rendered server-side here, so an
+    unrestricted fetcher is a direct SSRF/LFI primitive: e.g.
+    `<img src="http://169.254.169.254/latest/meta-data/...">` against a cloud
+    metadata endpoint, or `file:///etc/passwd`.
 
     Passing `base_url=None` to `HTML(...)` is NOT sufficient on its own: it
     only stops *relative* URLs from resolving (there is no base to resolve
@@ -66,16 +66,28 @@ def restricted_url_fetcher(url: str, timeout: int = 10, ssl_context: object = No
     per-resource (see `weasyprint.urls.fetch`) and treats it as a missing
     image/stylesheet, so the render still completes — just without that
     external resource, rather than crashing the whole request.
+
+    WeasyPrint 70 replaced the `default_url_fetcher` function with this
+    `URLFetcher` class. The guard is enforced twice on purpose: our own
+    literal `data:` prefix check (the exact pre-70 semantics) runs before
+    anything else, and the parent is additionally constructed with
+    `allowed_protocols=("data",)` and no redirect handler, so a future
+    refactor of either layer alone cannot widen what is fetched.
     """
-    if url.startswith("data:"):
-        return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
-    raise ValueError(f"blocked fetch of disallowed URL scheme (SSRF guard): {url!r}")
+
+    def __init__(self) -> None:
+        super().__init__(allowed_protocols=("data",), allow_redirects=False)
+
+    def fetch(self, url, headers=None):  # noqa: ANN001, ANN201 - mirrors URLFetcher.fetch
+        if not url.startswith("data:"):
+            raise ValueError(f"blocked fetch of disallowed URL scheme (SSRF guard): {url!r}")
+        return super().fetch(url, headers)
 
 
 class RenderHandler(BaseHTTPRequestHandler):
     server_version = "openbank-document-renderer/1.0"
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:
         # Silence BaseHTTPRequestHandler's default stderr access log — we
         # emit our own structured JSON line per request instead (_log_json).
         pass
@@ -150,7 +162,7 @@ class RenderHandler(BaseHTTPRequestHandler):
                 pdf_bytes = HTML(
                     string=html_source,
                     base_url=None,
-                    url_fetcher=restricted_url_fetcher,
+                    url_fetcher=RestrictedURLFetcher(),
                 ).write_pdf()
             except Exception as exc:  # noqa: BLE001 - any render failure -> 400
                 status = 400

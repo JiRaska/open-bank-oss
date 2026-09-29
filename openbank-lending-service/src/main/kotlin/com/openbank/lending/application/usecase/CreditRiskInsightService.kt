@@ -51,6 +51,10 @@ class CreditRiskInsightService(
             }
         }
 
+    override fun portfolioSummary(
+        asOf: LocalDate,
+    ): Uni<List<com.openbank.lending.domain.model.CreditPortfolioSummary>> = provisioning.summariseActive(asOf)
+
     override fun activePolicy(asOf: LocalDate): Uni<CreditPolicyView> = creditPolicy.activeBundle(asOf).map { bundle ->
         CreditPolicyView(
             asOf = asOf,
@@ -84,7 +88,9 @@ class CreditRiskInsightService(
         policyVersions = DecisionEvidenceCodec.policyVersions(a.policyVersions),
         inputSnapshotHash = a.decisionInputHash,
         decidedEngineAt = a.decidedEngineAt,
-        affordability = OriginationDecisionService.affordabilityRatios(a),
+        affordability = a.decisionDsti?.let { dsti ->
+            a.decisionDti?.let { dti -> com.openbank.lending.domain.model.AffordabilityRatios(dsti, dti, dsti) }
+        },
         verifiedIncomeMonthly = a.verifiedIncomeMonthly?.amount,
         existingDebtServiceMonthly = a.existingDebtServiceMonthly?.amount,
         ageYears = a.ageYears,

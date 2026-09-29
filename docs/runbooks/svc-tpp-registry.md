@@ -30,7 +30,7 @@ triaging an incident that starts on `tpp-registry`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8108` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `tpp-registry`); dashboards in Grafana.
 - Logs: `kubectl logs -n tpp-registry deploy/tpp-registry-service -f`, or Loki
   `{namespace="tpp-registry"}`.

@@ -109,6 +109,7 @@ data class DomesticPaymentResponse(
     val settledAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val aggregateRevision: Long,
 )
 
 fun DomesticPayment.toResponse() = DomesticPaymentResponse(
@@ -139,4 +140,5 @@ fun DomesticPayment.toResponse() = DomesticPaymentResponse(
     settledAt = settledAt,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    aggregateRevision = aggregateRevision,
 )

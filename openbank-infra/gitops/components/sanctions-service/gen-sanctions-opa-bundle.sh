@@ -48,6 +48,18 @@ allowed_reasons contains "operator-sanctions-write" if {
 	role in input.principal.roles
 	startswith(input.action, "sanctions.")
 }
+
+# #10486 batch 8: agent-service's sanctions_list_checks / sanctions_get_check / sanctions_list_pending
+# tools (SanctionsServiceClient, query.compliance.readonly, held by the compliance-officer charter only;
+# the agent gate refuses every other agent before the call). They used to reach these reads on the
+# shared service-account-openbank-services principal's ROLE_OPERATOR; they now present
+# service-account-openbank-agent (ROLE_API only), and this rule is that principal's whole grant here:
+# the two read verbs, never a screen, a decision or a watchlist edit.
+allowed_reasons contains "service-agent-sanctions-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-agent"
+	input.action in {"sanctions.list", "sanctions.read"}
+}
 REGO
 )
 

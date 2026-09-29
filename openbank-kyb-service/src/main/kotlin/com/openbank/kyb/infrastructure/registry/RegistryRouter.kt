@@ -17,6 +17,7 @@ import com.openbank.kyb.domain.model.RegistrySearchResult
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import org.jboss.logging.Logger
 
 /**
  * Picks the register for a scheme (ADR-0284 D1). Order matters only where two adapters claim one
@@ -32,6 +33,10 @@ class RegistryRouter : BusinessRegistryPort {
 
     @Inject lateinit var metrics: KybMetricsPort
 
+    @Inject lateinit var demo: DemoEntity
+
+    private val log = Logger.getLogger(RegistryRouter::class.java)
+
     /**
      * Routed like [lookup] except for the fallback: the manual-attestation adapter cannot search,
      * so a scheme whose only adapter is that one answers **null** — "this register has no search" —
@@ -39,6 +44,20 @@ class RegistryRouter : BusinessRegistryPort {
      * the customer their company does not exist.
      */
     override suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? {
+        if (!demo.answersSearch(scheme, query)) return searchRegister(scheme, query)
+        // Sandbox demo: offered alongside whatever the real register finds, and still offered when the
+        // register is down or has too many matches — a demo that depends on ARES being up is no demo.
+        val real = try {
+            searchRegister(scheme, query)
+        } catch (e: RegistryUnavailableException) {
+            log.debugf(e, "register search unavailable; offering the sandbox demo entity alone")
+            null
+        }
+        val realHits = real?.takeUnless { it.tooManyMatches }?.hits.orEmpty()
+        return RegistrySearchResult(listOf(demo.hit()) + realHits, realHits.size + 1)
+    }
+
+    private suspend fun searchRegister(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? {
         val adapter = adapters
             .sortedBy { if (it is ManualAttestationRegistryAdapter) 1 else 0 }
             .firstOrNull { it.supports(scheme) } ?: return null
@@ -53,6 +72,9 @@ class RegistryRouter : BusinessRegistryPort {
     }
 
     override suspend fun lookup(identifier: LegalEntityIdentifier, declared: DeclaredEntity?): RegistryExtract? {
+        if (demo.isDemo(identifier)) {
+            return demo.extract().also { metrics.registryLookup(RegistryExtract.SANDBOX_DEMO_SOURCE, "found") }
+        }
         val ordered = adapters.sortedBy { if (it is ManualAttestationRegistryAdapter) 1 else 0 }
         val adapter = ordered.firstOrNull { it.supports(identifier.scheme) }
             ?: throw RegistryUnavailableException("none for ${identifier.scheme}")

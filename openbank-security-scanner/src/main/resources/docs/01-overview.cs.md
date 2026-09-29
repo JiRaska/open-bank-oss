@@ -8,7 +8,7 @@
 - **Spouštění 6 kontrol OWASP Top 10** na každé službě: security headery (A05), citlivá data v health endpointu (A02), expozice OpenAPI (A05 info-disclosure), neautentizované aktuátorové endpointy (A01), CORS wildcard (A05) a dosažitelnost služby (A05).
 - **Skórování každé služby** 0–100 a přiřazení písmenkového grade (A+ → F), výpočet `PlatformSecurityReport` pokrývajícího všechny služby.
 - **Správu ICT incidentů** — compliance důstojníci mohou hlásit, sledovat a aktualizovat životní cyklus DORA-grade ICT incidentů přes API `IctIncidentResource`. Incidenty jsou trvale uloženy v registru `ict_incidents` a zůstávají dostupné po restartu podu.
-- **Vysílání eventů ICT incidentů** přímo do Kafka topicu `openbank.security.ict.incident`. Žádný outbox a žádná transakční záruka neexistuje; výsledky skenů se jako eventy nepublikují vůbec.
+- **Atomické ukládání eventů ICT incidentů** se stavem incidentu a jejich relay z claim-safe outboxu do `openbank.security.ict.incident`; výsledky skenů se jako eventy nepublikují.
 
 ## Co služba NEDĚLÁ
 
@@ -17,7 +17,7 @@
 - Neskenuje infrastrukturu ani síťovou vrstvu — pouze kontroly na aplikační vrstvě HTTP.
 - Nevynucuje nápravu — reportuje zjištění; lidé a procesy vlastní odezvu.
 - Neukládá kompletní těla HTTP odpovědí — pouze metadata, zjištění, mapu přítomnosti headerů a skóre.
-- Nic nepersistuje. Výsledky skenů i ICT incidenty jsou pouze in-memory a zanikají s restartem podu (viz [04 — Data](./04-data.md)).
+- Výsledky skenů zůstávají pouze in-memory a zanikají s restartem podu. ICT incidenty jsou uložené v Postgresu (viz [04 — Data](./04-data.md)).
 
 ## Pozice v doméně
 
@@ -28,7 +28,7 @@
    │     security-scanner         │ ──────────────────► │   admin-ui      │
    │     (tato služba)            │                     │ (security page) │
    └──────────────┬───────────────┘                     └─────────────────┘
-                  │ přímý Kafka emitter (pouze ICT incidenty)
+                  │ transakční outbox relay (pouze ICT incidenty)
                   ▼
          openbank.security.ict.incident
                   │

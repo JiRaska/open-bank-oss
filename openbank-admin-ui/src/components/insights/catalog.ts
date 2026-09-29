@@ -2,17 +2,17 @@
 import type { InsightPanel } from './ContextualInsights'
 
 export const PAYMENT_INSIGHTS: InsightPanel[] = [
-  { id: 6, titleCs: 'Úspěšnost plateb', titleEn: 'Payment success rate', descriptionCs: 'Vývoj úspěšnosti v pětiminutových oknech napříč obdobím.', descriptionEn: 'Success-rate trend in five-minute windows across the period.', height: 'trend' },
-  { id: 2, titleCs: 'SEPA Instant do 10 sekund', titleEn: 'SEPA Instant under 10 seconds', descriptionCs: 'Plnění zákaznického času pro okamžité platby.', descriptionEn: 'Customer-time target for instant payments.' },
-  { id: 1, titleCs: 'Doba zpracování', titleEn: 'Processing duration', descriptionCs: 'Medián a pomalý konec zpracování plateb.', descriptionEn: 'Median and slow tail of payment processing.', height: 'trend' },
-  { id: 4, titleCs: 'Dokončení podle typu', titleEn: 'Completion by payment type', descriptionCs: 'Pomáhá odlišit plošný problém od jedné platební koleje.', descriptionEn: 'Separates a broad incident from a single payment rail.', height: 'trend' },
+  { id: 6, titleCs: 'Úspěšnost požadavků', titleEn: 'Request success rate', descriptionCs: 'Technická úspěšnost požadavků podle platební koleje za poslední hodinu.', descriptionEn: 'Technical request success by payment rail over the last hour.', height: 'trend' },
+  { id: 2, titleCs: 'SEPA Instant latence p95', titleEn: 'SEPA Instant p95 latency', descriptionCs: 'Pozorovaná serverová odezva včetně syntetických kontrol.', descriptionEn: 'Observed server latency including synthetic probes.' },
+  { id: 1, titleCs: 'Latence platebních služeb', titleEn: 'Payment-service latency', descriptionCs: 'Medián a pomalý konec serverové odezvy napříč platebními kolejemi.', descriptionEn: 'Median and slow tail of server latency across payment rails.', height: 'trend' },
+  { id: 4, titleCs: 'Provoz podle platební koleje', titleEn: 'Traffic by payment rail', descriptionCs: 'Pomáhá odlišit plošný problém od jedné platební koleje.', descriptionEn: 'Separates a broad incident from a single payment rail.', height: 'trend' },
 ]
 
 export const LEDGER_INSIGHTS: InsightPanel[] = [
   { id: 2, titleCs: 'Nevyřízený outbox', titleEn: 'Pending outbox', descriptionCs: 'Zápisy, které ještě čekají na bezpečné předání.', descriptionEn: 'Entries still waiting for safe delivery.' },
   { id: 4, titleCs: 'Chybovost hlavní knihy', titleEn: 'Ledger error rate', descriptionCs: 'Technické chyby při práci s účetními zápisy.', descriptionEn: 'Technical failures while processing ledger entries.' },
   { id: 9, titleCs: 'Latence zaúčtování p95', titleEn: 'Posting latency p95', descriptionCs: 'Jak dlouho čeká pomalejší část zaúčtování.', descriptionEn: 'How long the slower share of postings takes.', height: 'trend' },
-  { id: 11, titleCs: 'Odeslané a dokončené platby', titleEn: 'Submitted and completed payments', descriptionCs: 'Tok rozpracovaných plateb bez tvrzení o účetním nesouladu.', descriptionEn: 'Flow of in-flight payments without claiming an accounting mismatch.', height: 'trend' },
+  { id: 11, titleCs: 'API a události hlavní knihy', titleEn: 'Ledger API and journal events', descriptionCs: 'Pozorovaný provoz API vedle publikace účetních událostí.', descriptionEn: 'Observed API traffic alongside journal-event publication.', height: 'trend' },
 ]
 
 export const HEALTH_INSIGHTS: InsightPanel[] = [
@@ -22,10 +22,10 @@ export const HEALTH_INSIGHTS: InsightPanel[] = [
 ]
 
 export const EVENT_INSIGHTS: InsightPanel[] = [
-  { id: 3, titleCs: 'Mrtvé zprávy dnes', titleEn: 'Dead letters today', descriptionCs: 'Události, které nebylo možné bezpečně zpracovat.', descriptionEn: 'Events that could not be processed safely.' },
-  { id: 4, titleCs: 'Úspěšnost předávání', titleEn: 'Dispatch success rate', descriptionCs: 'Spolehlivost doručení událostí mezi službami.', descriptionEn: 'Reliability of event delivery between services.' },
+  { id: 3, titleCs: 'Aktuálně mrtvé zprávy', titleEn: 'Current dead-lettered items', descriptionCs: 'Události nyní odložené v koncovém chybovém stavu.', descriptionEn: 'Events currently parked in a terminal failure state.' },
+  { id: 4, titleCs: 'Služby bez backlogu', titleEn: 'Backlog-free services', descriptionCs: 'Podíl instrumentovaných outboxů bez čekajících nebo chybných zpráv.', descriptionEn: 'Share of instrumented outboxes without pending or failed messages.' },
   { id: 5, titleCs: 'Backlog podle služby', titleEn: 'Backlog by service', descriptionCs: 'Kde se čekající nebo chybné události hromadí.', descriptionEn: 'Where pending or failed events accumulate.', height: 'trend' },
-  { id: 2, titleCs: 'Vývoj dead-letter toku', titleEn: 'Dead-letter trend', descriptionCs: 'Ukazuje, zda jde o jednorázovou nebo pokračující závadu.', descriptionEn: 'Shows whether a failure is isolated or ongoing.', height: 'trend' },
+  { id: 2, titleCs: 'Mrtvé zprávy podle služby', titleEn: 'Dead letters by service', descriptionCs: 'Ukazuje, ve kterých službách jsou události trvale odložené.', descriptionEn: 'Shows which services currently have terminally parked events.', height: 'trend' },
 ]
 
 export const AI_INSIGHTS: InsightPanel[] = [

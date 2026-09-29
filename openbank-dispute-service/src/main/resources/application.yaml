@@ -45,8 +45,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -80,12 +78,19 @@ quarkus:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:
     oidc:
       enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   dispute:
     resolution-sla-days: 45
     chargeback-window-days: 120

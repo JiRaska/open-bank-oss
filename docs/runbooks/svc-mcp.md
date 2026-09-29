@@ -30,7 +30,7 @@ triaging an incident that starts on `mcp`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8150` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `platform`); dashboards in Grafana.
 - Logs: `kubectl logs -n platform deploy/mcp-service -f`, or Loki
   `{namespace="platform"}`.

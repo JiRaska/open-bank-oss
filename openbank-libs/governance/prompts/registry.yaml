@@ -137,6 +137,15 @@ charters:
       and "there is a prompt" become true in the same change — the same shape as
       card-scheme-bulletin-agent above.
 
+  - id: treasury-dealing-assistant
+    status: pending
+    reason: >-
+      ADR-0315 D10 (#10896). The charter is registered and ships DISABLED: treasury-service accepts
+      an agent's DRAFT (rationale + inputs, no limit consumed, human-only submit and four-eyes
+      booking), but no agent runtime holds treasury tools yet, so a prompt now would be text that
+      nothing sends. It is authored in the PR that wires the tools and flips `enabled` — the same
+      shape as card-dispute-evidence-agent above.
+
   - id: mcp-anonymous
     status: not-applicable
     reason: >-

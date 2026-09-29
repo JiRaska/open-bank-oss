@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for lending-service's mTLS calls to product-catalog (8443, client
+# auth REQUIRED) — the RestCatalogLoanProfilePort product read (#10383). Same shape as notification-internal-tls and
+# sca-internal-tls: tls.crt/tls.key identify the caller, ca.crt trusts product-catalog.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lending-internal-tls
+  namespace: lending
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: lending-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: lending-service.lending.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

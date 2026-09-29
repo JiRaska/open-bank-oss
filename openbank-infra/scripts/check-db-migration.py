@@ -43,6 +43,15 @@ import sys
 
 MIGRATION_RE = re.compile(r"/src/main/resources/db/migration/.+\.sql$")
 
+# ClickHouse warehouse migrations (#6253). They are applied ONCE — by the init ConfigMap on an empty
+# data dir, or by an operator — and nothing re-applies them (#7645), so an edit to one that already
+# ran never reaches the live warehouse: repo and warehouse diverge with no error anywhere. That is
+# rule 1's premise exactly, so rule 1 (never edit a committed migration) applies here too. Measured
+# on main: V2 and V6 were each edited in a later PR (#2125, #4577) after first merging.
+# Rule 2 (rollback note) deliberately does NOT: 0 of 17 ClickHouse migrations carry one, so requiring
+# it would be a new convention for that directory, which is a separate decision, not a scope fix.
+CLICKHOUSE_MIGRATION_RE = re.compile(r"/src/main/resources/clickhouse/V\d+__[^/]+\.sql$")
+
 # `-- Rollback` / `--Rollback:` / `-- ROLLBACK -` … the marker, however it is punctuated.
 ROLLBACK_MARKER_RE = re.compile(r"^\s*--\s*rollback\b[:\s-]*(?P<inline>.*)$", re.IGNORECASE)
 COMMENT_LINE_RE = re.compile(r"^\s*--\s?(?P<body>.*)$")
@@ -121,6 +130,21 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
         else:
             modified.append(path)
     return added, modified
+
+
+def changed_clickhouse_migrations(base: str) -> list[str]:
+    """ClickHouse migrations EDITED (modified or renamed) in the diff against `base`.
+
+    Added ones are not returned: a new V<n+1> is the correct shape, and rule 2's rollback note is
+    not applied to this directory (see CLICKHOUSE_MIGRATION_RE).
+    """
+    edited = []
+    out = git("diff", "--name-status", "--diff-filter=MR", base, "HEAD")
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and CLICKHOUSE_MIGRATION_RE.search(parts[-1]):
+            edited.append(parts[-1])
+    return edited
 
 
 def has_rollback_note(text: str) -> bool:
@@ -204,12 +228,25 @@ def self_test() -> int:
         if got != want:
             fails.append(f"MIGRATION_RE({path!r}) = {got}, expected {want}")
 
+    # --- which files are ClickHouse migrations (#6253) ------------------------------------
+    for path, want in (
+        ("openbank-analytics-sink/src/main/resources/clickhouse/V2__onboarding_funnel.sql", True),
+        # Not ClickHouse migrations: a Flyway one (rule 1 covers it via MIGRATION_RE), a test copy,
+        # and a non-versioned file in the same directory.
+        ("openbank-x/src/main/resources/db/migration/V1__init.sql", False),
+        ("openbank-analytics-sink/src/test/resources/clickhouse/V2__onboarding_funnel.sql", False),
+        ("openbank-analytics-sink/src/main/resources/clickhouse/README.sql", False),
+    ):
+        got = bool(CLICKHOUSE_MIGRATION_RE.search(path))
+        if got != want:
+            fails.append(f"CLICKHOUSE_MIGRATION_RE({path!r}) = {got}, expected {want}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: db-migration rollback note is falsifiable (15 cases)")
+    print("self-test ok: db-migration rollback note is falsifiable (19 cases)")
     return 0
 
 
@@ -227,9 +264,10 @@ def main() -> int:
 
     level = "error" if args.enforce else "warning"
     added, modified = changed_migrations(args.base)
+    ch_edited = changed_clickhouse_migrations(args.base)
 
-    if not added and not modified:
-        print("check-db-migration: no Flyway migration touched — nothing to check.")
+    if not added and not modified and not ch_edited:
+        print("check-db-migration: no Flyway or ClickHouse migration touched — nothing to check.")
         return 0
 
     findings = 0
@@ -241,6 +279,16 @@ def main() -> int:
             "(rules.yaml: db_change requires a forward migration). Flyway checksums the whole "
             "file — comments included — so once it has been applied to any live DB, an edit "
             "fails startup with `checksum mismatch`. Add a new V<n+1> migration instead."
+        )
+
+    for path in ch_edited:
+        findings += 1
+        print(
+            f"::{level} file={path}::This ClickHouse migration is already committed and must not be "
+            "edited. ClickHouse migrations are applied once (init ConfigMap on an empty data dir, or "
+            "by hand) and nothing re-applies them (#7645), so an edit to one that already ran never "
+            "reaches the live warehouse — the repo and the warehouse silently diverge. Add a new "
+            "V<n+1> migration instead."
         )
 
     for path in added:
@@ -259,7 +307,7 @@ def main() -> int:
                 "and say what the recovery is instead (e.g. restore from backup)."
             )
 
-    checked = len(added) + len(modified)
+    checked = len(added) + len(modified) + len(ch_edited)
     if findings == 0:
         print(
             f"check-db-migration: {checked} migration change(s) checked — "

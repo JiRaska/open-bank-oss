@@ -44,12 +44,17 @@ on:
       - "openbank-libs/gradle/**"
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
+      - "openbank-libs-lending/build.gradle.kts"
+      - "openbank-libs-iso20022/build.gradle.kts"
       - "build-logic/**"
       # Release-please bumps version.txt, yet a release-only commit touches nothing
       # under src/main/**. That left the new version with no image built, causing
       # immediate deploy drift (issue #3597 et al.). Treat a version bump as a
       # release marker that must deploy like a source change.
       - "openbank-*/version.txt"
+      # Self-built images (SELF_BUILT_SERVICES below) have no src/main; these are their inputs.
+      - "openbank-document-renderer/app.py"
+      - "openbank-document-renderer/requirements.txt"
   # Self-heal reconcile (issue #2020). The per-push run is ONE-SHOT: a service that built
   # and pushed its image but was then blocked at the can-i-deploy contract gate by a
   # TRANSIENT verification lag (its build wave republished its consumer pact; the provider
@@ -222,7 +227,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-card-processing-service'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-document-renderer openbank-card-processing-service'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -257,7 +262,7 @@ jobs:
           for svc in $ALL_SERVICES; do
             # Keep this aligned with the push trigger: release-please changes only
             # version.txt, and that release marker must rebuild/deploy the component.
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile)" <<< "$CHANGED_FILES"; then
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile|app\.py|requirements\.txt)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
           done
@@ -484,7 +489,18 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 90
     env:
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
+      # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
+      # `gradle.properties` — the obvious place, and the one the issue named first — changes
+      # nothing here. It also silently dropped the file's `-XX:MaxMetaspaceSize`, which is why the
+      # two observed exhaustion modes (Java heap space, Metaspace) came from different lanes.
+      #
+      # 6g on a 4-core/16 GB arm runner, against `--parallel --max-workers=4`: the fleet build runs
+      # several `quarkusGenerateAppModel` tasks at once, each holding a full application model in
+      # the daemon's heap, and one service exhausting it strands every service in the wave.
+      # Metaspace is capped explicitly rather than left unbounded — an unbounded metaspace does not
+      # remove the limit, it moves the failure to a container OOM kill with no Java stack to read.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
@@ -496,6 +512,10 @@ jobs:
       # tags went stale (party/account-service stuck pre-#894). Mirrors _service-ci.yml.
       AWS_REGION: eu-north-1
       AWS_DEFAULT_REGION: eu-north-1
+      # Non-Gradle images built from their OWN multi-stage Dockerfile instead of the fast-jar
+      # template (the SELF_BUILT set in check-dockerfile-no-build-stage.py). They skip the Gradle
+      # step and share every later step: ECR push, cosign sign, CVE gate, SBOM attest, gitops PR.
+      SELF_BUILT_SERVICES: "openbank-document-renderer"
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
@@ -510,7 +530,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: |
@@ -532,7 +552,7 @@ jobs:
       # token.actions.githubusercontent.com for repo:JiRaska/open-bank-oss:*) — no per-pod webhook
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
@@ -587,6 +607,7 @@ jobs:
           # --continue reports all failures before exiting non-zero.
           TASKS=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) continue ;; esac
             # cyclonedxBom alongside quarkusBuild so every service's image gets its
             # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
             # SbomResource). Fleet-wide via this central loop — no per-service
@@ -595,7 +616,7 @@ jobs:
           done
 
           echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
-          if ! ./gradlew "${TASKS[@]}" \
+          if [ "${#TASKS[@]}" -gt 0 ] && ! ./gradlew "${TASKS[@]}" \
                 -Dquarkus.package.jar.type=fast-jar \
                 --parallel --max-workers=4 \
                 --build-cache --console=plain \
@@ -621,6 +642,15 @@ jobs:
 
           push_one() {
             local svc="$1"
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*)
+              bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
+                2>&1 | sed "s/^/[${svc}] /" || return 1
+              echo "==> [${svc}] self-built docker push → ${ECR_REGISTRY}/${svc}:${TAG}"
+              docker buildx build --platform linux/arm64 --provenance=false \
+                -f "${svc}/Dockerfile" -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
+                "${svc}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+              return 0 ;;
+            esac
             local qa="${svc}/build/quarkus-app"
             [ -f "${qa}/quarkus-run.jar" ] || \
               { echo "[${svc}] quarkus-run.jar not found — skip push"; return 0; }
@@ -719,7 +749,8 @@ jobs:
             echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
 
       # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
-      # verify-openbank-image-signatures runs Enforce, so an UNSIGNED image is rejected
+      # verify-openbank-image-sbom-attestation (Enforce) also verifies the image signature
+      # (folded in from verify-openbank-image-signatures, #9805), so an UNSIGNED image is rejected
       # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
       # used to push without signing, which is the other half of why deploys never landed.
       # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
@@ -789,7 +820,9 @@ jobs:
 
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # Mirror push_one's skip: no fast-jar → nothing was pushed.
-            [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
+              [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
+            esac
             image="${ECR_REGISTRY}/${svc}:${TAG}"
 
             echo "==> [${svc}] trivy image ${image}"
@@ -869,7 +902,9 @@ jobs:
           . openbank-infra/scripts/lib/cosign-attest.sh
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-            [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
+              [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
+            esac
             image="${ECR_REGISTRY}/${svc}:${TAG}"
             # Per-service rc rather than an early exit: report EVERY broken image in one run,
             # so a second failure is not hidden behind the first.
@@ -879,9 +914,11 @@ jobs:
             fi
             # SLSA build provenance (ADR-0030 D4, #8590 #14): binds the image to the repo/commit/
             # workflow/run that built it — the claim neither the signature nor the SBOM attestation
-            # carries. Fatal in CI: kyverno's verify-openbank-image-slsa-provenance is Audit today
-            # and graduates like the SBOM policy did, so an image that ships without provenance
-            # becomes tomorrow's redeploy worklist.
+            # carries. Fatal in CI even though no admission policy checks SLSA right now: the
+            # kyverno SLSA policy was removed from admission (#9805 item 4 — v1.12.5 lets any
+            # verify policy's verdict overwrite the others per image) and returns once Kyverno
+            # scopes verdicts per policy, so an image built without provenance today is the
+            # redeploy worklist on that day. 12 such images existed when it was removed.
             if ! cosign_attest_slsa_provenance "$image"; then
               echo "::error::[${svc}] SLSA provenance attestation failed"
               rc=1; continue
@@ -1195,6 +1232,40 @@ jobs:
             done
           done
 
+          # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
+          # check-fleet-attestations.sh fails on an allowlist entry whose ref nothing under
+          # openbank-infra/gitops declares any more (#7740), and the first real deploy of a
+          # service that shipped with a placeholder tag is exactly what makes its entry
+          # undeclared. Left to a human, every deploy PR after that one inherits the red gate:
+          # on 2026-09-13 #9924 and #9931 both replaced wealth-service's `sandbox-000000000`
+          # and both failed `fleet-attestation-classifier` on the entry they had just orphaned.
+          #
+          # "Declared" is computed exactly as the gate computes it — the same position-blind
+          # IMAGE_RE over the same directory — so this can neither leave an entry the gate
+          # calls stale nor remove one the gate still counts as declared. A still-declared
+          # placeholder (a service not yet built) is kept, which is the case the file exists for.
+          PLACEHOLDER_FILE=.github/scripts/fleet-attestation-placeholders.txt
+          if [ "${#UPDATED[@]}" -gt 0 ] && [ -f "$PLACEHOLDER_FILE" ]; then
+            IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
+            declared="$(grep -rhoE "$IMAGE_RE" openbank-infra/gitops 2>/dev/null | sort -u || true)"
+            pruned=0
+            : > "${PLACEHOLDER_FILE}.new"
+            while IFS= read -r line || [ -n "$line" ]; do
+              if printf '%s' "$line" | grep -qE '^[[:space:]]*(#|$)' \
+                 || printf '%s\n' "$declared" | grep -qxF "$line"; then
+                printf '%s\n' "$line" >> "${PLACEHOLDER_FILE}.new"
+              else
+                echo "  [placeholder allowlist] pruned ${line#"${ECR_REGISTRY}"/} — no longer declared in gitops"
+                pruned=$((pruned + 1))
+              fi
+            done < "$PLACEHOLDER_FILE"
+            if [ "$pruned" -gt 0 ]; then
+              mv "${PLACEHOLDER_FILE}.new" "$PLACEHOLDER_FILE"
+            else
+              rm -f "${PLACEHOLDER_FILE}.new"
+            fi
+          fi
+
           if [ "${#UPDATED[@]}" -eq 0 ]; then
             echo "No manifests changed — all images already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -1231,7 +1302,11 @@ jobs:
           # a property rather than a hope: create-pull-request otherwise commits whatever is dirty,
           # so any generator or tool that writes into the tree earlier in the job silently becomes
           # part of the deploy. See admin-ui-deploy.yml for the three defects that caused there.
-          add-paths: openbank-infra/gitops/**
+          # The placeholder allowlist rides along ONLY because the rewrite step prunes it in the
+          # same change that orphans an entry; nothing else in the job writes it.
+          add-paths: |
+            openbank-infra/gitops/**
+            .github/scripts/fleet-attestation-placeholders.txt
           # workflow_dispatch may run from a recovery ref. Without an explicit base,
           # create-pull-request targets that stale ref and includes every intervening main
           # commit in the deploy PR instead of only the rewritten GitOps manifests.

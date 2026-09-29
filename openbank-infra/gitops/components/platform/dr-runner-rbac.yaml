@@ -8,9 +8,10 @@
 #
 # Least-privilege notes, honestly stated: Kubernetes RBAC cannot scope a
 # ClusterRole to a namespace NAME PREFIX, so namespace create/delete is
-# cluster-wide on paper. The compensating control is the Kyverno policy below:
-# the openbank-dr SA may be used ONLY by pods in arc-runners carrying the ARC
-# runner labels, and dr-restore-verify's own teardown plus the
+# cluster-wide on paper. The compensating control is the Kyverno ValidatingPolicy
+# openbank-dr-sa-pin-cel (components/kyverno/cel-validating-policies.yaml, #11437):
+# the openbank-dr SA may be used ONLY by pods in arc-runners, and
+# dr-restore-verify's own teardown plus the
 # dr-verify-namespace-reaper alert bound the lifetime of what it creates.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -66,33 +67,3 @@ subjects:
   - kind: ServiceAccount
     name: openbank-dr
     namespace: arc-runners
----
-# Kyverno: the openbank-dr SA may ONLY be used by GitHub ARC runner pods in the
-# arc-runners namespace — never by an application workload, and a dr-verify
-# namespace name is mandatory on anything it creates. This is the control that
-# keeps the ClusterRole above from being a general-purpose backdoor.
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: openbank-dr-sa-pin
-spec:
-  validationFailureAction: Enforce
-  background: false
-  rules:
-    - name: deny-openbank-dr-sa-outside-arc
-      match:
-        any:
-          - resources:
-              kinds: ["Pod"]
-      exclude:
-        any:
-          - resources:
-              namespaces: ["arc-runners"]
-      validate:
-        message: "openbank-dr SA must not be used outside the arc-runners namespace (ADR-0277)."
-        deny:
-          conditions:
-            any:
-              - key: "{{ request.object.spec.serviceAccountName || '' }}"
-                operator: Equals
-                value: openbank-dr

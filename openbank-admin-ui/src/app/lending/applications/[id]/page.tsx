@@ -33,12 +33,13 @@ import { svcUrl } from '@/lib/services/bff'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { OriginationFlow, STATE_LABELS, type StepFact } from '@/components/lending/OriginationFlow'
+import { currencyCode, formatMoney, type WireMoney } from '@/lib/lending/money'
 
 type Application = {
   id: string
   partyId: string
   status: string
-  requestedAmount?: { amount: number; currency: string }
+  requestedAmount?: WireMoney
   termPeriods?: number
   nominalAnnualRate?: number
   jurisdiction?: string | null
@@ -79,7 +80,6 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
   const [evidenceState, setEvidenceState] = useState<ReadState>('ok')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -143,8 +143,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
   const stateLabel = (s?: string) =>
     s ? (STATE_LABELS[s] ? (language === 'cs' ? STATE_LABELS[s].cs : STATE_LABELS[s].en) : s) : '—'
 
-  const money = (m?: { amount: number; currency: string }) =>
-    m ? `${m.amount.toLocaleString(numberLocale)} ${m.currency}` : '—'
+  const money = (m?: WireMoney) => (m ? formatMoney(m.amount, currencyCode(m.currency), numberLocale) : '—')
 
   return (
     <div>
@@ -172,12 +171,6 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
           {error}
         </div>
       )}
-      {notice && (
-        <div className="card" data-testid="notice" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--success)', fontSize: 13 }}>
-          {notice}
-        </div>
-      )}
-
       {appState !== 'ok' && (
         <div className="card" data-testid="app-unavailable" style={{ padding: 16, fontSize: 13 }}>
           {appState === 'forbidden'

@@ -30,7 +30,7 @@ triaging an incident that starts on `vop`.
 
 ## Health & probes
 
-- Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
+- Readiness: `TCP :8149` · Liveness: `GET :8086/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
 - Logs: `kubectl logs -n payments -l app.kubernetes.io/name=vop-service -f`, or Loki
   `{namespace="payments"}`.

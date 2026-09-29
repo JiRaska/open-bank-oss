@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for risk-engine's east-west mTLS call to ledger-service's 8443
+# listener (client auth REQUIRED). ASVS V9.1 forbids a new plaintext inter-service edge, so the
+# ledger read never uses the legacy HTTP/8101 port. Same shape as interest-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: risk-internal-tls
+  namespace: risk
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: risk-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: risk-engine.risk.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -6,7 +6,7 @@ package com.openbank.account.infrastructure.client
 
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -25,12 +25,15 @@ import java.util.UUID
 
 /**
  * Minimal typed client for transaction-service's payment-initiation endpoint. `POST
- * /api/v1/transactions` is `@RolesAllowed(OPERATOR)`, so the call carries an M2M bearer via
- * [OidcClientRequestReactiveFilter] (oidc-client openbank-services → ROLE_OPERATOR).
+ * /api/v1/transactions` is `@RolesAllowed(API, OPERATOR)`, so the call carries an M2M bearer via
+ * the named oidc-client `m2m`: account-service's OWN Keycloak client `openbank-account` (ROLE_API
+ * only), which transaction-service's OPA grants `transaction.create` by identity (#10486).
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-account` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

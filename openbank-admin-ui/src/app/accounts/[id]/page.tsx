@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, Lock, Unlock, XCircle, AlertCircle } from 'lucide-react'
@@ -38,8 +38,12 @@ export default function AccountDetailPage() {
   const loadSequence = useRef(0)
   const [actionIntent, setActionIntent] = useState<'freeze' | 'unfreeze' | 'close' | null>(null)
   const [actionReason, setActionReason] = useState('')
+  const unverifiableAccountMessage = t(
+    'Služba vrátila neověřitelná data účtu.',
+    'The service returned unverifiable account data.',
+  )
 
-  async function load() {
+  const load = useCallback(async () => {
     const sequence = ++loadSequence.current
     setLoading(true); setError(null)
     try {
@@ -51,7 +55,7 @@ export default function AccountDetailPage() {
       if (acc.status !== 'fulfilled') throw new Error(acc.reason?.message ?? 'Failed to load account')
       const verifiedAccount = validateAccountDetail(acc.value, id)
       if (!verifiedAccount) {
-        throw new Error(t('Služba vrátila neověřitelná data účtu.', 'The service returned unverifiable account data.'))
+        throw new Error(unverifiableAccountMessage)
       }
       setAccount(verifiedAccount)
       setBalance(bal.status === 'fulfilled' ? validateAccountBalance(bal.value, verifiedAccount) : null)
@@ -61,12 +65,12 @@ export default function AccountDetailPage() {
     } finally {
       if (sequence === loadSequence.current) setLoading(false)
     }
-  }
+  }, [id, unverifiableAccountMessage])
 
   useEffect(() => {
     void load()
     return () => { loadSequence.current += 1 }
-  }, [id])
+  }, [load])
 
   function requestAction(action: 'freeze' | 'unfreeze' | 'close') {
     setActionIntent(action)

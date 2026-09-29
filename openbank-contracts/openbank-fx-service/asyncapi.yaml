@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006 contract for openbank-fx-service. Written when the service gained its second topic
+# (ADR-0314 D5), which retires its `openbank.fx.conversion.completed` line from
+# .github/event-contract-baseline.txt. Every claim below is derived from the code that runs:
+# `FxService.settle`, `CnbRateIngestionService.ingest`, `KafkaFxOutboxEventPublisher`.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank FX Service — events
+  version: 1.0.0
+  description: |
+    Both topics are fed from one transactional outbox (`fx_outbox`); `KafkaFxOutboxEventPublisher`
+    routes each row by event type. The discriminator is the `ce-type` header; neither payload
+    carries a body type field.
+
+    Both payloads ALSO carry `sourceService: "fx-service"`, inherited from the sealed `FxEvent`
+    parent rather than declared in either constructor. It is left out of the schemas below only
+    because `check-event-contract-code-agreement.py` compares against constructor properties and
+    cannot see an inherited one; it is on the wire and consumers may rely on it.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+channels:
+  conversions:
+    address: openbank.fx.conversion.completed
+    description: |
+      Executed customer FX conversions. One partition, 7-day retention
+      (`openbank-infra/gitops/components/fx-service/kafka-topic.yaml`). Partition key:
+      `aggregateId` = the conversion id.
+    messages:
+      FxConversionExecuted:
+        $ref: '#/components/messages/FxConversionExecuted'
+  fixings:
+    address: openbank.fx.fixing.published
+    description: |
+      Central-bank fixings (ČNB today), one event per ingestion run that stored at least one new
+      rate, written in the same transaction as those rates. A re-run that finds the day already
+      stored emits nothing. Partition key: `aggregateId` = a name-based UUID of `CNB:<fixingDate>`,
+      so events about one fixing stay ordered. 30-day retention; `fx_rates` is the state of record.
+    messages:
+      FxFixingPublished:
+        $ref: '#/components/messages/FxFixingPublished'
+
+operations:
+  publishConversion:
+    action: send
+    channel:
+      $ref: '#/channels/conversions'
+  publishFixing:
+    action: send
+    channel:
+      $ref: '#/channels/fixings'
+
+components:
+  messages:
+    FxConversionExecuted:
+      name: fx.conversion.executed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FxConversionExecutedPayload'
+    FxFixingPublished:
+      name: fx.fixing.published.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FxFixingPublishedPayload'
+
+  schemas:
+    FxConversionExecutedPayload:
+      type: object
+      required: [conversionId, partyId, fromCurrency, toCurrency, fromAmount, toAmount, rate, occurredAt]
+      properties:
+        conversionId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        fromCurrency: { type: string }
+        toCurrency: { type: string }
+        fromAmount:
+          type: integer
+          format: int64
+          description: MINOR UNITS, not a decimal amount.
+        toAmount:
+          type: integer
+          format: int64
+          description: MINOR UNITS.
+        rate: { type: number }
+        occurredAt: { type: string, format: date-time }
+    FxFixingPublishedPayload:
+      type: object
+      required: [source, fixingDate, quoteCurrency, validFrom, validTo, rates, occurredAt]
+      properties:
+        source: { type: string, enum: [CNB] }
+        fixingDate: { type: string, format: date, description: The business day the fixing is declared for. }
+        sequence:
+          type: [integer, 'null']
+          description: The ČNB publication number for the year, when the feed carries one.
+        quoteCurrency: { const: CZK }
+        validFrom: { type: string, format: date-time, description: 'Start of the fixing day, Europe/Prague.' }
+        validTo: { type: string, format: date-time, description: 'validFrom + 3 days (covers weekends and holidays).' }
+        rates:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [rateId, currency, ratePerUnit]
+            properties:
+              rateId: { type: string, format: uuid, description: The `fx_rates` row committed with this event. }
+              currency: { type: string }
+              ratePerUnit: { type: number, description: CZK for ONE unit of `currency` (already divided by the feed's quantity). }
+        occurredAt: { type: string, format: date-time }
