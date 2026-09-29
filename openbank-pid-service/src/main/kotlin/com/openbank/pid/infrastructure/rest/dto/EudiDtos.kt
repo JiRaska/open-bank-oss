@@ -7,6 +7,7 @@ package com.openbank.pid.infrastructure.rest.dto
 import com.openbank.pid.application.port.`in`.EudiResolutionResult
 import com.openbank.pid.application.port.`in`.ResolutionResult
 import com.openbank.pid.domain.model.PidClaims
+import com.openbank.pid.infrastructure.rest.maskPidSubject
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -96,7 +97,7 @@ data class PresentationExchangeStatusResponse(
 )
 
 fun PidClaims.toResponse(): PidClaimsResponse = PidClaimsResponse(
-    subjectIdMasked = maskSubjectId(subjectId),
+    subjectIdMasked = maskPidSubject(subjectId),
     givenName = givenName,
     familyName = familyName,
     birthDate = birthDate,
@@ -106,12 +107,3 @@ fun PidClaims.toResponse(): PidClaimsResponse = PidClaimsResponse(
     issuer = issuer,
     levelOfAssurance = levelOfAssurance,
 )
-
-/** Mask the government PID subject identifier: keep the source prefix + last 4 chars only. */
-private fun maskSubjectId(subjectId: String): String {
-    val tail = subjectId.takeLast(MASK_TAIL)
-    val prefix = subjectId.substringBefore(":", missingDelimiterValue = "")
-    return if (prefix.isNotEmpty()) "$prefix:***$tail" else "***$tail"
-}
-
-private const val MASK_TAIL = 4

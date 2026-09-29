@@ -144,12 +144,21 @@ component_management:
     - component_id: lending-service
       name: lending-service
       flag_regexes: ["^openbank-lending-service$"]
+    - component_id: client-product-catalog
+      name: client-product-catalog
+      flag_regexes: ["^openbank-client-product-catalog$"]
     - component_id: libs
       name: libs
       flag_regexes: ["^openbank-libs$"]
     - component_id: libs-domain
       name: libs-domain
       flag_regexes: ["^openbank-libs-domain$"]
+    - component_id: libs-lending
+      name: libs-lending
+      flag_regexes: ["^openbank-libs-lending$"]
+    - component_id: libs-iso20022
+      name: libs-iso20022
+      flag_regexes: ["^openbank-libs-iso20022$"]
     - component_id: libs-runtime
       name: libs-runtime
       flag_regexes: ["^openbank-libs-runtime$"]

@@ -175,7 +175,9 @@ interface LedgerServiceClient {
 
 @RegisterRestClient(configKey = "aml-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). aml-service grants it amlCase.list/read (query.compliance.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/aml")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -197,7 +199,9 @@ interface AmlServiceClient {
 
 @RegisterRestClient(configKey = "sanctions-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). sanctions-service grants it sanctions.list/read (query.compliance.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/sanctions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -295,7 +299,9 @@ interface InterestServiceClient {
 
 @RegisterRestClient(configKey = "dispute-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). dispute-service grants it dispute.list/read (query.disputes.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/disputes")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

@@ -140,6 +140,11 @@ quarkus:
     management:
       enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   swift:
     scheme-submission:
       # ADR-0104 D4 SWIFT pilot. OFF by default; when off, behaviour is exactly as before.

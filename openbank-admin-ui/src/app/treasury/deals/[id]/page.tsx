@@ -66,11 +66,11 @@ function DealDetail({ id }: { id: string }) {
   const labels: Record<DealAction, string> = {
     submit: t('Předložit', 'Submit'), approve: t('Schválit', 'Approve'), reject: t('Zamítnout', 'Reject'),
     cancel: t('Zrušit obchod', 'Cancel deal'), settle: t('Vypořádat', 'Settle'), mature: t('Ukončit ke splatnosti', 'Mature'),
-    reverse: t('Stornovat', 'Reverse'),
+    reverse: t('Stornovat', 'Reverse'), 'override-limit': t('Překročit limit', 'Override limit'),
   }
 
   const act = async (action: DealAction) => {
-    const needsReason = action === 'reject' || action === 'reverse'
+    const needsReason = action === 'reject' || action === 'reverse' || action === 'override-limit'
     if (needsReason && !reason.trim()) return
     setBusy(true)
     setNotice(null)
@@ -104,7 +104,12 @@ function DealDetail({ id }: { id: string }) {
 
   const a = dealActions(deal, actor, roles)
   const plain: DealAction[] = (['submit', 'approve', 'settle', 'mature', 'cancel'] as const).filter(k => a[k])
-  const withReason: DealAction[] = (['reject', 'reverse'] as const).filter(k => a[k])
+  // override-limit needs a mandatory reason exactly like reject/reverse, so it shares the same
+  // reason input and disabled-until-filled behaviour rather than a separate dialog.
+  const withReason: DealAction[] = [
+    ...(['reject', 'reverse'] as const).filter(k => a[k]),
+    ...(a.overrideLimit ? (['override-limit'] as const) : []),
+  ]
 
   return (
     <div>
@@ -114,6 +119,12 @@ function DealDetail({ id }: { id: string }) {
         icon={<Landmark size={20} aria-hidden="true" />}
         actions={back}
       />
+
+      {deal.product === 'CNB_LOMBARD' && (
+        <p role="note" style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+          {t('Zástava není v systému evidována.', 'The collateral pledge is not modelled in this system.')}
+        </p>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
         <StatCard label={t('Stav', 'State')} value={stateLabel(deal.state, t)} tone={STATE_TONE[deal.state] === 'danger' ? 'danger' : undefined} />
@@ -137,6 +148,27 @@ function DealDetail({ id }: { id: string }) {
         </table>
       </div>
 
+      {deal.fx && (
+        <div className="card" style={{ marginBottom: 16 }} data-testid="fx-terms">
+          <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('Podmínky FX spotu', 'FX spot terms')}</h2>
+          <div style={{ fontSize: 13, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <StatusBadge status={deal.fx.side} tone={deal.fx.side === 'BUY' ? 'info' : 'warning'} label={deal.fx.side} />
+            <span>{`${deal.fx.buyCurrency}/${deal.fx.sellCurrency}`}</span>
+            <span>{`${t('Kupuje', 'Buys')} ${money(deal.fx.buyAmount)} ${deal.fx.buyCurrency}`}</span>
+            <span>{`${t('Prodává', 'Sells')} ${money(deal.fx.sellAmount)} ${deal.fx.sellCurrency}`}</span>
+            <span>{`${t('Kurz obchodu', 'Deal rate')} ${deal.fx.dealRate.toLocaleString(locale, { maximumFractionDigits: 4 })}`}</span>
+            {deal.fx.midRate !== null && (
+              <span>{`${t('Střední kurz fx-service', 'fx-service mid')} ${deal.fx.midRate.toLocaleString(locale, { maximumFractionDigits: 4 })}`}</span>
+            )}
+          </div>
+          {deal.fx.rateFlag && (
+            <div role="alert" style={{ color: 'var(--danger-text)', marginTop: 8 }}>
+              {t(`Kurz označen: ${deal.fx.rateFlag}`, `Rate flagged: ${deal.fx.rateFlag}`)}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('Kontrola limitu', 'Limit check')}</h2>
         {deal.limitCheck ? (
@@ -149,6 +181,14 @@ function DealDetail({ id }: { id: string }) {
           </div>
         ) : (
           <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('Limit se kontroluje při předložení a schválení.', 'The limit is checked at submit and at approval.')}</p>
+        )}
+        {deal.limitOverride && (
+          <p style={{ fontSize: 13, marginTop: 8 }}>
+            {t(
+              `Limit překročen senior schvalovatelem ${deal.limitOverride.by} — pokrývá expozici do ${money(deal.limitOverride.coversExposureUpTo)}. Důvod: ${deal.limitOverride.reason}`,
+              `Limit overridden by senior approver ${deal.limitOverride.by} — covers exposure up to ${money(deal.limitOverride.coversExposureUpTo)}. Reason: ${deal.limitOverride.reason}`,
+            )}
+          </p>
         )}
       </div>
 
@@ -164,7 +204,7 @@ function DealDetail({ id }: { id: string }) {
             ))}
             {withReason.length > 0 && (
               <>
-                <input className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder={t('Důvod (povinný)', 'Reason (required)')} aria-label={t('Důvod zamítnutí nebo storna', 'Reason for rejection or reversal')} style={{ width: 220 }} />
+                <input className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder={t('Důvod (povinný)', 'Reason (required)')} aria-label={t('Důvod zamítnutí, storna nebo překročení limitu', 'Reason for rejection, reversal or limit override')} style={{ width: 220 }} />
                 {withReason.map(k => (
                   <button key={k} type="button" className="btn btn-secondary btn-sm" disabled={busy || !reason.trim()} onClick={() => void act(k)}>{labels[k]}</button>
                 ))}

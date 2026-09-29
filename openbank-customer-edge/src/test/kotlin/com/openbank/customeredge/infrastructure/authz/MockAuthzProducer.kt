@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.customeredge.infrastructure.authz
 
-import com.openbank.libs.authz.AllowAllPolicyDecisionPoint
 import com.openbank.libs.authz.PolicyDecisionPoint
+import com.openbank.libs.testing.authz.AllowAllPolicyDecisionPoint
 import io.quarkus.test.Mock
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces

@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import ApprovalsPage from '@/app/approvals/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { parseAgentProposalList, parseApprovalInbox } from '@/lib/approvals/evidence'
+import { auth } from '@/auth'
+
+vi.mock('@/auth', () => ({ auth: vi.fn() }))
 
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { email: 'checker@example.test', roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
@@ -28,7 +31,8 @@ const proposal = {
 const sourceNames = [
   'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
   'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
-  'delegation', 'agent',
+  'delegation', 'agent', 'communication', 'treasury', 'ledger-backfill',
+  'compliance-pack', 'campaign', 'audience', 'identity-case',
 ]
 const inbox = { items: [], sources: Object.fromEntries(sourceNames.map(name => [name, 'ok'])) }
 
@@ -47,6 +51,33 @@ afterEach(() => {
 })
 
 describe('approval queue evidence contracts', () => {
+  it('simulates operator session through the real BFF mapper into the rendered billing queue', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'mock-operator-token', roles: ['ROLE_ADMIN'] } } as never)
+    const providerCalls: Array<{ url: string; authorization: string | undefined }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/approvals/pending') return (await import('@/app/api/approvals/pending/route')).GET()
+      if (url.startsWith('/api/agent/proposals')) return json([])
+      if (url.startsWith('/api/governance/agent-identities')) return json({ available: true, agents: [] })
+      providerCalls.push({ url, authorization: new Headers(init?.headers).get('authorization') ?? undefined })
+      if (url.includes('/api/v1/fees/approvals')) return json([{
+        id: 'fee-approval-7', action: 'billing.feeWaiver', resourceId: 'fee-7',
+        makerId: 'maker@example.test', createdAt: '2026-09-24T10:00:00Z',
+      }])
+      return json({ error: 'mock provider unavailable' }, 503)
+    }))
+
+    mount()
+
+    const row = await screen.findByTestId('domain-approval-billing:fee-approval-7')
+    expect(row).toHaveTextContent('billing.feeWaiver')
+    expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('maker@example.test')
+    expect(row.querySelector('[data-testid="approval-resource"]')).toHaveTextContent('fee-7')
+    expect(row.querySelector('time[datetime="2026-09-24T10:00:00Z"]')).not.toBeNull()
+    expect(providerCalls.find(call => call.url.includes('/api/v1/fees/approvals'))?.authorization).toBe('Bearer mock-operator-token')
+    expect(screen.queryByText(/No domain approvals pending|Žádná doménová schvalování nečekají/)).not.toBeInTheDocument()
+  })
+
   it('accepts verified empty queues and rejects guessed or duplicate evidence', () => {
     expect(parseAgentProposalList([])).toEqual([])
     expect(parseAgentProposalList({ items: [] })).toBeNull()
@@ -55,6 +86,85 @@ describe('approval queue evidence contracts', () => {
     expect(parseApprovalInbox(inbox)).toEqual(inbox)
     expect(parseApprovalInbox({ items: [], sources: {} })).toBeNull()
     expect(parseApprovalInbox({ ...inbox, items: [{ id: 'x', domain: 'unknown', action: 'act', resourceId: null, maker: null, proposedAt: null }] })).toBeNull()
+  })
+
+  it('accepts the communication source and item returned by the federated BFF', () => {
+    const item = {
+      id: 'communication-approval-7', domain: 'communication', action: 'communication.publish',
+      resourceId: 'message-7', maker: 'operator@example.test', proposedAt: '2026-09-24T10:00:00Z',
+    }
+    expect(parseApprovalInbox({ ...inbox, items: [item] })).toEqual({ ...inbox, items: [item] })
+  })
+
+  it('shows treasury and backfill makers with governed hand-offs', async () => {
+    const items = [
+      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', proposedAt: '2026-09-20T11:00:00Z' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/agent/proposals')) return json([])
+      if (url.includes('/api/approvals/pending')) return json({ ...inbox, items })
+      return json({ available: true, agents: [] })
+    }))
+    mount()
+
+    const treasury = await screen.findByTestId('domain-approval-treasury:deal-7')
+    expect(treasury.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('dealer.two')
+    expect(treasury.querySelector('a[href="/treasury/deals/deal-7"]')).not.toBeNull()
+    const backfill = screen.getByTestId('domain-approval-ledger-backfill:request-7')
+    expect(backfill.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('finance.one')
+    expect(backfill.querySelector('a[href="/balance-sheet/ledger-backfill"]')).not.toBeNull()
+  })
+
+  it('shows a communication approval with its human maker and governed hand-off', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/agent/proposals')) return json([])
+      if (url.includes('/api/approvals/pending')) return json({ ...inbox, items: [{
+        id: 'communication-approval-7', domain: 'communication', action: 'communication.publish',
+        resourceId: 'message-7', maker: 'operator@example.test', proposedAt: '2026-09-24T10:00:00Z',
+      }] })
+      return json({ available: true, agents: [] })
+    }))
+    mount()
+
+    const row = await screen.findByTestId('domain-approval-communication:communication-approval-7')
+    expect(row).toHaveTextContent('communication.publish')
+    expect(row.querySelector('[data-testid="approval-resource"]')).toHaveTextContent('message-7')
+    expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('operator@example.test')
+    expect(row.querySelector('time[datetime="2026-09-24T10:00:00Z"]')).not.toBeNull()
+    expect(row.querySelector('a[href="/approvals/communication"]')).not.toBeNull()
+  })
+
+  it('does not guess AI authorship from an unverified proposer name', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/agent/proposals')) return json([{ ...proposal, proposedBy: 'risk-agent-review-desk' }])
+      if (url.includes('/api/approvals/pending')) return json(inbox)
+      return json({ available: true, agents: [] })
+    }))
+    mount()
+
+    expect(await screen.findByText('Rotate a key')).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector('[data-proposer-kind="unverified"]')).not.toBeNull())
+    expect(document.querySelector('[data-proposer-kind="agent"]')).toBeNull()
+    expect(screen.getByText(/authorship cannot be verified|Původ tohoto návrhu nelze ověřit/)).toBeInTheDocument()
+    expect(screen.queryByText(/This proposal was generated by AI|Tento návrh vytvořila AI/)).not.toBeInTheDocument()
+  })
+
+  it('does not treat a legacy user icon as proof of a human proposer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/agent/proposals')) return json([{ ...proposal, proposedBy: 'review-desk', agent: { id: 'review-desk', displayName: 'Review Desk', icon: 'user', charterKnown: false } }])
+      if (url.includes('/api/approvals/pending')) return json(inbox)
+      return json({ available: true, agents: [] })
+    }))
+    mount()
+
+    expect(await screen.findByText('Rotate a key')).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector('[data-proposer-kind="unverified"]')).not.toBeNull())
+    expect(screen.getByText(/authorship cannot be verified|Původ tohoto návrhu nelze ověřit/)).toBeInTheDocument()
   })
 
   it('does not turn malformed agent evidence into a clear queue', async () => {

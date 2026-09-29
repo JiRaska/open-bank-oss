@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.4...consent-service-v0.25.0) (2026-09-28)
+
+
+### Features
+
+* **consent:** bind create idempotency key to a request fingerprint ([#10954](https://github.com/JiRaska/open-bank-oss/issues/10954)) ([d0e024f](https://github.com/JiRaska/open-bank-oss/commit/d0e024f422ecbf78a1b6eb4c0ddb00c39a30cdb9))
+
 ## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.3...consent-service-v0.24.4) (2026-09-26)
 
 

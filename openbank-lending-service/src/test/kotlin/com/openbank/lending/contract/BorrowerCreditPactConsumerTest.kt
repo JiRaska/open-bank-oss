@@ -145,6 +145,60 @@ class BorrowerCreditPactConsumerTest {
     }
 
     /**
+     * Exactly what [com.openbank.lending.infrastructure.client.BorrowerCreditClient.debit] builds for a
+     * repayment (#11487): `type = "DEBIT"`, the borrower as `sourceAccountId`, no target, no rail — the
+     * same in-bank shape the other one-off debits pin, with the repayment description.
+     */
+    private val repaymentDebit = InitiateTransactionBody(
+        idempotencyKey = REPAYMENT_REFERENCE,
+        type = "DEBIT",
+        sourceAccountId = UUID.fromString(BORROWER_ACCOUNT_ID),
+        targetAccountId = null,
+        amount = BigDecimal("1066.19"),
+        currencyCode = "CZK",
+        description = "Loan repayment",
+        valueDate = "2026-02-20",
+    )
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun repaymentDebitPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a valid source account exists")
+        .uponReceiving("POST the loan repayment debit from the borrower's account")
+        .path(EXPECTED_TRANSACTIONS_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(jacksonObjectMapper().writeValueAsString(repaymentDebit))
+        .willRespondWith()
+        .status(201)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.uuid("id")
+                o.stringValue("status", "COMPLETED")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "repaymentDebitPact")
+    fun `the repayment debit is accepted and its ack binds into TransactionAck`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        val raw = given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(mapper.writeValueAsString(repaymentDebit))
+            .post(clientDerivedTransactionsPath())
+            .then()
+            .statusCode(201)
+            .extract().asString()
+
+        val ack = mapper.readValue<TransactionAck>(raw)
+        assertThat(ack.id).isNotNull()
+        assertThat(ack.status).isEqualTo("COMPLETED")
+    }
+
+    /**
      * The negative half of this contract is pinned PROVIDER-side (ADR-0279 #3):
      * `TransactionPactFolderProviderVerificationTest` asserts that a caller carrying only
      * ROLE_VIEWER is refused with 403 before `POST /api/v1/transactions` reaches the handler.
@@ -175,6 +229,7 @@ class BorrowerCreditPactConsumerTest {
         const val PROVIDER = "openbank-transaction-service"
 
         const val DISBURSEMENT_REFERENCE = "loan-disbursement-pact-001"
+        const val REPAYMENT_REFERENCE = "loan-repayment-pact-001"
         const val BORROWER_ACCOUNT_ID = "44444444-5555-4666-8777-888888888888"
 
         /**

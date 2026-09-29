@@ -47,4 +47,16 @@ describe('approval inbox triage', () => {
     expect(readApprovalId('?tab=checks')).toBeNull()
     expect(readApprovalId('?approvalId=%20%20')).toBeNull()
   })
+
+  it('hands treasury and ledger backfill to their governed checker pages', () => {
+    expect(approvalWorkbenchHref({ ...rows[0], domain: 'treasury', id: 'deal/7' })).toBe('/treasury/deals/deal%2F7')
+    expect(approvalWorkbenchHref({ ...rows[0], domain: 'ledger-backfill', id: 'request-7' })).toBe('/balance-sheet/ledger-backfill')
+  })
+
+  it('hands specialist four-eyes queues to their existing workbenches', () => {
+    expect(approvalWorkbenchHref({ ...rows[0], domain: 'compliance-pack', id: 'pack-7' })).toBe('/lending/compliance-packs')
+    expect(approvalWorkbenchHref({ ...rows[0], domain: 'campaign', id: 'campaign/7' })).toBe('/campaigns/campaign%2F7')
+    expect(approvalWorkbenchHref({ ...rows[0], domain: 'audience', id: 'newcomers@3' })).toBe('/segments')
+    expect(approvalWorkbenchHref({ ...rows[0], domain: 'identity-case', id: 'case-7' })).toBe('/identity-cases')
+  })
 })

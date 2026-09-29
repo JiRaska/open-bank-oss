@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.39.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.1...lending-service-v0.39.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **lending:** debit the borrower's account when a repayment is recorded ([#11505](https://github.com/JiRaska/open-bank-oss/issues/11505)) ([d990f8c](https://github.com/JiRaska/open-bank-oss/commit/d990f8ce37c6d6963b9d33c592c5c42de2656b37))
+
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.0...lending-service-v0.39.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.38.0...lending-service-v0.39.0) (2026-09-28)
+
+
+### Features
+
+* **lending:** bind Idempotency-Key to a request fingerprint ([#10958](https://github.com/JiRaska/open-bank-oss/issues/10958)) ([4d0ba3d](https://github.com/JiRaska/open-bank-oss/commit/4d0ba3d4ef50bc0f4ec24f89363999611eb8f081))
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.1...lending-service-v0.38.0) (2026-09-26)
 
 

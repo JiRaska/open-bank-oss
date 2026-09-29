@@ -914,6 +914,23 @@
       "secret": "__SERVICES_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-delegation-disclosure",
+      "name": "OpenBank Delegation Disclosure",
+      "description": "Dedicated client-credentials identity for delegation-service to request sealed external disclosures from document-service. It must not be shared with other backend workloads.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "roles"
+      ],
+      "secret": "__DELEGATION_DISCLOSURE_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-edge",
       "name": "OpenBank Customer Edge",
       "description": "M2M service-account client for the customer-facing edge proxy (ADR-0065). The edge validates customer JWTs from openbank-customers realm and uses this client (client_credentials) to call upstream backend services with an operator-realm token.",
@@ -1064,6 +1081,25 @@
         "roles"
       ],
       "secret": "__TREASURY_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-finrep",
+      "name": "OpenBank FINREP/COREP Service",
+      "description": "Per-service M2M client for COREP C 02.00: reads the risk engine's snapshot list and Pillar 1 capital (risk.snapshot.read only, ADR-0313 D6). Holds ROLE_API only; its read is granted by identity in risk_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__FINREP_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-clearing",
@@ -1553,6 +1589,26 @@
       "defaultClientScopes": ["openid", "profile", "email", "roles"]
     },
     {
+      "clientId": "openbank-ops-cli",
+      "name": "Operator CLI scripts (PKCE, full access tokens)",
+      "description": "Dedicated public client for operator scripts (issue #10905) so they stop borrowing apicurio-registry's client identity; loopback redirect only, no direct grants, no lightweight tokens.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://127.0.0.1/*"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300",
+        "client.use.lightweight.access.token.enabled": "false"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
       "clientId": "openbao",
       "name": "OpenBao (SSO)",
       "enabled": true,
@@ -1674,6 +1730,14 @@
       ]
     },
     {
+      "username": "service-account-openbank-delegation-disclosure",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-delegation-disclosure",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
       "username": "service-account-openbank-interest",
       "enabled": true,
       "serviceAccountClientId": "openbank-interest",
@@ -1725,6 +1789,14 @@
       "username": "service-account-openbank-treasury",
       "enabled": true,
       "serviceAccountClientId": "openbank-treasury",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-finrep",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-finrep",
       "realmRoles": [
         "ROLE_API"
       ]

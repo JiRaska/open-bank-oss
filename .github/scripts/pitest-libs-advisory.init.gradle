@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: Apache-2.0
+// Advisory mutation testing for the shared libs modules (ADR-0063 gap, issue tracked in the PR
+// that introduces this file). Money, idempotency, audit and outbox logic lives in
+// openbank-libs-domain / openbank-libs-runtime and carried NO pitest coverage at all, unlike the
+// 12 money-path services already wired in pitest.yml — this closes that gap advisory-only.
+//
+// Init-script application, mirroring .github/scripts/pitest-authz.init.gradle: the plugins DSL
+// cannot add ANY external versioned plugin to openbank-libs-domain or openbank-libs-runtime — both
+// apply the jandex convention plugin, and stacking info.solidsoft.pitest on top of it in the same
+// plugins{} block splits the plugin classloaders and jandex loads twice (Banner$Inject_
+// ClassCastException, measured on openbank-libs-runtime 2026-09-05). An init script carries its
+// own classpath, so pitest loads without touching either module's plugin resolution.
+//
+// Advisory only, never a per-PR gate (mutationThreshold left at 0): pitest.yml's own
+// "Check mutation threshold (advisory)" step reports the score and warns below 70%, same as the
+// service lanes. The pitest-authz job's ENFORCED lane over com.openbank.libs.authz.* is untouched
+// by this file — authz already has its own dedicated init script and blocking threshold, so it is
+// deliberately excluded from targetClasses below to avoid running the same package under two
+// different pitest configurations.
+initscript {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'info.solidsoft.gradle.pitest:gradle-pitest-plugin:1.19.0'
+    }
+}
+
+// module -> [targetClasses, targetTests, excludedClasses]
+def libsPitestConfig = [
+    'openbank-libs-domain': [
+        target: [
+            'com.openbank.libs.domain.money.*',
+            'com.openbank.libs.audit.*',
+            'com.openbank.libs.persistence.outbox.*',
+        ],
+        tests: [
+            'com.openbank.libs.domain.money.*',
+            'com.openbank.libs.audit.*',
+            'com.openbank.libs.persistence.outbox.*',
+        ],
+        excluded: [
+            'com.openbank.libs.domain.money.*Kt',
+            'com.openbank.libs.audit.*Kt',
+            'com.openbank.libs.persistence.outbox.*Kt',
+        ],
+    ],
+    'openbank-libs-runtime': [
+        target: [
+            'com.openbank.libs.idempotency.impl.*',
+            'com.openbank.libs.persistence.outbox.*',
+            'com.openbank.libs.audit.*',
+        ],
+        tests: [
+            'com.openbank.libs.idempotency.impl.*',
+            'com.openbank.libs.persistence.outbox.*',
+            'com.openbank.libs.audit.*',
+        ],
+        excluded: [
+            'com.openbank.libs.idempotency.impl.*Kt',
+            'com.openbank.libs.persistence.outbox.*Kt',
+            'com.openbank.libs.audit.*Kt',
+        ],
+    ],
+]
+
+gradle.projectsLoaded { g ->
+    g.rootProject { root ->
+        libsPitestConfig.each { moduleName, cfg ->
+            def target = root.findProject(":${moduleName}")
+            if (target == null) {
+                return  // included builds (e.g. build-logic) don't have the module
+            }
+            target.with { p ->
+                p.afterEvaluate { proj ->
+                    proj.apply(plugin: info.solidsoft.gradle.pitest.PitestPlugin)
+                    def ext = proj.extensions.getByName('pitest')
+                    ext.junit5PluginVersion = '1.2.3'
+                    ext.targetClasses = cfg.target as Set
+                    ext.targetTests = cfg.tests as Set
+                    // Advisory (ADR-0063): 0 so the Gradle task itself never fails the run; the
+                    // pitest.yml warning step reports the score. Raise per-module later only after
+                    // it sustains >=70%, same convention as the service lanes.
+                    ext.mutationThreshold = 0
+                    ext.outputFormats = ['XML', 'HTML'] as Set
+                    ext.timestampedReports = false
+                    ext.threads = 4
+                    ext.excludedClasses = cfg.excluded as Set
+                }
+            }
+        }
+    }
+}

@@ -26,7 +26,7 @@ shared_sa := {
 
 agent := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
 
-reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read"}
+reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
 
 dealer_writes := {"treasury.deal.draft", "treasury.deal.submit"}
 
@@ -103,10 +103,34 @@ test_shared_service_account_gets_no_treasury_reason if {
 	}
 }
 
-# ADR-0315 D3/D10: no charter yet, so an agent cannot draft, let alone approve or settle.
-test_ai_agent_denied_draft_approve_settle if {
-	every a in {"treasury.deal.draft", "treasury.deal.approve", "treasury.deal.settle"} {
+# ADR-0315 D3/D10: this file grants an agent NOTHING — not even the draft. The agent's draft grant
+# comes only from its agents.yaml charter via rest.rego's agent-charter-allows (asserted against the
+# real charter in openbank-infra/opa/build-bundle.sh). This trio loads no agents data, so any allow
+# an AI_AGENT gets here would have to come from a treasury rule — which is the regression to catch:
+# add `treasury.deal.approve` for AI_AGENT to any rule above and this goes red.
+test_ai_agent_denied_every_treasury_action_by_this_file if {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
 		not allowed(agent, a)
+	}
+}
+
+test_ai_agent_gets_no_treasury_reason if {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
+		count({r | some r in rest.allowed_reasons with input as {"principal": agent, "action": a}; startswith(r, "treasury-")}) == 0
+	}
+}
+
+# The charter-shaped agent id, with the most roles a treasury agent client could be handed. The
+# must-DENY half at the policy layer, as the agent itself.
+chartered_agent := {
+	"type": "AI_AGENT",
+	"id": "agent:treasury-dealing-assistant",
+	"roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"],
+}
+
+test_chartered_agent_may_not_approve_settle_override_or_upload if {
+	every a in {"treasury.deal.approve", "treasury.deal.settle", "treasury.deal.override-limit", "treasury.nostro.upload", "treasury.deal.submit"} {
+		not allowed(chartered_agent, a)
 	}
 }
 
@@ -130,4 +154,16 @@ test_machines_and_agents_may_not_override if {
 	not allowed(sa, "treasury.deal.override-limit")
 	ag := object.union(agent, {"roles": ["ROLE_TREASURY_SENIOR_APPROVER"]})
 	not allowed(ag, "treasury.deal.override-limit")
+}
+
+# --- nostro reconciliation (#10896) ---
+
+test_approver_may_upload_nostro_statement if {
+	allowed(approver, "treasury.nostro.upload")
+}
+
+test_nobody_else_may_upload_nostro_statement if {
+	every p in [dealer, senior, nobody, shared_sa, agent] {
+		not allowed(p, "treasury.nostro.upload")
+	}
 }

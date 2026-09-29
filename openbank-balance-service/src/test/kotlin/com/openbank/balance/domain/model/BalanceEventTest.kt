@@ -64,6 +64,7 @@ class BalanceEventTest {
         val node = objectMapper.readTree(objectMapper.writeValueAsString(e))
         assertThat(node.get("eventType").asText()).isEqualTo("BALANCE_UPDATED")
         assertThat(node.get("sourceService").asText()).isEqualTo("balance-service")
+        assertThat(node.get("currency").asText()).isEqualTo("CZK")
     }
 
     @Test
@@ -89,5 +90,14 @@ class BalanceEventTest {
             val node = objectMapper.readTree(objectMapper.writeValueAsString(event(type)))
             assertThat(node.get("sourceService").asText()).isEqualTo("balance-service")
         }
+    }
+
+    @Test
+    fun `value date roll actor remains distinct from API and ledger projection`() {
+        assertThat(BalanceEventActors.VALUE_DATE_ROLL).isEqualTo(
+            EventActor.system("balance-service", "value-date-roll"),
+        )
+        assertThat(BalanceEventActors.VALUE_DATE_ROLL).isNotEqualTo(BalanceEventActors.API)
+        assertThat(BalanceEventActors.VALUE_DATE_ROLL).isNotEqualTo(BalanceEventActors.LEDGER_PROJECTION)
     }
 }

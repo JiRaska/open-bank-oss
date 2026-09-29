@@ -17,7 +17,7 @@
 |---|---|---|
 | `OIDC_CLIENT_SECRET` | `CHANGE_ME_LOCAL_DEV_ONLY` | secret for the `openbank-services` client (resource server + outbound client-credentials) |
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8080/realms/openbank` | Keycloak realm issuer |
-| `OIDC_TLS_VERIFICATION` | `none` | set to `required` in a real HTTPS deploy |
+| `OIDC_TLS_VERIFICATION` | `required` | `%dev` relaxes it to `none` for a local plain-http Keycloak |
 | `AGENT_DEFAULT_MODEL` | `mock-echo` | gateway default model id |
 | `AGENT_MODEL_ENDPOINT` | `http://litellm.ai-platform.svc:4000/v1` | base URL of the `openai-compat` backend. Defaults to the in-cluster LiteLLM gateway, the only workload permitted to egress to a hosted LLM provider (ADR-0174/0175) — the same value the deployment sets. The registered model ids are gateway `model_name`s, not provider ids, so a direct-to-provider base URL does not serve them (#5736) |
 | `AGENT_MODEL_API_KEY` | *(falls back to `GROQ_API_KEY`)* | key for the `openai-compat` backend. Deployed, this is the LiteLLM **virtual** key, not a provider key (OpenBao/ESO — never in git) |

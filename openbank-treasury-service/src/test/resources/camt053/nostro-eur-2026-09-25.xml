@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SYNTHETIC test fixture (#10896). No real bank, account or payment: bank code 9999 does not exist
+  in the Czech bank-code register. A EUR nostro statement spanning TWO booking days, with DtTm
+  (camt.053.001.08 ISODateTime) on the closing balance and one entry.
+-->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>SYNTH-MSG-20260925-EUR</MsgId>
+      <CreDtTm>2026-09-25T20:00:00Z</CreDtTm>
+    </GrpHdr>
+    <Stmt>
+      <Id>SYNTH-STMT-20260925-EUR</Id>
+      <Acct>
+        <Id><IBAN>CZ82 9999 0000 0000 0000 1002</IBAN></Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">50000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-09-23</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">57500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><DtTm>2026-09-25T23:59:59+02:00</DtTm></Dt>
+      </Bal>
+      <Ntry>
+        <Amt Ccy="EUR">10000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><DtTm>2026-09-24T09:15:00+02:00</DtTm></BookgDt>
+        <AcctSvcrRef>SYNTH-EUR-0001</AcctSvcrRef>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">2500.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-09-25</Dt></BookgDt>
+        <AcctSvcrRef>SYNTH-EUR-0002</AcctSvcrRef>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

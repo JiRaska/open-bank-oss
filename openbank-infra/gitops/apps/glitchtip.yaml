@@ -50,7 +50,7 @@ spec:
   source:
     repoURL: https://gitlab.com/api/v4/projects/16325141/packages/helm/stable
     chart: glitchtip
-    targetRevision: 8.2.0   # appVersion GlitchTip v6.1.4
+    targetRevision: 9.0.1   # appVersion GlitchTip 6.2.3 (bundled valkey chart 0.11.0 / valkey 9.1.1)
     helm:
       releaseName: glitchtip
       valuesObject:
@@ -76,114 +76,112 @@ spec:
         # flip back to `true`. Steady-state upgrades need no intervention (ADR-0075/0082).
         migrationJob:
           enabled: true
-        # All-in-one: the web pod embeds the background worker, so no separate
-        # worker Deployment is needed for a small instance.
-        web:
-          embedWorker: true
-          replicaCount: 1
-          budget:
-            minAvailable: 0   # single-replica sandbox — allow voluntary eviction
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          ingress:
-            enabled: true
-            className: nginx
-            annotations:
-              cert-manager.io/cluster-issuer: letsencrypt-prod
-              # ADR-0234: declared exemption from the identity-aware edge gate.
-              # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
-              # authenticates by DSN and cannot follow a 302 to the console login,
-              # so an auth_request here would break every crash report silently
-              # (the SDK swallows the redirect). The UI is NOT served from this
-              # host; it stays port-forward-only until ADR-0234 phase 2 moves it
-              # to admin.open-bank.tech/tools/glitchtip. Keep the path list below
-              # narrowed to ingest + the two dSYM-upload endpoints — widening it
-              # re-opens the management API on an ungated host, which is exactly
-              # what this annotation waives.
-              openbank.io/ungated-machine-callers: >-
-                SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
-                (org-token-authenticated); neither can follow a login redirect.
-              # ATTACK-SURFACE REDUCTION (ADR-0056): only the event INGEST must be
-              # public (devices in the field + the admin-ui operator browser POST
-              # crashes here). The web UI, Django /admin/ (a superuser password login)
-              # and the management REST API have no business on the internet — they're
-              # reached in-cluster via port-forward (like Grafana, ArgoCD, et al.).
-              # So the public ingress allow-lists ONLY the per-project ingest verbs
-              # plus the debug-symbol upload endpoints; everything else 404s at the
-              # edge. Mirrors the keycloak-admin-block pattern.
-              nginx.ingress.kubernetes.io/use-regex: "true"
-              # Debug-symbol chunks. sentry-cli sends ~8 MiB chunks and the default
-              # 1m body limit turned every dSYM upload into an nginx 413.
-              nginx.ingress.kubernetes.io/proxy-body-size: 64m
-            hosts:
-              - host: glitchtip.open-bank.tech
-                paths:
-                  # Sentry/GlitchTip project ingest endpoints only (store/envelope/
-                  # security/minidump). project_id is numeric; /api/0/* (management) and
-                  # every UI/admin path are intentionally NOT matched → edge 404.
-                  - path: /api/[0-9]+/(store|envelope|security|minidump|unreal)/
-                    pathType: ImplementationSpecific
-                  # dSYM upload, and ONLY dSYM upload, out of the /api/0/ management
-                  # surface. Without these two paths `fastlane beta`'s
-                  # upload_debug_symbols was dead code: chunk-upload answers its GET
-                  # with an ABSOLUTE public URL, so sentry-cli posts the chunks back
-                  # through this ingress no matter how it was invoked — a port-forward
-                  # cannot work around it. Every iOS crash therefore arrived with
-                  # <redacted> frames.
-                  #
-                  # Both endpoints require a GlitchTip org auth token (scopes
-                  # project:read/write/releases + org:read), so this exposes an
-                  # authenticated write path, not an open one — and nothing else under
-                  # /api/0/ (users, teams, settings, the Django admin) becomes
-                  # reachable. Keep these regexes anchored to `chunk-upload` and
-                  # `files/(difs|dsyms)`; widening them re-opens the management API.
-                  #
-                  # The trailing slash is OPTIONAL, and that is the whole point: sentry-cli asks
-                  # GET .../chunk-upload/ (slash) and is answered with a `url` field that has NO
-                  # trailing slash, so it then POSTs the chunks to .../chunk-upload and nginx 404s
-                  # a path that differs from the allowed one by one character. Build 82 and 83
-                  # both died exactly there, after the GET had already succeeded.
-                  - path: /api/0/organizations/[^/]+/chunk-upload/?
-                    pathType: ImplementationSpecific
-                  # …/files/difs/assemble/ shares this prefix, so it matches too.
-                  - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/?
-                    pathType: ImplementationSpecific
-                  # JS source-map bundles for the admin-ui (#3235). Same shape as the dSYM
-                  # case above and for the same reason: without it, GlitchTip records that
-                  # the console broke and cannot say where — every event stored a minified
-                  # title and an EMPTY culprit, which is the information the user already
-                  # had when they complained.
-                  #
-                  # This ONE path is the whole widening, and it was derived by measurement,
-                  # not by reading docs: pointing the bundler plugin's `sentryUrl` at a
-                  # request-logging stand-in showed sentry-cli 2.58 issuing exactly
-                  #   GET  /api/0/organizations/<org>/chunk-upload/     (already allowed)
-                  #   POST /api/0/organizations/<org>/chunk-upload/     (already allowed)
-                  #   POST /api/0/organizations/<org>/artifactbundle/assemble/   ← 404 here
-                  # The three release calls it also made by default are NOT allowed and must
-                  # not be: `/api/0/projects/<org>/<proj>/releases/<version>/` answers DELETE.
-                  # `release.create: false` in next.config.mjs suppresses them, and nothing is
-                  # lost — GlitchTip's own `assemble_artifacts` does `Release.get_or_create()`
-                  # from the bundle manifest, and symbolication joins on the debug ID anyway
-                  # (`javascript_event_processor.transform`), never on the release.
-                  #
-                  # Anchored to `artifactbundle/assemble` on purpose: it takes a chunk-checksum
-                  # list and needs the same org token the chunk upload already needs, so it adds
-                  # an authenticated write of the same kind rather than new surface. Widening it
-                  # to `/api/0/organizations/[^/]+/` would re-open the management API.
-                  - path: /api/0/organizations/[^/]+/artifactbundle/assemble/?
-                    pathType: ImplementationSpecific
-            tls:
-              - secretName: glitchtip-tls
-                hosts:
-                  - glitchtip.open-bank.tech
-        worker:
-          enabled: false   # embedded in web (embedWorker)
+        # Web pod settings live at the values ROOT since chart 9.0 (the `web:` block
+        # was flattened; the chart FAILS the render if `web` or `worker` is set).
+        # The worker is always embedded in the web ASGI process now, so there is
+        # no embedWorker switch and no separate worker Deployment to disable.
+        replicaCount: 1
+        budget:
+          minAvailable: 0   # single-replica sandbox — allow voluntary eviction
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            # ADR-0234: declared exemption from the identity-aware edge gate.
+            # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
+            # authenticates by DSN and cannot follow a 302 to the console login,
+            # so an auth_request here would break every crash report silently
+            # (the SDK swallows the redirect). The UI is NOT served from this
+            # host; it stays port-forward-only until ADR-0234 phase 2 moves it
+            # to admin.open-bank.tech/tools/glitchtip. Keep the path list below
+            # narrowed to ingest + the two dSYM-upload endpoints — widening it
+            # re-opens the management API on an ungated host, which is exactly
+            # what this annotation waives.
+            openbank.io/ungated-machine-callers: >-
+              SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
+              (org-token-authenticated); neither can follow a login redirect.
+            # ATTACK-SURFACE REDUCTION (ADR-0056): only the event INGEST must be
+            # public (devices in the field + the admin-ui operator browser POST
+            # crashes here). The web UI, Django /admin/ (a superuser password login)
+            # and the management REST API have no business on the internet — they're
+            # reached in-cluster via port-forward (like Grafana, ArgoCD, et al.).
+            # So the public ingress allow-lists ONLY the per-project ingest verbs
+            # plus the debug-symbol upload endpoints; everything else 404s at the
+            # edge. Mirrors the keycloak-admin-block pattern.
+            nginx.ingress.kubernetes.io/use-regex: "true"
+            # Debug-symbol chunks. sentry-cli sends ~8 MiB chunks and the default
+            # 1m body limit turned every dSYM upload into an nginx 413.
+            nginx.ingress.kubernetes.io/proxy-body-size: 64m
+          hosts:
+            - host: glitchtip.open-bank.tech
+              paths:
+                # Sentry/GlitchTip project ingest endpoints only (store/envelope/
+                # security/minidump). project_id is numeric; /api/0/* (management) and
+                # every UI/admin path are intentionally NOT matched → edge 404.
+                - path: /api/[0-9]+/(store|envelope|security|minidump|unreal)/
+                  pathType: ImplementationSpecific
+                # dSYM upload, and ONLY dSYM upload, out of the /api/0/ management
+                # surface. Without these two paths `fastlane beta`'s
+                # upload_debug_symbols was dead code: chunk-upload answers its GET
+                # with an ABSOLUTE public URL, so sentry-cli posts the chunks back
+                # through this ingress no matter how it was invoked — a port-forward
+                # cannot work around it. Every iOS crash therefore arrived with
+                # <redacted> frames.
+                #
+                # Both endpoints require a GlitchTip org auth token (scopes
+                # project:read/write/releases + org:read), so this exposes an
+                # authenticated write path, not an open one — and nothing else under
+                # /api/0/ (users, teams, settings, the Django admin) becomes
+                # reachable. Keep these regexes anchored to `chunk-upload` and
+                # `files/(difs|dsyms)`; widening them re-opens the management API.
+                #
+                # The trailing slash is OPTIONAL, and that is the whole point: sentry-cli asks
+                # GET .../chunk-upload/ (slash) and is answered with a `url` field that has NO
+                # trailing slash, so it then POSTs the chunks to .../chunk-upload and nginx 404s
+                # a path that differs from the allowed one by one character. Build 82 and 83
+                # both died exactly there, after the GET had already succeeded.
+                - path: /api/0/organizations/[^/]+/chunk-upload/?
+                  pathType: ImplementationSpecific
+                # …/files/difs/assemble/ shares this prefix, so it matches too.
+                - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/?
+                  pathType: ImplementationSpecific
+                # JS source-map bundles for the admin-ui (#3235). Same shape as the dSYM
+                # case above and for the same reason: without it, GlitchTip records that
+                # the console broke and cannot say where — every event stored a minified
+                # title and an EMPTY culprit, which is the information the user already
+                # had when they complained.
+                #
+                # This ONE path is the whole widening, and it was derived by measurement,
+                # not by reading docs: pointing the bundler plugin's `sentryUrl` at a
+                # request-logging stand-in showed sentry-cli 2.58 issuing exactly
+                #   GET  /api/0/organizations/<org>/chunk-upload/     (already allowed)
+                #   POST /api/0/organizations/<org>/chunk-upload/     (already allowed)
+                #   POST /api/0/organizations/<org>/artifactbundle/assemble/   ← 404 here
+                # The three release calls it also made by default are NOT allowed and must
+                # not be: `/api/0/projects/<org>/<proj>/releases/<version>/` answers DELETE.
+                # `release.create: false` in next.config.mjs suppresses them, and nothing is
+                # lost — GlitchTip's own `assemble_artifacts` does `Release.get_or_create()`
+                # from the bundle manifest, and symbolication joins on the debug ID anyway
+                # (`javascript_event_processor.transform`), never on the release.
+                #
+                # Anchored to `artifactbundle/assemble` on purpose: it takes a chunk-checksum
+                # list and needs the same org token the chunk upload already needs, so it adds
+                # an authenticated write of the same kind rather than new surface. Widening it
+                # to `/api/0/organizations/[^/]+/` would re-open the management API.
+                - path: /api/0/organizations/[^/]+/artifactbundle/assemble/?
+                  pathType: ImplementationSpecific
+          tls:
+            - secretName: glitchtip-tls
+              hosts:
+                - glitchtip.open-bank.tech
         # Transient cache/broker; data loss only logs users out — no persistence.
         valkey:
           enabled: true
@@ -205,7 +203,11 @@ spec:
         postgresql:
           enabled: true
           cluster:
-            instances: 1
+            # Two instances: backups stay off (the data is disposable, above), but
+            # AVAILABILITY is not -- while this database is down, every crash report
+            # the customer apps' SDKs send is lost. Spot interruptions on 2026-09-28
+            # took the single instance down repeatedly (ADR-0325, #11304).
+            instances: 2
             storage:
               size: 5Gi
               storageClass: gp3

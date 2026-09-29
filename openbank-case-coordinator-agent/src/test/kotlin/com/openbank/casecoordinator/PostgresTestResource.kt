@@ -17,7 +17,7 @@ import org.testcontainers.containers.PostgreSQLContainer
 class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
     private companion object {
-        const val POSTGRES_IMAGE = "postgres:18-alpine"
+        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
     }
 
     private lateinit var postgres: PostgreSQLContainer<*>

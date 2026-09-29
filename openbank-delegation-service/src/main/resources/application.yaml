@@ -63,6 +63,9 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
   # OUTBOUND M2M. `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
+  # The default client remains the shared backend identity because the existing SCA, PID and
+  # ownership REST clients depend on its established OPA grants. The disclosure client below is
+  # named and opt-in, so it cannot silently change those callers' subjects.
   # Every REST client here (sca, pid, party, account, card-issuance) targets an @RolesAllowed endpoint,
   # so without this block the calls carry no Authorization header and 401 — surfacing as the
   # ownership gate's fail-closed "could not be established", never as an auth problem.
@@ -74,6 +77,16 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    disclosure:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      # This credential is deliberately not the fleet-wide `openbank-services` client.
+      # document-service authorizes this caller by its exact service-account subject, rather
+      # than accepting every backend sharing the generic client.
+      client-id: openbank-delegation-disclosure
+      credentials:
+        secret: ${DISCLOSURE_OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
     # #10486 batch 6: the party eligibility read (pid party.read) and the card ownership read
     # (card-issuance card.read) no longer ride the shared openbank-services principal. PidServiceRestClient and
     # CardIssuanceRestClient select this NAMED client (@OidcClientFilter("m2m")), so their principal is
@@ -134,6 +147,10 @@ quarkus:
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
       connect-timeout: 2000
       read-timeout: 2000
+    document-service:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 2000
+      read-timeout: 3000
 
   management:
     enabled: true
@@ -211,9 +228,25 @@ mp:
           pem:
             certs: /mnt/party-tls/ca.crt
         protocols: TLSv1.3
+      # document-service's 8443 listener is private-CA mTLS with client auth REQUIRED. The
+      # delegation-internal-tls certificate (issued by the same openbank-ca ClusterIssuer and
+      # already mounted for party-authority) is the client identity; hostname verification stays
+      # on. Local/test HTTP fixtures use the default URL and never exercise this bucket.
+      disclosure:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       party-service:
         tls-configuration-name: party-authority
+      document-service:
+        tls-configuration-name: disclosure
 
 "%test":
   quarkus:
@@ -237,6 +270,11 @@ mp:
     enforce: "false"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   delegation:
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
