@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.17.0...risk-engine-v0.18.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** record who requested each snapshot run ([#11016](https://github.com/JiRaska/open-bank-oss/issues/11016)) ([5acdd48](https://github.com/JiRaska/open-bank-oss/commit/5acdd4825c61fdc729eacf50126970f17adc187d))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.16.0...risk-engine-v0.17.0) (2026-09-29)
 
 
