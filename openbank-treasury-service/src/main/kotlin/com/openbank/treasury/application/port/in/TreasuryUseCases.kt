@@ -12,6 +12,7 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
@@ -26,9 +27,12 @@ data class DraftDealCommand(
     val principal: BigDecimal,
     val rate: BigDecimal,
     val tradeDate: LocalDate?,
-    val valueDate: LocalDate,
+    /** Required, except for FX_SPOT where it defaults to T+2 business days after the trade date. */
+    val valueDate: LocalDate?,
     val maturityDate: LocalDate?,
     val rationale: String?,
+    /** FX_SPOT only: the bank's side on the foreign [currency]. */
+    val fxSide: FxSide? = null,
 )
 
 data class DealView(val deal: Deal, val journals: List<LedgerJournalRef>)

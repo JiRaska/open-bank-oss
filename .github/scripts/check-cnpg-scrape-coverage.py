@@ -53,6 +53,7 @@ import argparse
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import gatelib
 import yaml
@@ -163,6 +164,10 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
     found: dict[str, dict] = {}
     errors: list[str] = []
     for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
+        # The network-policy generator writes an atomic .network-policies-*.yaml in this tree.
+        # Parallel gates may enumerate it just before the generator replaces/removes it.
+        if path.name.startswith(".network-policies-"):
+            continue
         rel = path.relative_to(REPO)
         if any(part in rel.parts for part in SKIP_PATH_PARTS):
             continue
@@ -702,6 +707,15 @@ def self_test() -> int:
             print(f"SELF-TEST FAIL: clean corpus still errors: {errors}"); ok = False
         if "st/good-db" not in clusters:
             print("SELF-TEST FAIL: the scraped cluster was not discovered at all"); ok = False
+
+        # A vanished atomic-write temp file must not turn this unrelated gate red in a parallel run.
+        original_rglob = gatelib.rglob
+        vanished = d / ".network-policies-vanished.yaml"
+        with patch.object(gatelib, "rglob", side_effect=lambda root, pattern: original_rglob(root, pattern) + (vanished,)):
+            raced_clusters, raced_errors = discover_clusters()
+        if "st/good-db" not in raced_clusters or raced_errors:
+            print(f"SELF-TEST FAIL: vanished network-policy temp affected cluster discovery: {raced_errors}")
+            ok = False
 
         # 3. the generated rule must actually mention every discovered cluster
         out = render(clusters)
