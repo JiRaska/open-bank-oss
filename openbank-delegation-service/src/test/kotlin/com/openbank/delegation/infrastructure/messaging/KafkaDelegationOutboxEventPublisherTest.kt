@@ -97,7 +97,13 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper, emitter).publish(entry(realEventPayload()))
+            KafkaDelegationOutboxEventPublisher(
+                emitter,
+                emitter,
+                emitter,
+                mapper,
+                emitter,
+            ).publish(entry(realEventPayload()))
         }
 
         assertThat(mapper.readTree(captured.captured.payload).get("sourceService").asText())
@@ -111,7 +117,9 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
         val payload = realEventPayload()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper, emitter).publish(entry(payload)) }
+        runBlocking {
+            KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper, emitter).publish(entry(payload))
+        }
 
         val before = mapper.readTree(payload)
         val after = mapper.readTree(captured.captured.payload)
@@ -132,7 +140,13 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(emitter, emitter, emitter, mapper, emitter).publish(entry("not json at all"))
+            KafkaDelegationOutboxEventPublisher(
+                emitter,
+                emitter,
+                emitter,
+                mapper,
+                emitter,
+            ).publish(entry("not json at all"))
         }
 
         // This is the money path: an unattributed row is a strictly better outcome than a publish
@@ -148,7 +162,13 @@ class KafkaDelegationOutboxEventPublisherTest {
         val reservationId = UUID.randomUUID()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, lifecycleEmitter, mapper, mockk()).publish(
+            KafkaDelegationOutboxEventPublisher(
+                lifecycleEmitter,
+                stateEmitter,
+                lifecycleEmitter,
+                mapper,
+                mockk(),
+            ).publish(
                 entry(
                     statePayload(reservationId, 1L),
                     DelegationSpendReservationStateChanged.EVENT_TYPE,
@@ -166,7 +186,8 @@ class KafkaDelegationOutboxEventPublisherTest {
         val lifecycleEmitter = mockk<MutinyEmitter<String>>()
         val stateEmitter = mockk<MutinyEmitter<String>>()
         val reservationId = UUID.randomUUID()
-        val publisher = KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, lifecycleEmitter, mapper, mockk())
+        val publisher =
+            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, lifecycleEmitter, mapper, mockk())
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
             runBlocking {
