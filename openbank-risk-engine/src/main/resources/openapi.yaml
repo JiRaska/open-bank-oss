@@ -38,11 +38,13 @@ info:
   #        claimed 1.10.0; main has since reached 1.14.0, so this takes the next free number, 1.15.0.
   # 1.15.0 -> 1.15.1: description only — /capital defaults to the EU CRR parameter set
   #        (eu-crr3-sa); the response shape is unchanged.
-  # 1.15.1 -> 1.16.0: additive — ČNB minimum reserves averaged over the maintenance period
+  # 1.15.1 -> 1.17.0: additive — ČNB minimum reserves averaged over the maintenance period
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  version: 1.16.0
+  #        1.16.0 is claimed by open PR #11539 (snapshot run manifest), so this takes 1.17.0 and
+  #        must merge after it, or be renumbered if main moves first.
+  version: 1.17.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
