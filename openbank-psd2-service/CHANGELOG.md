@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.8](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.7...psd2-service-v0.11.8) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.11.7](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.6...psd2-service-v0.11.7) (2026-09-28)
 
 
