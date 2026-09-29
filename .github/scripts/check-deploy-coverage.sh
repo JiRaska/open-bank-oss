@@ -122,8 +122,22 @@ if [ "${1:-}" = "--self-test" ]; then
   sed -i.bak '/base: main/d' "$j/.github/workflows/auto-deploy.yml"; rm -f "$j/.github/workflows/auto-deploy.yml.bak"
   expect "recovery deploy PRs explicitly target main" "$j" 1 "base: main"
 
+  # THE WIDENING: an UNRELEASED workload wearing a sandbox tag is auto-deploy's own output
+  # (analytics-sink has no version.txt). Built, it is clean; unbuilt, it must fail. A subject
+  # set of RELEASED only reads PASS on the second fixture — the #4637 regression.
+  k="$td/sandboxbuilt"; mkrepo "$k" openbank-a openbank-a,openbank-sink openbank-a
+  printf '  image: ecr/openbank-sink:sandbox-abc123\n' >> "$k/openbank-infra/gitops/apps.yaml"
+  expect "an unreleased sandbox-tagged workload that is built is clean" "$k" 0
+  l="$td/sandboxgap"; mkrepo "$l" openbank-a openbank-a openbank-a
+  printf '  image: ecr/openbank-sink:sandbox-abc123\n' >> "$l/openbank-infra/gitops/apps.yaml"
+  expect "an unreleased sandbox-tagged workload nobody builds is a violation" "$l" 1 "openbank-sink"
+  # ...and its baseline entry is evaluated, so paying the debt trips the ratchet.
+  m="$td/sandboxstale"; mkrepo "$m" openbank-a openbank-a,openbank-sink openbank-a "" openbank-sink
+  printf '  image: ecr/openbank-sink:sandbox-abc123\n' >> "$m/openbank-infra/gitops/apps.yaml"
+  expect "a paid-off sandbox baseline entry is reported" "$m" 1 "no longer violating"
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: deploy-coverage guard is falsifiable (10 cases)"
+  echo "self-test ok: deploy-coverage guard is falsifiable (13 cases)"
   exit 0
 fi
 
@@ -191,6 +205,20 @@ fi
 GITOPS_REFS="$(grep -rhoE 'openbank-[a-z0-9-]+:[A-Za-z0-9._-]+' "$GITOPS" 2>/dev/null \
   | sed -E 's/:.*$//' | sort -u || true)"
 
+# Workloads pinned to a `sandbox-<sha>` tag: that tag shape IS auto-deploy's own output, so
+# anything wearing one is something this repo is expected to build, released or not. This is
+# what widens the subject set past release-please's registry (#4582): analytics-sink has no
+# version.txt and was undeployed for weeks while this gate passed, because a gate whose scope
+# is derived from a DIFFERENT registry than the one it protects only covers their intersection.
+# Version-pinned third-party images carry an upstream version, never a sandbox tag, so they
+# are excluded by construction.
+#
+# The widening was lost once already, in a conflict resolution (#4637) that kept the RELEASED-
+# only loop: the baseline entries stopped being evaluated and an unbuilt sandbox workload read
+# PASS. The self-test's sandbox cases exist so that cannot happen silently again.
+SANDBOX_REFS="$(grep -rhoE 'openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' "$GITOPS" 2>/dev/null \
+  | sed -E 's/:.*$//' | sort -u || true)"
+
 _read_list() {
   local f="$1" line
   [ -f "$f" ] || return 0
@@ -215,9 +243,13 @@ SKIPPED=()
 KNOWN=0
 CHECKED=0
 
-for svc in "${RELEASED[@]}"; do
-  # Not deployed by ArgoCD at all (a library, or not yet registered) — out of scope.
-  _in "$svc" $GITOPS_REFS || continue
+# Subjects: every released component ArgoCD deploys (a library, or a component with no
+# manifest, is out of scope), PLUS every sandbox-tagged workload whether released or not.
+SUBJECTS=()
+for svc in "${RELEASED[@]}"; do _in "$svc" $GITOPS_REFS && SUBJECTS+=("$svc"); done
+for svc in $SANDBOX_REFS; do _in "$svc" ${SUBJECTS[@]+"${SUBJECTS[@]}"} || SUBJECTS+=("$svc"); done
+
+for svc in ${SUBJECTS[@]+"${SUBJECTS[@]}"}; do
   CHECKED=$((CHECKED + 1))
 
   if _in "$svc" ${ALLOWED[@]+"${ALLOWED[@]}"}; then
@@ -240,7 +272,7 @@ for svc in "${RELEASED[@]}"; do
 done
 
 echo "SUBJECTS=${CHECKED}"
-echo "==> Deploy-coverage: ${CHECKED} released component(s) with a gitops workload; ${#SKIPPED[@]} allowlisted; ${KNOWN} baselined."
+echo "==> Deploy-coverage: ${CHECKED} deployable workload(s) (released + sandbox-tagged); ${#SKIPPED[@]} allowlisted; ${KNOWN} baselined."
 for svc in ${SKIPPED[@]+"${SKIPPED[@]}"}; do echo "  ALLOWLISTED ${svc}  (built by its own workflow)"; done
 for svc in ${BASELINED[@]+"${BASELINED[@]}"};  do echo "  BASELINED   ${svc}  (known debt — see ${BASELINE})"; done
 
