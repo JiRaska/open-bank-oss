@@ -121,7 +121,7 @@ def gitops_findings(root: pathlib.Path):
     base = root / "openbank-infra/gitops"
     configmaps = {}
     workloads = []
-    for p in gatelib.rglob(base, "*.yaml"):
+    for p in sorted(set(gatelib.rglob(base, "*.yaml")) | set(gatelib.rglob(base, "*.yml"))):
         try:
             docs = gatelib.load_yaml_all(p)
         except yaml.YAMLError:
@@ -241,6 +241,8 @@ def self_test() -> int:
         wl = ("kind: {kind}\nmetadata:\n  name: {n}\nspec:\n  template:\n    spec:\n      containers:\n"
               "        - name: app\n          env:\n            - name: {e}\n              value: {v}\n")
         (gitops / "bad.yaml").write_text(wl.format(kind="Rollout", n="bad-svc", e="OIDC_TLS_VERIFICATION", v="none"))
+        (gitops / "bad-yml.yml").write_text(
+            wl.format(kind="Deployment", n="bad-yml-svc", e="OIDC_TLS_VERIFICATION", v="none"))
         (gitops / "good.yaml").write_text(wl.format(kind="Deployment", n="good-svc", e="OIDC_TLS_VERIFICATION", v="required"))
         (gitops / "source.yaml").write_text(
             "kind: ConfigMap\nmetadata:\n  name: tls-settings\n  namespace: test\n"
@@ -298,6 +300,8 @@ def self_test() -> int:
             fails.append("an un-profiled properties line with none must be flagged")
         if "bad-svc" not in text:
             fails.append("a gitops env TLS_VERIFICATION=none must be flagged")
+        if "bad-yml-svc" not in text:
+            fails.append("a .yml gitops env TLS_VERIFICATION=none must be flagged")
         if "good-svc" in text:
             fails.append("a gitops env TLS_VERIFICATION=required must not be flagged")
         for name in ("dynamic-svc", "envfrom-svc", "unknown-svc", "secret-dynamic-svc",
@@ -308,7 +312,7 @@ def self_test() -> int:
             fails.append("an in-repo ConfigMap with required OIDC TLS verification must pass")
         if "application-dev.yaml" in text or "application-test.yaml" in text:
             fails.append("profile-specific application files must not be flagged")
-        want = len(cases) + 4 + 12
+        want = len(cases) + 4 + 13
         if subjects != want:
             fails.append(f"subject count {subjects}, expected {want}")
 
@@ -317,7 +321,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print(f"self-test ok: oidc-tls-verification-profile is falsifiable ({len(cases) + 12} cases)")
+    print(f"self-test ok: oidc-tls-verification-profile is falsifiable ({len(cases) + 13} cases)")
     return 0
 
 
