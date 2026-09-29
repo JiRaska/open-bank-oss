@@ -126,8 +126,11 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun liquidityUseCase(snapshots: SnapshotUseCase, config: LiquidityConfig): LiquidityUseCase =
-        LiquidityService(snapshots, config.toParameters())
+    fun liquidityUseCase(
+        snapshots: SnapshotUseCase,
+        config: LiquidityConfig,
+        fixings: FxFixingRepository,
+    ): LiquidityUseCase = LiquidityService(snapshots, config.toParameters(), fixings)
 
     /**
      * The mapping's presence check runs at boot, but the range / unknown-key checks live in the
