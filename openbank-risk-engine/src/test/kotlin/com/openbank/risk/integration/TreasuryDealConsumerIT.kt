@@ -123,6 +123,33 @@ class TreasuryDealConsumerIT {
         assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId }).contains(deal)
     }
 
+    /**
+     * ADR-0315 D2: treasury now emits `treasury.deal.confirmed.v1` between booked and settled. It
+     * moves nothing the engine models, so it is acked as `ignored` — never `malformed` — and the
+     * deal it names keeps its state and rate. Remove the IGNORED_TYPES entry and this goes red on
+     * the `malformed` counter.
+     */
+    @Test
+    fun `a confirmed event is ignored - counted, not malformed, and the book is unchanged`() {
+        val source = connector.source<Any>("treasury-deal-in")
+        source.send(record("treasury.deal.settled.v1", payload(""","ledgerJournalId":"${UUID.randomUUID()}"""")))
+        awaitState("SETTLED")
+        val malformedBefore = outcome("malformed")
+        val ignoredBefore = outcome("ignored")
+
+        // Delivered late (after settled) on purpose: an ignored type must not move the state either way.
+        source.send(
+            record("treasury.deal.confirmed.v1", payload(""","confirmedBy":"bob.approver","simulated":false""")),
+        )
+        await { outcome("ignored") >= ignoredBefore + 1.0 }
+
+        assertThat(outcome("malformed")).isEqualTo(malformedBefore)
+        assertThat(current()!!.state).isEqualTo("SETTLED")
+        // And the channel is not wedged: the matured event right after still lands.
+        source.send(record("treasury.deal.matured.v1", payload(""","interest":694.44""")))
+        awaitState("MATURED")
+    }
+
     @org.junit.jupiter.api.AfterEach
     fun cleanup() = TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$deal'")
 
