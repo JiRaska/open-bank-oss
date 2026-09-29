@@ -75,7 +75,7 @@ class TreasuryDealServiceTest {
         valueDate,
         null,
         null,
-        side,
+        fxSide = side,
     )
 
     private fun cmd(
