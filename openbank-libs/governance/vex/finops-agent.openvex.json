@@ -106,7 +106,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.3 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
     },
     {
       "vulnerability": {
@@ -114,7 +114,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.3 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
     },
     {
       "vulnerability": {
@@ -122,7 +122,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.3 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
     },
     {
       "vulnerability": {
@@ -130,7 +130,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.3 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
     },
     {
       "vulnerability": {
@@ -138,7 +138,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.3 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
     },
     {
       "vulnerability": {
@@ -146,7 +146,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.3 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
     },
     {
       "vulnerability": {
@@ -154,7 +154,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). Unlike the other jackson CVEs in this batch, this one was patched on the 2.22 branch itself: the upstream advisory lists `from 2.22.0 before 2.22.1` as affected with 2.22.1 as a named fixed version. The resolved 2.22.1 is exactly that fixed version, so the vulnerable code is not present in the shipped artifact."
+      "impact_statement": "jackson-databind is resolved to 2.22.3 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). Unlike the other jackson CVEs in this batch, this one was patched on the 2.22 branch itself: the upstream advisory lists `from 2.22.0 before 2.22.1` as affected with 2.22.1 as a named fixed version. The resolved 2.22.3 is a later patch on that same branch (it also carries the 2.22.2 fixes for GHSA-q4xh-88c3-wmh7 et al.), so the vulnerable code is not present in the shipped artifact."
     },
     {
       "vulnerability": {
