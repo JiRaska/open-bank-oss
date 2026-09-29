@@ -5,9 +5,11 @@
 package com.openbank.risk.infrastructure.rest
 
 import com.openbank.risk.application.port.`in`.CapitalAnalysis
+import com.openbank.risk.domain.capital.CapitalClassification
 import com.openbank.risk.domain.capital.CapitalFactor
 import com.openbank.risk.domain.capital.CapitalGlClass
 import com.openbank.risk.domain.capital.CapitalRatio
+import com.openbank.risk.domain.capital.CapitalRegime
 import com.openbank.risk.domain.capital.CreditRiskCapital
 import com.openbank.risk.domain.capital.CurrencyCapital
 import com.openbank.risk.domain.capital.OwnFunds
@@ -184,6 +186,42 @@ fun CapitalAnalysis.toResponse(): CapitalResponse {
     )
 }
 
+private fun CapitalAnalysis.choices(c: CapitalClassification): List<String> {
+    val retail = parameters.citation(c.retailTreatment.factor)
+    val grade = parameters.citation(c.bankScraGrade.factor)
+    val sovereign = "(${parameters[CapitalFactor.RW_SOVEREIGN_DOMESTIC_CURRENCY]}); in any other currency the " +
+        "unrated weight (${parameters[CapitalFactor.RW_SOVEREIGN_UNRATED]}). The sovereign's rating is not in the data."
+    val unmapped = "Only GL accounts named in the mapping are weighted; any other asset balance is listed as not " +
+        "classified and counted nowhere, so RWA is understated by exactly those balances."
+    return when (parameters.regime) {
+        CapitalRegime.BCBS -> listOf(
+            "Loans and overdrafts are '${c.retailTreatment.wire}' ($retail): the " +
+                "d424 ¶55 regulatory-retail criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's " +
+                "natural-person test cannot be verified from the snapshot.",
+            "Every bank exposure is unrated and weighted at SCRA Grade ${c.bankScraGrade.name} " +
+                "($grade): no external ratings or counterparty capital disclosures " +
+                "are in the data (¶23, ¶26). Short-term weights (¶30) need original maturities a GL balance " +
+                "does not carry; the ¶31 sovereign floor needs the counterparty's jurisdiction, and at Grade C " +
+                "(150%, the table maximum) it cannot bind.",
+            "Central-bank claims in ${c.domesticCurrency} take the d424 ¶8 national-discretion weight $sovereign",
+            unmapped,
+        )
+        CapitalRegime.EU -> listOf(
+            "Loans and overdrafts are '${c.retailTreatment.wire}' ($retail): the CRR Art. 123 retail criteria " +
+                "(natural person or SME, one of a significant number of similar exposures, the EUR 1m obligor-group " +
+                "limit) cannot be verified from the snapshot, and an exposure that does not meet them is a " +
+                "corporate exposure (Art. 122), not retail. 75% only with evidence of every Art. 123 criterion.",
+            "Every institution exposure is unrated and weighted under SCRA (CRR Art. 121) at Grade " +
+                "${c.bankScraGrade.name} ($grade): no external ratings or counterparty capital disclosures are in " +
+                "the data. The short-term SCRA weights (original maturity up to three months) need original " +
+                "maturities a GL balance does not carry, so the base weights apply.",
+            "Central-bank claims in ${c.domesticCurrency} take the CRR Art. 114(4) weight (domestic currency, " +
+                "funded in it) $sovereign",
+            unmapped,
+        )
+    }
+}
+
 @Suppress("LongMethod") // one statement per assumption; splitting it would only scatter them
 private fun CapitalAnalysis.assumptions(): CapitalAssumptionsDto {
     val c = parameters.classification
@@ -191,45 +229,40 @@ private fun CapitalAnalysis.assumptions(): CapitalAssumptionsDto {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         source = parameters.source,
-        scope = "BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. Pillar 1 credit risk only.",
-        factors = CapitalFactor.entries.map { FactorDto(it.key, parameters[it], it.citation) },
+        scope = parameters.regime.scope,
+        factors = CapitalFactor.entries.map { FactorDto(it.key, parameters[it], parameters.citation(it)) },
         classification = CapitalClassificationDto(
             retailTreatment = c.retailTreatment.wire,
             bankScraGrade = c.bankScraGrade.name,
             domesticCurrency = c.domesticCurrency,
             glAccounts = c.glAccounts.toSortedMap().map { (k, v) -> v.mapping(k) },
             glAccountTypes = c.glAccountTypes.toSortedMap().map { (k, v) -> v.mapping(k) },
-            choices = listOf(
-                "Loans and overdrafts are '${c.retailTreatment.wire}' (${c.retailTreatment.factor.citation}): the " +
-                    "d424 ¶55 regulatory-retail criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's " +
-                    "natural-person test cannot be verified from the snapshot.",
-                "Every bank exposure is unrated and weighted at SCRA Grade ${c.bankScraGrade.name} " +
-                    "(${c.bankScraGrade.factor.citation}): no external ratings or counterparty capital disclosures " +
-                    "are in the data (¶23, ¶26). Short-term weights (¶30) need original maturities a GL balance " +
-                    "does not carry; the ¶31 sovereign floor needs the counterparty's jurisdiction, and at Grade C " +
-                    "(150%, the table maximum) it cannot bind.",
-                "Central-bank claims in ${c.domesticCurrency} take the d424 ¶8 national-discretion weight " +
-                    "(${parameters[CapitalFactor.RW_SOVEREIGN_DOMESTIC_CURRENCY]}); " +
-                    "in any other currency the unrated ¶7 weight " +
-                    "(${parameters[CapitalFactor.RW_SOVEREIGN_UNRATED]}). " +
-                    "The sovereign's rating is not in the data.",
-                "Only GL accounts named in the mapping are weighted; any other asset balance is listed as not " +
-                    "classified and counted nowhere, so RWA is understated by exactly those balances.",
-            ),
+            choices = choices(c),
         ),
         exposureValue =
         "EAD = on-balance carrying amount of each position / loan instrument in the tied-out snapshot " +
-            "(d424 ¶92 'net of specific provisions' cannot be applied: the loan loss allowance is not allocated to loans).",
+            "(netting specific credit risk adjustments, CRR Art. 111(1) / d424 ¶92, cannot be applied: the loan loss " +
+            "allowance is not allocated to loans).",
         creditRiskMitigation = "None applied. Loan collateral exists in lending but is not on the snapshot, and no " +
-            "guarantees, credit derivatives or netting agreements are in the data (d424 Part I section D not used).",
+            "guarantees, credit derivatives or netting agreements are in the data (CRR Part Three Title II Chapter 4 / d424 Part I section D not used).",
         offBalanceSheet =
         "None in the snapshot (no undrawn commitments, guarantees or letters of credit), so no credit " +
-            "conversion factor (d424 ¶78-85) is applied: the category is absent, not zero-weighted.",
-        defaulted = "IFRS 9 stage 3 is the documented proxy for d424 ¶90 default (> 90 days past due or unlikely to " +
-            "pay). Specific provisions per loan are not in the data, so ¶92's 150% (provisions < 20%) applies; " +
-            "the 100% bucket needs per-loan provisions. A loan read at GL level carries no stage and is weighted as retail.",
+            "conversion factor (CRR Art. 111 / d424 ¶78-85) is applied: the category is absent, not zero-weighted.",
+        defaulted = when (parameters.regime) {
+            CapitalRegime.BCBS ->
+                "IFRS 9 stage 3 is the documented proxy for d424 ¶90 default (> 90 days past due or unlikely to " +
+                    "pay). Specific provisions per loan are not in the data, so ¶92's 150% (provisions < 20%) " +
+                    "applies; the 100% bucket needs per-loan provisions."
+            CapitalRegime.EU ->
+                "IFRS 9 stage 3 is the documented proxy for default under CRR Art. 178 (> 90 days past due or " +
+                    "unlikely to pay). Specific credit risk adjustments per loan are not in the data, so the " +
+                    "CONSERVATIVE Art. 127(1) weight of 150% (adjustments < 20% of the unsecured part) applies to " +
+                    "every defaulted loan; the 100% bucket needs per-loan adjustments."
+        } + " A loan read at GL level carries no stage and is weighted by the retail treatment.",
         ownFunds = "Own funds from the capital GL accounts as booked: CET1 = 6000-6030 less the 6040 deduction " +
-            "(bcbs189 ¶52, ¶66-89 as already booked); AT1 = 6050 (¶54); Tier 2 = 6060 (¶57). No further regulatory " +
+            "(CRR Art. 26, Art. 36 / bcbs189 ¶52, ¶66-89, as already booked); " +
+            "AT1 = 6050 (CRR Art. 51 / bcbs189 ¶54); Tier 2 = 6060 (CRR Art. 62 / bcbs189 ¶57). " +
+            "No further regulatory " +
             "adjustment, no Tier 2 amortisation, and no current-year result (INCOME / EXPENSE not closed) is applied.",
         creditRiskOnly = CreditRiskCapital.CREDIT_RISK_ONLY_NOTE,
         currencyAggregation = CreditRiskCapital.AGGREGATION_NOTE,

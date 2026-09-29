@@ -15,10 +15,13 @@ import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionBuilder
 import com.openbank.risk.domain.model.PositionKind
 import com.openbank.risk.domain.model.ScheduledInstallment
+import com.openbank.risk.domain.model.TreasuryDeal
+import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * LCR / NSFR on hand-computed fixtures, with the SHIPPED parameter set. Each cap test states the
@@ -277,5 +280,85 @@ class LiquidityTest {
         assertThat(run(listOf(gl("1510", "ASSET", "1000"))).notes).doesNotContain(Liquidity.PLEDGED_COLLATERAL_NOTE)
         assertThat(run(listOf(gl("2320", "LIABILITY", "0"), gl("1510", "ASSET", "1000"))).notes)
             .doesNotContain(Liquidity.PLEDGED_COLLATERAL_NOTE)
+    }
+
+    private fun deal(product: String, principal: String, maturityInDays: Long, ccy: String = "CZK"): Instrument =
+        TreasuryInstrumentMapper.toInstrument(
+            TreasuryDeal(
+                dealId = UUID.randomUUID(),
+                product = product,
+                counterpartyId = "BANK-A",
+                currency = ccy,
+                principal = BigDecimal(principal),
+                rate = BigDecimal("3.00"),
+                valueDate = asOf.minusDays(5),
+                maturityDate = asOf.plusDays(maturityInDays),
+                state = TreasuryDeal.SETTLED,
+            ),
+        )
+
+    private fun dealPosition(i: Instrument) =
+        Position(PositionKind.TREASURY_DEAL, i.glAccountCode, "ASSET", i.currency, null, i.outstanding, i.id)
+
+    private fun placementInflows(vararg deals: Instrument, extra: List<Position> = emptyList()) =
+        run(deals.map(::dealPosition) + extra, instruments = deals.toList()).total!!.lcr
+
+    private fun LcrResult.placementLines() =
+        inflows.filter { it.factorKey == LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D.key }
+
+    @Test
+    fun `a money-market placement maturing within 30 days is a 100 percent inflow of its principal`() {
+        val lcr = placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", 10))
+        assertThat(lcr.placementLines()).hasSize(1)
+        assertThat(lcr.placementLines().single().glAccountCode).isEqualTo("1500")
+        assertThat(lcr.totalInflows).isEqualByComparingTo("2000")
+    }
+
+    @Test
+    fun `a placement maturing exactly on day 30 is inside the horizon, day 31 is not`() {
+        assertThat(placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", 30)).totalInflows)
+            .isEqualByComparingTo("2000")
+        assertThat(placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", 31)).placementLines()).isEmpty()
+    }
+
+    @Test
+    fun `a past-due placement is not counted as a future inflow`() {
+        assertThat(placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", -1)).placementLines()).isEmpty()
+    }
+
+    @Test
+    fun `a placement maturing beyond 30 days gives no inflow and keeps its RSF`() {
+        val placement = deal(TreasuryDeal.MM_PLACEMENT, "1000", 90)
+        val r = run(
+            listOf(dealPosition(placement)),
+            instruments = listOf(placement),
+        ).total!!
+        assertThat(r.lcr.inflows).isEmpty()
+        assertThat(r.nsfr.totalRsf).isEqualByComparingTo("1000")
+    }
+
+    @Test
+    fun `the CNB deposit facility is HQLA Level 1 and never also an inflow`() {
+        val lcr = placementInflows(deal(TreasuryDeal.CNB_DEPOSIT_FACILITY, "4000", 1))
+        assertThat(lcr.hqla.level1).isEqualByComparingTo("4000")
+        assertThat(lcr.inflows).isEmpty()
+    }
+
+    @Test
+    fun `a GL-level placement balance with no contract data gives no inflow`() {
+        assertThat(run(listOf(gl("1500", "ASSET", "2000"))).total!!.lcr.inflows).isEmpty()
+    }
+
+    @Test
+    fun `placement inflows are still capped at 75 percent of outflows`() {
+        // Outflow 1000 (2310, 100%); placement inflow 2000 uncapped would net to −1000.
+        val lcr = placementInflows(
+            deal(TreasuryDeal.MM_PLACEMENT, "2000", 7),
+            extra = listOf(gl("2310", "LIABILITY", "-1000")),
+        )
+        assertThat(lcr.totalInflows).isEqualByComparingTo("2000")
+        assertThat(lcr.inflowCapBinding).isTrue()
+        assertThat(lcr.cappedInflows).isEqualByComparingTo("750")
+        assertThat(lcr.netOutflows).isEqualByComparingTo("250")
     }
 }

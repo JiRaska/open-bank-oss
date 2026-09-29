@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "b89dd22a467b37f0"
+    openbank.tech/policy-checksum: "11b1a39ad9b93acb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -613,9 +613,16 @@ data:
     # Every rule requires a real person: principal.type HUMAN and never a `service-account-` id. The
     # Keycloak service-accounts the platform authenticates as are classified HUMAN and hold
     # ROLE_OPERATOR in at least one realm (#3765/#3734), so without the exclusion a realm role granted
-    # to a machine by mistake would open booking to it. AI_AGENT principals get NOTHING here: no
-    # agents.yaml charter holds a treasury capability yet (ADR-0315 D10 is a follow-up), so an agent
-    # cannot even draft.
+    # to a machine by mistake would open booking to it.
+    #
+    # AI_AGENT principals get NOTHING from this file, deliberately. ADR-0315 D10's agent grant lives in
+    # ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the three reads
+    # + treasury.deal.draft; tools.deny: every other treasury.deal.* action and treasury.nostro.*) —
+    # and reaches this bundle through base rest.rego's `agent-charter-allows`, which hands the REST
+    # action to agents.allow (charter allow AND not charter deny AND not hard-denied). A second grant
+    # here would be a copy that drifts. treasury_rest_ext_test.rego holds this file to granting an agent
+    # nothing; openbank-infra/opa/build-bundle.sh asserts the charter's allow/deny against the REAL
+    # agents data (must-ALLOW draft, must-DENY approve / settle / override-limit / nostro.upload).
     #
     # WHY NOT `rules.yaml: authz.role_action_matrix`. A line there is a grant to a MACHINE that no
     # policy can veto (matrix-allows consults no service-account exclusion), and every write here moves
@@ -1016,6 +1023,27 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
