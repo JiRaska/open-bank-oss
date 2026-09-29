@@ -121,3 +121,24 @@ test_staff_create_case if {
 test_viewer_may_not_create_case if {
 	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "amlCase.create"}
 }
+
+# #10486 batch 8
+b8agent_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+
+test_b8agent_own_identity_reads if {
+	every action in {"amlCase.list", "amlCase.read"} {
+		"service-agent-aml-case-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-agent"), "action": action}
+	}
+}
+
+test_b8agent_own_identity_never_writes if {
+	every action in {"amlCase.create", "amlCase.updateDecision"} {
+		not "service-agent-aml-case-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-agent"), "action": action}
+	}
+}
+
+test_b8agent_other_api_identity_gets_nothing if {
+	every action in {"amlCase.list", "amlCase.read"} {
+		not "service-agent-aml-case-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-services"), "action": action}
+	}
+}
