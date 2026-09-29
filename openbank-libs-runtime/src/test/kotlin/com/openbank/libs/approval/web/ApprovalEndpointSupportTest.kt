@@ -32,7 +32,7 @@ class ApprovalEndpointSupportTest {
 
         assertThatThrownBy {
             runBlocking {
-                support.decide(approval.id, DecideApprovalRequest(approve = true), identityOf("maker-1"))
+                support.decide(approval.id, DecideApprovalRequest(approve = true)) { identityOf("maker-1") }
             }
         }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
 
@@ -45,7 +45,7 @@ class ApprovalEndpointSupportTest {
 
         assertThatThrownBy {
             runBlocking {
-                support.decide(approval.id, DecideApprovalRequest(approve = false), identityOf("maker-1"))
+                support.decide(approval.id, DecideApprovalRequest(approve = false)) { identityOf("maker-1") }
             }
         }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
     }
@@ -54,10 +54,16 @@ class ApprovalEndpointSupportTest {
     fun `a different checker approves, and the response carries the wire shape`(): Unit = runBlocking {
         val approval = store.create("opsmessage.compose", "res-1", "maker-1")
 
-        val response = support.decide(approval.id, DecideApprovalRequest(approve = true), identityOf("checker-1"))
+        val response = support.decide(approval.id, DecideApprovalRequest(approve = true)) { identityOf("checker-1") }
 
         assertThat(response.status).isEqualTo(200)
         val body = response.entity as ApprovalResponse
+        // Every field of PendingApproval -> ApprovalResponse (toApprovalResponse()), pinned here
+        // because this is the only mapping test the move to libs-runtime (#11079) left behind —
+        // transaction-service's own ApprovalResourceMappingTest asserted `id` and `action` too,
+        // and those two were not otherwise covered anywhere in this class.
+        assertThat(body.id).isEqualTo(approval.id)
+        assertThat(body.action).isEqualTo("opsmessage.compose")
         assertThat(body.status).isEqualTo("APPROVED")
         assertThat(body.decidedBy).isEqualTo("checker-1")
         assertThat(body.makerId).isEqualTo("maker-1")
@@ -68,14 +74,14 @@ class ApprovalEndpointSupportTest {
     @Test
     fun `an unknown id is a 404`() {
         assertThatThrownBy {
-            runBlocking { support.decide("nope", DecideApprovalRequest(approve = true), identityOf("checker-1")) }
+            runBlocking { support.decide("nope", DecideApprovalRequest(approve = true)) { identityOf("checker-1") } }
         }.isInstanceOf(NotFoundException::class.java)
     }
 
     @Test
     fun `a null body is an IllegalArgumentException (400), not an NPE (500)`() {
         assertThatThrownBy {
-            runBlocking { support.decide("any", null, identityOf("checker-1")) }
+            runBlocking { support.decide("any", null) { identityOf("checker-1") } }
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
@@ -92,7 +98,7 @@ class ApprovalEndpointSupportTest {
         val untouched = mockk<SecurityIdentity>()
 
         assertThatThrownBy {
-            runBlocking { support.decide("any", null, untouched) }
+            runBlocking { support.decide("any", null) { untouched } }
         }.isInstanceOf(IllegalArgumentException::class.java)
 
         verify(exactly = 0) { untouched.principal }

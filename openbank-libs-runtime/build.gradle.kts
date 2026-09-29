@@ -97,7 +97,7 @@ dependencies {
     // consuming service. Only the ObjectMapperCustomizer interface is compiled against, and it is
     // identical across both versions. Correcting the whole block to the real BOM versions is the
     // separate change the header calls for (#5482), and needs those checksums added with it.
-    compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.3")
     compileOnly("io.quarkus:quarkus-jackson:3.33.2")
 
     // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
@@ -136,7 +136,7 @@ dependencies {
     testImplementation("io.quarkus:quarkus-redis-client:3.33.2")
     // NulByteGuardsTest drives the REAL ObjectMapper through the REAL customizer, so the module
     // registration and the deserializer are both exercised rather than asserted about.
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.3")
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
     testImplementation("io.quarkus:quarkus-jackson:3.33.2")
     testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
@@ -152,6 +152,11 @@ dependencies {
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
+    // OpenBaoTransitFieldProtectorIT drives a REAL openbao/openbao container (ADR-0320 P3 security
+    // review): the stub-based AAD/rewrap tests cannot tell whether the stub matches the server.
+    // 2.0.5 (the line the Quarkus BOM resolves for every service), not the catalog's 1.20.4: 1.20.x
+    // negotiates Docker API 1.32, which Docker Engine 29 (min API 1.40) rejects, so the container
+    // never starts and a local run can only SKIP. Measured 2026-09-27 on this module.
     // RedisIdempotencyStoreIT runs the store's three Lua scripts against a REAL Valkey: the unit
     // test only exercises a Kotlin twin of them, which cannot catch a Lua defect.
     // 2.0.5 is what the Quarkus BOM resolves for every service; the catalog's 1.20.4 bundles a

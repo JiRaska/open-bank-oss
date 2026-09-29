@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pricing REST authorization extension. It is mounted with OpenBank's shared rest.rego, which owns
+# the final deny-by-default decision object at data.openbank.rest.allow.
+package openbank.rest
+
+import rego.v1
+
+# Pricing's PDP adapter enriches the shared OpenBank authorization query with the verified tenant
+# and OAuth scopes. The policy repeats the endpoint scope contract as an independently evaluated
+# OPA fact. No blanket service-account or role grant exists: a future machine caller must receive
+# a separately reviewed, action-scoped rule.
+allowed_reasons contains "pricing-oauth-scope" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	object.get(input.principal.attributes, "tenant", "") != ""
+	some scope in object.get(required_scopes, input.action, set())
+	scope in object.get(input.principal.attributes, "scopes", [])
+}
+
+required_scopes := {
+	"pricingDecision.calculate": {"pricing.quote"},
+	"pricingDecision.read": {"pricing.quote"},
+	"pricingDecision.replay": {"pricing.quote"},
+	"simulation.create": {"pricing.simulate"},
+	"simulation.read": {"pricing.simulate"},
+	"commitmentEvaluation.create": {"pricing.commitment.evaluate"},
+	"commitmentEvaluation.read": {"pricing.commitment.evaluate"},
+	"commitmentEvaluation.list": {"pricing.agreement.read"},
+	"agreement.create": {"pricing.agreement.activate"},
+	"agreement.activate": {"pricing.agreement.activate"},
+	"agreement.read": {"pricing.agreement.read"},
+	"pricingInstruction.acknowledge": {"pricing.instruction.ack"},
+	"publication.read": {"pricing.bundle.read"},
+	"publication.submit": {"pricing.bundle.publish"},
+	"publication.activate": {"pricing.bundle.publish"},
+	"publication.approve": {"pricing.bundle.approve"},
+	"deal.create": {"pricing.deal.write"},
+	"deal.revise": {"pricing.deal.write"},
+	"deal.submit": {"pricing.deal.write"},
+	"deal.read": {"pricing.deal.read"},
+	"pricingDecision.profitability": {"pricing.quote"},
+	"companyProfile.read": {"pricing.deal.read"},
+	"publicCompanySignals.read": {"pricing.deal.read"},
+	"companyRegistryCoverage.read": {"pricing.deal.read"},
+	"companyRegistryCoverage.write": {"pricing.deal.write"},
+	"companyContractCoverage.read": {"pricing.deal.read"},
+	"companyContractCoverage.write": {"pricing.deal.write"},
+	"riskAssessment.read": {"pricing.deal.read"},
+	"financialHealth.read": {"pricing.deal.read"},
+	"vatValidation.read": {"pricing.deal.read"},
+	"dealApproval.read": {"pricing.deal.read"},
+	"deal.approve": {"pricing.deal.approve"},
+	"priceProposal.submit": {"pricing.price-proposal.write"},
+	"priceProposal.read": {"pricing.price-proposal.read"},
+	"priceProposal.approve": {"pricing.price-proposal.approve"},
+	"aiAdvisory.request": {"pricing.advisory.request"},
+	"aiAdvisory.read": {"pricing.advisory.read"},
+	# The operation reader deliberately supports any one of the scopes its HTTP handler supports.
+	"controlPlaneOperation.read": {
+		"pricing.simulate",
+		"pricing.commitment.evaluate",
+		"pricing.agreement.read",
+		"pricing.bundle.read",
+		"pricing.advisory.read",
+	},
+}

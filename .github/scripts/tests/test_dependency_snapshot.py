@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,6 +87,12 @@ class MergeTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_serial_shards_obey_total_resolution_budget(self):
+        self.assertEqual(subject.shard_timeout(1200, 0, 240), 240)
+        self.assertEqual(subject.shard_timeout(1200, 1195, 180), 5)
+        with self.assertRaisesRegex(RuntimeError, '20-minute budget'):
+            subject.shard_timeout(1200, 1200, 180)
+
     def run_case(self, case):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -134,18 +141,26 @@ class RunnerTests(unittest.TestCase):
                 if case == 'duplicate-snapshot':
                     (reports / 'other.json').write_text(json.dumps(part))
 
-            with patch.object(subject, 'run_bounded', side_effect=execute), patch('subprocess.check_output', return_value=SHA+'\n'):
-                if case == 'success':
+            clock = (patch('time.monotonic', side_effect=[0, 0, 0, 0, 1190, 1190, 1190])
+                     if case == 'budget-truncated' else
+                     patch('time.monotonic', side_effect=[0, 0, 0, 0, 1200, 1200])
+                     if case == 'budget-expired' else nullcontext())
+            with patch.object(subject, 'run_bounded', side_effect=execute), \
+                    patch('subprocess.check_output', return_value=SHA+'\n'), clock:
+                if case in ('success', 'budget-truncated'):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
-                    self.assertEqual(timeouts, [240, 180])
+                    self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
                 else:
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
                     self.assertFalse((output / 'merged.json').exists())
+                    if case == 'budget-expired':
+                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(timeouts, [240])
 
     def test_real_failed_process_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -163,6 +178,10 @@ class RunnerTests(unittest.TestCase):
 
     def test_complete_generation(self):
         self.run_case('success')
+
+    def test_serial_shards_share_one_deadline(self):
+        self.run_case('budget-truncated')
+        self.run_case('budget-expired')
 
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',

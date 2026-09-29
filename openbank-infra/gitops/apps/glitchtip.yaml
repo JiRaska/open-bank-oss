@@ -205,7 +205,11 @@ spec:
         postgresql:
           enabled: true
           cluster:
-            instances: 1
+            # Two instances: backups stay off (the data is disposable, above), but
+            # AVAILABILITY is not -- while this database is down, every crash report
+            # the customer apps' SDKs send is lost. Spot interruptions on 2026-09-28
+            # took the single instance down repeatedly (ADR-0325, #11304).
+            instances: 2
             storage:
               size: 5Gi
               storageClass: gp3
