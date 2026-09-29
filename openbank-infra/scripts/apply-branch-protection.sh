@@ -34,15 +34,13 @@ RULESET_NAME="main-protection"
 # not have to enumerate all 29 services here.
 #
 # CI GATE MIGRATION — PHASE 1 OF 2:
-# `Validate manifests` used to be the required context for the three gate
-# shards. That adds one serial hosted-runner allocation after all substantive
-# work is complete; in #9986 the no-op aggregator waited almost seven minutes
-# and then ran for seconds. Require those shards directly while retaining the
-# aggregator during the transition. `Admin UI` remains a separate follow-up:
-# this script cannot itself prove its PR-only skipped-build path. A later change
-# may add it after reviewing that evidence. Another follow-up may remove
-# `Validate manifests` from both this list and ci.yml after the new contexts
-# are observed live; the overlap intentionally preserves shard coverage.
+# The three gate shards are already required directly. Add the Admin UI
+# aggregator as a required context now that hosted PR runs have proven both
+# its skipped-build and selected cross-package-guard paths. Keep `Validate
+# manifests` required until Admin UI is observed as a required, green context
+# on both UI and non-UI PRs. Only then may phase 2 remove the extra serial
+# hosted-runner job (#11442). This script is additive-only: phase 2 needs a
+# separately reviewed ruleset removal before deleting the job from ci.yml.
 #
 # NOTE on matrix checks: a job with a matrix produces one check PER cell named
 # "Job (cell)" — e.g. CodeQL becomes "CodeQL (java-kotlin)" and
@@ -51,6 +49,7 @@ RULESET_NAME="main-protection"
 REQUIRED_CHECKS=(
   "all-green"                                # Services CI — aggregates the per-service build matrix
   "Validate manifests"                       # CI — transitional aggregator; remove only in phase 2
+  "Admin UI"                                 # CI — direct UI and cross-package guard aggregate
   "gates (gitops-api)"                       # CI — direct governance shard
   "gates (lint-supplychain-security)"        # CI — direct governance shard
   "gates (registry-kotlin-data)"             # CI — direct governance shard

@@ -55,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
+          python3 .github/scripts/tests/test_ci_admin_ui_aggregate.py
           if [ "${{ github.event_name }}" = "push" ]; then
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -299,6 +300,14 @@ jobs:
             echo "Admin UI change detection did not succeed ($DETECTION_RESULT)."
             exit 1
           fi
+          if [ "$UI_CHANGED" != "true" ] && [ "$UI_CHANGED" != "false" ]; then
+            echo "Admin UI change detection returned an invalid selection ($UI_CHANGED)."
+            exit 1
+          fi
+          if [ "$UI_CHANGED" = "false" ] && [ "$REGISTRY_TEST" != "true" ] && [ "$REGISTRY_TEST" != "false" ]; then
+            echo "Admin UI registry guard selection is missing or invalid ($REGISTRY_TEST)."
+            exit 1
+          fi
           if [ "$UI_CHANGED" = "false" ] && { [ -n "$RBAC_TESTS" ] || [ "$REGISTRY_TEST" = 'true' ]; } && [ "$RBAC_RESULT" != "success" ]; then
             echo "Admin UI cross-package guards did not pass ($RBAC_RESULT)."
             exit 1
@@ -318,6 +327,14 @@ jobs:
             echo "Re-run it (or push again) — a cancelled run must not read as a passing gate."
             exit 1
           fi
+          if [ "$UI_CHANGED" = "true" ] && [ "$RESULT" != "success" ]; then
+            echo "Admin UI files changed, but the build did not succeed ($RESULT)."
+            exit 1
+          fi
+          if [ "$UI_CHANGED" = "false" ] && [ "$RESULT" != "skipped" ]; then
+            echo "Admin UI files did not change, but the build result was unexpected ($RESULT)."
+            exit 1
+          fi
           echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
 
   # ---------------------------------------------------------------------------
@@ -334,14 +351,11 @@ jobs:
   # max(shard) rather than sum(gates) — measured locally on the full set: 500s of gate CPU,
   # 187s for the slowest single gate.
   #
-  # `Validate manifests` (below) remains during phase 1 of the required-context migration.
-  # main-protection first gains the three direct shard contexts while this old context
-# overlaps those shards. `Admin UI` remains a separate follow-up because this updater cannot
-# itself prove the PR-only skipped-build path. This non-UI governance PR supplies reviewable
-# evidence (`Admin UI build` skipped while `Admin UI` succeeded), but does not require that
-# context yet. A later follow-up may add it, and another may remove `Validate manifests`
-# only after the three direct shard contexts are required and green on a real PR. This order keeps
-  # shard coverage intact across the GitHub-side ruleset and workflow changes.
+  # All three shard contexts are required directly. `Validate manifests` remains
+  # required because it also binds the Admin UI result to branch protection.
+  # Phase 1 adds `Admin UI` to the required contexts. After that is live and
+  # green on UI and non-UI PRs, a separately reviewed phase 2 may remove this
+  # aggregate from the ruleset, then from this workflow (#11442).
   #
   # Shards are WALL-TIME buckets, not a taxonomy — rebalance `group:` in the manifest when
   # one gets slow. Adding a group here without one in the manifest fails loudly: run-gates.py
