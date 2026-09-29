@@ -30,7 +30,7 @@ triaging an incident that starts on `card-processing`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8157` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
 - Logs: `kubectl logs -n payments deploy/card-processing-service -f`, or Loki
   `{namespace="payments"}`.
