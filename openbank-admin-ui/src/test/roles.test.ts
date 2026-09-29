@@ -6,7 +6,9 @@ describe('hasPermission', () => {
   // The one deliberate gap: treasury deal WRITES. TreasuryResource's method-level @RolesAllowed
   // admits only the desk roles (ADR-0315), so a UI grant to ADMIN would render buttons that 403.
   // treasury-rbac.guard.test.ts ties these to the Kotlin annotations.
-  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit'])
+  // #10896: NostroResource's upload endpoint is method-level APPROVER only, same shape as the
+  // treasury deal writes above — ADMIN sits in the class-level @RolesAllowed but not this method's.
+  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload'])
 
   it('returns true for admin on any permission, except the service-excluded treasury writes', () => {
     const admin = [ROLES.ADMIN]
