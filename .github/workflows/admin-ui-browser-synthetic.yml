@@ -44,6 +44,7 @@ jobs:
         working-directory: openbank-admin-ui
         env:
           OPENBANK_BROWSER: ${{ matrix.browser }}
+          OPENBANK_SYNTHETIC_JOURNEY: admin-ui-sso-boundary
           ADMIN_UI_EXPECTED_BUILD_SHA: ${{ inputs.expected_build_sha }}
           OPENBANK_BROWSER_VITALS_OUTPUT: build/test-intelligence/browser-vitals-${{ matrix.browser }}.json
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/admin-login-synthetic-${{ matrix.browser }}.xml
@@ -90,6 +91,7 @@ jobs:
         working-directory: openbank-admin-ui
         env:
           OPENBANK_BROWSER: ${{ matrix.browser }}
+          OPENBANK_SYNTHETIC_JOURNEY: admin-ui-security-excellence
           ADMIN_UI_SYNTHETIC_URL: https://admin.open-bank.tech/security/excellence
           ADMIN_UI_SYNTHETIC_EXPECT_AUTH_GATE: '1'
           ADMIN_UI_EXPECTED_BUILD_SHA: ${{ inputs.expected_build_sha }}
