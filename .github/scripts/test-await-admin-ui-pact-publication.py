@@ -95,15 +95,21 @@ class PublicationWaitTest(unittest.TestCase):
         match = re.search(r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^  [a-z][a-z-]*:|\Z)", services)
         self.assertIsNotNone(match)
         template = textwrap.dedent(match.group(1))
-        common = {"needs.changes.result": "success",
-                  "needs.build.result": "success",
-                  "needs.verification-metadata.result": "skipped"}
-        for changed, publication, expected_success in [
-            ("true", "success", True), ("true", "failure", False),
-            ("true", "skipped", False), ("", "skipped", True),
+        common = {"needs.changes.result": "success", "needs.build.result": "success"}
+        # The service aggregate also requires verification metadata for changed build files.
+        # Exercise both independent prerequisites so a merge cannot make either gate vacuous.
+        for changed, publication, modules, metadata, expected_success in [
+            ("true", "success", "", "skipped", True),
+            ("true", "failure", "", "skipped", False),
+            ("true", "skipped", "", "skipped", False),
+            ("", "skipped", "", "skipped", True),
+            ("", "skipped", "openbank-treasury-service", "skipped", False),
+            ("", "skipped", "openbank-treasury-service", "success", True),
         ]:
-            with self.subTest(changed=changed, publication=publication):
+            with self.subTest(changed=changed, publication=publication, modules=modules, metadata=metadata):
                 values = dict(common, **{"needs.changes.outputs.admin-ui-pact-changed": changed,
+                                         "needs.changes.outputs.verification-modules": modules,
+                                         "needs.verification-metadata.result": metadata,
                                          "needs.publication-ready.result": publication})
                 script = template
                 for key, value in values.items():
