@@ -45,7 +45,8 @@ import java.time.LocalDate
  * never a figure finrep derives: a pre-cap sum would overstate the buffer whenever a cap binds.
  *
  * Data gaps (ADR-0097): every row under the whole-template conditions of C 74.00 (read disabled, no
- * tied snapshot, empty or multi-currency book, unclassified balances); every value row when the run's
+ * tied snapshot, empty book, no combined CZK view or one in another currency — a multi-currency book
+ * is read from the engine's combined view, EU 2015/61 Art. 4(5) — unclassified balances); every value row when the run's
  * parameter set is not the 2015/61 set; r0030 when net outflows are not positive (the ratio is
  * undefined, not infinite); and r0010 (buffer) and r0030 (ratio, whose numerator is the buffer) when
  * the engine's notes say the collateral pledged for a secured central-bank borrowing is not modelled
@@ -133,11 +134,11 @@ object C7600Mapper {
     /** The engine's ratio (a fraction) as a percentage, 2 dp HALF_EVEN. */
     internal fun percent(ratio: BigDecimal): BigDecimal = ratio.movePointRight(2).setScale(2, RoundingMode.HALF_EVEN)
 
-    private fun gapReason(result: RiskLiquidityResult): String? = when {
-        result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
-        result.currencyCount > 1 || result.totalOutflows == null || result.netOutflows == null ->
-            "The risk engine's book is multi-currency (or it reported no net outflows) and it does not " +
-                "convert to one reporting currency, so no LCR can be stated (snapshot ${result.runId})."
+    private fun gapReason(result: RiskLiquidityResult): String? = RiskEngineFigures.combinedViewGap(
+        result,
+        "outflow or net-outflow total",
+        result.totalOutflows != null && result.netOutflows != null,
+    ) ?: when {
         result.unclassifiedBalances > 0 ->
             "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
                 "any of them could be HQLA, an outflow or an inflow, so the LCR could be misstated."

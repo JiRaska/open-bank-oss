@@ -35,8 +35,10 @@ class C7600MapperTest {
         unclassified: Int = 0,
         parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
         notes: List<String> = emptyList(),
+        currency: String? = "CZK",
+        totalNotStated: String? = null,
     ) = RiskLiquidityResult(
-        "run-7", asOf, parameterSet, "2", "CZK", emptyList(),
+        "run-7", asOf, parameterSet, "2", currency, emptyList(),
         BigDecimal("1000"), BigDecimal("300"), BigDecimal("400"), currencies, unclassified,
         totalOutflows = BigDecimal(outflows),
         totalInflows = BigDecimal(inflows),
@@ -49,6 +51,7 @@ class C7600MapperTest {
         netOutflows = net?.let(::BigDecimal),
         lcrRatio = ratio?.let(::BigDecimal),
         notes = notes,
+        totalNotStated = totalNotStated,
     )
 
     private fun render(r: RiskLiquidityResult) = C7600Mapper.map(RiskLiquidityLookup.found(r), asOf)
@@ -152,12 +155,25 @@ class C7600MapperTest {
     }
 
     @Test
-    fun `an empty book, a multi-currency book and unclassified balances are whole-template gaps`() {
+    fun `a multi-currency book is reported from the engine's combined CZK view`() {
+        val t = render(result(currencies = 2))
+        assertThat(t.at("r0030").isDataGap).isFalse()
+        assertThat(t.at("r0030").value).isEqualByComparingTo("611.76")
+        assertThat(t.at("r0010").value).isEqualByComparingTo("1529.41")
+    }
+
+    @Test
+    fun `an empty book, no combined view, a non-CZK total and unclassified balances are whole-template gaps`() {
         assertThat(render(result(currencies = 0)).cells).allSatisfy {
             assertThat(it.gapReason).contains("an empty book")
         }
-        assertThat(render(result(currencies = 2)).cells).allSatisfy {
-            assertThat(it.gapReason).contains("multi-currency")
+        val noView = result(currencies = 2, net = null, currency = null, totalNotStated = "no ČNB fixing for EUR")
+        assertThat(render(noView).cells).allSatisfy {
+            assertThat(it.isDataGap).isTrue()
+            assertThat(it.gapReason).contains("no combined CZK total", "no ČNB fixing for EUR")
+        }
+        assertThat(render(result(currency = "EUR")).cells).allSatisfy {
+            assertThat(it.gapReason).contains("is in EUR, not the reporting currency CZK")
         }
         assertThat(render(result(unclassified = 3)).cells).allSatisfy {
             assertThat(it.gapReason).contains("3 balance(s) are unclassified")
