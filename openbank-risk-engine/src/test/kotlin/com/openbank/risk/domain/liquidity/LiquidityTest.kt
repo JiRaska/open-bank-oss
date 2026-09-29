@@ -6,6 +6,7 @@ package com.openbank.risk.domain.liquidity
 
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.risk.domain.Fixtures
+import com.openbank.risk.domain.capital.FxRateUsed
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.InstrumentKind
@@ -17,6 +18,7 @@ import com.openbank.risk.domain.model.ScheduledInstallment
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDate
 
 /**
  * LCR / NSFR on hand-computed fixtures, with the SHIPPED parameter set. Each cap test states the
@@ -191,12 +193,65 @@ class LiquidityTest {
         assertThat(r.nsfr.totalRsf).isEqualByComparingTo("1000")
     }
 
+    private val eur25 = FxRateUsed("EUR", BigDecimal("25"), LocalDate.parse("2026-01-30"), "CNB")
+
     @Test
-    fun `a two-currency book has per-currency results and no total`() {
+    fun `a EUR and CZK book is combined in CZK at the fixing, with the ratio recomputed on converted figures`() {
+        // CZK: 1000 retail deposits -> outflow 100, no HQLA: CZK LCR 0.
+        // EUR: 40 at the ČNB (L1) against 40 other liability (100% outflow): EUR LCR 1.
+        val positions = listOf(deposit("1000"), gl("1510", "ASSET", "40", "EUR"), gl("2300", "LIABILITY", "-40", "EUR"))
+        val r = Liquidity.compute(positions, emptyList(), asOf, shipped, mapOf("EUR" to eur25))
+
+        val eur = r.currencies.single { it.currency == "EUR" }
+        assertThat(eur.lcr.hqla.stock).isEqualByComparingTo("40") // per-currency result stays in EUR
+        assertThat(eur.lcr.ratio).isEqualByComparingTo("1")
+        assertThat(r.currencies.single { it.currency == "CZK" }.lcr.ratio).isEqualByComparingTo("0")
+
+        val t = r.total!!
+        assertThat(t.currency).isEqualTo("CZK")
+        assertThat(t.lcr.hqla.lines.single().marketValue).isEqualByComparingTo("1000") // 40 × 25
+        assertThat(t.lcr.hqla.stock).isEqualByComparingTo("1000")
+        assertThat(t.lcr.totalOutflows).isEqualByComparingTo("1100") // 100 + 40 × 25 × 100%
+        // 1000 / 1100 — not the 0.5 average of the per-currency ratios, nor 40 / 140 unconverted.
+        assertThat(t.lcr.ratio).isEqualByComparingTo("0.909091")
+        assertThat(t.lcr.outflows.single { it.glAccountCode == "2300" }.label).contains("EUR at CNB 2026-01-30")
+        assertThat(t.nsfr.totalAsf).isEqualByComparingTo("900") // 1000 × 90% + 1000 × 0%
+        assertThat(r.fxRates).containsExactly(eur25)
+        assertThat(r.totalNotStated).isNull()
+        assertThat(r.notes.single()).isEqualTo(Liquidity.AGGREGATION_NOTE)
+    }
+
+    @Test
+    fun `the HQLA caps are recomputed on the combined stock, not summed from the per-currency caps`() {
+        val p = mapped("9002" to GlClass.HQLA_L2A)
+        // CZK: L1 100. EUR: L2A 10 (8.5 after the 15% haircut) and no L1, so on its own fully capped.
+        val positions = listOf(gl("1510", "ASSET", "100"), gl("9002", "ASSET", "10", "EUR"))
+        val r = Liquidity.compute(positions, emptyList(), asOf, p, mapOf("EUR" to eur25))
+        assertThat(r.currencies.single { it.currency == "EUR" }.lcr.hqla.stock).isEqualByComparingTo("0")
+        // Sum of per-currency stocks would be 100. Combined: L1 100 + L2A 212.5, capped at 2/3 × 100.
+        val hqla = r.total!!.lcr.hqla
+        assertThat(hqla.level2a).isEqualByComparingTo("212.5")
+        assertThat(hqla.stock.setScale(2, java.math.RoundingMode.HALF_EVEN)).isEqualByComparingTo("166.67")
+        assertThat(hqla.level2CapBinding).isTrue()
+    }
+
+    @Test
+    fun `a missing fixing states no combined total and says why, keeping the per-currency results`() {
         val r = run(listOf(deposit("100", "CZK"), deposit("100", "EUR")))
         assertThat(r.currencies.map { it.currency }).containsExactly("CZK", "EUR")
         assertThat(r.total).isNull()
+        assertThat(r.fxRates).isEmpty()
+        assertThat(r.totalNotStated).contains("EUR").contains(asOf.toString())
         assertThat(r.notes.single()).isEqualTo(Liquidity.AGGREGATION_NOTE)
+    }
+
+    @Test
+    fun `an all-CZK book needs no fixing and its total equals the CZK result`() {
+        val r = run(PositionBuilder.build(Fixtures.tiedOut()))
+        assertThat(r.fxRates).isEmpty()
+        assertThat(r.totalNotStated).isNull()
+        assertThat(r.total!!.lcr.totalOutflows).isEqualByComparingTo(r.currencies.single().lcr.totalOutflows)
+        assertThat(r.total!!.nsfr.ratio).isEqualByComparingTo(r.currencies.single().nsfr.ratio)
     }
 
     @Test

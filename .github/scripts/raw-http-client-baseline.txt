@@ -1,0 +1,31 @@
+# ADR-0320 P1 ratchet: per-file count of raw HttpClient.newBuilder()/newHttpClient() in service src/main.
+# Measured on origin/main 2026-09-26. Only ever lower or remove entries.
+openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/model/OpenAiCompatibleModelProvider.kt	1
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/clickhouse/ClickHouseClient.kt	1
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/erasure/VaultCryptoErasure.kt	1
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/HttpReconciliationSource.kt	1
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/schema/ApicurioSchemaCatalogSource.kt	1
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/sink/ClickHouseAnalyticsSink.kt	1
+openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/worm/S3WormArchive.kt	1
+openbank-campaign-service/src/main/kotlin/com/openbank/campaign/infrastructure/segment/SilverSegmentEvaluator.kt	1
+openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/crypto/OpenBaoTransitDekUnwrapper.kt	1
+openbank-case-coordinator-agent/src/main/kotlin/com/openbank/casecoordinator/infrastructure/policy/OpaCaseCollaborationPolicyAdapter.kt	1
+openbank-control-liveness-sentinel/src/main/kotlin/com/openbank/liveness/infrastructure/adapter/GitHubProposalAdapter.kt	1
+openbank-copilot-service/src/main/kotlin/com/openbank/copilot/infrastructure/authz/OpaToolGate.kt	1
+openbank-copilot-service/src/main/kotlin/com/openbank/copilot/infrastructure/model/OpenAiCompatibleModelProvider.kt	1
+openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/KeycloakAdminClient.kt	1
+openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/UpstreamClient.kt	1
+openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/webauthn/WebAuthnKeycloakClient.kt	1
+openbank-devops-agent/src/main/kotlin/com/openbank/devops/infrastructure/adapter/GitHubMetricsAdapter.kt	1
+openbank-devops-agent/src/main/kotlin/com/openbank/devops/infrastructure/adapter/RemediationProposalAdapter.kt	1
+openbank-document-service/src/main/kotlin/com/openbank/document/infrastructure/render/HttpPdfRenderAdapter.kt	1
+openbank-document-service/src/main/kotlin/com/openbank/document/infrastructure/render/OpenBaoClientSignatureAdapter.kt	1
+openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/infrastructure/adapter/GitHubProposalAdapter.kt	1
+openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt	1
+openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/FcmPushSender.kt	1
+openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/webhook/SlackOversightWebhookPublisher.kt	1
+openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/webhook/TeamsOversightWebhookPublisher.kt	1
+openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/crypto/TrustedListService.kt	1
+openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsImportService.kt	1
+openbank-security-scanner/src/main/kotlin/com/openbank/securityscanner/application/SecurityScannerService.kt	1
+openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/ingest/LogoFetcher.kt	1

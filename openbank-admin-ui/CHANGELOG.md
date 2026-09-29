@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.262.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.1...admin-ui-v0.262.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** secure gate evidence and verify CI dependencies ([#10899](https://github.com/JiRaska/open-bank-oss/issues/10899)) ([0172e3b](https://github.com/JiRaska/open-bank-oss/commit/0172e3bb08b6232a74fd67fab2406ccea8cd3728))
+
 ## [0.262.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.0...admin-ui-v0.262.1) (2026-09-28)
 
 

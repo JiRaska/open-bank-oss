@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.15.0...risk-engine-v0.16.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** compute the ČNB minimum reserve requirement ([#11015](https://github.com/JiRaska/open-bank-oss/issues/11015)) ([7a0b9eb](https://github.com/JiRaska/open-bank-oss/commit/7a0b9ebd5e81c531794b2aff4c93ab820524b317))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.14.0...risk-engine-v0.15.0) (2026-09-27)
 
 
