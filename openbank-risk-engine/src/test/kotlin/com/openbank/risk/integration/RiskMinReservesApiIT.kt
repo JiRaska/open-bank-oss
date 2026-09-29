@@ -50,7 +50,7 @@ class RiskMinReservesApiIT {
     private val cnbDeal = UUID.randomUUID()
     private val borrowing = UUID.randomUUID()
 
-    private fun seedDeal(dealId: UUID, product: String, counterparty: String, principal: String) = runBlocking {
+    private fun seedDeal(dealId: UUID, product: String, counterparty: String, principal: String): Unit = runBlocking {
         treasury.apply(
             TreasuryDealEvent(
                 state = "SETTLED",
