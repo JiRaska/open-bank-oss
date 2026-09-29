@@ -5,8 +5,10 @@
 # ClusterPolicies — Kyverno 1.19 deprecates kyverno.io/v1 ClusterPolicy and plans
 # its removal in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
 #
-# STAGE 1 OF 2 — AUDIT ONLY. Each ValidatingPolicy below runs NEXT TO its v1
-# original, which stays in Enforce and remains the only thing that can deny:
+# STAGE 1 OF 2 — AUDIT ONLY, except where a document says it has reached stage 2
+# (today: deny-nginx-snippet-annotations-cel, #11437). Each other ValidatingPolicy
+# below runs NEXT TO its v1 original, which stays in Enforce and remains the only
+# thing that can deny:
 #   validationActions: [Audit]   reports, never denies
 #   failurePolicy: Ignore        a webhook error on the shadow cannot block admission
 # Both are deliberate deviations from the v1 originals (Enforce / default Fail) and
@@ -78,7 +80,10 @@ spec:
         uses progressive delivery (ADR-0098) — use kind:Rollout to ensure canary
         analysis gates run before traffic reaches 100 %."
 ---
-# Shadow of deny-nginx-snippet-annotations.yaml. No exclusions, as in v1.
+# STAGE 2 (#11437): enforcing. The v1 original deny-nginx-snippet-annotations.yaml was
+# deleted in the same PR, so this is the only policy denying snippet annotations.
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. No exclusions, as in v1.
+# The -cel suffix is kept so metrics and PolicyReports stay continuous with stage 1.
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -87,12 +92,12 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: No ingress-nginx snippet annotations (ADR-0324) — CEL shadow
+    policies.kyverno.io/title: No ingress-nginx snippet annotations (ADR-0324) — CEL
     policies.kyverno.io/category: Security
     policies.kyverno.io/severity: high
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false
