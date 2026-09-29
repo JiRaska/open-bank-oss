@@ -132,7 +132,8 @@ jobs:
     name: main red watch
     # A rerun of an older main commit is not a verdict on the current main.
     # For workflow_run, github.sha is the default branch tip when this event fires;
-    # reject stale runs before making API calls or changing the main-red issue.
+    # reject stale runs before making API calls. Recheck the live ref before issue mutation
+    # because main can advance while this job waits for a runner.
     # Manual dispatch still permits historical run inspection without issue mutation.
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -201,7 +202,19 @@ jobs:
         with:
           script: |
             const fs = require('fs')
+            const { execFileSync } = require('child_process')
             const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
+            // Git smart HTTP avoids another call against the installation API quota. A failed
+            // lookup fails this step without changing an issue; an old result is no verdict
+            // on the current branch even if it was current when the event was queued.
+            const liveRef = execFileSync('git', ['ls-remote', 'origin', 'refs/heads/main'], {
+              encoding: 'utf8', timeout: 10000,
+            }).trim().split(/\s+/)[0]
+            if (!/^[0-9a-f]{40}$/.test(liveRef)) throw new Error('cannot resolve current main ref')
+            if (v.head_sha !== liveRef) {
+              core.info(`ignoring historical ${v.workflow} run ${v.run_id}: ${v.head_sha} is not current main ${liveRef}`)
+              return
+            }
             const LABEL = 'main-red'
             const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
             const marker = `<!-- main-red:${slug} -->`
