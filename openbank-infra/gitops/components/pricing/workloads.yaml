@@ -26,11 +26,7 @@ spec:
         app.kubernetes.io/name: pricing-service
         app.kubernetes.io/part-of: pricing
       annotations:
-<<<<<<< HEAD
         openbank.tech/policy-checksum: "d65f1589cab1a76f"
-=======
-        openbank.tech/policy-checksum: "d65f1589cab1a76f"
->>>>>>> origin/main
     spec:
       containers:
       - env:
