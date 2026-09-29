@@ -1185,6 +1185,7 @@ jobs:
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
+          UPDATED_SERVICES=()
 
           # FAIL CLOSED when the contract gate ran but crashed before emitting a verdict
           # (GATE_RAN=true, DEPLOYABLE_SERVICES empty). Without this the empty verdict was read
@@ -1229,6 +1230,7 @@ jobs:
               rm -f "${f}.bak"
               echo "  [${svc}] ${old_tag:-?} → ${tag} in ${f}"
               UPDATED+=("$f")
+              UPDATED_SERVICES+=("$svc")
             done
           done
 
@@ -1275,6 +1277,8 @@ jobs:
             fi
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            # Report changed images, not the larger contract-approved list.
+            printf 'updated_services=%s\n' "$(jq -cn '$ARGS.positional | unique' --args "${UPDATED_SERVICES[@]}")" >> "$GITHUB_OUTPUT"
             printf '%s\n' "${UPDATED[@]}"
           fi
 
@@ -1318,10 +1322,10 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
+            **Services with image tags updated by this PR:** ${{ steps.rewrite.outputs.updated_services }}
 
-            Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
-            triggering commit). ArgoCD syncs automatically after merge.
+            These manifests reference the sandbox images built from the triggering commit.
+            ArgoCD syncs automatically after merge.
 
             ## Linked issues
 
