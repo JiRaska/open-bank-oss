@@ -1,0 +1,37 @@
+# Triaged, EXPIRING exceptions for the openbank-keycloak image (platform-images.yml scan gate).
+#
+# Context (2026-09-28): the running Keycloak 26.6.3 carries two CRITICAL CVEs in Keycloak itself,
+# CVE-2026-11800 (JWT algorithm confusion, authentication bypass) and CVE-2026-18963
+# (unauthenticated account takeover via reset-credentials). Both are fixed only in the 26.7 line.
+# Upstream 26.7.3, the newest release, still bundles libraries with fixable CRITICAL CVEs, so
+# without these entries the gate blocks the very upgrade that removes the Keycloak CVEs.
+# Decision: ship 26.7.3 and track the library CVEs here, each with a reason and an expiry.
+#
+# Trivy stops honouring an entry after `expired_at`; the gate then fails again on its own. When
+# an upstream Keycloak release ships the fixed libraries, delete the entry, don't extend it.
+# Facts relied on (checked 2026-09-28): Keycloak listens plain HTTP in-cluster and TLS terminates
+# at ingress-nginx (keycloak.yaml: KC_HTTP_ENABLED, KC_PROXY_HEADERS); neither realm template
+# configures an X.509 authenticator; neither enables internationalization or supported locales.
+vulnerabilities:
+  - id: CVE-2026-75595
+    # io.netty:netty-handler 4.1.136.Final, fixed in 4.1.137.Final.
+    statement: >-
+      not_affected (vulnerable_code_not_in_execute_path): SNI routing bypass in netty's SNI handler.
+      Keycloak never terminates TLS here, so no SNI handshake reaches its netty stack.
+    expired_at: 2026-12-27
+  - id: CVE-2026-8763
+    # org.bouncycastle:bcprov-jdk18on 1.84 (server lib and admin CLI), fixed in 1.85.
+    statement: >-
+      not_affected (vulnerable_code_not_in_execute_path): X.509 name-constraints bypass via a trailing
+      dot. Only reachable when validating certificate chains with name constraints; no realm uses
+      X.509 client-certificate authentication, and Keycloak's own TLS is off.
+    expired_at: 2026-12-27
+  - id: CVE-2026-84939
+    # org.freemarker:freemarker 2.3.32, fixed in 2.3.35.
+    statement: >-
+      affected, mitigated, SHORT expiry: template path traversal via a malformed locale identifier.
+      Keycloak renders login/account themes with FreeMarker and the locale can come from the
+      request (kc_locale, Accept-Language). Both realms have internationalization disabled, which
+      pins the default locale, but that is configuration, not a code-level guarantee we verified.
+      Re-triage or upgrade before expiry.
+    expired_at: 2026-10-28

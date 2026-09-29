@@ -4,6 +4,15 @@
 # Journey: product-catalog-read (ADR-0252). It is intentionally non-mutating: the
 # direct in-cluster Service route exercises the deployed REST handler and its Postgres
 # projection without creating a customer, identity, payment, or catalog revision.
+#
+# Identity (issue #7324): the read is authenticated as the synthetic-only Keycloak client
+# `openbank-synthetic-catalog-read`. It holds NO realm role (not ROLE_API); its only grant is
+# the `catalog:read` client scope, which product-catalog's CatalogScopeRoleMapper turns into
+# CATALOG_SCOPE_READ, one of the roles GET /api/v1/products admits. The client secret arrives
+# from the ExternalSecret journey-product-catalog-read-oidc as an OPTIONAL env ref: while the
+# Vault KV entry is unseeded the pod still starts and the script fails its checks with an
+# explicit "credential absent" error. An unprovisioned identity is therefore a red run, never
+# a crash loop and never a green one.
 # Its availability verdict comes from the Job exit code through kube-state-metrics. Unlike
 # public-edge it does not remote-write k6 trends: adding another plaintext in-cluster
 # Prometheus edge before the observability mTLS work would make a test monitor weaken the
@@ -32,18 +41,58 @@ data:
       tags: { journey: 'product-catalog-read' },
     };
 
-    // This has no credentials and performs one GET only. Override it only for the
-    // catalog's documented falsification; the normal target is the real sandbox Service.
+    // Read-only by construction: one token request for the synthetic client, one GET.
+    // Override the bases only for the catalog's documented falsification; the normal
+    // targets are the real sandbox Services.
     const CATALOG_BASE = __ENV.CATALOG_BASE || 'http://product-catalog.accounts.svc:8104';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.CATALOG_READ_CLIENT_ID || 'openbank-synthetic-catalog-read';
+    const CLIENT_SECRET = __ENV.CATALOG_READ_CLIENT_SECRET || '';
+
+    // Never log the secret, the token, request headers or any response body: retained Job
+    // logs must stay secret-free. Only status codes and content types are printed.
+    function fetchToken() {
+      if (!CLIENT_SECRET) {
+        console.error('product-catalog-read credential absent: CATALOG_READ_CLIENT_SECRET is not set (ExternalSecret journey-product-catalog-read-oidc not provisioned); refusing to probe unauthenticated');
+        return null;
+      }
+      const res = http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+      if (res.status !== 200) {
+        console.error(`product-catalog-read token request failed: status=${res.status}`);
+        return null;
+      }
+      let token = null;
+      try { token = res.json('access_token'); } catch (_) { /* reported below */ }
+      if (typeof token !== 'string' || token.length === 0) {
+        console.error('product-catalog-read token response carried no access_token');
+        return null;
+      }
+      return token;
+    }
 
     export default function () {
+      const token = fetchToken();
+      if (token === null) {
+        // No identity means no functional evidence: fail all three checks explicitly rather
+        // than sending an anonymous request whose 401 would only prove transport.
+        check(null, {
+          'product catalog answers 200': () => false,
+          'product catalog returns JSON': () => false,
+          'product catalog response is an array': () => false,
+        });
+        return;
+      }
       const response = http.get(`${CATALOG_BASE}/api/v1/products`, {
+        headers: { Authorization: `Bearer ${token}` },
         tags: { endpoint: 'products-list', service: 'product-catalog' },
       });
       // A threshold exit proves the journey is red but does not say whether its first
       // boundary was authentication, routing, or the service itself. Status and content type
-      // are operational metadata only: never log response bodies or request headers because
-      // a future read-only identity must remain secret-free in retained Job logs.
+      // are operational metadata only: never log response bodies or request headers.
       if (response.status !== 200) {
         console.error(`product-catalog-read unexpected response: status=${response.status} content_type=${response.headers['Content-Type'] || 'absent'}`);
       }
@@ -102,6 +151,15 @@ spec:
                 - run
                 - --quiet
                 - /scripts/journey.js
+              env:
+                # Optional on purpose (#7324): an unseeded KV entry must yield a red run with
+                # an explicit "credential absent" error, not CreateContainerConfigError.
+                - name: CATALOG_READ_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-product-catalog-read-oidc
+                      key: CATALOG_READ_CLIENT_SECRET
+                      optional: true
               volumeMounts:
                 - name: script
                   mountPath: /scripts

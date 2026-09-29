@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -72,6 +73,9 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 RULES = REPO / "openbank-libs" / "governance" / "rules.yaml"
 REGISTER_KEY = "shared_m2m_matrix_write_grants"
+REST_REGO = REPO / "openbank-libs" / "governance" / "policies" / "rest.rego"
+MATRIX_RULE = re.compile(r'allowed_reasons contains "matrix-allows" if \{(.*?)\n\}', re.S)
+SA_EXCLUSION = 'not startswith(input.principal.id, "service-account-")'
 
 # The last dot-segment of a read action. Everything else is treated as a write.
 READ_VERBS = {"list", "read", "readonly"}
@@ -120,23 +124,39 @@ def effective_grants(matrix: dict, roles: set[str]) -> set[str]:
     return out
 
 
+def matrix_allows_excludes_service_accounts(rego: str) -> bool:
+    """True when rest.rego's matrix-allows rule carries the service-account exclusion (#3765).
+
+    While it does, matrix-allows grants no M2M identity anything, so no write is M2M-reachable
+    through the matrix and the register must be empty. The rule must exist: a rename that makes
+    it unfindable is an error, not a silent 'not excluded'.
+    """
+    m = MATRIX_RULE.search(rego)
+    if not m:
+        raise SystemExit("::error::no `matrix-allows` rule found in rest.rego — the check cannot "
+                         "tell whether machines are excluded. Fix the pattern, never pass blind.")
+    return SA_EXCLUSION in m.group(1)
+
+
 def is_write(action: str) -> bool:
     return action.rsplit(".", 1)[-1] not in READ_VERBS
 
 
-def evaluate(rules: dict, roles_by_account: dict[str, set[str]]) -> tuple[list[str], list[str], set[str]]:
-    """Returns (undeclared, stale, m2m_roles)."""
+def evaluate(rules: dict, roles_by_account: dict[str, set[str]],
+             sa_excluded: bool = False) -> tuple[list[str], list[str], set[str]]:
+    """Returns (undeclared, stale, m2m_roles). With sa_excluded, nothing is M2M-reachable."""
     matrix = ((rules.get("authz") or {}).get("role_action_matrix") or {})
     m2m_roles: set[str] = set()
     for r in roles_by_account.values():
         m2m_roles |= r
-    reachable_writes = {a for a in effective_grants(matrix, m2m_roles) if is_write(a)}
+    reachable_writes = set() if sa_excluded else {
+        a for a in effective_grants(matrix, m2m_roles) if is_write(a)}
     declared = set((rules.get(REGISTER_KEY) or {}).get("declared") or [])
     return sorted(reachable_writes - declared), sorted(declared - reachable_writes), m2m_roles
 
 
-def run(rules: dict, roles_by_account: dict[str, set[str]], enforce: bool) -> int:
-    undeclared, stale, m2m_roles = evaluate(rules, roles_by_account)
+def run(rules: dict, roles_by_account: dict[str, set[str]], enforce: bool, sa_excluded: bool = False) -> int:
+    undeclared, stale, m2m_roles = evaluate(rules, roles_by_account, sa_excluded)
     level = "error" if enforce else "warning"
 
     for a in undeclared:
@@ -152,9 +172,11 @@ def run(rules: dict, roles_by_account: dict[str, set[str]], enforce: bool) -> in
         )
     for a in stale:
         print(
-            f"::{level}::{REGISTER_KEY}.declared names '{a}', which is no longer a write "
-            f"grant in authz.role_action_matrix. Delete it — a stale register overstates the "
-            f"exposure and hides the next real entry."
+            f"::{level}::{REGISTER_KEY}.declared names '{a}', which is no longer an "
+            f"M2M-reachable write grant"
+            + (" (rest.rego's matrix-allows excludes service-account principals, so the matrix "
+               "reaches no machine at all)" if sa_excluded else " in authz.role_action_matrix")
+            + ". Delete it — a stale register overstates the exposure and hides the next real entry."
         )
 
     if not roles_by_account:
@@ -163,7 +185,9 @@ def run(rules: dict, roles_by_account: dict[str, set[str]], enforce: bool) -> in
         return 1
 
     print(f"check-matrix-write-grants: {len(roles_by_account)} service-account(s), roles "
-          f"{sorted(m2m_roles)}; {len(undeclared)} undeclared, {len(stale)} stale.")
+          f"{sorted(m2m_roles)}; matrix-allows "
+          f"{'EXCLUDES' if sa_excluded else 'admits'} service accounts; "
+          f"{len(undeclared)} undeclared, {len(stale)} stale.")
     return 1 if (enforce and (undeclared or stale)) else 0
 
 
@@ -225,6 +249,24 @@ def self_test() -> int:
     if s != ["ledger.gone"]:
         print(f"::error::self-test: a stale declaration was not flagged ({s})"); ok = False
 
+    # (7) #3765: with the exclusion in rest.rego nothing is reachable, and every declaration is stale
+    u, s, _ = evaluate(base_rules, base_roles, sa_excluded=True)
+    if u or s != ["ledger.create"]:
+        print(f"::error::self-test: exclusion did not empty the reachable set ({u=} {s=})"); ok = False
+
+    # (8) the exclusion is read from the matrix-allows rule itself, not from anywhere in the file
+    with_ex = ('allowed_reasons contains "matrix-allows" if {\n\tinput.principal.type == "HUMAN"\n'
+               '\tnot startswith(input.principal.id, "service-account-")\n\tmatrix_grants(a, r)\n}\n')
+    without = with_ex.replace('\tnot startswith(input.principal.id, "service-account-")\n', "")
+    elsewhere = without + ('allowed_reasons contains "other" if {\n'
+                           '\tnot startswith(input.principal.id, "service-account-")\n}\n')
+    if not matrix_allows_excludes_service_accounts(with_ex):
+        print("::error::self-test: the exclusion was not detected"); ok = False
+    if matrix_allows_excludes_service_accounts(without):
+        print("::error::self-test: a missing exclusion read as present"); ok = False
+    if matrix_allows_excludes_service_accounts(elsewhere):
+        print("::error::self-test: another rule's exclusion was credited to matrix-allows"); ok = False
+
     print("check-matrix-write-grants --self-test: " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -237,7 +279,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
     rules = yaml.safe_load(RULES.read_text())
-    return run(rules, service_account_roles(REPO), args.enforce)
+    excluded = matrix_allows_excludes_service_accounts(REST_REGO.read_text())
+    return run(rules, service_account_roles(REPO), args.enforce, excluded)
 
 
 if __name__ == "__main__":

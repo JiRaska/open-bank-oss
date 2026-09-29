@@ -45,7 +45,8 @@ dependencies {
     implementation(libs.aws.sdk.s3)
     // ADR-0162 D2: logic-less Handlebars templating behind TemplateRenderPort.
     implementation(libs.handlebars)
-    // ADR-0162 D4 phase 1: PAdES-B sealing behind SignatureSealPort.
+    // ADR-0162 D4 phase 1: PAdES-B sealing behind SignatureSealPort. BouncyCastle version is the
+    // catalog `bouncycastle` ref, force-pinned fleet-wide in openbank.dependency-vulnerability-pins.
     implementation(libs.pdfbox)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)

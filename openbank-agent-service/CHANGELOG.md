@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.27.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.1...agent-service-v1.27.2) (2026-09-29)
+
+
+### Security
+
+* **agent:** own M2M identities for the reads that still needed ROLE_OPERATOR ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 8) ([#11454](https://github.com/JiRaska/open-bank-oss/issues/11454)) ([9d20502](https://github.com/JiRaska/open-bank-oss/commit/9d205029f5f71b15427134a8e7140201f63ec13d))
+
+## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.0...agent-service-v1.27.1) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.2...agent-service-v1.27.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** verify unified approval inbox identity and audit context ([#11400](https://github.com/JiRaska/open-bank-oss/issues/11400)) ([a12d9be](https://github.com/JiRaska/open-bank-oss/commit/a12d9be97efa1af05460899e39d5c3baa0b965b0))
+
+## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.1...agent-service-v1.26.2) (2026-09-23)
+
+
+### Security
+
+* **agent:** own M2M identities for the AI-agent reads and the statement search ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 7) ([#10551](https://github.com/JiRaska/open-bank-oss/issues/10551)) ([5a25631](https://github.com/JiRaska/open-bank-oss/commit/5a25631fffd69f9f5ea653d36b5b5718bb35e951))
+
+## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.0...agent-service-v1.26.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **agent:** emit kill-switch events from agent-service to case-coordinator topic ([#10593](https://github.com/JiRaska/open-bank-oss/issues/10593)) ([45b241e](https://github.com/JiRaska/open-bank-oss/commit/45b241e1ccd0eaf580e0920c87c353753c3149d7))
+
 ## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.1...agent-service-v1.26.0) (2026-09-13)
 
 

@@ -15,6 +15,14 @@ describe('case status presentation', () => {
     ])
   })
 
+  it('distinguishes governance halt without widening the status enum', () => {
+    const presentation = caseStatusPresentation('CLOSED', 'en', true)
+
+    expect(presentation.label).toBe('Halted by kill switch')
+    expect(presentation.detail).toContain('not a swarm verdict')
+    expect(CASE_STATUSES).not.toContain('HALTED')
+  })
+
   it('keeps a synthesized case truthful about what the thread does not establish', () => {
     const presentation = caseStatusPresentation('SYNTHESIZED', 'en')
 

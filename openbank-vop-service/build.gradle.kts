@@ -47,6 +47,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract test (ADR-0063, issue #2255 dimension C3): vop is a real consumer of
     // party-service's GET /api/v1/parties/{id} — hop 2 of the ADR-0171 §4 name resolution.
     testImplementation(libs.pact.consumer)

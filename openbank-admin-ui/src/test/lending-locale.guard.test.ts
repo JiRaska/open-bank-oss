@@ -7,7 +7,7 @@ describe('lending locale formatting', () => {
     for (const file of ['src/app/lending/page.tsx', 'src/app/lending/applications/[id]/page.tsx']) {
       const source = readFileSync(resolve(process.cwd(), file), 'utf8')
       expect(source).toContain("const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'")
-      expect(source).toContain('toLocaleString(numberLocale)')
+      expect(source).toMatch(/toLocaleString\(numberLocale\)|formatMoney\(.*numberLocale\)/)
       expect(source).toContain('toLocaleString(dateLocale)')
       expect(source).not.toContain("toLocaleString('cs-CZ'")
     }

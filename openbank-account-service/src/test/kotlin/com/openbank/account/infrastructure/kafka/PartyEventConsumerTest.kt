@@ -255,6 +255,91 @@ class PartyEventConsumerTest {
         assertThat(cmds.single { it.accountType == AccountType.CURRENT }.productId).isEqualTo(RETAIL_PRODUCT)
     }
 
+    private fun activation(
+        partyId: UUID,
+        partyType: String,
+        eventType: String = "KYC_STATUS_CHANGED",
+        status: String = "ACTIVE",
+    ) = """{"eventType":"$eventType","partyId":"$partyId","partyType":"$partyType",""" +
+        """"status":"$status","kycStatus":"APPROVED","legalName":"Acme s.r.o.","occurredAt":"2026-09-19T10:00:00Z"}"""
+
+    @Test
+    fun `an activated business party with no current account gets the business account, then activation`(): Unit =
+        runBlocking {
+            listOf("SOLE_TRADER", "COMPANY").forEach { type ->
+                val partyId = UUID.randomUUID()
+                val openedId = UUID.randomUUID()
+                // First read (the open guard) sees nothing; the activation pass sees the new account.
+                coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returnsMany listOf(
+                    emptyList(),
+                    listOf(pendingAccount(openedId, AccountType.CURRENT, BUSINESS_PRODUCT)),
+                )
+                val cmds = mutableListOf<OpenAccountCommand>()
+                coEvery { accountUseCase.openAccount(capture(cmds)) } returns mockk(relaxed = true)
+
+                consumer(bonusEnabled = true, openBusiness = true).consume(activation(partyId, type))
+
+                val cmd = cmds.single()
+                assertThat(cmd.idempotencyKey)
+                    .describedAs("the PARTY_CREATED key, so the two paths can never open two accounts")
+                    .isEqualTo("onboarding-business-account-$partyId")
+                assertThat(cmd.productId).isEqualTo(BUSINESS_PRODUCT)
+                assertThat(cmd.currency.code).isEqualTo("EUR")
+                assertThat(cmd.accountType).isEqualTo(AccountType.CURRENT)
+                assertThat(cmd.initialStatus).isEqualTo(AccountStatus.PENDING_ACTIVATION)
+                coVerify(exactly = 1) { accountUseCase.activateAccount(openedId) }
+            }
+            coVerify(exactly = 0) { welcomeBonusPort.grantWelcomeBonus(any(), any(), any()) }
+        }
+
+    @Test
+    fun `an activated business party that already has a current account opens nothing`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns listOf(
+            pendingAccount(UUID.randomUUID(), AccountType.CURRENT, BUSINESS_PRODUCT),
+        )
+
+        consumer(bonusEnabled = false, openBusiness = true).consume(activation(partyId, "SOLE_TRADER"))
+        consumer(bonusEnabled = false, openBusiness = true)
+            .consume(activation(partyId, "SOLE_TRADER", eventType = "PARTY_UPDATED"))
+
+        coVerify(exactly = 0) { accountUseCase.openAccount(any()) }
+    }
+
+    @Test
+    fun `business activation opens nothing while business opening is off`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns emptyList()
+
+        consumer(bonusEnabled = false, openBusiness = false).consume(activation(partyId, "COMPANY"))
+
+        coVerify(exactly = 0) { accountUseCase.openAccount(any()) }
+    }
+
+    @Test
+    fun `an activated individual with no accounts gets nothing from the activation path`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns emptyList()
+
+        consumer(bonusEnabled = false, openBusiness = true).consume(activation(partyId, "INDIVIDUAL"))
+        consumer(bonusEnabled = false, openBusiness = true).consume(activation(partyId, "TRUST"))
+
+        coVerify(exactly = 0) { accountUseCase.openAccount(any()) }
+    }
+
+    @Test
+    fun `a business party not yet ACTIVE gets no account from the status path`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns emptyList()
+
+        consumer(bonusEnabled = false, openBusiness = true)
+            .consume(activation(partyId, "COMPANY", status = "PENDING_KYC"))
+        consumer(bonusEnabled = false, openBusiness = true)
+            .consume(activation(partyId, "COMPANY", status = "SUSPENDED"))
+
+        coVerify(exactly = 0) { accountUseCase.openAccount(any()) }
+    }
+
     @Test
     fun `party ACTIVE activates the business account without a welcome bonus`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()

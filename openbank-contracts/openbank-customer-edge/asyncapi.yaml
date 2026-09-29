@@ -99,6 +99,16 @@ channels:
         $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_INITIATED'
       customerpaymentrefused:
         $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_REFUSED'
+      businessapprovalrejected:
+        $ref: '#/components/messages/auditEvent_BUSINESS_APPROVAL_REJECTED'
+      businessapprovalsigned:
+        $ref: '#/components/messages/auditEvent_BUSINESS_APPROVAL_SIGNED'
+      customerpaymentheld:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_HELD'
+      customerpaymentreleased:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_RELEASED'
+      customerpaymentreleasefailed:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_RELEASE_FAILED'
       customerpocketconverted:
         $ref: '#/components/messages/auditEvent_CUSTOMER_POCKET_CONVERTED'
       customerpocketexchanged:
@@ -246,6 +256,51 @@ components:
       description: |
         Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
         Carries the envelope below with `eventType: CUSTOMER_PAYMENT_REFUSED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_BUSINESS_APPROVAL_REJECTED:
+      name: BUSINESS_APPROVAL_REJECTED
+      title: Customer audit event BUSINESS_APPROVAL_REJECTED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `BusinessSigningHandlers`, on the hand-built outbox path (#10281 business
+        multi-signature payments). Carries the envelope below with `eventType: BUSINESS_APPROVAL_REJECTED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_BUSINESS_APPROVAL_SIGNED:
+      name: BUSINESS_APPROVAL_SIGNED
+      title: Customer audit event BUSINESS_APPROVAL_SIGNED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `BusinessSigningHandlers`, on the hand-built outbox path (#10281 business
+        multi-signature payments). Carries the envelope below with `eventType: BUSINESS_APPROVAL_SIGNED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_PAYMENT_HELD:
+      name: CUSTOMER_PAYMENT_HELD
+      title: Customer audit event CUSTOMER_PAYMENT_HELD
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `BusinessPaymentApprovals`, on the hand-built outbox path (#10281 business
+        multi-signature payments). Carries the envelope below with `eventType: CUSTOMER_PAYMENT_HELD`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_PAYMENT_RELEASED:
+      name: CUSTOMER_PAYMENT_RELEASED
+      title: Customer audit event CUSTOMER_PAYMENT_RELEASED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `BusinessPaymentApprovals`, on the hand-built outbox path (#10281 business
+        multi-signature payments). Carries the envelope below with `eventType: CUSTOMER_PAYMENT_RELEASED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_PAYMENT_RELEASE_FAILED:
+      name: CUSTOMER_PAYMENT_RELEASE_FAILED
+      title: Customer audit event CUSTOMER_PAYMENT_RELEASE_FAILED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `BusinessPaymentApprovals`, on the hand-built outbox path (#10281 business
+        multi-signature payments). Carries the envelope below with `eventType: CUSTOMER_PAYMENT_RELEASE_FAILED`.
       payload:
         $ref: '#/components/schemas/AnalyticsEnvelope'
     auditEvent_CUSTOMER_POCKET_CONVERTED:

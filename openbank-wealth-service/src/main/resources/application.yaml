@@ -56,8 +56,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   smallrye-reactive-messaging:
     kafka:
@@ -143,6 +141,8 @@ authz:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
   authz:
     enforce: "false"

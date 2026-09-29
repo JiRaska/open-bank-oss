@@ -7,10 +7,13 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
+// A browser returns a cross-origin frame's window and throws only on reading its location;
+// jsdom >= 30.1 reads contentWindow itself on every frame insertion, so the getter must not throw.
 function blockGrafanaUntilExplicitLoad() {
-  vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockImplementation(() => {
-    throw new DOMException('Cross-origin frame')
+  const crossOriginWindow = Object.defineProperty({}, 'location', {
+    get() { throw new DOMException('Cross-origin frame', 'SecurityError') },
   })
+  vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockReturnValue(crossOriginWindow as Window)
 }
 
 function completeGrafanaLoad(panel: HTMLElement) {

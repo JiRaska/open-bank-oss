@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.2...copilot-service-v0.17.3) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.1...copilot-service-v0.17.2) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.0...copilot-service-v0.17.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **consent:** add an mTLS listener and point lending + copilot at it ([#10400](https://github.com/JiRaska/open-bank-oss/issues/10400)) ([4de039d](https://github.com/JiRaska/open-bank-oss/commit/4de039d0fdb285b79df402ec3e68aa71b5524112))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.16.0...copilot-service-v0.17.0) (2026-09-13)
 
 

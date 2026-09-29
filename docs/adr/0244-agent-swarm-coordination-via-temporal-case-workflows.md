@@ -34,7 +34,7 @@ both the speed and the content of the result ("swarm" semantics).
 Constraints inherited from the estate:
 
 - **ADR-0031**: agents propose, governance disposes. Charters live in
-  `agents.yaml`; every action is AI-attributed audit; kill switch per agent and
+`agents.yaml`; every action is AI-attributed audit; kill switch per agent and
   global.
 - **ADR-0034 / ADR-0202**: tool access is OPA-gated; a delegating call is identified
   by principal id, never by the structurally unreachable `SERVICE` principal type.
@@ -114,8 +114,11 @@ contributed what to this case" across every participant. The global and per-agen
 kill switches cancel in-flight case workflows (Temporal cancel) without redeploy;
 a halted case emits a no-action finding naming the kill switch as the cause, so a
 governance action never reads as a swarm verdict. (As-built note: today's kill
-switch halts agent runtimes but has no Temporal hook; wiring it to case-workflow
-cancellation is part of the follow-up, not the current state.)
+switch is projected from agent-service's durable audit outbox into case-coordinator. A global or
+`rca-investigator` halt blocks new opens/signals, requests Temporal cancellation for every running
+incident-response SHADOW case, waits for the cancelled terminal state, and only then persists
+`HALTED` no-action evidence naming the human initiator and reason. It writes no proposal outbox row;
+the governance intervention is not a swarm verdict.)
 
 **D8 — The coordinator lives in the agent plane.** `case-coordinator` is an
 AGPL-3.0-only module registered in `rules.yaml: agpl_modules`, like every other
@@ -171,7 +174,7 @@ fails to converge cannot keep billing supervisors for its failure.
 - Follow-ups: `agents.yaml` extension (case budgets, swarm-participation and
   `case-open` capabilities, per-case-class ceilings and contested-rate thresholds);
   `case-coordinator` charter + eval scenarios under the ADR-0148 evals gate;
-  kill-switch → Temporal case-cancellation wiring (D7); admin-ui thread-view ADR;
+  admin-ui thread-view ADR;
   registration in `rules.yaml: agpl_modules`.
 
 ## Compliance impact

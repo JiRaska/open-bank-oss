@@ -134,6 +134,33 @@ class SpendCeilingsTest {
         assertThat((decision as SpendDecision.Refused).remaining).isEqualTo(czk("0.00"))
     }
 
+    @Test
+    fun `reports zero headroom when the daily ceiling is already exactly consumed`() {
+        val decision = SpendCeilings.evaluate(
+            spendGrant(daily = czk("1000.00")),
+            czk("0.01"),
+            counted("1000.00", "1000.00"),
+            now,
+        )
+
+        val refused = decision as SpendDecision.Refused
+        assertThat(refused.reason).isEqualTo(SpendRefusalReason.DAILY)
+        assertThat(refused.alreadyCounted).isEqualTo(czk("1000.00"))
+        assertThat(refused.remaining).isEqualTo(czk("0.00"))
+    }
+
+    @Test
+    fun `reports the daily refusal first when both cumulative ceilings are breached`() {
+        val decision = SpendCeilings.evaluate(
+            spendGrant(daily = czk("1000.00"), monthly = czk("2000.00")),
+            czk("100.00"),
+            counted("950.00", "1950.00"),
+            now,
+        )
+
+        assertThat((decision as SpendDecision.Refused).reason).isEqualTo(SpendRefusalReason.DAILY)
+    }
+
     /** Same reason `withinLimits` denies rather than throws: an authz answer, not a crash. */
     @Test
     fun `denies rather than throws when the amount is in another currency than the ceiling`() {
@@ -145,6 +172,20 @@ class SpendCeilingsTest {
         )
 
         assertThat((decision as SpendDecision.Refused).reason).isEqualTo(SpendRefusalReason.CURRENCY_MISMATCH)
+    }
+
+    @Test
+    fun `reports a per-transaction currency mismatch before cumulative checks`() {
+        val decision = SpendCeilings.evaluate(
+            spendGrant(perTx = czk("1000.00"), daily = czk("5000.00")),
+            Money.of("100.00", "EUR"),
+            nothingCounted,
+            now,
+        )
+
+        val refused = decision as SpendDecision.Refused
+        assertThat(refused.reason).isEqualTo(SpendRefusalReason.CURRENCY_MISMATCH)
+        assertThat(refused.ceiling).isEqualTo(czk("1000.00"))
     }
 
     @Test

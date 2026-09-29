@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "a0e6f63725d63c7b"
+    openbank.tech/policy-checksum: "a83ae6df40d013dc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -738,6 +747,78 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action == "ledger.create"
+    }
+
+    # #10486 step 1 — interest-service's OWN machine identity. Its capitalization journal (DEBIT
+    # interest expense / CREDIT deposit-control / CREDIT withholding-tax payable) is posted by
+    # LedgerRestClient through the named oidc-client `ledger`, i.e. Keycloak client
+    # `openbank-interest`, whose service account carries ROLE_API only. This rule is the ONLY
+    # thing that lets that principal write: exactly ledger.create, nothing else (no reverse, no
+    # trigger/replay/approve/close.draft). LedgerResource.postJournal admits ROLE_API at the RBAC
+    # layer for this caller; every OTHER ROLE_API holder still reaches OPA and is denied here unless
+    # its own identity rule fires — the identity gate is what keeps that RBAC widening narrow
+    # (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
+    allowed_reasons contains "service-interest-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-interest"
+    	input.action == "ledger.create"
+    }
+
+    # #10486 batch 1 — per-service machine identities posting journals. Same shape as
+    # service-interest-ledger-post above: each principal carries ROLE_API only, and its rule is its
+    # WHOLE grant here — exactly ledger.create, never reverse/trigger/replay/approve/close.draft.
+    #   lending-service  (LedgerRestClient, named oidc-client `m2m`): disbursement/repayment journals
+    #   clearing-service (ClearingLedgerRestClient, named oidc-client `m2m`): ADR-0281 net settlement
+    allowed_reasons contains "service-lending-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-lending"
+    	input.action == "ledger.create"
+    }
+
+    allowed_reasons contains "service-clearing-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-clearing"
+    	input.action == "ledger.create"
+    }
+
+    # #10486 batch 2 — transaction-service and settlement-service on their own identities.
+    #   transaction-service (LedgerRestClient, named oidc-client `m2m`): postJournal on settlement and
+    #     reverseJournal on a failed/compensated leg -> ledger.create + ledger.reverse. The ONLY
+    #     per-service identity granted ledger.reverse; LedgerResource.reverseJournal admits ROLE_API
+    #     at the RBAC layer for it and every other ROLE_API holder is denied here.
+    #   settlement-service (LedgerRestClient, named oidc-client `m2m`): postJournal (the settlement
+    #     workflow's booking activity) plus getJournalsByTransaction (LedgerJournalLookupAdapter's
+    #     already-posted check) -> ledger.create + ledger.read. Never reverse.
+    allowed_reasons contains "service-transaction-ledger-write" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-transaction"
+    	input.action in {"ledger.create", "ledger.reverse"}
+    }
+
+    allowed_reasons contains "service-settlement-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-settlement"
+    	input.action in {"ledger.create", "ledger.read"}
+    }
+
+    # ADR-0315 — treasury-service on its own identity (named oidc-client `m2m`, Keycloak client
+    # `openbank-treasury`, ROLE_API only). It posts the settlement, maturity and reversal journals of a
+    # money-market deal -> ledger.create: a reversal is an offsetting journal it posts itself
+    # (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse.
+    allowed_reasons contains "service-treasury-ledger-post" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-treasury"
+    	input.action == "ledger.create"
+    }
+
+    # Nostro reconciliation (ADR-0315, #10896): treasury reads the journals of one statement date
+    # (GET /api/v1/journals -> ledger.list) and the trial balance (GET /api/v1/journals/trial-balance
+    # -> ledger.read) to compare the nostro GL against the correspondent's camt.053. Read-only; it
+    # never posts a reconciling entry.
+    allowed_reasons contains "service-treasury-ledger-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-treasury"
+    	input.action in {"ledger.list", "ledger.read"}
     }
 
     # Only transaction-service's client exposes a reverseJournal call. lending-service and
@@ -1449,6 +1530,16 @@ data:
                                                 # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                                 # joins the #3679 cohort.
       - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                                # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                                # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                                # may move, which is money-path for the same reason sca/consent/vop/
+                                                # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                                # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                                # repair money movement; card.create/activate are SCA-bound customer
+                                                # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                                # without the cardholder's SCA today — add a verb here when one ships.
+                                                # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1774,7 +1865,6 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
-            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
@@ -1886,6 +1976,23 @@ data:
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
+        # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+        # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+        # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # here on purpose: every treasury action, the reads included, is granted in
+        # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+        # treasury depends on this matrix.
+        ROLE_RISK:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
+        ROLE_FINANCE:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

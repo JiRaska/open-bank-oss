@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.4...pid-service-v0.10.5) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.3...pid-service-v0.10.4) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
 ## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.2...pid-service-v0.10.3) (2026-09-13)
 
 

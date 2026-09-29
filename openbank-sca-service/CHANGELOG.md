@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.3...sca-service-v0.17.0) (2026-09-28)
+
+
+### Features
+
+* **sca:** bind initiate Idempotency-Key to a request fingerprint ([#10949](https://github.com/JiRaska/open-bank-oss/issues/10949)) ([6032da8](https://github.com/JiRaska/open-bank-oss/commit/6032da8ea9ee58f6f6bc06fb08cf99ba5705117c))
+
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.2...sca-service-v0.16.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.1...sca-service-v0.16.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.0...sca-service-v0.16.1) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.2...sca-service-v0.16.0) (2026-09-19)
+
+
+### Features
+
+* **sca:** link APPROVAL challenges to an approval request, record the decider, refuse entity devices ([#10312](https://github.com/JiRaska/open-bank-oss/issues/10312)) ([b2528c2](https://github.com/JiRaska/open-bank-oss/commit/b2528c274cc3b6429bdc5b40ef19ffb6022865e0))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.1...sca-service-v0.15.2) (2026-09-13)
 
 

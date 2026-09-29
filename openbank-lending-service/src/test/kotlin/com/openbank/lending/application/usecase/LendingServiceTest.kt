@@ -33,6 +33,9 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanRateIndex
+import com.openbank.lending.domain.model.LoanRateTerms
+import com.openbank.lending.domain.model.LoanRateType
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
@@ -119,7 +122,7 @@ class LendingServiceTest {
         clock,
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-        OriginationConfig(false),
+        OriginationConfig(false, false),
         NoOpOriginationWorkflowPort(),
         OriginationDecisionService(
             mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
@@ -324,7 +327,7 @@ class LendingServiceTest {
             applications, loans, installments, collateral, ledger,
             valuation, riskParameters, events, clock, provisioning,
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
-            OriginationConfig(true),
+            OriginationConfig(true, false),
             NoOpOriginationWorkflowPort(),
             OriginationDecisionService(
                 mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
@@ -2086,6 +2089,146 @@ class LendingServiceTest {
         val disbursed = emitted.single { it.eventType == "loan.disbursed" }
         assertThat(occurredAtOf(disbursed)).isEqualTo(loan.disbursedAt.toInstant())
         assertThat(occurredAtOf(disbursed)).isEqualTo(expectedEventTime)
+    }
+
+    // ── ADR-0314 D5: loan rate terms ──────────────────────────────────────────────────────────
+
+    private val floating = LoanRateTerms(
+        rateType = LoanRateType.FLOATING,
+        rateIndex = LoanRateIndex.PRIBOR_3M,
+        spread = BigDecimal("0.025"),
+        resetFrequencyMonths = 3,
+        nextResetDate = firstDue.plusMonths(3),
+    )
+
+    private fun serviceWith(config: OriginationConfig) = LendingService(
+        applications, loans, installments, collateral, ledger,
+        valuation, riskParameters, events, clock, provisioning,
+        CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+        config,
+        NoOpOriginationWorkflowPort(),
+        OriginationDecisionService(
+            mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
+                every { assess(any(), any()) } returns Uni.createFrom().item(
+                    com.openbank.lending.application.port.out.CreditAssessment(null, false, "test-bureau", true),
+                )
+            },
+            StarterCreditPolicy(),
+            CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+            clock,
+        ),
+        borrowerAccounts,
+        borrowerCredit,
+        catalogLoanProfiles,
+    )
+
+    @Test
+    fun `a FLOATING application is refused while floating-rate origination is off`() {
+        // The default. Nothing reprices a floating loan at its reset date yet, so booking one would
+        // create a rate that silently never moves.
+        assertThatThrownBy {
+            service.apply(sampleRequest().copy(rateTerms = floating), "alice").await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("not enabled")
+        verify(exactly = 0) { applications.save(any()) }
+    }
+
+    @Test
+    fun `a FLOATING application is accepted when enabled and keeps its terms`() {
+        val slot: CapturingSlot<LoanApplication> = slot()
+        every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+
+        val result = serviceWith(OriginationConfig(autoApprove = false, floatingRateEnabled = true))
+            .apply(sampleRequest().copy(rateTerms = floating), "alice").await().indefinitely()
+
+        assertThat(result.rateTerms).isEqualTo(floating)
+    }
+
+    @Test
+    fun `malformed rate terms are refused before anything is saved`() {
+        val enabled = serviceWith(OriginationConfig(autoApprove = false, floatingRateEnabled = true))
+        listOf(
+            LoanRateTerms(rateType = LoanRateType.FIXED, rateIndex = LoanRateIndex.CZEONIA),
+            floating.copy(spread = null),
+            floating.copy(resetFrequencyMonths = 2),
+            floating.copy(nextResetDate = firstDue.minusDays(1)),
+        ).forEach { bad ->
+            assertThatThrownBy {
+                enabled.apply(sampleRequest().copy(rateTerms = bad), "alice").await().indefinitely()
+            }.describedAs(bad.toString()).isInstanceOf(IllegalArgumentException::class.java)
+        }
+        verify(exactly = 0) { applications.save(any()) }
+    }
+
+    @Test
+    fun `a catalog loan cannot be FLOATING`() {
+        val offeringId = UUID.fromString("10000000-0000-0000-0000-000000000099")
+        every { catalogLoanProfiles.resolvePublished(offeringId) } returns Uni.createFrom().item(
+            CatalogLoanProfile(
+                CatalogLoanSnapshot(offeringId, UUID.randomUUID(), "c".repeat(64), 2),
+                "EUR",
+                12,
+                AmortizationMethod.ANNUITY,
+                BigDecimal("0.0699"),
+                null,
+                null,
+            ),
+        )
+
+        assertThatThrownBy {
+            serviceWith(OriginationConfig(autoApprove = false, floatingRateEnabled = true))
+                .apply(sampleRequest().copy(catalogOfferingId = offeringId, rateTerms = floating), "alice")
+                .await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `disbursement carries the rate terms onto the loan and into loan disbursed`() {
+        val app = proposedApplication().copy(
+            status = OriginationState.READY_TO_DISBURSE,
+            decidedBy = "bob",
+            rateTerms = floating,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
+
+        val loan = service.disburse(app.id, "dave").await().indefinitely()
+
+        assertThat(loan.rateTerms).isEqualTo(floating)
+        val json = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(emitted.single { it.eventType == "loan.disbursed" }.payload)
+        assertThat(json["rateType"].asText()).isEqualTo("FLOATING")
+        assertThat(json["rateIndex"].asText()).isEqualTo("PRIBOR_3M")
+        assertThat(json["spread"].asText()).isEqualTo("0.025")
+        assertThat(json["resetFrequencyMonths"].asInt()).isEqualTo(3)
+        assertThat(json["nextResetDate"].asText()).isEqualTo(firstDue.plusMonths(3).toString())
+    }
+
+    @Test
+    fun `a FIXED loan disbursed says FIXED with null floating terms`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
+
+        service.disburse(app.id, "dave").await().indefinitely()
+
+        val json = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(emitted.single { it.eventType == "loan.disbursed" }.payload)
+        assertThat(json["rateType"].asText()).isEqualTo("FIXED")
+        // JSON null, not the string "null": isNull on the node, never asText().
+        assertThat(json["rateIndex"].isNull).isTrue()
+        assertThat(json["nextResetDate"].isNull).isTrue()
     }
 
     @Test

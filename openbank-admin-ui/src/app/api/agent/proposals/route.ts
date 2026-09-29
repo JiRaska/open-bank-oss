@@ -4,13 +4,22 @@
 
 // BFF proxy for the agent HITL approval queue (ADR-0031 D4). The agent owns the
 // proposals store; the admin-ui lists pending proposals and records a human
-// decision. GET ?state=pending|all ; POST { proposalId, approve, decidedBy, reason }.
+// decision. GET ?state=pending|all ; POST { proposalId, approve, reason }.
+// A legacy decidedBy field may be sent by older clients, but never supplies audit identity.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { auth } from '@/auth'
 import { loadAgentCharters } from '@/lib/governance/agentCharters'
+import { resolveAgentIdentity } from '@/lib/governance/agentIdentity'
 
 export const dynamic = 'force-dynamic'
+
+const decisionSchema = z.object({
+  proposalId: z.uuid(),
+  approve: z.boolean(),
+  reason: z.string().nullable().optional(),
+})
 
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
@@ -40,18 +49,19 @@ export async function GET(req: NextRequest) {
     const registry = await loadAgentCharters()
     // Without a readable registry we cannot classify an author as a human. Preserve the
     // upstream provenance so the UI can apply its conservative fallback (ADR-0080).
-    const charterIds = new Set(registry.agents.map(agent => agent.id))
     const enriched = Array.isArray(rows) ? rows.map(row => {
       const id = row.proposedBy ?? 'unknown'
-      const known = charterIds.has(id)
+      const known = resolveAgentIdentity(id, registry).status === 'chartered'
       if (!registry.available) return row
+      // A missing AI charter is not proof that this principal is a human.
+      if (!known) return { ...row, agent: undefined }
       return {
         ...row,
         agent: {
           id,
           displayName: id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-          icon: known ? 'bot' : 'user',
-          charterKnown: known,
+          icon: 'bot',
+          charterKnown: true,
         },
       }
     }) : rows
@@ -63,19 +73,22 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { proposalId, approve, decidedBy, reason } = body ?? {}
-    if (!proposalId || typeof approve !== 'boolean' || !decidedBy) {
-      return NextResponse.json({ error: 'proposalId, approve (bool) and decidedBy are required' }, { status: 400 })
-    }
-    const accessToken = await operatorBearer()
+    const session = await auth()
+    const accessToken = session?.user?.accessToken
     if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    const parsed = decisionSchema.safeParse(await req.json())
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'valid proposalId (UUID) and approve (bool) are required' }, { status: 400 })
+    }
+    const { proposalId, approve, reason } = parsed.data
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10000)
     const res = await fetch(`${agentBase()}/api/v1/proposals/${encodeURIComponent(proposalId)}/decision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ approve, decidedBy, reason: reason ?? null }),
+      // An old agent-service requiring decidedBy must reject this request rather than
+      // audit the wrong actor during rollout. The upgraded service uses its bearer principal.
+      body: JSON.stringify({ approve, reason: reason ?? null }),
       signal: ctrl.signal,
       cache: 'no-store',
     })

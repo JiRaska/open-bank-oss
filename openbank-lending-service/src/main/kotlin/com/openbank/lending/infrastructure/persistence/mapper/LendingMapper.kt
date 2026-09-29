@@ -10,6 +10,7 @@ import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanRateTerms
 import com.openbank.lending.infrastructure.persistence.entity.CollateralEntity
 import com.openbank.lending.infrastructure.persistence.entity.InstallmentEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanApplicationEntity
@@ -30,6 +31,7 @@ class LendingMapper {
         it.requestedAmount = a.requestedAmount.amount
         it.currency = a.requestedAmount.currency.code
         it.nominalAnnualRate = a.nominalAnnualRate
+        a.rateTerms.writeTo(it)
         it.termPeriods = a.termPeriods
         it.periodsPerYear = a.periodsPerYear
         it.method = a.method
@@ -69,6 +71,7 @@ class LendingMapper {
         id = LoanApplicationId(e.id), partyId = e.partyId,
         requestedAmount = Money.of(e.requestedAmount, e.currency),
         nominalAnnualRate = e.nominalAnnualRate, termPeriods = e.termPeriods,
+        rateTerms = LoanRateTerms(e.rateType, e.rateIndex, e.spread, e.resetFrequencyMonths, e.nextResetDate),
         periodsPerYear = e.periodsPerYear, method = e.method, firstDueDate = e.firstDueDate,
         status = e.status, proposedBy = e.proposedBy, decidedBy = e.decidedBy,
         decisionReason = e.decisionReason, createdAt = e.createdAt, decidedAt = e.decidedAt,
@@ -94,6 +97,7 @@ class LendingMapper {
         it.principal = l.principal.amount
         it.currency = l.principal.currency.code
         it.nominalAnnualRate = l.nominalAnnualRate
+        l.rateTerms.writeTo(it)
         it.termPeriods = l.termPeriods
         it.periodsPerYear = l.periodsPerYear
         it.method = l.method
@@ -110,6 +114,7 @@ class LendingMapper {
     fun toDomain(e: LoanEntity) = Loan(
         id = LoanId(e.id), applicationId = LoanApplicationId(e.applicationId), partyId = e.partyId,
         principal = Money.of(e.principal, e.currency), nominalAnnualRate = e.nominalAnnualRate,
+        rateTerms = LoanRateTerms(e.rateType, e.rateIndex, e.spread, e.resetFrequencyMonths, e.nextResetDate),
         termPeriods = e.termPeriods, periodsPerYear = e.periodsPerYear, method = e.method,
         firstDueDate = e.firstDueDate, status = e.status, disbursedAt = e.disbursedAt,
         noticeEndsOn = e.noticeEndsOn, terminatedBy = e.terminatedBy, terminatedAt = e.terminatedAt,
@@ -209,4 +214,20 @@ private fun LoanApplicationEntity.toCatalogSnapshot(): CatalogLoanSnapshot? {
     val contentHash = catalogContentHash ?: return null
     val schemaVersion = catalogSchemaVersion ?: return null
     return CatalogLoanSnapshot(offeringId, revisionId, contentHash, schemaVersion)
+}
+
+private fun LoanRateTerms.writeTo(e: LoanApplicationEntity) {
+    e.rateType = rateType
+    e.rateIndex = rateIndex
+    e.spread = spread
+    e.resetFrequencyMonths = resetFrequencyMonths
+    e.nextResetDate = nextResetDate
+}
+
+private fun LoanRateTerms.writeTo(e: LoanEntity) {
+    e.rateType = rateType
+    e.rateIndex = rateIndex
+    e.spread = spread
+    e.resetFrequencyMonths = resetFrequencyMonths
+    e.nextResetDate = nextResetDate
 }

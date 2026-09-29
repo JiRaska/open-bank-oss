@@ -739,8 +739,8 @@ function IAOpsContent() {
           <Card>
             <SectionTitle icon={<Search size={16} />}
               sub={t(
-                'Zadej popis alertu nebo problému a HolmesGPT (Davis-lite) ho vyšetří — stáhne metriky z Prometheu a stav clusteru, pak navrhne pravděpodobnou příčinu. Read-only, nic nespouští.',
-                'Describe an alert or incident and HolmesGPT (Davis-lite) investigates — it pulls Prometheus metrics and cluster state, then proposes a probable root cause. Read-only, triggers nothing.',
+              'Zadej popis alertu nebo problému a HolmesGPT (Davis-lite) ho vyšetří — stáhne metriky z Prometheu a stav clusteru, pak navrhne pravděpodobnou příčinu. Pro oprávněného operátora se výsledek uloží jen do shadow case; nic nemění v bankovních službách.',
+              'Describe an alert or incident and HolmesGPT (Davis-lite) investigates — it pulls Prometheus metrics and cluster state, then proposes a probable root cause. For an authorized operator the result is recorded only in a shadow case; it changes no banking service.',
               )}>
               {t('Holmes RCA — vyšetřování alertu', 'Holmes RCA — alert investigation')}
             </SectionTitle>
@@ -797,8 +797,8 @@ function IAOpsContent() {
                 <Info size={13} style={{ color: 'var(--text-tertiary)', marginTop: '1px', flexShrink: 0 }} />
                 <span style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                   {t(
-                    'Model: NVIDIA NIM meta/llama-3.1-8b-instruct. Vyšetřování typicky trvá 30–60 s — HolmesGPT nejdřív stáhne Prometheus metriky a stav clusteru, pak zavolá LLM. Výsledek se neukládá.',
-                    'Model: NVIDIA NIM meta/llama-3.1-8b-instruct. Investigation typically takes 30–60 s — HolmesGPT first fetches Prometheus metrics and cluster state, then calls the LLM. Result is not persisted.',
+            'Model: NVIDIA NIM meta/llama-3.1-8b-instruct. Vyšetřování typicky trvá 30–60 s — HolmesGPT nejdřív stáhne Prometheus metriky a stav clusteru, pak zavolá LLM. Oprávněný operátor uloží výsledek do shadow case pro pilotní vyhodnocení.',
+            'Model: NVIDIA NIM meta/llama-3.1-8b-instruct. Investigation typically takes 30–60 s — HolmesGPT first fetches Prometheus metrics and cluster state, then calls the LLM. An authorized operator records the result in a shadow case for pilot evaluation.',
                   )}
                 </span>
               </div>

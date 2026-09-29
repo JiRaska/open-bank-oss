@@ -14,4 +14,17 @@ agents:
 - id: kyb-analyst
   case_capabilities:
   - case.join
-grants: []
+- id: rca-investigator
+  case_capabilities:
+  - case.contribute
+  - case.join
+grants:
+- agent_id: rca-investigator
+  capabilities:
+  - case.join
+  - case.contribute
+  case_class: INCIDENT_RESPONSE
+  delivery_mode: SHADOW
+  enabled: true
+  rollout_id: incident-triage-shadow-2026-08-20
+  max_signals_per_case: 8

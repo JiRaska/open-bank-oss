@@ -28,11 +28,11 @@ jobs:
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
     # became queryable ~24 min after this job started (GitHub indexes the submitted graph
     # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
-    # slow queue away from a spurious red on an honest PR. 50 also contains the bounded
-    # installation-quota recovery below plus the final basis retry: a 15.5 min API wait,
-    # a measured 24 min snapshot/indexing path and ~5 min basis retry fit without turning
-    # a transient GitHub 403 into a timeout.
-    # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
+    # slow queue away from a spurious red on an honest PR. 50 contains the bounded
+    # 30-minute sparse snapshot wait, up to ~11.5 minutes of API recovery and the final
+    # ~3.25-minute basis retry, leaving over five minutes for setup and policy execution.
+    # An exhausted installation quota fails promptly instead of burning the job's remainder.
+    # Only dependency-touching PRs wait; the rest finish in seconds.
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,7 +40,7 @@ jobs:
       # Whether to wait for a Gradle snapshot depends on whether one is coming: the retry
       # below must be armed ONLY when dependency-submission.yml is also running for this PR,
       # i.e. when the same paths it filters on changed. Measured the hard way — with the
-      # retry armed unconditionally this job sat >11 min on a PR that touched no manifest
+      # a wait armed unconditionally this job sat >11 min on a PR that touched no manifest
       # at all, because GitHub reports a snapshot warning for the head SHA regardless (the
       # Gradle graph is inherited from main, never submitted for this SHA). That would have
       # taxed the ~93% of PRs this feature has nothing to say about.
@@ -48,6 +48,11 @@ jobs:
       # Same merge-base resolution as ci.yml's shared diff-base step, and for the same
       # reason: pull_request.base.sha is frozen at PR creation and misclassifies once a
       # competing PR merges first.
+      - name: Test dependency review basis guard
+        run: |
+          python3 .github/scripts/tests/test_dependency_review_basis.py
+          python3 .github/scripts/tests/test_wait_dependency_review_snapshot.py
+
       - name: Detect dependency-manifest changes
         id: deps
         env:
@@ -65,13 +70,75 @@ jobs:
           # Here-string, not a pipe: `set -o pipefail` + `grep -q` exiting early SIGPIPEs
           # the producer and fails the step (a known footgun in this repo's workflows).
           files="$(git diff --name-only "${base}" "${GITHUB_SHA}")"
-          if grep -qE '(^|/)build\.gradle\.kts$|^openbank-libs/gradle/libs\.versions\.toml$|^settings\.gradle\.kts$|^gradle/wrapper/' <<< "${files}"; then
+          if grep -qE '(^|/)build\.gradle\.kts$|^build-logic/|^openbank-libs/gradle/libs\.versions\.toml$|^settings\.gradle\.kts$|^gradle/wrapper/|^\.github/workflows/dependency-submission\.yml$|^\.github/scripts/dependency_snapshot\.py$|^\.github/scripts/dependency-resolution-strict\.init\.gradle$|^\.github/scripts/tests/test_dependency_(snapshot|resolution_guard)\.py$' <<< "${files}"; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Dependency manifests changed — will wait for the Gradle snapshot from dependency-submission.yml."
+            echo "Dependency submission input changed — will wait for the Gradle snapshot from dependency-submission.yml."
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No dependency manifest touched — no Gradle submission runs for this PR, so nothing to wait for."
+            echo "No dependency submission input touched — no Gradle submission runs for this PR, so nothing to wait for."
           fi
+
+      # A terminal unsuccessful producer on the immutable merge-base cannot be repaired by
+      # waiting for the PR head. Reject that proven state before the bounded snapshot
+      # wait. A pending producer or transient Checks API failure still takes
+      # the normal bounded review path, which retains the final fail-closed basis check.
+      - name: Reject known failed base dependency graph
+        if: ${{ steps.deps.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha' 2>/dev/null)" || {
+            echo "::warning::Could not query merge-base; final basis check remains authoritative."
+            exit 0
+          }
+          [ -n "$mb" ] || { echo "::error::Empty merge-base"; exit 1; }
+          # Before #10883, setup-gradle could report a successful job after submitting
+          # a partial nonzero graph. A stale PR must rebase onto the first main commit
+          # whose complete 75-project snapshot was verified and accepted by GitHub.
+          complete_since=1e009deab5085b19d3977d53f5b634a8c7f5a548
+          era="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${complete_since}...${mb}" --jq '.status' 2>/dev/null)" || {
+            echo "::warning::Could not classify merge-base graph era; final basis check remains authoritative."
+            exit 0
+          }
+          if [ "$era" != ahead ] && [ "$era" != identical ]; then
+            echo "::error title=Legacy dependency basis::Merge-base $mb predates the first verified complete main graph. Rebase this PR onto current main before dependency review."
+            exit 1
+          fi
+          response="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${mb}/check-runs?per_page=100" 2>/dev/null)" || {
+            echo "::warning::Checks API unavailable; final basis check remains authoritative."
+            exit 0
+          }
+          verdict="$(jq -r -s --arg name 'Submit fleet dependency graph' '
+            if length > 0 and all(.[]; (.check_runs | type) == "array") then
+              [.[] | .check_runs[] | select(.name == $name)] |
+              if any(.[]; .conclusion == "success") then "success"
+              elif any(.[]; .status != "completed") then "pending"
+              elif length > 0 and all(.[]; .status == "completed") then "failure"
+              else "unknown" end
+            else error("invalid check-run response") end
+          ' <<< "$response" 2>/dev/null)" || {
+            echo "::warning::Checks API response malformed; final basis check remains authoritative."
+            exit 0
+          }
+          if [ "$verdict" = failure ]; then
+            echo "::error title=Base dependency graph failed::Merge-base $mb has only terminal unsuccessful dependency-submission checks. Waiting for a PR-head snapshot cannot repair its missing base graph. See #10145."
+            exit 1
+          fi
+          echo "merge-base $mb producer verdict: $verdict; continuing full dependency review."
+
+      # The action's 10-second snapshot poll exhausted this installation's API quota
+      # on #9971 (2026-09-25): ~160 requests before GitHub indexed the accepted head
+      # snapshot. Probe seven times over 30 minutes instead, then run policy once.
+      - name: Wait for indexed dependency snapshots
+        if: ${{ steps.deps.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/wait_dependency_review_snapshot.py
 
       - name: Dependency Review
         id: review
@@ -86,16 +153,9 @@ jobs:
           # every PR was invisible here and vulnerable deps landed unreviewed, to surface
           # later as Dependabot alerts on main.
           #
-          # Armed only on dependency-touching PRs (see the detect step above): there the
-          # submission job runs concurrently with this one, so the head-SHA snapshot does
-          # not exist yet when this starts ("No snapshots were found for the head SHA")
-          # and we must wait for it.
-          #
-          # gradle/actions documents 600 s. Measured end-to-end on a real dependency PR,
-          # the snapshot only became queryable ~24 min in (734 s resolve + GitHub's own
-          # indexing lag afterwards), so 600 — and even 1200 — undershoot reality. 1800.
-          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
-          retry-on-snapshot-warnings-timeout: 1800
+          # The sparse preflight above waits for both indexed snapshots on dependency-
+          # touching PRs. The action must not restart its own ten-second polling loop.
+          retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
           # allow-dependencies-licenses: none currently — the schemathesis 3.39.16 rfc3987
           # (GPL-3.0-or-later) suppression that used to live here was retired once the
@@ -146,7 +206,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          delays=(0 30 60 120 240 480)
+          delays=(0 30 60 120 240 240)
           for delay in "${delays[@]}"; do
             if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
             if gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}" \
@@ -154,28 +214,19 @@ jobs:
               echo "Dependency-diff API is readable; repeating the full policy review."
               exit 0
             fi
+            # An exhausted installation quota cannot recover within this bounded wait.
+            # Preserve the red/unknown verdict without spending 11 minutes retrying it.
+            if grep -qi 'API rate limit exceeded for installation' /tmp/dependency-diff.error; then
+              cat /tmp/dependency-diff.error >&2
+              echo "::error title=dependency-review: could not run::GitHub installation API quota is exhausted; dependency review has no verdict."
+              exit 1
+            fi
             echo "Dependency-diff API unavailable; retrying after bounded backoff."
           done
           cat /tmp/dependency-diff.error >&2
-          # Say WHICH failure this is. The step stays red either way — that is a deliberate
-          # decision recorded above, and this does not reverse it — but "could not run" and
-          # "found something" must not render identically, which is the distinction #4162 cost
-          # this repo to learn. An installation-quota 403 is an environmental answer about the
-          # API, not a statement about this PR's dependencies, and on 2026-09-13 it was red on
-          # 11 open PRs at once: a red that is never about the diff is how a real finding gets
-          # scrolled past.
-          if grep -qi "rate limit exceeded for installation" /tmp/dependency-diff.error; then
-            echo "::error title=dependency-review: could not run::The dependency-diff API answered" \
-                 "HTTP 403 rate-limit for the whole bounded wait (${#delays[@]} attempts). This is" \
-                 "the INSTALLATION API quota, exhausted fleet-wide — NOT a dependency finding and" \
-                 "not a fault in this PR. Re-run once the quota window resets; if it is red again," \
-                 "the quota is the thing to fix (#8690 measures the per-build API cost), not this" \
-                 "PR's dependencies."
-          else
-            echo "::error title=dependency-review: could not run::The dependency-diff API was" \
-                 "unreadable for the whole bounded wait and the error is NOT a rate limit — see the" \
-                 "text above. This is still not a dependency finding; it is a failure to measure."
-          fi
+          echo "::error title=dependency-review: could not run::The dependency-diff API remained" \
+               "unreadable after ${#delays[@]} bounded attempts. This is not a dependency" \
+               "finding; the full policy review could not be completed."
           exit 1
 
       - name: Dependency Review retry
@@ -184,8 +235,7 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
-          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
-          retry-on-snapshot-warnings-timeout: 1800
+          retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
 
       # A successful review attempt above can still PROCEED on an invalid basis instead of
@@ -198,10 +248,9 @@ jobs:
       # and neither is distinguishable from a real verdict: a green means "not evaluated",
       # a red means "every pre-existing dependency, re-flagged".
       #
-      # #2837 made every main commit submit, so the systemic cause is gone — but a branch
-      # whose merge-base predates that fix, or a submission that failed outright, still lands
-      # here. This step makes that state RED and says why, instead of letting the gate claim
-      # a verdict it did not earn.
+      # #2837 made every main commit trigger submission, but a trigger is not a graph:
+      # the producer can still fail (issue #10145). A missing or failed merge-base
+      # submission makes this step RED instead of claiming a verdict it did not earn.
       #
       # Only armed on dependency-touching PRs: with no Gradle submission in flight there is no
       # Gradle graph on either side and nothing to assert.
@@ -256,8 +305,23 @@ jobs:
           mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
                   --jq '.merge_base_commit.sha' 2>/dev/null || true)"
           if [ -z "${mb}" ]; then
-            echo "::warning title=basis unverified::Could not resolve the merge-base; skipping the basis assertion rather than failing on an API hiccup."
-            exit 0
+            echo "::error title=basis unverified::Could not resolve the merge-base; dependency review has no verified basis."
+            exit 1
+          fi
+
+          # A legacy successful producer plus a partial nonzero snapshot must not
+          # satisfy this guard. #10883 is the first main commit with verified 75-project
+          # coverage and GitHub-accepted publication (run 36197004573).
+          complete_since=1e009deab5085b19d3977d53f5b634a8c7f5a548
+          era=""
+          for delay in 0 15 30; do
+            [ "$delay" -eq 0 ] || sleep "$delay"
+            era="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${complete_since}...${mb}" \
+                    --jq '.status' 2>/dev/null)" && break
+          done
+          if [ "$era" != ahead ] && [ "$era" != identical ]; then
+            echo "::error title=Legacy dependency basis::Merge-base $mb is not proven to descend from the first verified complete main graph. Rebase onto current main; an old successful producer may have submitted a partial snapshot."
+            exit 1
           fi
 
           # Checks API, not the Actions "list workflow runs" endpoint — see the header note
@@ -265,26 +329,31 @@ jobs:
           # returns check runs for ONE commit, and a SHA is re-checked at most a handful of
           # times (submission itself, plus any manual re-runs).
           count() {
-            # shellcheck disable=SC2016  # $name is jq's own --arg binding, not a shell var
-            gh api "repos/${GITHUB_REPOSITORY}/commits/$1/check-runs?per_page=100" \
-              --jq --arg name "${SUBMIT_JOB_NAME}" \
-              '[.check_runs[] | select(.name == $name and .conclusion == "success")] | length' \
-              2>/dev/null || echo ""
+            local response
+            # Keep failed API output out of the parser, including a partial page
+            # emitted before a later pagination request failed.
+            response="$(gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/commits/$1/check-runs?per_page=100" 2>/dev/null)" || return 1
+            # --arg belongs to jq, not gh's --jq option. Slurp all API pages so
+            # a successful submission beyond the first 100 checks is still seen.
+            jq -s --arg name "${SUBMIT_JOB_NAME}" '
+              if length > 0 and all(.[]; (.check_runs | type) == "array") then
+                [.[] | .check_runs[] | select(.name == $name and .conclusion == "success")] | length
+              else error("invalid check-run response") end
+            ' <<< "${response}" 2>/dev/null
           }
 
-          # Bounded retry, defense in depth against residual Checks-API propagation lag —
-          # see the header note for why this is expected to be minutes, not the 18-27+ min
-          # observed against the old endpoint. Only retries a genuine zero; an API read
-          # failure (empty string from count()) still exits via the warning path below on
-          # the last attempt, unchanged from before #5066.
+          # Retry missing graphs and API failures within the existing bound.
+          # Exhausted retries fail closed: an unavailable basis is not a verdict.
+
           delays=(0 15 30 60 90)
           for delay in "${delays[@]}"; do
             if [ "${delay}" -gt 0 ]; then
               echo "Basis not yet visible via the Checks API — retrying in ${delay}s (issue #5066)."
               sleep "${delay}"
             fi
-            base_runs="$(count "${mb}")"
-            head_runs="$(count "${HEAD_SHA}")"
+            base_runs="$(count "${mb}")" || base_runs=""
+            head_runs="$(count "${HEAD_SHA}")" || head_runs=""
             if [ -n "${base_runs}" ] && [ -n "${head_runs}" ] \
                && [ "${base_runs}" -gt 0 ] && [ "${head_runs}" -gt 0 ]; then
               break
@@ -292,8 +361,8 @@ jobs:
           done
 
           if [ -z "${base_runs}" ] || [ -z "${head_runs}" ]; then
-            echo "::warning title=basis unverified::Could not query dependency-submission check runs; skipping the assertion."
-            exit 0
+            echo "::error title=basis unverified::Could not verify dependency-submission check runs after bounded retries."
+            exit 1
           fi
 
           echo "merge-base ${mb}: ${base_runs} successful submission check-run(s)"
@@ -301,7 +370,7 @@ jobs:
 
           fail=0
           if [ "${base_runs}" -eq 0 ]; then
-            echo "::error title=Dependency review had no base graph::No successful dependency-submission run exists for the merge-base ${mb}, so the Gradle half of this review compared against nothing and reported the whole head graph as additions. Rebase onto current main — every main commit has carried a snapshot since #2837, so a current merge-base resolves. See issue #2833."
+            echo "::error title=Dependency review had no base graph::No successful dependency-submission run exists for merge-base ${mb}; the Gradle comparison has no verified base. Check that SHA's Dependency submission run and #10145. Rebase only after a newer main commit has successfully published a complete graph; a rebase alone does not create one."
             fail=1
           fi
           if [ "${head_runs}" -eq 0 ]; then
@@ -310,4 +379,46 @@ jobs:
           fi
           [ "${fail}" -eq 0 ] || exit 1
 
-          echo "Both sides of the dependency diff had a submitted graph — the verdict above is about this PR's delta."
+          # A green legacy producer is not proof that GitHub indexed its snapshot. On
+          # 2026-09-17 main's job succeeded, yet this endpoint reported base=0,
+          # head=1 and classified 1,257 packages as additions. Check the comparison
+          # response itself, not just the producer checks. The head producer on this
+          # PR is independently validated above; the warning identifies a missing
+          # side (or unequal positive snapshot counts after a re-run).
+          graph_response="$(mktemp)"
+          trap 'rm -f "$graph_response"' EXIT
+          if ! gh api -i "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${mb}...${HEAD_SHA}" \
+              > "$graph_response"; then
+            echo "::error title=basis unverified::Dependency comparison API is unavailable."
+            exit 1
+          fi
+          python3 - "$graph_response" <<'PY'
+          import base64
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8", errors="replace") as response:
+              status = response.readline().strip()
+              if not re.match(r"^HTTP/\S+ 200(?: |$)", status):
+                  sys.exit("::error title=basis unverified::Dependency comparison HTTP status is not 200")
+              warning = None
+              for line in response:
+                  if not line.strip():
+                      break
+                  name, sep, value = line.partition(":")
+                  if sep and name.lower() == "x-github-dependency-graph-snapshot-warnings":
+                      warning = value.strip()
+              if warning:
+                  try:
+                      decoded = base64.b64decode(warning, validate=True).decode("utf-8")
+                  except (ValueError, UnicodeDecodeError):
+                      sys.exit("::error title=basis unverified::Malformed dependency snapshot warning")
+                  counts = re.search(r"base SHA \((\d+)\) and the head SHA \((\d+)\)", decoded)
+                  if not counts:
+                      sys.exit("::error title=basis unverified::Unknown dependency snapshot warning")
+                  base_count, head_count = map(int, counts.groups())
+                  if not base_count or not head_count:
+                      sys.exit(f"::error title=Dependency review missing graph::GitHub compared base={base_count}, head={head_count} snapshots; a successful producer check did not establish a valid basis.")
+                  print(f"Snapshot warning records unequal but nonzero counts: base={base_count}, head={head_count}.")
+          PY
+          echo "Both sides had successful producers and the comparison reported no missing snapshot."

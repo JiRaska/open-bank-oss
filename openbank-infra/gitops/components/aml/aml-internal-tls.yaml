@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for aml-service's mTLS read of party-service (8443, client auth
+# REQUIRED) — the onboarding screening reconciler's party list read. Same shape as
+# delegation-internal-tls: tls.crt/tls.key identify aml-service, ca.crt trusts party-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aml-internal-tls
+  namespace: aml
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: aml-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: aml-service.aml.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

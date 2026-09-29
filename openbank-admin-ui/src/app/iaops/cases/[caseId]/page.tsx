@@ -57,6 +57,8 @@ interface CaseThread {
   historySource: string
   retentionPolicy: string
   entries: ThreadEntry[]
+  haltedAtEpochMs?: number
+  haltReason?: string
 }
 
 type DetailEnvelope =
@@ -146,9 +148,12 @@ export default function IaopsCaseThreadPage() {
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
             {(() => {
-              const visual = statusVisual(thread.status)
+              const halted = thread.haltedAtEpochMs !== undefined
+              const visual = halted
+                ? { icon: TriangleAlert, fg: 'var(--warning-text)', bg: 'var(--warning-bg)' }
+                : statusVisual(thread.status)
               const Icon = visual.icon
-              const presentation = caseStatusPresentation(thread.status, language)
+              const presentation = caseStatusPresentation(thread.status, language, halted)
               return (
                 <div>
                   <span style={{
