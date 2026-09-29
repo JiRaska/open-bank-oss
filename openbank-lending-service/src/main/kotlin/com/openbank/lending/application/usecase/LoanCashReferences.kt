@@ -22,4 +22,3 @@ object LoanCashReferences {
     fun repaymentDebit(loanId: LoanId, installmentNumber: Int): String =
         "loan:${loanId.value}:inst:$installmentNumber:repayment-debit"
 }
-
