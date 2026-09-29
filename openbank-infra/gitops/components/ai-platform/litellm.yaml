@@ -35,7 +35,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "14"
+        openbank.tech/litellm-config-revision: "15"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -127,6 +127,13 @@ spec:
             # FileNotFoundError: '/.cache/prisma-python/binaries/...'.
             - name: HOME
               value: /tmp
+            # An existing database created before Prisma migrations (no _prisma_migrations table)
+            # makes LiteLLM baseline it: `migrate deploy` answers P3005 and LiteLLM writes
+            # migrations/0_init into its own package directory, which is root-owned, so at uid 1000
+            # the pod crashloops with PermissionError. Upstream's supported switch points the
+            # migrations at a writable copy instead (litellm_proxy_extras/utils.py _get_prisma_dir).
+            - name: LITELLM_MIGRATION_DIR
+              value: /tmp/litellm-migrations
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
