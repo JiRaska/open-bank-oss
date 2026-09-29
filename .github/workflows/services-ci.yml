@@ -417,14 +417,18 @@ jobs:
       # is the event that changed. It is NOT stale for `contract`, which is still self-hosted
       # and still bounded by the same ARC pool (12 runners, Phase 1, #4319) — max-parallel is
       # a single number governing the WHOLE matrix, so it bounds both jobs' concurrency at
-      # once. Eight stays below both the 20-job hosted cap (leaving 12 slots for other CI)
-      # and the 12-runner ARC pool (leaving four slots for targeted verification/deploy work).
+      # once. Keep eight for main, whose contract jobs also consume the 12-runner ARC
+      # pool. PRs have no contract jobs, so twelve leaves eight of the account's 20
+      # hosted slots for other workflows and repositories.
       #
       # Measured on successful full-fleet run 34476896912 after the hosted-build split:
       # 50 build jobs, median 7.8 min, P90 10.4 min, 381 runner-minutes. Four lanes impose
-      # a ~95 min work floor before queueing; eight cut that floor to ~48 min without
-      # saturating either pool. Re-measure before raising it again.
-      max-parallel: 8
+      # a ~95 min work floor before queueing; eight cut that floor to ~48 min.
+      # A later PR full-fleet attempt (36510536981, 2026-09-29) ran 76 builds
+      # for 480 runner-minutes in 63.8 min wall time, near the eight-lane 60 min
+      # floor. Twelve PR lanes lower that work floor to 40 min; hosted validation
+      # must measure the effect and check for other-workflow queue displacement.
+      max-parallel: ${{ github.event_name == 'pull_request' && 12 || 8 }}
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml
