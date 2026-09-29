@@ -6,8 +6,6 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  annotations:
-    openbank.io/affinity-rollout-pending: "ADR-0325 fleet wave -- required anti-affinity lands in a staged wave PR, which removes this"
   name: releasesteward-db
   namespace: release-steward
 spec:
@@ -39,6 +37,19 @@ spec:
   # operator has no standby and restarts either way, so this is free there.
   primaryUpdateMethod: switchover
   primaryUpdateStrategy: unsupervised
+  # ADR-0325 fleet wave: required anti-affinity + zone spread. Changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: releasesteward-db
   # ECR pull-through instead of ghcr.io (issue #1290, fleet rollout after the #1304 pilot on
   # pact-broker-db). CNPG instance pods are (correctly) excluded from the Kyverno
   # ecr-pull-through-rewrite policy: the operator reconciles the running pod's image against
