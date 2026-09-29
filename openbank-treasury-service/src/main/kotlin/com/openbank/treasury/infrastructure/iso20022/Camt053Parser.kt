@@ -9,14 +9,13 @@ import com.openbank.treasury.domain.model.StatementDirection
 import com.openbank.treasury.domain.model.StatementEntry
 import org.w3c.dom.Element
 import org.xml.sax.SAXException
-import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
-import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.parsers.ParserConfigurationException
 
 /**
  * Reads ONE `Stmt` of an ISO 20022 camt.053 (any `camt.053.001.xx` namespace — elements are matched
@@ -33,26 +32,16 @@ object Camt053Parser {
 
     /** A malformed number is a `NumberFormatException`, itself an `IllegalArgumentException` (400). */
     fun parse(xml: ByteArray): NostroStatement = try {
-        // Configure the very factory used for this untrusted upload before constructing the builder.
-        // Keeping these calls beside parse also lets CodeQL verify the DTD guard on this flow.
-        val factory = DocumentBuilderFactory.newInstance()
-        factory.isNamespaceAware = true
-        factory.isXIncludeAware = false
-        factory.isExpandEntityReferences = false
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        val builder = factory.newDocumentBuilder()
-        builder.setEntityResolver { _, _ -> throw SAXException("external entity resolution is disabled") }
-        val doc = builder.parse(ByteArrayInputStream(xml))
+        val doc = SecureXmlParser.parse(xml)
         val stmts = descendants(doc.documentElement, "Stmt")
         require(stmts.size == 1) { "expected exactly one Stmt, found ${stmts.size}" }
         read(stmts.single())
     } catch (e: SAXException) {
         throw IllegalArgumentException("statement is not well-formed XML: ${e.message}", e)
+    } catch (e: IOException) {
+        throw IllegalArgumentException("statement could not be read: ${e.message}", e)
+    } catch (e: ParserConfigurationException) {
+        throw IllegalStateException("secure XML parser is unavailable", e)
     } catch (e: DateTimeParseException) {
         throw IllegalArgumentException("statement carries an invalid date: ${e.parsedString}", e)
     }
