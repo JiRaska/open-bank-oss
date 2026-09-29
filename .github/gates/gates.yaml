@@ -1408,6 +1408,9 @@ gates:
   # too, and a discovery root that covers only one of them is a coverage set maintained
   # separately from the artifacts it covers — the exact shape that let 16 pacts go
   # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
+  # The FreeMarker buildscript cases also run here, even on a cold runner: this shard
+  # is required while dependency-submission is not. Their wrapper-download retry keeps
+  # a transient transport reset from turning into an unrelated governance failure.
   - id: governance-script-unit-tests
     selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
