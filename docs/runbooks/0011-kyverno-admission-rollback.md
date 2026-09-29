@@ -196,9 +196,16 @@ with the v1 policy's verdict and fix the CEL port before stage 2. If a shadow ev
 (admission latency, registry load), delete its file by PR; nothing depends on it yet.
 
 **Stage 2 progress (#11437), one policy per PR:** `deny-nginx-snippet-annotations` — enforcing as
-`deny-nginx-snippet-annotations-cel` (`[Deny]`, `failurePolicy: Fail`), v1 file deleted; its v1
-verdicts are pinned in the parity harness. For that policy the rollback targets the `-cel` document,
-and reverting the stage-2 PR re-creates the v1 original. All other policies are still at stage 1.
+`deny-nginx-snippet-annotations-cel` (`[Deny]`, `failurePolicy: Fail`), v1 file deleted.
+`require-gated-or-declared-tool-ingress` — enforcing as `require-gated-or-declared-tool-ingress-cel`
+(`[Deny]`, `failurePolicy: Fail`), v1 file `tool-ingress-gate-policy.yaml` deleted. The v1 verdicts
+of both are pinned in the parity harness. `openbank-dr-sa-pin` — enforcing as `openbank-dr-sa-pin-cel`
+(`[Deny]`, `failurePolicy: Fail`) NEXT TO its still-enforcing v1 original; the v1 ClusterPolicy lives
+in `components/platform/dr-runner-rbac.yaml` (Argo app `platform`, not `kyverno-policies`), so it is
+removed by a separate follow-up PR after this flip has synced — two apps sync independently and
+`PruneLast` cannot order across them. While both enforce, a rollback must relax BOTH documents. For those policies the rollback targets the `-cel`
+document, and reverting the stage-2 PR re-creates the v1 original. All other policies are still at
+stage 1.
 Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
 
 ## 5. Related

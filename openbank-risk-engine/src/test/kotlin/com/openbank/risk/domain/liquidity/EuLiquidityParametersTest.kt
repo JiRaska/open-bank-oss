@@ -59,7 +59,7 @@ class EuLiquidityParametersTest {
     fun `the EU set is the default, identified, versioned and cites EU law`() {
         val default = LiquidityTestParameters.shipped()
         assertThat(default.id).isEqualTo("eu-2015-61-crr2")
-        assertThat(default.version).isEqualTo("2")
+        assertThat(default.version).isEqualTo("3")
         assertThat(default.regime).isEqualTo(LiquidityRegime.EU)
         assertThat(default.source).contains("2015/61").contains("575/2013")
         assertThat(LiquidityFactor.entries.map { default.citation(it) })
@@ -130,6 +130,7 @@ class EuLiquidityParametersTest {
     fun `2015-61 Art 32 - inflows 50, 100 and 0 percent`() {
         assertFactor(LCR_RETAIL_LOAN_INFLOW, "0.50", "Art. 32(3)(a)")
         assertFactor(LCR_FI_INFLOW, "1.00", "Art. 32(2)(a)")
+        assertFactor(LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D, "1.00", "Art. 32(2)(a)")
         assertFactor(LCR_OPERATIONAL_DEPOSIT_INFLOW, "0", "Art. 32(3)(d)")
     }
 

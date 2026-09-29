@@ -163,8 +163,8 @@ class SnapshotServiceProducer {
 
     /**
      * Pillar 1 credit risk, standardised approach (ADR-0313 phase 2): the versioned parameter set in
-     * `openbank.risk.capital.sa.*` ([CapitalConfig]); every risk weight comes from there, with its
-     * BCBS d424 paragraph.
+     * `openbank.risk.capital.sa.*` ([CapitalConfig]) selected by `parameter-set-id` (EU CRR by
+     * default); every risk weight comes from there, with its CRR article or BCBS d424 paragraph.
      */
     @Produces
     @ApplicationScoped
@@ -174,9 +174,14 @@ class SnapshotServiceProducer {
         fixings: FxFixingRepository,
     ): CapitalUseCase = CapitalService(snapshots, config.toParameters(), fixings)
 
-    /** Same reason as [validateLiquidityParameters]: a bad risk weight must fail the deploy, not a request. */
+    /**
+     * Same reason as [validateLiquidityParameters]: a bad risk weight must fail the deploy, not a
+     * request. Every DECLARED set is validated, not only the selected one, so switching
+     * `parameter-set-id` can never be the first time a set is parsed; an undeclared id fails here.
+     */
     @Suppress("UnusedParameter") // the event only schedules the call
     fun validateCapitalParameters(@Observes event: StartupEvent, config: CapitalConfig) {
+        config.parameterSets().keys.forEach { config.toParameters(it) }
         config.toParameters()
     }
 
