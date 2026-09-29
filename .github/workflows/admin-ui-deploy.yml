@@ -694,7 +694,9 @@ jobs:
               esac
               dest="${svc}/build/reports/pitest"
               mkdir -p "${dest}"
-              unzip -q "/tmp/${art_name}.zip" -d "${dest}" || exit 1
+              # A future duplicate must fail this stage, never consume the next
+              # artifact-list line as an interactive answer to unzip's prompt.
+              unzip -q "/tmp/${art_name}.zip" -d "${dest}" </dev/null || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
             else
               echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
