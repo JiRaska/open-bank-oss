@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "571387469f187f3b"
+        openbank.tech/policy-checksum: "a6a7944f4d00943f"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -140,6 +140,12 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: CARD_ISSUANCE_SERVICE_URL
               value: http://card-issuance-service.payments.svc:8118
+            # External disclosure (#9226): the issued disclosure is rendered, sealed and
+            # exported by document-service over its private-CA mTLS listener (8443, client auth
+            # REQUIRED; %prod TLS bucket `disclosure`). ASVS V9.1 forbids a new plaintext http://
+            # value here. Declared so gen-network-policies.py sees the edge.
+            - name: DOCUMENT_SERVICE_URL
+              value: https://document-service.documents.svc:8443
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot
             # (OIDC defers discovery to the first request) — it just makes every
             # authenticated call fail later with `Name does not resolve`.
