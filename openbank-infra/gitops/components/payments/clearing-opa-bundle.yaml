@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "ee4a640304d51cc8"
+    openbank.tech/policy-checksum: "b89279d5fb317723"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1720,6 +1720,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

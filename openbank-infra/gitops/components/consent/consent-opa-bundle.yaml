@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "957438d71c48c77e"
+    openbank.tech/policy-checksum: "99cffa9bb1108500"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1794,6 +1794,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
