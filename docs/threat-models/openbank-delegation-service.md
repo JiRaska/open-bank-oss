@@ -333,7 +333,7 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
   lookup-then-save race, does not remove any control).
 
 - **2026-09-29** — **N-of-M admission for savings-goal withdrawal proposals, behind a flag (#9430).**
-  `rejectUnenforcedApprovalPolicy` is replaced by an approval-policy resolver. SOLO is unchanged.
+  The former SOLO-only approval-policy refusal is replaced by `resolveApprovalPolicy`. SOLO is unchanged.
   `N_OF_M` is admitted ONLY when `openbank.delegation.n-of-m-enabled` (env
   `DELEGATION_N_OF_M_ENABLED`) is true — the default is **false**, and with it off every N_OF_M
   offer is refused with 400 `APPROVAL_POLICY_UNSUPPORTED` before the SCA challenge is spent — and
