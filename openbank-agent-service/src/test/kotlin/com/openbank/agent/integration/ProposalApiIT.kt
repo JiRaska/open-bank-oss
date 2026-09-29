@@ -55,6 +55,16 @@ class ProposalApiIT {
     }
 
     @Test
+    fun `POST decision without an authenticated role is rejected`() {
+        given()
+            .contentType("application/json")
+            .body(mapOf("approve" to true))
+            .`when`().post("/api/v1/proposals/00000000-0000-4000-8000-000000000001/decision")
+            .then()
+            .statusCode(anyOf(equalTo(401), equalTo(403)))
+    }
+
+    @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `GET proposals with agentId only returns that agent's own proposals`() {
         service.create(

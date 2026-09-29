@@ -354,6 +354,10 @@ paths:
                 $ref: '#/components/schemas/ProposalDto'
         "400":
           description: Malformed id
+        "401":
+          description: Authentication required
+        "403":
+          description: Authenticated principal lacks an operator role
         "404":
           description: Proposal not found
         "409":
