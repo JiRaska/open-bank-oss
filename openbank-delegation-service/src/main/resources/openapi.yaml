@@ -6,12 +6,16 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive ADR-0312 business-signing routes (entity signing policy, trusted payees, approvals).
-  version: 1.22.0
+  # 1.22 -> 1.25 (#9430): additive — approval-group management routes, preview scaReference and
+  # approval-group snapshot fields; N_OF_M is admitted behind openbank.delegation.n-of-m-enabled
+  # (default false) for SAVINGS_GOAL + SAVINGS_PROPOSE_WITHDRAW only. 1.23/1.24 are claimed by open PRs.
+  version: 1.25.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
   - name: Delegation portfolios
+  - name: Approval groups
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
   - name: Business signing
@@ -78,6 +82,86 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
         '403': { description: Authenticated active profile does not own the portfolio }
         '404': { description: Portfolio not found }
+  /api/v1/delegations/approval-groups/sca-reference:
+    post:
+      tags: [Approval groups]
+      summary: Calculate the canonical reference that the management SCA must sign
+      parameters:
+        - { $ref: '#/components/parameters/CustomerPartyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
+      responses:
+        '200':
+          description: Opaque, versioned SCA reference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceResponse' }
+        '400': { description: Invalid create/revise shape }
+  /api/v1/delegations/approval-groups:
+    get:
+      tags: [Approval groups]
+      summary: List approval groups owned by the authenticated party
+      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      responses:
+        '200':
+          description: Versioned groups, including inactive history
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ApprovalGroupResponse' } }
+    post:
+      tags: [Approval groups]
+      summary: Create an SCA-bound approval group
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '201': { description: Approval group created }
+        '400': { description: Invalid roster or SCA }
+        '403': { description: Caller is not the group owner }
+  /api/v1/delegations/approval-groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/CustomerPartyId'
+    get:
+      tags: [Approval groups]
+      summary: Get an owned approval group
+      responses:
+        '200':
+          description: Approval group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalGroupResponse' }
+        '404': { description: Missing or owned by another party }
+    put:
+      tags: [Approval groups]
+      summary: Replace a roster under optimistic revision and a fresh SCA challenge
+      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '200': { description: Approval group revised }
+        '400': { description: Invalid roster or SCA }
+        '409': { description: expectedRevision is stale }
+    delete:
+      tags: [Approval groups]
+      summary: Deactivate the group for future operation snapshots
+      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
+      responses:
+        '200': { description: Approval group deactivated }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -953,7 +1037,7 @@ components:
       required: false
       description: |
         The natural person authenticated by customer-edge. Required together with
-        X-Customer-Party-Id on customer preview/offer calls. It equals the principal for an
+        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls. It equals the principal for an
         individual profile; for an organization profile it differs and the service verifies the
         actor's active PartyMandate before accepting the request. Never supplied by the app.
       schema: { type: string, format: uuid }
@@ -1043,6 +1127,59 @@ components:
           items: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ApprovalGroupScaReferenceRequest:
+      type: object
+      required: [name, members, threshold]
+      properties:
+        groupId: { type: string, format: uuid, description: Present only for revision }
+        expectedRevision: { type: integer, format: int64, minimum: 1, description: Required with groupId }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        threshold: { type: integer, minimum: 1 }
+    ApprovalGroupScaReferenceResponse:
+      type: object
+      required: [reference]
+      properties:
+        reference:
+          type: string
+          pattern: '^approval-group:v1:[0-9a-f]{64}$'
+          description: Pass as dynamicLinkingData.reference when initiating the SCA challenge.
+    ApprovalGroupWriteRequest:
+      type: object
+      required: [name, members, threshold, scaSessionId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        threshold: { type: integer, minimum: 1 }
+        scaSessionId: { type: string, format: uuid }
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required on PUT; prevents a stale client from overwriting a newer roster.
+    ApprovalGroupResponse:
+      type: object
+      required: [id, ownerPartyId, name, members, threshold, revision, active, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string }
+        members: { type: array, items: { type: string, format: uuid } }
+        threshold: { type: integer }
+        revision: { type: integer, format: int64 }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]
@@ -1099,16 +1236,21 @@ components:
           enum: [SOLO, ANY_ONE, ALL, N_OF_M]
           default: SOLO
           description: >-
-            Only SOLO is enforced. Any other value is rejected with 400 APPROVAL_POLICY_UNSUPPORTED:
-            no service counts approvals against a grant, so a co-signing requirement set here would
-            be stored and echoed while a single owner decision still releases the money. The enum
-            values remain listed because ADR-0232 D8 describes them as intended; they are not built.
-          x-unsupported-values: [ANY_ONE, ALL, N_OF_M]
+            SOLO is universal. N_OF_M is enforced only for a SAVINGS_GOAL grant containing exactly
+            SAVINGS_PROPOSE_WITHDRAW, and only where openbank.delegation.n-of-m-enabled is true
+            (default false: refused with APPROVAL_POLICY_UNSUPPORTED). ANY_ONE and ALL remain
+            unsupported and fail closed.
+          x-unsupported-values: [ANY_ONE, ALL]
         requiredApprovals:
           type: integer
           deprecated: true
           description: >-
-            Meaningful only with approvalPolicy=N_OF_M, which is rejected. Nothing counts approvals.
+            Compatibility input only. For N_OF_M the server derives the threshold from
+            approvalGroupId and rejects a supplied mismatch.
+        approvalGroupId:
+          type: string
+          format: uuid
+          description: Required for N_OF_M; the server pins its current active revision and threshold.
         perTransactionLimit:
           $ref: '#/components/schemas/MoneyDto'
           description: >-
@@ -1170,7 +1312,8 @@ components:
                    CARD_VIEW_TRANSACTIONS, CARD_MANAGE_LIMITS, CARD_MANAGE_STATUS, CARD_MANAGE_CHANNELS,
                    SAVINGS_DEPOSIT, SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
         approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M], default: SOLO }
-        requiredApprovals: { type: integer }
+        requiredApprovals: { type: integer, deprecated: true }
+        approvalGroupId: { type: string, format: uuid }
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
         dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
         monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
@@ -1187,9 +1330,17 @@ components:
         validTo: { type: string, format: date-time }
     DelegationPreviewResponse:
       type: object
-      required: [valid]
+      required: [valid, scaReference]
       properties:
         valid: { type: boolean, const: true }
+        scaReference:
+          type: string
+          description: >-
+            Canonical fingerprint of the validated draft. Pass it as dynamicLinkingData.reference
+            when creating the DELEGATION_GRANT SCA challenge; offer recomputes and consumes it.
+        approvalGroupId: { type: string, format: uuid, nullable: true }
+        approvalGroupRevision: { type: integer, format: int64, minimum: 1, nullable: true }
+        requiredApprovals: { type: integer, minimum: 2, nullable: true }
     DelegationRecertificationResponse:
       type: object
       required: [id, delegationId, expectedLifecycleRevision, audience, sequence, dueAt, status]

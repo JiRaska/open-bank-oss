@@ -61,7 +61,9 @@ class DelegationRecertificationAudienceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
+        service = DelegationService(
+            repository, scaClient, eligibilityClient, authorityClient, ownershipClient, mockk(), false, clock,
+        )
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
         coEvery { scaClient.consumeChallenge(any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")

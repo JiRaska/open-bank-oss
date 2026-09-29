@@ -39,12 +39,28 @@ class StubScaChallengeClient : ScaChallengeClient {
         partyId = party.get(),
         purpose = purpose.get(),
         status = "PENDING",
+        amount = amount.get(),
+        currency = currency.get(),
+        reference = reference.get(),
     )
 
-    override suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot {
+    override suspend fun consumeChallenge(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        amount: String,
+        currency: String,
+        reference: String,
+    ): ScaChallengeSnapshot {
         consumeCount.incrementAndGet()
         check(consumed.add(challengeId)) { "SCA challenge $challengeId already consumed" } // sca-service: 409
         check(expectedPartyId == party.get()) { "SCA challenge $challengeId does not belong to $expectedPartyId" }
+        check(
+            amount == StubScaChallengeClient.amount.get() &&
+                currency == StubScaChallengeClient.currency.get() &&
+                reference == StubScaChallengeClient.reference.get(),
+        ) {
+            "SCA challenge $challengeId is not linked to this operation"
+        }
         return ScaChallengeSnapshot(
             id = challengeId,
             partyId = party.get(),
@@ -56,6 +72,9 @@ class StubScaChallengeClient : ScaChallengeClient {
     companion object {
         val party: AtomicReference<UUID> = AtomicReference(UUID.randomUUID())
         val purpose: AtomicReference<String> = AtomicReference("SAVINGS_WITHDRAW_APPROVAL")
+        val amount: AtomicReference<String> = AtomicReference("10.00")
+        val currency: AtomicReference<String> = AtomicReference("CZK")
+        val reference: AtomicReference<String> = AtomicReference("")
         val consumeCount: AtomicInteger = AtomicInteger(0)
         val consumed: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
 

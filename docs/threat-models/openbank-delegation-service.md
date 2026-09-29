@@ -19,6 +19,7 @@ is now stated in the row rather than implied away.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
+- `ApprovalGroup` rosters and thresholds used to select future corporate operation approvers.
 
 ## Lifecycle approval execution
 
@@ -97,6 +98,7 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T32 | Device key bound to the ENTITY signs for it (#10281 item 1) | A signer is always a natural person's party id from the edge's token and must hold a live mandate over the entity; the entity itself is never eligible (it holds no mandate over itself). The enrolment refusal and the purge of entity-bound credentials live in sca-service (#10281). |
 | T33 | Trust or policy widened without the full round | PAYEE_ADD / PAYEE_REMOVE / POLICY_CHANGE use the STRICTEST rule of the current policy, never a trusted-payee shortcut, and take effect only in the transaction that records the last signature. A trusted payee is written by no other code path. A POLICY_CHANGE prepared against an older version is refused as `SUPERSEDED` rather than applied over a newer policy; signer-group edits move the version. Trusted payees lower the signature COUNT to one — they are not the RTS Article 13 exemption; the initiator's SCA is always required. |
 | T34 | Only the edge may drive signing | `delegation_rest_ext.rego` grants the twelve `delegation.signing.*` actions to `service-account-openbank-edge` only and `prohibited` vetoes the whole family for every other principal — including the shared backend identity that base `operator-read-any` would otherwise admit, and staff operators. |
+| T35 | A compromised client changes an approval-group member or threshold after the owner completes SCA, or manages an organization's roster through a stale/forged profile | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. The edge forwards the authenticated human separately from the selected owner, and delegation-service revalidates that actor's current organization mandate before every create, revise or deactivate and consumes that actor's SCA—not the entity's. Any changed field, revoked authority or actor mismatch refuses before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
 
 ## Outbound authentication (added 2026-08-06)
 
@@ -258,13 +260,40 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the grantee-response endpoints: `granteePartyId` on accept/decline/renounce and `scaSessionId` on accept. Both are authorization-relevant — `granteePartyId` names WHO is responding to the grant and `scaSessionId` is the SCA evidence for accepting it — so a null reaching the use case is a delegation transition with no identified actor. The `X-Customer-Party-Id` header stays nullable by design (its absence is what distinguishes a bank-initiated call). No new caller or boundary. Rollback: revert.
 - **2026-08-08** — Cumulative ceilings became a control (ADR-0249 D3). New inbound REST surface: reserve / confirm / release on `/delegations/{id}/reservations`, boundary 4 above, rows T14 and T15. `dailyLimit` / `monthlyLimit` stop being refused (#3613) because a place now exists where spend is observed *before* it happens. Two properties carry the row: concurrency is a `FOR UPDATE` row lock on the grant, not an in-JVM lock (which does nothing across replicas), and idempotency is a unique index on `(grant_id, idempotency_key)`, not a read-then-write. Windows are `AccountingClock.BANK_ZONE` per ADR-0207 D1 rather than a second hand-written `ZoneId.of("Europe/Prague")`. Residual, unchanged: no audit envelope on the new transitions (T4), no rail other than the edge's delegated-payment path asks the counter, and pre-#3613 grants still carry ceilings nobody counted. Rollback: revert — the reservation table is additive and no existing path reads it.
+## Approval-group history and projection recovery
+
+Every create, revise and deactivate now appends the full roster revision in the same database
+transaction as the mutable current row and transactional outbox message. The current table remains
+the fast management view; `delegation_approval_group_revisions` is the authoritative historical
+source for audit and reconciliation. Product services bootstrap from the dedicated compacted
+`openbank.delegation.approval-group-revisions` stream, keyed by `groupId:revision`, rather than
+calling delegation-service synchronously on an authorization path. Rows are
+immutable and uniquely keyed by `(group_id, revision)`, while a deterministic primary key makes a
+duplicate write fail rather than create two histories. A later internal reconciliation endpoint
+can repopulate that stream under an audited recovery procedure. N-of-M admission is limited to the
+consumer and operation shape that proves immutable snapshot enforcement. Rollback keeps the append-only table because
+dropping it would erase evidence even though no existing authorization path depends on it.
+
 # Client draft preview
 
 `POST /api/v1/delegations/preview` deliberately creates no authority. It repeats the caller,
 constraint, resource-ownership and party-eligibility gates used by `offer`, but never reads or
 consumes SCA, writes a grant or publishes an event. `offer` repeats every check so a stale preview
-cannot become authorization. The response contains only `valid: true`: returning counterparty
-attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-directory oracle.
+cannot become authorization. It returns no counterparty attributes, so the pre-SCA endpoint cannot
+become a party-directory oracle. It returns a SHA-256 reference over the complete authority-bearing
+draft and server-resolved group revision/threshold. The app signs that opaque value in the
+DELEGATION_GRANT challenge; `offer` recomputes it before compare-and-consume. Changing capability,
+resource, limit, validity, group or revision after SCA therefore fails closed.
+
+For `N_OF_M`, the client selects only `approvalGroupId`; it does not own the threshold or revision.
+The service loads the current active group, verifies grantor ownership, derives the threshold and
+pins the revision on the grant and lifecycle events. Admission is restricted to a `SAVINGS_GOAL`
+grant containing exactly `SAVINGS_PROPOSE_WITHDRAW`, the only operation resolver with an immutable
+roster snapshot and atomic distinct-actor ledger. `ANY_ONE`, `ALL`, direct withdrawal and payment
+combinations remain refused rather than storing policy their execution paths would ignore.
+Admission is additionally guarded by `DELEGATION_N_OF_M_ENABLED=false` during the expand deploy.
+Operations enable it only after the account consumer has replayed group revisions and the new
+schema/decision-ledger path is healthy; rollback flips the flag before reverting either service.
 - **2026-09-21** — **Party-eligibility and card-ownership reads move to the service's own machine identity (#10486 batch 6).** `PidServiceRestClient` (`GET /api/v1/parties/{id}`) and `CardIssuanceRestClient` (`GET /api/v1/cards/{id}`) now mint their bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only). pid-service grants it `party.read` by identity; that endpoint gained `@Authorize` in the same change and pid enforces OPA. card-issuance grants `card.read` by identity, plus a Kotlin named-caller check while it runs OPA advisory. **STRIDE-S:** a new credential at Vault KV `keycloak/delegation-service`, projected by `delegation-service-m2m-oidc`, env ref `optional: false`; compromise reaches those two reads only. The account-ownership client stays on the shared client, where its `account.read` is already identity-granted. Rollback: revert the commit.
 
 - **2026-09-29** — **Grantor mandate reads move to the service's own machine identity (#10486 batch 8).** `PartyMandateRestClient` and `PartyAuthorityRestClient` (`GET /api/v1/parties/{id}`, `/{id}/mandates`, `/{id}/acting-for`) now mint their bearer from the existing NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only), instead of the shared `openbank-services` principal, whose `ROLE_OPERATOR` was the only thing granting `party.mandate.read`. party-service grants it `party.mandate.read` by identity (`service-delegation-mandate-read` in `party_rest_ext.rego`); `GET /api/v1/parties/{id}` is RBAC-only and admits `ROLE_API`. **STRIDE-E:** no new credential; the grant is one read verb, never `party.update` or a mandate write (`party_rest_ext_test.rego`). Rollback: revert the commit, and the clients return to the shared principal, which keeps `ROLE_OPERATOR` until the follow-up removes it.
@@ -302,3 +331,22 @@ attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-di
   the existing idempotency contract (closes a race the previous revision left open), no new
   principal or data path. Rollback: revert to the non-atomic `lookup`+`save` pair (reopens the
   lookup-then-save race, does not remove any control).
+
+- **2026-09-29** — **N-of-M admission for savings-goal withdrawal proposals, behind a flag (#9430).**
+  `rejectUnenforcedApprovalPolicy` is replaced by an approval-policy resolver. SOLO is unchanged.
+  `N_OF_M` is admitted ONLY when `openbank.delegation.n-of-m-enabled` (env
+  `DELEGATION_N_OF_M_ENABLED`) is true — the default is **false**, and with it off every N_OF_M
+  offer is refused with 400 `APPROVAL_POLICY_UNSUPPORTED` before the SCA challenge is spent — and
+  only for a `SAVINGS_GOAL` grant carrying exactly `SAVINGS_PROPOSE_WITHDRAW`; `ANY_ONE`/`ALL` and
+  every other resource/capability combination keep main's refusal. The threshold and revision are
+  server-derived from an active approval group the grantor owns (threshold >= 2); the grantor
+  authority / ownership gates from the organisation-authority foundation run unchanged before it.
+  New surface: owner-only approval-group CRUD (`/api/v1/delegations/approval-groups`, edge-only via
+  `delegation.approval-group.manage`), every create/revise bound to a `DELEGATION_APPROVAL_GROUP`
+  SCA challenge whose reference fingerprints the complete roster; immutable revisions are published
+  on the compacted `openbank.delegation.approval-group-revisions` topic (account-service, audit).
+  A group change after a grant was issued does not silently re-scope it: account-service refuses a
+  new proposal with "approval group changed; the grant must be reissued" when the group is inactive
+  or its revision/threshold differs from the one pinned on the grant (T35). Risk class: elevation
+  of privilege / tampering. Rollback: flip the flag off first (new offers refused, existing
+  proposals keep their snapshots), then revert; migrations V29–V32 are additive.

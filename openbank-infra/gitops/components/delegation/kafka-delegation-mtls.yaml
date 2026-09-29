@@ -48,5 +48,8 @@ spec:
       - resource:
           type: topic
           name: openbank.delegation.approval-events
+      - resource:
+          type: topic
+          name: openbank.delegation.approval-group-revisions
           patternType: literal
         operations: [Write, Describe]

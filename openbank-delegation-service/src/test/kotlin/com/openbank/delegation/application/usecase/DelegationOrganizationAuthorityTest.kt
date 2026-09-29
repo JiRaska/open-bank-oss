@@ -67,7 +67,9 @@ class DelegationOrganizationAuthorityTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
+        service = DelegationService(
+            repository, scaClient, eligibilityClient, authorityClient, ownershipClient, mockk(), false, clock,
+        )
         coEvery { authorityClient.authorityFor(grantor, grantor) } returns
             GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED

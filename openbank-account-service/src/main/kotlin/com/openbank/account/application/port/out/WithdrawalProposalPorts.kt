@@ -18,9 +18,42 @@ interface WithdrawalProposalRepository {
 
     /** PENDING proposals whose window has closed, oldest first — the expiry sweep's input. */
     suspend fun findExpirable(now: OffsetDateTime, limit: Int): List<WithdrawalProposal>
+    suspend fun findDecisions(proposalIds: Set<UUID>): List<WithdrawalApprovalDecision>
+
+    /** Atomically records one distinct actor decision and emits [approvedEvent] only at quorum. */
+    suspend fun recordDecision(
+        proposalId: UUID,
+        actorPartyId: UUID,
+        approved: Boolean,
+        scaSessionId: UUID,
+        decidedAt: OffsetDateTime,
+        approvedEvent: DomainEvent,
+    ): WithdrawalDecisionResult
 }
 
-data class ScaChallengeSnapshot(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
+data class WithdrawalApprovalDecision(
+    val proposalId: UUID,
+    val partyId: UUID,
+    val approved: Boolean,
+    val decidedAt: OffsetDateTime,
+)
+
+data class WithdrawalDecisionResult(
+    val proposal: WithdrawalProposal,
+    val acceptedApprovals: Int,
+    val replayed: Boolean,
+)
+
+data class ScaChallengeSnapshot(
+    val id: UUID,
+    val partyId: UUID,
+    val purpose: String,
+    val status: String,
+    val amount: String? = null,
+    val currency: String? = null,
+    val reference: String? = null,
+    val consumedAt: OffsetDateTime? = null,
+)
 
 interface ScaChallengeClient {
     suspend fun getChallenge(challengeId: UUID): ScaChallengeSnapshot
@@ -31,5 +64,11 @@ interface ScaChallengeClient {
      * component that owns "was this really approved", not the caller. See [ScaChallengeClient]
      * usage in `SavingsProposalService` for why a caller-side completeness pre-check is wrong.
      */
-    suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot
+    suspend fun consumeChallenge(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        amount: String,
+        currency: String,
+        reference: String,
+    ): ScaChallengeSnapshot
 }
