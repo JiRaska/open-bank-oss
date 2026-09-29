@@ -4337,6 +4337,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*SchemeAccepted*.kt"
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/nostro/**"
+      - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
     pii:
