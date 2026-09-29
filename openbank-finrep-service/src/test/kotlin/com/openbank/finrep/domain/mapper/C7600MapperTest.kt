@@ -34,6 +34,7 @@ class C7600MapperTest {
         currencies: Int = 1,
         unclassified: Int = 0,
         parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
+        notes: List<String> = emptyList(),
     ) = RiskLiquidityResult(
         "run-7", asOf, parameterSet, "2", "CZK", emptyList(),
         BigDecimal("1000"), BigDecimal("300"), BigDecimal("400"), currencies, unclassified,
@@ -47,6 +48,7 @@ class C7600MapperTest {
         hqlaStock = stock?.let(::BigDecimal),
         netOutflows = net?.let(::BigDecimal),
         lcrRatio = ratio?.let(::BigDecimal),
+        notes = notes,
     )
 
     private fun render(r: RiskLiquidityResult) = C7600Mapper.map(RiskLiquidityLookup.found(r), asOf)
@@ -167,5 +169,29 @@ class C7600MapperTest {
         val t = C7600Mapper.map(RiskLiquidityLookup.unavailable("read disabled"), asOf)
         assertThat(t.cells).hasSize(C7600Mapper.UNVERIFIED_ROWS.size)
         assertThat(t.cells).allSatisfy { assertThat(it.gapReason).isEqualTo("read disabled") }
+    }
+
+    @Test
+    fun `the engine's pledged-collateral note makes the buffer and the ratio gaps naming the note`() {
+        val note = "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for " +
+            "it is not modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock " +
+            "and the LCR may be overstated, and the RSF of the pledged assets understated."
+        val t = render(result(notes = listOf(note)))
+        listOf("r0010", "r0030").forEach { row ->
+            assertThat(t.at(row).isDataGap).describedAs(row).isTrue()
+            assertThat(t.at(row).gapReason).contains("Pledged collateral not modelled; HQLA may be overstated")
+                .contains(note)
+        }
+        // Outflow / inflow rows do not depend on the stock and are still stated.
+        listOf("r0020", "r0180", "r0210", "r0240").forEach {
+            assertThat(t.at(it).isDataGap).describedAs(it).isFalse()
+        }
+    }
+
+    @Test
+    fun `the pledged-collateral gap does not skip the ties, so a broken engine buffer still fails`() {
+        val note = "collateral pledged is not modelled; HQLA may be overstated"
+        assertThatThrownBy { render(result(stock = "1600", ratio = "6.400000", notes = listOf(note))) }
+            .isInstanceOf(IllegalStateException::class.java)
     }
 }

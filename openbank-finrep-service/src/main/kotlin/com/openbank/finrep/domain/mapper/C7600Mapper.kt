@@ -47,7 +47,10 @@ import java.time.LocalDate
  * Data gaps (ADR-0097): every row under the whole-template conditions of C 74.00 (read disabled, no
  * tied snapshot, empty or multi-currency book, unclassified balances); every value row when the run's
  * parameter set is not the 2015/61 set; r0030 when net outflows are not positive (the ratio is
- * undefined, not infinite).
+ * undefined, not infinite); and r0010 (buffer) and r0030 (ratio, whose numerator is the buffer) when
+ * the engine's notes say the collateral pledged for a secured central-bank borrowing is not modelled
+ * ([RiskEngineFigures.pledgedCollateralGap]) — encumbered assets would not be HQLA, so the buffer and
+ * the ratio may be overstated. The engine's figures are still tied before that gap is applied.
  */
 object C7600Mapper {
 
@@ -93,13 +96,13 @@ object C7600Mapper {
 
         val buffer = r?.hqlaStock?.takeIf { r.level2bCapAdjustment != null && r.level2CapAdjustment != null }
         val cells = listOf(
-            cell("r0010", "Liquidity buffer", buffer, NO_CAPPED_BUFFER_REASON.takeIf { r != null && buffer == null }),
+            cell("r0010", "Liquidity buffer", buffer, bufferReason(r, buffer)),
             cell("r0020", "Net liquidity outflow", r?.netOutflows, null),
             cell(
                 "r0030",
                 "Liquidity coverage ratio (%)",
                 r?.lcrRatio?.let(::percent),
-                UNDEFINED_RATIO_REASON.takeIf { r != null && r.lcrRatio == null },
+                ratioReason(r),
                 PERCENT_UNIT,
             ),
             cell("r0180", "Total outflows", r?.totalOutflows, null),
@@ -111,6 +114,20 @@ object C7600Mapper {
             cell("r0240", "Reduction for inflows subject to cap of 75 %", r?.cappedInflows, null),
         )
         return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedBy { it.rowRef })
+    }
+
+    /** Why the buffer cannot be stated: pledged collateral unmodelled, or no post-cap buffer reported. */
+    private fun bufferReason(r: RiskLiquidityResult?, buffer: BigDecimal?): String? = when {
+        r == null -> null
+        else -> RiskEngineFigures.pledgedCollateralGap(r.notes, r.runId)
+            ?: NO_CAPPED_BUFFER_REASON.takeIf { buffer == null }
+    }
+
+    /** Why the ratio cannot be stated: pledged collateral unmodelled (its numerator), or net outflows ≤ 0. */
+    private fun ratioReason(r: RiskLiquidityResult?): String? = when {
+        r == null -> null
+        else -> RiskEngineFigures.pledgedCollateralGap(r.notes, r.runId)
+            ?: UNDEFINED_RATIO_REASON.takeIf { r.lcrRatio == null }
     }
 
     /** The engine's ratio (a fraction) as a percentage, 2 dp HALF_EVEN. */
