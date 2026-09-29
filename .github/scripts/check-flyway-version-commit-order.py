@@ -27,14 +27,13 @@ migrations by that commit's position in main's history (earliest first). The ver
 that order must be strictly increasing — a migration that reached main later must never carry a
 version number lower than one that reached main earlier.
 
-This is a DETECT-FAST gate, not a prevention: it runs on push to main (ci.yml's `push: [main]`
-trigger), so two PRs racing for the same next-version slot can both still merge green against
-their own stale bases — nothing pre-merge can see a sibling PR's future content. What this buys is
-the alarm firing within minutes of the SECOND merge landing, on main itself, instead of being
-found by a crashed pod hours or days later. The fix differs by WHEN it is caught: renumbering is
-only safe while the offending file is still open in its own PR, not yet on main (once it reaches
-main, check-db-migration.py's own db-migration-gate blocks renaming it — see
-KNOWN_VIOLATIONS below for the alternative: `QUARKUS_FLYWAY_OUT_OF_ORDER=true`).
+The mainline history check detects a bad merge within minutes. On a PR, this gate also compares
+each proposed migration absent from current main with the highest version already on main, so a
+late lower-version file is rejected while renumbering is still safe. A PR check that ran BEFORE
+a competing migration merged remains stale unless required checks are made strict or a merge
+queue reruns them against the new base; this gate cannot close that race by itself. Once the
+file reaches main, check-db-migration.py blocks renaming it — see KNOWN_VIOLATIONS below for the
+out-of-order deployment alternative.
 
 WHAT IT DELIBERATELY DOES NOT CHECK
 ------------------------------------
@@ -126,7 +125,7 @@ def duplicate_versions(files_by_service: dict[str, list[tuple[pathlib.Path, int]
     return out
 
 
-def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, int], str]:
+def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, int], str, str]:
     """{path: position in origin/main's history, lower = earlier} for the commit that first
     ADDED each path (git log --diff-filter=A, oldest add if a path was ever removed+re-added).
 
@@ -197,7 +196,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
     # The depth guard. A history with fewer commits than there are migrations cannot have
     # introduced them one at a time, so it is truncated whatever it claims to be.
     if len(revs) < len(paths):
-        return {}, f"{provenance} — TOO SHALLOW for {len(paths)} migrations"
+        return {}, f"{provenance} — TOO SHALLOW for {len(paths)} migrations", mainline
 
     wanted = {str(p.relative_to(REPO)) for p in paths}
     try:
@@ -224,7 +223,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
             cwd=REPO, capture_output=True, text=True, check=True,
         ).stdout.splitlines()
     except subprocess.CalledProcessError:
-        return order, provenance
+        return order, provenance, mainline
 
     # Newest-first traversal: the LAST (oldest) commit that added a given path wins, so a later
     # match for the same path must not overwrite an earlier one already recorded.
@@ -245,7 +244,52 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
         sha = seen.get(rel)
         if sha in position:
             order[path] = position[sha]
-    return order, provenance
+    return order, provenance, mainline
+
+
+def mainline_migrations(ref: str) -> dict[str, int]:
+    """Current migration paths and versions on the same mainline used for commit ordering."""
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", ref],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    )
+    versions: dict[str, int] = {}
+    for rel in result.stdout.splitlines():
+        parts = pathlib.PurePosixPath(rel).parts
+        if len(parts) < 7 or not parts[0].startswith("openbank-"):
+            continue
+        if parts[1:6] != ("src", "main", "resources", "db", "migration"):
+            continue
+        match = VERSION_RE.match(parts[-1])
+        if match:
+            versions[rel] = int(match.group(1))
+    return versions
+
+
+def pending_against_main(
+    files_by_service: dict[str, list[tuple[pathlib.Path, int]]],
+    main_versions: dict[str, int],
+) -> list[str]:
+    """Flag PR-only migrations older than the highest version already present on main."""
+    highest: dict[str, int] = {}
+    for rel, version in main_versions.items():
+        service = rel.split("/", 1)[0]
+        highest[service] = max(highest.get(service, 0), version)
+    findings = []
+    for service, files in files_by_service.items():
+        main_max = highest.get(service)
+        if main_max is None:
+            continue
+        for path, version in files:
+            rel = str(path.relative_to(REPO))
+            if rel not in main_versions and version <= main_max:
+                findings.append(
+                    f"::error file={rel}::{service}: PR-only migration {path.name} claims "
+                    f"version {version}, but current main already contains version {main_max}. "
+                    "Renumber this still-unmerged migration above main's highest version before "
+                    "merging; otherwise Flyway can reject it on startup."
+                )
+    return findings
 
 
 def find_violations(
@@ -338,9 +382,21 @@ def selftest() -> int:
         print("selftest FAIL: a duplicate version was silenced by KNOWN_VIOLATIONS — it must "
               "not be, because Flyway refuses the set regardless of any gitops flag.")
         return 1
+    main_v11 = "openbank-fake-service/src/main/resources/db/migration/V11__existing.sql"
+    pr_v10 = REPO / "openbank-fake-service/src/main/resources/db/migration/V10__late.sql"
+    pr_v12 = REPO / "openbank-fake-service/src/main/resources/db/migration/V12__next.sql"
+    if len(pending_against_main({"openbank-fake-service": [(pr_v10, 10)]}, {main_v11: 11})) != 1:
+        print("selftest FAIL: a PR-only V10 below main's V11 was not blocked")
+        return 1
+    if pending_against_main({"openbank-fake-service": [(pr_v12, 12)]}, {main_v11: 11}):
+        print("selftest FAIL: a PR-only V12 above main's V11 was blocked")
+        return 1
+    if pending_against_main({"openbank-fake-service": [(REPO / main_v11, 11)]}, {main_v11: 11}):
+        print("selftest FAIL: a migration already on main was treated as PR-only")
+        return 1
     print("selftest OK: flags the #5628 shape (later commit, lower version), spares "
           "monotonically increasing versions, recognises a baselined KNOWN_VIOLATIONS entry, "
-          "and flags a duplicate version that no baseline may excuse.")
+          "flags duplicate versions, and rejects a PR-only V10 after main's V11.")
     return 0
 
 
@@ -353,7 +409,7 @@ def main() -> int:
         return selftest()
 
     all_files = migration_files(REPO)
-    order, provenance = first_commit_order([p for p, _ in all_files])
+    order, provenance, mainline = first_commit_order([p for p, _ in all_files])
 
     files_by_service: dict[str, list[tuple[pathlib.Path, int]]] = {}
     for path, version in all_files:
@@ -377,6 +433,11 @@ def main() -> int:
     findings = duplicate_versions(files_by_service)
     order_findings, used_baseline = find_violations(files_by_service, order)
     findings += order_findings
+    try:
+        findings += pending_against_main(files_by_service, mainline_migrations(mainline))
+    except subprocess.CalledProcessError as exc:
+        print(f"::error::could not read current migrations on {mainline}: {exc}")
+        return 1
 
     for key in sorted(set(KNOWN_VIOLATIONS) - used_baseline):
         findings.append(
